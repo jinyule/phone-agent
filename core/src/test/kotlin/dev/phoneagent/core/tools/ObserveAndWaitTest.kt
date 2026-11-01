@@ -31,6 +31,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
@@ -151,6 +152,26 @@ class ObserveAndWaitTest {
             assertEquals(20_000, tool.timeoutMs)
         }
     }
+
+    @Test
+    fun `without vision no hint points to screenshots`() =
+        runTest {
+            val presenter = ScreenFormatter(lexicon = Screens.LEXICON, vision = false)
+            val blind = PhaseOneTools.create(presenter, ToolsConfig(vision = false)).associateBy { it.def.name }
+            for (snapshot in listOf(
+                Samples.sparse,
+                Samples.sparse.copy(elements = emptyList(), quality = TreeQuality.EMPTY),
+            )) {
+                val result =
+                    blind
+                        .getValue(
+                            "phone_observe",
+                        ).execute(call("phone_observe"), FakeContext(FakeScreen(snapshot)))
+                assertFalse(result.text().contains("image=true"), result.text())
+                assertFalse(result.text().contains("看截图"), result.text())
+                assertTrue(result.text().contains("hand_to_user"), result.text())
+            }
+        }
 
     @Nested
     inner class Waiting {

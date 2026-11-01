@@ -120,6 +120,19 @@ class PromptSurfaceTest {
     }
 
     @Test
+    fun `screens - poor trees for a model that cannot read images`() {
+        val blind = ScreenFormatter(lexicon = Screens.LEXICON, vision = false)
+        val empty = Samples.sparse.copy(elements = emptyList(), quality = TreeQuality.EMPTY)
+        Golden.assertMatches(
+            "screens/poor-trees-without-vision.expected.txt",
+            blind.page(
+                Samples.sparse,
+                SnapshotDetail.BRIEF,
+            ) + "\n\n=====\n\n" + blind.page(empty, SnapshotDetail.BRIEF),
+        )
+    }
+
+    @Test
     fun `results - type shows only the diff`() =
         runTest {
             val after = Samples.chatWith(id = "s13", draft = "十点半")

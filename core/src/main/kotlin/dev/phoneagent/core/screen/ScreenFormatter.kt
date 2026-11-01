@@ -25,13 +25,18 @@ import dev.phoneagent.core.tool.ScreenPresenter
  * there is no diff, more than [ScreenFormatConfig.fullPageShare] of the lines changed, or the
  * diff cannot be shown faithfully or within the budget; then it gets the full page with new
  * elements marked `+`.
+ *
+ * [vision] is whether the main model reads images (the same capability the tools are assembled
+ * with, `ToolsConfig.vision`): without it no note suggests a screenshot.
  */
 public class ScreenFormatter(
     private val config: ScreenFormatConfig = ScreenFormatConfig(),
     private val lexicon: RiskLexicon = RiskLexicon { _, _ -> null },
+    vision: Boolean = true,
 ) : ScreenPresenter {
     private val briefLines = ElementLines(config, SnapshotDetail.BRIEF)
     private val fullLines = ElementLines(config, SnapshotDetail.FULL)
+    private val headers = PageHeader(vision)
 
     override fun page(
         snapshot: ScreenSnapshot,
@@ -90,7 +95,7 @@ public class ScreenFormatter(
                         INDENT.repeat(line.depth) + text
                     }
             }
-        val header = PageHeader.lines(snapshot, note)
+        val header = headers.lines(snapshot, note)
         val ocr =
             snapshot.ocr.orEmpty().map { line ->
                 val center = line.bounds.center()
@@ -136,7 +141,7 @@ public class ScreenFormatter(
             } else {
                 listOf("screen ${after.id} · ${since}的变化（其余不变）")
             }
-        val text = (head + PageHeader.notes(after) + body).joinToString("\n")
+        val text = (head + headers.notes(after) + body).joinToString("\n")
         return text.takeIf { it.length <= config.briefBudget }
     }
 

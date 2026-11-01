@@ -5,8 +5,16 @@ import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.ports.SurfaceKind
 import dev.phoneagent.core.ports.TreeQuality
 
-/** Header and notes of a page, e.g. `screen s12 · com.tencent.mm/.ui.LauncherUI · agent 屏 · 坐标 0–999`. */
-internal object PageHeader {
+/**
+ * Header and notes of a page, e.g. `screen s12 · com.tencent.mm/.ui.LauncherUI · agent 屏 · 坐标 0–999`.
+ *
+ * The tree-quality note says what to do instead of reading the tree. With [vision] it suggests a
+ * screenshot; without, it never does (the model cannot read one): it points to the full text
+ * page and the OCR coordinates, or to the user.
+ */
+internal class PageHeader(
+    private val vision: Boolean,
+) {
     /** The header line, the [notes], then [note] when given. */
     fun lines(
         snapshot: ScreenSnapshot,
@@ -46,21 +54,29 @@ internal object PageHeader {
             }
 
             TreeQuality.SPARSE -> {
-                if (secure) {
-                    "树不完整，而且这一页禁止截屏：读不到的部分只能请用户处理（hand_to_user kind=secure_page）"
-                } else {
-                    "树不完整：有些内容读不到，可以 phone_observe image=true 看截图，再按坐标操作"
+                when {
+                    secure -> "树不完整，而且这一页禁止截屏：读不到的部分只能请用户处理（hand_to_user kind=secure_page）"
+                    vision -> "树不完整：有些内容读不到，可以 phone_observe image=true 看截图，再按坐标操作"
+                    else -> SPARSE_TEXT_ONLY
                 }
             }
 
             TreeQuality.EMPTY -> {
-                if (secure) {
-                    "读不到界面元素，而且这一页禁止截屏：请用户处理（hand_to_user kind=secure_page）"
-                } else {
-                    "读不到界面元素：用 phone_observe image=true 看截图，再按坐标操作"
+                when {
+                    secure -> "读不到界面元素，而且这一页禁止截屏：请用户处理（hand_to_user kind=secure_page）"
+                    vision -> "读不到界面元素：用 phone_observe image=true 看截图，再按坐标操作"
+                    else -> EMPTY_TEXT_ONLY
                 }
             }
         }
+    }
+
+    private companion object {
+        const val SPARSE_TEXT_ONLY =
+            "树不完整：有些内容读不到。可以 phone_observe detail=full 读全部元素，屏上文字可以按坐标点；" +
+                "还缺的部分请用户处理（hand_to_user kind=other）"
+        const val EMPTY_TEXT_ONLY =
+            "读不到界面元素：屏上文字可以按坐标点；没有屏上文字或不够用时，请用户处理（hand_to_user kind=other）"
     }
 
     private fun flagWord(flag: ScreenFlag): String =
