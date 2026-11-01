@@ -32,8 +32,12 @@ import kotlinx.serialization.json.putJsonArray
  * shown, both as deltas and as the reasoning parts' summaries, so the two never mix;
  * the parts come from the output items in `output_index` order, finished on the stream
  * (`response.output_item.done`) or listed in the final `response.output` ([OutputItems]). Only
- * `response.completed` or `response.incomplete` complete a stream: a body that ends before them
- * was cut ([ModelError.Network]). `response.failed` and `error` events become [ModelError]s.
+ * `response.completed` or `response.incomplete`, each with its response object, complete a
+ * stream: a body that ends before them was cut ([ModelError.Network]), a terminal event without
+ * the object or a whole JSON reply in any other state is [ModelError.BadResponse]. An incomplete
+ * reply stops with [StopReason.MAX_TOKENS] or [StopReason.OTHER] (a content filter is a
+ * [ModelError.Refusal]); on the ChatGPT plan only `response.completed` succeeds.
+ * `response.failed` and `error` events become [ModelError]s.
  */
 internal class ResponsesStream(
     private val provider: ProviderId,
@@ -61,12 +65,17 @@ internal class ResponsesStream(
         return final != null
     }
 
-    /** Consumes a whole response object (servers that ignore `stream:true`). */
+    /** Consumes a whole response object (servers that ignore `stream:true`); it must be completed or incomplete. */
     fun acceptJson(body: String) {
         val root = parse(body)
         root.obj("error")?.let { throw failure(it) }
+        val status = root.str("status")
+        if (status != COMPLETED && status != INCOMPLETE) {
+            val shown = status?.let { "'${redactor.text(it).take(SNIPPET)}'" } ?: "no status"
+            throw ModelError.BadResponse("whole response has $shown, not completed or incomplete")
+        }
         final = root
-        incomplete = root.str("status") == "incomplete"
+        incomplete = status == INCOMPLETE
     }
 
     /** The reply; throws [ModelError] for cut streams, refusals and malformed replies. */
@@ -78,12 +87,20 @@ internal class ResponsesStream(
         val parts = ResponsesOutput.parts(output, provider, model, redactor, rawFirst)
         val hasCalls = parts.any { it is Part.ToolCall }
         ResponsesOutput.checkRefusal(output, parts, incomplete && reason == "content_filter")
+        if (incomplete && plan) {
+            val shown = reason?.let { redactor.text(it).take(SNIPPET) } ?: "no reason"
+            throw ModelError.BadResponse(
+                "ChatGPT plan replies must end with response.completed; this one is incomplete ($shown)",
+            )
+        }
         val diverged = ledger.catchUp(parts)
         val stop =
             when {
-                incomplete && reason == "max_output_tokens" -> StopReason.MAX_TOKENS
+                // An unfinished reply is never a tool step or a finished turn, whatever it holds.
+                incomplete -> if (reason == "max_output_tokens") StopReason.MAX_TOKENS else StopReason.OTHER
+
                 hasCalls -> StopReason.TOOL_USE
-                incomplete -> StopReason.OTHER
+
                 else -> StopReason.END_TURN
             }
         val meta = ResponsesOutput.metadata(response, reason, diverged)
@@ -116,21 +133,14 @@ internal class ResponsesStream(
                 root.obj("item")?.let { items.done(root.int("output_index"), it) }
             }
 
-            "response.completed" -> {
-                final = root.obj("response") ?: JsonObject(emptyMap())
+            "response.completed", "response.incomplete" -> {
+                final = root.obj("response") ?: throw ModelError.BadResponse("$type event without a response object")
+                incomplete = type == "response.incomplete"
             }
 
-            "response.incomplete" -> {
-                final = root.obj("response") ?: JsonObject(emptyMap())
-                incomplete = true
-            }
-
-            "response.failed" -> {
-                throw failure(root.obj("response")?.obj("error") ?: root)
-            }
-
-            "error" -> {
-                throw failure(root.obj("error") ?: root)
+            "response.failed", "error" -> {
+                val error = if (type == "error") root.obj("error") else root.obj("response")?.obj("error")
+                throw failure(error ?: root)
             }
         }
     }
@@ -181,6 +191,8 @@ internal class ResponsesStream(
 
     private companion object {
         const val SNIPPET = 200
+        const val COMPLETED = "completed"
+        const val INCOMPLETE = "incomplete"
     }
 }
 

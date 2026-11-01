@@ -176,14 +176,14 @@ class ResponsesModelTest {
             assertThrows<ModelError.BadResponse> { model().complete(Kit.request()) }
             server.enqueueSse(
                 event("""{"type":"response.output_item.done","item":{"type":"function_call","name":"x"}}""") +
-                    event("""{"type":"response.completed"}"""),
+                    event("""{"type":"response.completed","response":{"status":"completed"}}"""),
             )
             assertThrows<ModelError.BadResponse> { model().complete(Kit.request()) }
             server.enqueueSse(
                 event(
                     """{"type":"response.output_item.done","item":{"type":"function_call","name":"x","call_id":" "}}""",
                 ) +
-                    event("""{"type":"response.completed"}"""),
+                    event("""{"type":"response.completed","response":{"status":"completed"}}"""),
             )
             assertThrows<ModelError.BadResponse> { model().complete(Kit.request()) }
             server.enqueue(
@@ -212,14 +212,14 @@ class ResponsesModelTest {
                     event("""{"type":"response.output_item.done","item":{"type":"web_search_call"}}""") +
                     event("""{"type":"response.output_item.done","item":{"type":"message","content":[]}}""") +
                     event("""[DONE]""") +
-                    "event: response.incomplete\ndata: {}\n\n",
+                    "event: response.incomplete\ndata: {\"response\":{\"status\":\"incomplete\"}}\n\n",
             )
             val deltas = Deltas()
             val reply = model().complete(Kit.request(), deltas)
             assertEquals(emptyList<Part>(), reply.parts)
             assertEquals(StopReason.OTHER, reply.stopReason)
             assertEquals("A", deltas.text)
-            server.enqueueSse(event("""{"type":"response.completed"}"""))
+            server.enqueueSse(event("""{"type":"response.completed","response":{"status":"completed"}}"""))
             assertEquals(StopReason.END_TURN, model().complete(Kit.request()).stopReason)
         }
 }

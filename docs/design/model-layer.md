@@ -182,7 +182,7 @@ data class WireProfile(
 - **实现约定**（WP03）：
   - 发不发 `include`（`WireOptions.responses`）也只在"测试并保存"时协商：只认结构化的 `error.param == "include"`（这个词太常见，不看消息；`input[n].encrypted_content` 之类的错误不算）。运行时拒绝 `include` 的 400 是 `InvalidRequest(param = "include")`，和其他 400 一样交给上层。
   - 套餐模式遇到 401，向 `CredentialResolver` 要一次新令牌（`rejected = true`）后重发；再次 401 报 `SignInExpired`。
-  - `response.completed` 和 `response.incomplete` 都算流的正常结束，在它们之前断流报 `Network`。
+  - 流的终态：只有带 response 对象的 `response.completed` 或 `response.incomplete` 才算流结束，在它们之前断流报 `Network`；终态事件缺 response 对象，或者整段 JSON 回复的 `status` 不是 `completed` / `incomplete`（`in_progress` 等），报 `BadResponse`。`incomplete` 先按原因分类：`max_output_tokens` → `MAX_TOKENS`，`content_filter` → `Refusal`，其他或缺原因 → `OTHER`；不管回复里有没有工具调用，都不会变成 `TOOL_USE` 或 `END_TURN`。套餐模式按官方要求只认 `response.completed`（上表"流"一行）：`incomplete` 里除了 `content_filter` 报 `Refusal`，其余都报 `BadResponse`。
   - 回复的内容按 `output_index` 排序：流里 `response.output_item.done` 收到的条目和最终 `response.output` 里的条目按位置合并，只在一边出现的条目也保留；同一位置的两个版本在适配器读取的字段上（类型、id、call_id、名字、参数、文字、加密推理）不一致时报 `BadResponse`。
   - 带图片的 `function_call_output`，`output` 用 `input_text` / `input_image` 数组。
 
