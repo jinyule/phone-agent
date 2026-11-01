@@ -131,33 +131,42 @@ internal object Kit {
 
     fun wireExists(path: String): Boolean = Kit::class.java.getResource("/wire/$path") != null
 
-    /** Source path of a wire resource (for golden updates with `PA_UPDATE_GOLDENS=1`). */
-    fun wireSource(path: String): Path = Path.of("src/test/resources/wire", path)
-
     val pretty: Json =
         Json {
             prettyPrint = true
             prettyPrintIndent = "  "
         }
 
-    /**
-     * Compares [actual] with the golden JSON at `wire/[path]`. With `PA_UPDATE_GOLDENS=1` the golden is
-     * (re)written instead; review the diff before committing.
-     */
+    /** Pretty JSON as fixtures store it. */
+    fun prettyText(json: JsonElement): String = pretty.encodeToString(JsonElement.serializer(), json) + "\n"
+
+    /** Compares [actual] with the golden JSON at `wire/[path]` ([assertWire]). */
     fun assertGolden(
         path: String,
         actual: JsonElement,
+    ) = assertWire(path, prettyText(actual))
+
+    /**
+     * Compares [actual] with the fixture text at `wire/[path]`. Tests never write fixtures: on a
+     * mismatch (or a missing fixture) the actual text goes to `build/wire-actual/[path]` and the
+     * test fails. To accept it, review the diff and copy it over, e.g.
+     * `cp -R core/build/wire-actual/. core/src/test/resources/wire/` after a test run.
+     */
+    fun assertWire(
+        path: String,
+        actual: String,
     ) {
-        val text = pretty.encodeToString(JsonElement.serializer(), actual) + "\n"
-        if (System.getenv("PA_UPDATE_GOLDENS") == "1") {
-            val target = wireSource(path)
-            Files.createDirectories(target.parent)
-            Files.writeString(target, text)
-            return
-        }
-        check(wireExists(path)) { "golden wire/$path is missing; run with PA_UPDATE_GOLDENS=1 and review it" }
-        org.junit.jupiter.api.Assertions
-            .assertEquals(wire(path), text, "golden wire/$path")
+        val expected = if (wireExists(path)) wire(path) else null
+        if (expected == actual) return
+        val kept = Path.of(ACTUAL_DIR, path)
+        Files.createDirectories(kept.parent)
+        Files.writeString(kept, actual)
+        val what = if (expected == null) "is missing" else "differs"
+        org.junit.jupiter.api.Assertions.assertEquals(
+            expected,
+            actual,
+            "fixture wire/$path $what; the actual output is in $ACTUAL_DIR/$path (review, then copy to accept)",
+        )
     }
 
     /** `data:` events for [chunks], then `[DONE]`. */
@@ -212,6 +221,7 @@ internal object Kit {
 
     fun RecordedRequest.json(): JsonObject = Json.parseToJsonElement(checkNotNull(body).utf8()) as JsonObject
 
+    private const val ACTUAL_DIR = "build/wire-actual"
     private const val BLOB_REF_LENGTH = 64
     private const val TAKE_TIMEOUT_S = 5L
 }

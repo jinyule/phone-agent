@@ -9,7 +9,6 @@ import dev.phoneagent.core.model.openai.Kit.base
 import dev.phoneagent.core.model.openai.WireSupport.str
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.addJsonObject
@@ -35,8 +34,8 @@ import kotlin.io.path.name
 /**
  * Replays every stream fixture under `wire/<provider>/` through the real adapter and HTTP stack,
  * once in one piece and once in 7-byte chunks, and compares the outcome with
- * `<case>.expect.json` (`expect`). With `PA_UPDATE_GOLDENS=1` the expectations are rewritten
- * instead; review them by hand. Delta invariants are checked on every successful replay.
+ * `<case>.expect.json` (`expect`); a mismatch leaves the actual expectation file for review
+ * ([Kit.assertWire]). Delta invariants are checked on every successful replay.
  */
 class ReplayTest {
     @StartStop
@@ -51,15 +50,7 @@ class ReplayTest {
             val whole = run(fixture, meta, Int.MAX_VALUE)
             val chunked = run(fixture, meta, CHUNK)
             assertEquals(whole, chunked, "chunking must not change the outcome")
-            if (System.getenv("PA_UPDATE_GOLDENS") == "1") {
-                val updated = JsonObject(meta + ("expect" to whole))
-                Files.writeString(
-                    Kit.wireSource(metaPath),
-                    Kit.pretty.encodeToString(serializer<JsonElement>(), updated) + "\n",
-                )
-            } else {
-                assertEquals(meta["expect"], whole, "expectation of $fixture")
-            }
+            Kit.assertWire(metaPath, Kit.prettyText(JsonObject(meta + ("expect" to whole))))
         }
 
     @Test
