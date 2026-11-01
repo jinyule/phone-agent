@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.AlarmClock
 import android.provider.CalendarContract
 import android.provider.Settings
+import androidx.core.net.toUri
 import dev.phoneagent.core.ports.LaunchTarget
 import dev.phoneagent.core.ports.SystemIntentKind
 import java.time.LocalDateTime
@@ -106,7 +107,7 @@ internal object LaunchIntents {
      * Invalid with the reason.
      */
     fun link(target: LaunchTarget.Link): Built {
-        val uri = Uri.parse(target.uri.trim())
+        val uri = target.uri.trim().toUri()
         val scheme = uri.scheme?.lowercase()
         val web = scheme == "http" || scheme == "https"
         return when {
@@ -306,7 +307,7 @@ internal object SystemIntents {
         if (place.isEmpty()) {
             invalid("navigate needs a place")
         } else {
-            ready(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=" + Uri.encode(place))))
+            ready(Intent(Intent.ACTION_VIEW, ("geo:0,0?q=" + Uri.encode(place)).toUri()))
         }
 
     private fun settings(

@@ -2,6 +2,7 @@ package dev.phoneagent.app.adapters.screen
 
 import android.graphics.Bitmap
 import android.util.Size
+import androidx.core.graphics.scale
 import dev.phoneagent.core.ports.Frame
 import java.io.ByteArrayOutputStream
 import kotlin.math.max
@@ -41,7 +42,7 @@ internal object FrameEncoder {
             if (size.width == bitmap.width && size.height == bitmap.height) {
                 bitmap
             } else {
-                Bitmap.createScaledBitmap(bitmap, size.width, size.height, true)
+                bitmap.scale(size.width, size.height)
             }
         try {
             val out = ByteArrayOutputStream()

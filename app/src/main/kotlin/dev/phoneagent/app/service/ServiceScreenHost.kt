@@ -14,6 +14,7 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityWindowInfo
 import android.view.inputmethod.EditorInfo
 import androidx.annotation.RequiresApi
+import androidx.core.util.size
 import dev.phoneagent.app.adapters.screen.A11yEvent
 import dev.phoneagent.app.adapters.screen.ImeConnection
 import dev.phoneagent.app.adapters.screen.ScreenHost
@@ -162,7 +163,7 @@ internal class ServiceScreenHost(
     private fun displayOf(event: AccessibilityEvent): Int {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) return event.displayId
         val all = service.windowsOnAllDisplays
-        val index = (0 until all.size()).firstOrNull { i -> all.valueAt(i).any { it.id == event.windowId } }
+        val index = (0 until all.size).firstOrNull { i -> all.valueAt(i).any { it.id == event.windowId } }
         return if (event.windowId == -1 || index == null) Display.INVALID_DISPLAY else all.keyAt(index)
     }
 

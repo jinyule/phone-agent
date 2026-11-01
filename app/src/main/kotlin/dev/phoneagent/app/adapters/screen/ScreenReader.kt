@@ -1,5 +1,6 @@
 package dev.phoneagent.app.adapters.screen
 
+import android.annotation.SuppressLint
 import android.graphics.Rect
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
@@ -66,6 +67,8 @@ internal object ScreenReader {
 
     private const val MIN_SIDE_PX = 2
 
+    // TYPE_MAGNIFICATION_OVERLAY (API 33) is inlined; below 33 no window has that type, so it never matches.
+    @SuppressLint("InlinedApi")
     private val SKIPPED_WINDOW_TYPES =
         setOf(
             AccessibilityWindowInfo.TYPE_INPUT_METHOD,
