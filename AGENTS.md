@@ -50,7 +50,8 @@ lefthook install                      # 每个 clone 装一次本地钩子
 - **配置错误要大声失败**：在加载时校验；可调参数是带校验的配置字段，不是散落的常量。
 - `catch` 要给错误命名并说明原因，`try` 只包一条语句；协程里不吞 `CancellationException`。
 - 注释只写契约（行为、失败、时序、归属），不写推理过程。
-- 依赖方向：`app → core`、`app → privileged`；core 内部 `agent` 不认识具体能力，能力之间不互相引用。
+- 依赖方向：`app → core`、`app → privileged`。core 内部分契约包（层次从低到高：`ids` < `model`、`ports` < `tool` < `policy` < `session` < `agent`，只引用更低层）和能力包（其余包，如 `model.openai`、`screen`、`storage`）：契约包不引用能力包，能力包之间不互相引用。由 `PackageDependencyTest` 检查，见 ADR `2026-11-01-core-contracts`。
+- 序列化格式（session 事件 type、`@SerialName`、enum 常量名、字段）发布后只能经格式版本 + 迁移函数修改。
 - 新增 detekt 依赖的规则时，要在 `config/detekt/canary/` 里补一个会被它拒绝的反例，并加进 `expected-rules.txt`。
 
 ## 5. 测试义务

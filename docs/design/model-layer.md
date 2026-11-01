@@ -43,13 +43,17 @@
 ```kotlin
 sealed interface Part {
     data class Text(val text: String) : Part
-    data class Image(val blob: BlobRef, val mime: String) : Part        // 每次都以 base64 发送同样的字节
+    data class Image(val blob: BlobRef, val mime: String, val width: Int, val height: Int) : Part  // 每次都以 base64 发送同样的字节
     data class ToolCall(val id: ToolCallId, val name: String, val argsJson: String) : Part
-    data class ToolResult(val id: ToolCallId, val parts: List<Part>, val isError: Boolean) : Part
+    data class ToolResult(val id: ToolCallId, val parts: List<Part>, val isError: Boolean) : Part  // parts 只含 Text / Image
     /** 服务商私有的推理内容，原样保存，只回传给同一 provider 和同一 model。 */
-    data class Reasoning(val provider: ProviderId, val model: ModelId, val kind: ReasoningKind, val opaque: JsonElement) : Part
+    data class Reasoning(val provider: ProviderId, val model: ModelId, val kind: ReasoningKind, val opaque: JsonElement,
+                         val summary: String? = null /* 只给 UI 看，不回传 */) : Part
 }
-enum class ReasoningKind { AnthropicThinking /* 带 signature */, ResponsesEncrypted /* encrypted_content */, ChatReasoningField /* reasoning_content 等 */ }
+enum class ReasoningKind {
+    AnthropicThinking /* 带 signature */, AnthropicRedactedThinking, AnthropicCompaction /* 服务端 compaction 块，§5 */,
+    ResponsesEncrypted /* encrypted_content */, ChatReasoningField /* reasoning_content 等 */,
+}
 ```
 
 **能力描述**：
@@ -57,10 +61,10 @@ enum class ReasoningKind { AnthropicThinking /* 带 signature */, ResponsesEncry
 ```kotlin
 data class ModelCapabilities(
     val tools: Boolean, val vision: Boolean, val contextTokens: Int, val maxOutputTokens: Int?,
-    val reasoningEfforts: List<String>?,        // null = 未知；空 = 没有可选档位
+    val reasoningLevels: List<ReasoningLevel>?, // null = 未知；空 = 没有可选档位；适配器负责映射成各家的档位名
     val promptCaching: PromptCaching,           // Implicit / Explicit(cache_control) / None
     val thinkingBinding: ThinkingBinding,       // None / PrefixBound（Anthropic preserved thinking）
-    val verified: Set<VerifiedCap>,             // 探测确认过的：TOOL_CALL、VISION、GROUNDING …
+    val verified: Set<VerifiedCapability>,      // 探测确认过的：TOOL_CALL、VISION、GROUNDING、REASONING_ECHO
 )
 ```
 
@@ -68,12 +72,13 @@ data class ModelCapabilities(
 
 ```kotlin
 sealed interface ModelError {
-    Auth, SignInExpired, PlanNotEligible, RateLimited(retryAfter), Overloaded, ContextOverflow,
-    InvalidRequest(param, detail), Refusal(category), PrefixBindingMismatch, Network, Server(status)
-}
+    Auth, SignInExpired, PlanNotEligible, QuotaExceeded /* 余额或额度用完，不重试 */, RateLimited(retryAfter), Overloaded,
+    ContextOverflow, InvalidRequest(param, detail), Refusal(category), PrefixBindingMismatch, Network, Server(status),
+    BadResponse /* 响应解析失败或违反协议 */
+}   // 每个都带 kind: ModelErrorKind（写进日志）；retryable 由 kind 决定：RateLimited、Overloaded、Network、Server、BadResponse
 ```
 
-- 重试策略由各 provider 自己定义，参考 dsh 的默认值：最多 5 次，500ms–10s，带抖动，遵守 `retry-after`。每次重试都写一条 `llm/retry` 日志。
+- 重试策略由各 provider 自己定义，参考 dsh 的默认值：最多 5 次，500ms–10s，带抖动，遵守 `retry-after`。每次重试都写一条 `request/retry` 日志。
 - `InvalidRequest` 和 `Auth` 不重试。
 
 ---

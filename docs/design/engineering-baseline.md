@@ -60,7 +60,7 @@ phone-agent/
 | 不提交密钥，fixture 和截图不含真实隐私 | gitleaks（pre-commit + CI）；fixture 一律来自测试账号（§3.2） |
 | **模型可见 ⟺ 已记录**：进入模型请求的内容都能从 session 日志重建 | 回放测试：用日志重建请求，与录制时逐字节比较（§3.2） |
 | **主循环只能通过固定拦截点扩展**；改 `agent/` 包必须同时更新 `docs/design/phase1-architecture.md` §3.8 | 依赖测试 + PR 模板勾选项 |
-| core 内部的依赖方向：agent 不认识具体能力，能力之间不互相引用 | ArchUnit 或 Konsist 写的依赖测试（参考 Mika 的 `PackageDependencyTest`；M1 建包时加） |
+| core 内部的依赖方向：agent 不认识具体能力，能力之间不互相引用 | Konsist 写的 `core` 包依赖测试 `PackageDependencyTest`，带会被拒绝的反例（规则见 ADR `2026-11-01-core-contracts`） |
 
 ---
 
@@ -248,4 +248,4 @@ core/src/test/resources/sessions/<scenario>/
 | lefthook、gitleaks、.editorconfig、.gitattributes | ✅ | 仓库根目录 |
 | CI：`ci.yml` + `all-checks-passed`、Dependabot、PR 模板 | ✅ 2026-11-01 在 GitHub 上首次跑通（前两次失败暴露了校验文件的冷缓存和 aapt2 平台问题，见 ADR）；main 已设为必须通过 `all-checks-passed` | `.github/` |
 | AGENTS.md + 技能 | ✅ `pre-push-checks`、`code-review` | `.agents/skills/` |
-| 推迟 | `add-tool`、`record-session` 两个技能（对应的工具注册和回放设施在 M1 落地，先写会误导代理）；Compose 字面量规则与包依赖测试（M1）；`release.yml`（M2 前）；`eval/` 模块（M1） | — |
+| 推迟 | `add-tool`、`record-session` 两个技能（对应的工具注册和回放设施在 M1 落地，先写会误导代理）；Compose 字面量规则（M1）；`release.yml`（M2 前）；`eval/` 模块（M1） | — |

@@ -69,7 +69,12 @@ phone-agent/
 └─ eval/         任务集（YAML）、设备端 instrumentation runner、PC 端 harness（经 MCP 驱动）
 ```
 
-依赖方向：`app → core`、`app → privileged`、`privileged → (无)`。`core` 内部用一个依赖测试（参考 Mika 的 `PackageDependencyTest`）守住两条规则：`agent` 不认识具体能力，能力之间不互相引用。
+依赖方向：`app → core`、`app → privileged`、`privileged → (无)`。`core` 内部用一个依赖测试（Konsist 写的 `PackageDependencyTest`）守住两条规则：`agent` 不认识具体能力，能力之间不互相引用。core 的包分为两类：
+
+- **契约包**：`ids`、`model`、`ports`、`tool`、`policy`、`session`、`agent`，分层排列，只能引用更低的层；
+- **能力包**：其余所有包，例如 `model.openai`、`model.anthropic`、`policy.rules`、`screen`、`tools`、`storage`。能力包只引用契约包和自己。
+
+分层和理由见 ADR `2026-11-01-core-contracts`。
 
 ### 2.2 进程模型
 
@@ -130,10 +135,10 @@ data class ChatRequest(
 
 ```kotlin
 interface Tool {
-    val def: ToolDef                    // name、description（静态，长度有上限）、JSON schema
+    val def: ToolDef                    // name、description（静态，长度有上限）、JSON schema；定义在 core.model（ChatRequest 也用它）
     val group: ToolGroup                // PHONE、GENERAL、KNOWLEDGE …（按组折叠或展开）
     val risk: RiskClass                 // READ / WRITE / OUTWARD / SPEND / SETUP
-    val concurrencySafe: Boolean get() = false   // 写屏幕的动作一律 false（屏幕是共享资源）
+    val concurrencySafe: Boolean        // 每个工具显式声明，没有默认值；写屏幕的动作一律 false（屏幕是共享资源）
     val timeoutMs: Long                 // 单一超时真相源；等待用户的时间不计入
     suspend fun execute(call: ToolCall, ctx: ToolContext): ToolResult
     fun presentCall(call: ToolCall): StepCard          // 纯函数：回放时可以重新生成轨迹卡片
@@ -203,7 +208,7 @@ data class ActionOutcome(
 
 ```kotlin
 interface SurfaceManager {
-    suspend fun agentDisplay(task: TaskId): Result<SurfaceRef>   // 懒创建；每个任务一块（14+ 才支持多任务并行）
+    suspend fun agentDisplay(task: TaskId): SurfaceAllocation   // Ready(surface) | Unavailable(reason, detail)；懒创建；每个任务一块（14+ 才支持多任务并行）
     suspend fun release(task: TaskId)
     suspend fun handToUser(task: TaskId, kind: HandoffKind): HandoffTicket  // 把任务挪到主屏
     suspend fun takeBack(ticket: HandoffTicket): SurfaceRef                 // 挪回后台屏，并重新读屏
@@ -320,7 +325,7 @@ interface Chain<I, O> { suspend fun proceed(input: I): O }   // 不调用 procee
 data class Envelope(
     val seq: Long, val time: Long, val type: String,
     val ignorable: Boolean = false,          // 不认识的类型：ignorable=true 才能跳过，否则拒绝加载
-    val surfaceOp: SurfaceOp? = null,        // Append | Replace(startSeq, endSeq)：压缩和裁剪用 Replace
+    val surfaceOp: SurfaceOp = SurfaceOp.Append, // Append（默认，不写出）| Replace(startSeq, endSeq)：压缩和裁剪用 Replace
     val sources: List<Long> = emptyList(),   // 例如 tool/result 指回对应的 tool/call
     val data: JsonElement,
 )
@@ -329,9 +334,11 @@ sealed interface SessionEvent   // turn/start|end、step/start|end、user/messag
                                 // handoff/start|end、compaction/*、inbox/spliced、screen/frame(blobRef)…
 ```
 
+完整的类型表和每种类型是否 ignorable 登记在 `core.session.SessionEventTypes`；命名规则、序列化方式和格式版本见 ADR `2026-11-01-core-contracts`。
+
 **规则**：
 1. **模型可见 ⟺ 已记录**：请求 = 请求头 + `deriveMessages(events)` + 工具清单。`deriveMessages` 是纯函数；请求组装好后冻结。回放测试会逐字节核对。
-2. **大对象存 blob**：截图存为 `blobs/<sha256>.jpg`，日志里只记引用和尺寸。**旧截图怎么瘦身按协议区分**（见 `model-layer.md` §5）：
+2. **大对象存 blob**：截图存为 `blobs/<sha256>`（不带扩展名），日志里只记引用、mime 和尺寸。**旧截图怎么瘦身按协议区分**（见 `model-layer.md` §5）：
    - Responses / Chat Completions：越过阈值时在客户端做一次 Replace，只保留最近 N 张图（默认 3），更早的换成文字占位。
    - Anthropic：**不在客户端改写历史**，因为 preserved thinking 会让之后的思考块失效。改用服务端 context editing / compaction，Replace 只用于 UI 投影。
 3. **刷盘时机**：模型请求发出前、写动作执行前（追加写 + fsync）。**刷盘失败就不执行**。
