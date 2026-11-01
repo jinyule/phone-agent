@@ -86,6 +86,16 @@ class ProviderPresetsTest {
     }
 
     @Test
+    fun `only presets known to leak tool calls into the text recover them`() {
+        assertEquals(false, ChatQuirks.DEFAULT.recoverLeakedCalls)
+        val recovering = ProviderPresets.ALL.filter { it.chat.recoverLeakedCalls }.map { it.id }
+        assertEquals(listOf("deepseek", "qwen", "ollama"), recovering)
+        for (preset in ProviderPresets.ALL.filter { it.chat.recoverLeakedCalls }) {
+            assertTrue(preset.facts.any { "recovers complete calls" in it.text }, "${preset.id} says why")
+        }
+    }
+
+    @Test
     fun `default wire options come from the preset or the official host`() {
         fun defaults(
             baseUrl: String,

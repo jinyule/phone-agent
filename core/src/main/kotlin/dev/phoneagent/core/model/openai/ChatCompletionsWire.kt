@@ -33,12 +33,21 @@ import kotlinx.serialization.json.putJsonObject
  * @property streamUsage send `stream_options.include_usage` (usage in the last chunk).
  * @property maxTokensField field that carries `ChatRequest.maxOutputTokens`.
  * @property reasoningEffort how a requested reasoning level is sent.
+ * @property recoverLeakedCalls turn tool calls written into the answer text into calls
+ *   ([LeakedToolMarkup]). Off by default: text that looks like a call is otherwise an answer, and
+ *   a recovered call never went through the provider's tool channel. On only for providers known
+ *   to leak them: DeepSeek models that write DSML, Qwen-family models that write `<tool_call>`
+ *   JSON, and Ollama, whose chat templates leave unparsed calls of local models in the text.
+ *   Even then only complete calls of the request's tools that end the answer are recovered, and
+ *   only when the reply has no native call; their ids are listed in the reply's
+ *   `providerMetadata.recovered_tool_calls`.
  */
 public data class ChatQuirks(
     val parallelToolCalls: Boolean = true,
     val streamUsage: Boolean = true,
     val maxTokensField: MaxTokensField = MaxTokensField.MAX_TOKENS,
     val reasoningEffort: ReasoningEffortStyle = ReasoningEffortStyle.REASONING_EFFORT,
+    val recoverLeakedCalls: Boolean = false,
 ) {
     /** Defaults. */
     public companion object {

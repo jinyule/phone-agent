@@ -21,8 +21,10 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 
 /**
  * Assembles one Chat Completions reply from stream chunks (or from a whole JSON completion when
@@ -32,23 +34,22 @@ import kotlinx.serialization.json.put
  * reused for a second call, names repeated in every fragment, mid-stream error chunks.
  *
  * Complete means `[DONE]` or a `finish_reason` arrived; a body that ends before either was cut
- * ([ModelError.Network]). Text with leaked tool markup is repaired at the end ([LeakedToolMarkup]);
- * the preview deltas hold back anything that may be markup, and the end shows what they missed
- * ([DeltaLedger.catchUp]).
+ * ([ModelError.Network]). Where [ChatReading.recoverableTools] allows it, calls leaked into the
+ * answer text are recovered at the end ([LeakedToolMarkup]); the preview deltas then hold back
+ * anything that may be markup, and the end shows what they missed ([DeltaLedger.catchUp]).
  *
- * @param reasoningFields delta fields that carry reasoning, in priority order; the first one seen wins.
  * @param redactor masks credentials in provider text that goes into errors.
  */
 internal class ChatCompletionsStream(
     private val provider: ProviderId,
     private val model: ModelId,
-    private val reasoningFields: List<String>,
+    private val reading: ChatReading,
     private val newCallId: () -> String,
     private val redactor: Redactor,
     onDelta: (Delta) -> Unit,
 ) {
     private val ledger = DeltaLedger(onDelta)
-    private val text = StreamedText(ledger)
+    private val text = StreamedText(ledger, holdBack = reading.recoverableTools.isNotEmpty())
     private val refusal = StringBuilder()
     private val calls = ToolCallAssembler(newCallId, ledger, redactor)
     private var usage: Usage? = null
@@ -77,17 +78,24 @@ internal class ChatCompletionsStream(
         checkComplete()
         val reason = finishReason
         checkOutcome(reason)
-        val leaked = LeakedToolMarkup.scan(text.answer())
-        val recovered = leaked.calls.map { Part.ToolCall(ToolCallId(newCallId()), it.name, it.argsJson) }
-        val toolCalls = calls.parts() + recovered
+        val native = calls.parts()
+        val recovery =
+            if (native.isEmpty() && reading.recoverableTools.isNotEmpty()) {
+                LeakedToolMarkup.recover(text.answer(), reading.recoverableTools)
+            } else {
+                null
+            }
+        val recovered = recovery?.calls.orEmpty().map { Part.ToolCall(ToolCallId(newCallId()), it.name, it.argsJson) }
+        val answer = recovery?.text ?: text.answer()
+        val toolCalls = native + recovered
         val parts =
             buildList {
                 text.reasoning(provider, model)?.let(::add)
-                if (leaked.text.isNotEmpty()) add(Part.Text(leaked.text))
+                if (answer.isNotEmpty()) add(Part.Text(answer))
                 addAll(toolCalls)
             }
         ledger.catchUp(parts)
-        val meta = metadata(responseId, reportedModel, reason, recovered.size)
+        val meta = metadata(responseId, reportedModel, reason, recovered.map { it.id })
         return ChatResponse(parts, stopReason(reason, toolCalls.isNotEmpty()), usage, meta)
     }
 
@@ -129,7 +137,7 @@ internal class ChatCompletionsStream(
     }
 
     private fun delta(delta: JsonObject) {
-        reasoningFields.forEach { field -> delta.str(field)?.let { text.appendReasoning(field, it) } }
+        reading.reasoningFields.forEach { field -> delta.str(field)?.let { text.appendReasoning(field, it) } }
         textOf(delta["content"]).forEach(text::appendAnswer)
         delta.str("refusal")?.let(refusal::append)
         delta.array("tool_calls")?.forEach { (it as? JsonObject)?.let(calls::merge) }
@@ -181,14 +189,16 @@ internal class ChatCompletionsStream(
             id: String?,
             model: String?,
             finishReason: String?,
-            leakedCalls: Int,
+            recovered: List<ToolCallId>,
         ): JsonObject? {
             val meta =
                 buildJsonObject {
                     id?.let { put("id", it) }
                     model?.let { put("model", it) }
                     finishReason?.let { put("finish_reason", it) }
-                    if (leakedCalls > 0) put("leaked_tool_calls", leakedCalls)
+                    if (recovered.isNotEmpty()) {
+                        putJsonArray(RECOVERED_TOOL_CALLS) { recovered.forEach { add(it.value) } }
+                    }
                 }
             return meta.takeIf { it.isNotEmpty() }
         }
@@ -196,11 +206,29 @@ internal class ChatCompletionsStream(
 }
 
 /**
- * Answer and reasoning text of one streamed reply. Answer deltas stop short of anything that may
- * be leaked tool markup ([LeakedToolMarkup.previewEnd]); reasoning keeps the first field it came in.
+ * How [ChatCompletionsStream] reads one reply.
+ *
+ * @property reasoningFields delta fields that carry reasoning, in priority order; the first one seen wins.
+ * @property recoverableTools tools whose calls are recovered from markup leaked into the answer
+ *   ([ChatQuirks.recoverLeakedCalls]: the request's tools, or none); empty turns recovery and the
+ *   preview hold-back off.
+ */
+internal data class ChatReading(
+    val reasoningFields: List<String>,
+    val recoverableTools: Set<String>,
+)
+
+/** `providerMetadata` key listing the ids of calls recovered from the answer text. */
+internal const val RECOVERED_TOOL_CALLS = "recovered_tool_calls"
+
+/**
+ * Answer and reasoning text of one streamed reply. With [holdBack], answer deltas stop short of
+ * anything that may be leaked tool markup ([LeakedToolMarkup.previewEnd]); reasoning keeps the
+ * first field it came in.
  */
 internal class StreamedText(
     private val ledger: DeltaLedger,
+    private val holdBack: Boolean,
 ) {
     private val answer = StringBuilder()
     private var shown = 0
@@ -211,7 +239,7 @@ internal class StreamedText(
     fun appendAnswer(fragment: String) {
         if (fragment.isEmpty()) return
         answer.append(fragment)
-        val end = LeakedToolMarkup.previewEnd(answer.toString()).coerceAtLeast(shown)
+        val end = (if (holdBack) LeakedToolMarkup.previewEnd(answer.toString()) else answer.length).coerceAtLeast(shown)
         if (end > shown) {
             ledger.text(answer.substring(shown, end))
             shown = end

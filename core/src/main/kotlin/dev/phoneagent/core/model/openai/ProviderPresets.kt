@@ -117,13 +117,16 @@ public object ProviderPresets {
             needsKey = true,
             reasoningField = "reasoning_content",
             echoReasoning = true,
-            chat = ChatQuirks(parallelToolCalls = false),
+            chat = ChatQuirks(parallelToolCalls = false, recoverLeakedCalls = true),
             officialHosts = setOf("api.deepseek.com"),
             facts =
                 listOf(
                     documented("Thinking mode returns reasoning_content; it must be sent back on tool-call steps."),
                     unverified("Accepts reasoning_effort in thinking mode."),
-                    unverified("Some models leak tool calls as DSML markup in the text; the adapter repairs them."),
+                    unverified(
+                        "Some models leak tool calls as DSML markup at the end of the text; the adapter " +
+                            "recovers complete calls of declared tools.",
+                    ),
                     noParallelParam,
                     documentedUsage,
                 ),
@@ -139,11 +142,15 @@ public object ProviderPresets {
             needsKey = true,
             reasoningField = "reasoning_content",
             echoReasoning = true,
-            chat = ChatQuirks(reasoningEffort = ReasoningEffortStyle.NONE),
+            chat = ChatQuirks(reasoningEffort = ReasoningEffortStyle.NONE, recoverLeakedCalls = true),
             officialHosts = setOf("dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com"),
             facts =
                 listOf(
                     documented("International accounts use dashscope-intl.aliyuncs.com."),
+                    unverified(
+                        "Qwen-family models sometimes write <tool_call> JSON blocks into the text; the adapter " +
+                            "recovers complete calls of declared tools.",
+                    ),
                     documented("Thinking is switched with enable_thinking, not reasoning_effort."),
                     documented("Accepts parallel_tool_calls."),
                     documented("Tool-call continuation fragments carry an empty id."),
@@ -276,12 +283,16 @@ public object ProviderPresets {
             needsKey = false,
             reasoningField = "reasoning",
             echoReasoning = true,
-            chat = ChatQuirks(),
+            chat = ChatQuirks(recoverLeakedCalls = true),
             officialHosts = emptySet(),
             facts =
                 listOf(
                     documented(
                         "On a phone, 127.0.0.1 is the phone itself: use the LAN address of the Ollama computer.",
+                    ),
+                    unverified(
+                        "When a model's chat template does not parse its tool calls, they arrive as <tool_call> " +
+                            "or DSML text; the adapter recovers complete calls of declared tools.",
                     ),
                     verified("Thinking models stream delta.reasoning (2026-11-01, qwen3.8)."),
                     verified(

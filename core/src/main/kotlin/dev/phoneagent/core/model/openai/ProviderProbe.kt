@@ -185,7 +185,10 @@ public class ProviderProbe internal constructor(
         )
     }
 
-    /** Why [reply] is not the expected trial call, or `null` when it is. */
+    /**
+     * Why [reply] is not the expected trial call, or `null` when it is. A call recovered from the
+     * answer text does not count: the provider's tool channel is what is being verified.
+     */
     private fun checkTrialCall(
         reply: ChatResponse,
         token: String,
@@ -197,6 +200,7 @@ public class ProviderProbe internal constructor(
                         .filterIsInstance<Part.Text>()
                         .joinToString(" ") { it.text }
                         .take(SNIPPET)
+        val recovered = reply.providerMetadata?.array(RECOVERED_TOOL_CALLS)?.contains(JsonPrimitive(call.id.value))
         val args =
             try {
                 Json.parseToJsonElement(call.argsJson) as? JsonObject
@@ -205,7 +209,11 @@ public class ProviderProbe internal constructor(
                 null
             }
         val sent = (args?.get("token") as? JsonPrimitive)?.contentOrNull?.trim()
-        return if (sent == token) null else "the trial tool got unexpected arguments: ${call.argsJson.take(SNIPPET)}"
+        return when {
+            recovered == true -> "the model wrote the trial call into its answer text instead of calling the tool"
+            sent == token -> null
+            else -> "the trial tool got unexpected arguments: ${call.argsJson.take(SNIPPET)}"
+        }
     }
 
     private fun trialRequest(token: String): ChatRequest =

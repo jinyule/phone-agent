@@ -50,18 +50,25 @@ public class ChatCompletionsModel internal constructor(
         val redactor = Redactor(listOfNotNull(secret))
         val body = wire.body(request, images, inputs.options.chat)
         val post = env.post(endpoint, inputs.headers, secret, body)
-        return when (val exchange = env.exchange(post, redactor) { read(it, redactor, onDelta) }) {
+        return when (val exchange = env.exchange(post, redactor) { read(request, it, redactor, onDelta) }) {
             is Exchange.Done -> exchange.value
             is Exchange.Failed -> throw env.error(exchange.failure, false, redactor)
         }
     }
 
+    private fun reading(request: ChatRequest): ChatReading =
+        ChatReading(
+            reasoningFields,
+            if (inputs.options.chat.recoverLeakedCalls) request.tools.mapTo(HashSet()) { it.name } else emptySet(),
+        )
+
     private suspend fun read(
+        request: ChatRequest,
         reply: HttpReply,
         redactor: Redactor,
         onDelta: (Delta) -> Unit,
     ): ChatResponse {
-        val stream = ChatCompletionsStream(profile.id, info.model, reasoningFields, env.newCallId, redactor, onDelta)
+        val stream = ChatCompletionsStream(profile.id, info.model, reading(request), env.newCallId, redactor, onDelta)
         try {
             reply.readEvents(stream::accept, stream::acceptJson)
             return stream.finish()

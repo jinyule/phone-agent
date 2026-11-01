@@ -87,6 +87,7 @@ class ReplayTest {
                 protocol = if (responses) ModelProtocol.OPENAI_RESPONSES else ModelProtocol.OPENAI_CHAT_COMPLETIONS,
                 credential = if (meta["plan"] == JsonPrimitive(true)) Kit.PLAN else Credential.None,
                 reasoningField = meta.str("reasoningField"),
+                preset = meta.str("preset"),
             )
         val model = Kit.adapters().model(profile, Kit.MODEL, Kit.capabilities(), Kit.blobs())
         val deltas = Deltas()
@@ -125,7 +126,7 @@ class ReplayTest {
         deltas: Deltas,
     ) {
         val text = response.parts.filterIsInstance<Part.Text>().joinToString("") { it.text }
-        val leaked = response.providerMetadata?.get("leaked_tool_calls") != null
+        val leaked = response.providerMetadata?.get(RECOVERED_TOOL_CALLS) != null
         if (!leaked) assertEquals(text, deltas.text, "text deltas add up to the text")
         val reasoning =
             response.parts

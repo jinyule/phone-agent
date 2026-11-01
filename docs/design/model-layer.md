@@ -148,14 +148,14 @@ data class WireProfile(
 - **工具调用**：`tools[].function` + `tool_choice:"auto"`。主循环每轮只执行一个调用，所以服务商支持时适配器在 `prepare` 里设 `wire.disableParallelToolCalls = true`，线路上发 `parallel_tool_calls:false`。如果模型仍然返回多个调用，第一个之外的每个都要配一条结果"已跳过：每步只执行一个动作"，否则下一次请求会被拒。
 - **流式**：`stream:true` + `stream_options.include_usage`；要兼容某些网关返回 `usage:null` 的情况。
 - **推理内容**：字段名和"要不要回传"各家不同（`reasoning_content` 等）。在 `ProviderProfile.reasoningField` 和 `ProviderProfile.echoReasoning` 里按服务商配置，由能力探测确认；**探测不了的标"未验证"**。写请求头时这两项冻结进 `wire`（§2"线路快照"）。
-- **工具调用漏成文字**：有的模型会把工具调用写成正文里的标记（DeepSeek DSML、`<tool_call>` 等），参考 Mika 的 `LeakedToolMarkup`，识别出来按工具调用处理。
+- **工具调用漏成文字**：有的模型会把工具调用写成正文里的标记（DeepSeek DSML、`<tool_call>` 等），参考 Mika 的 `LeakedToolMarkup`。还原**默认关闭**，只有已知会漏的预设打开（`ChatQuirks.recoverLeakedCalls`：DeepSeek、通义、Ollama）。打开后也要同时满足下面几条才还原，否则正文原样保留：本次请求声明了工具；原生 `tool_calls` 里没有调用；从第一个标记到正文末尾只有完整的调用（DSML 要有闭合的 invoke，`<tool_call>` 要有 `name` 和对象形式的参数）和空白；标记不在代码围栏或行内代码里；每个名字都在 `request.tools` 里。还原出的调用 ID 记在 `providerMetadata.recovered_tool_calls` 里（会进日志）；"测试并保存"时，试调用如果是从正文还原的，算失败。
 - **缓存**：靠服务端隐式前缀缓存，所以历史要尽量只追加；命中情况从 usage 里读。
 - **实现约定**（`core.model.openai`，WP03）：
   - `ToolResult.isError` 在 OpenAI 两种协议里都没有对应字段，失败只靠结果文字说明。
   - `tool` 消息只能带文字：结果里的图片在全部 `tool` 消息之后用一条 user 消息补上（每组以 "Images from tool call <id>:" 开头）；只有图片的结果，`tool` 消息写占位文字。不支持看图的模型，图片一律换成固定占位文字，保证前缀稳定。
   - 线路选项（`WireOptions`）是创建模型时传入的固定输入，适配器运行时不协商、没有可变状态：一次 `complete()` 只发一个请求，同一个模型对同一请求发出的线路总是一样，所有重试都归 `requestError`。
   - 可选字段 `parallel_tool_calls`、`stream_options` 发不发（`WireOptions.chat`），只在"测试并保存"时协商：试调用被 400 拒绝，并且结构化的 `error.param` 点名该字段（没有 `param` 时看服务商的消息有没有点名）时，去掉它再试一次，每个字段最多一次。试调用通过时用的选项写进 `ProbeResult.Passed.wire`，由 app 跟 profile 一起保存，创建模型时传入。运行时再遇到这类 400，就是不可重试的 `InvalidRequest(param)`，UI 可以据 `param` 提示重新测试。
-  - 漏成文字的工具调用，ID 由适配器生成；流式预览会扣住可能是标记的文字，流结束时用 `DeltaLedger` 把预览漏掉的内容补发，保证增量拼起来和最终回复一致。
+  - 漏成文字的工具调用，ID 由适配器生成；打开还原时，流式预览会扣住可能是标记的文字，流结束时用 `DeltaLedger` 把预览漏掉的内容补发，保证增量拼起来和最终回复一致。
   - 发送前校验对话：每个工具调用都必须有结果，不能有孤立的结果；服务端上下文编辑只支持 Anthropic。不满足时直接报 `InvalidRequest`，不发请求。
   - 预设的已知差异写在 `ProviderPresets` 里，每条注明 VERIFIED / DOCUMENTED / UNVERIFIED。没有预设的 profile 用默认线路选项；指向某个预设官方地址的自定义 profile 用该预设的选项（`WireOptions.defaultsFor`）。
   - 输出上限的字段名是线路选项 `ChatQuirks.maxTokensField`：官方 OpenAI 用 `max_completion_tokens`（`max_tokens` 已弃用），兼容网关默认 `max_tokens`。

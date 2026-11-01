@@ -1,5 +1,6 @@
 {
   "source": "constructed from reports: Qwen-style <tool_call> JSON block in the answer text",
+  "preset": "qwen",
   "expect": {
     "response": {
       "parts": [
@@ -19,7 +20,9 @@
         "id": "chatcmpl-test",
         "model": "test-model",
         "finish_reason": "stop",
-        "leaked_tool_calls": 1
+        "recovered_tool_calls": [
+          "call_gen_1"
+        ]
       }
     },
     "deltas": {
