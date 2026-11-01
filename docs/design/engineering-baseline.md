@@ -146,7 +146,7 @@ core/src/test/resources/sessions/<scenario>/
 
 | Workflow | 触发 | Job | 优先级 |
 |---|---|---|---|
-| `ci.yml` | pull_request、push main、手动 | `static`（spotlessCheck、detektMain/detektTest、detekt canary、Android lint、gitleaks 扫全历史）· `core`（test + 会话回放 + `koverVerify` + `koverVerifyCritical` + build-logic 测试）· `app`（assembleDebug + Robolectric 单测）· `privileged-build`（构建 dex，检查 AIDL 版本常量）· **`all-checks-passed`**（汇总以上 job：failure、cancelled、skipped 都判红；**唯一的必过检查**） | P0 |
+| `ci.yml` | pull_request、push main、手动 | `static`（spotlessCheck、detektMain/detektTest、detekt canary、Android lint、gitleaks 扫全历史）· `core`（test + 会话回放 + `koverVerify` + `koverVerifyCritical` + build-logic 测试）· `app`（assembleDebug + Robolectric 单测）· `privileged-build`（构建 dex + 单测，`verifyPrivilegedProtocol` 检查 AIDL 版本常量）· **`all-checks-passed`**（汇总以上 job：failure、cancelled、skipped 都判红；**唯一的必过检查**） | P0 |
 | `main.yml` | push main | ci.yml 的全部内容 + 模拟器端口契约测试（API 34/35/36，`reactivecircus/android-emulator-runner`）+ 构建未签名的 release 包 | P1 |
 | `e2e.yml` | 每日定时 + 手动 | 真实模型 API 测试；secret 为空时直接判红 | P1 |
 | `eval.yml` | 每日定时 + 手动 | 自建 runner 接 USB 真机跑保留池，产出 `summary.md` 和 `metrics.json`；成功率下降超过阈值就标红 | P1 |
@@ -181,7 +181,10 @@ core/src/test/resources/sessions/<scenario>/
 **特权助手与版本错配（必须遵守）**
 - helper 是从 `base.apk` 加载的，**App 更新后，旧的 helper 进程可能还在运行旧代码**。
 - 交接时比对 `protocolVersion` 和 APK 的 versionCode；不一致就让旧 helper `releaseAll()` 并退出，再重新拉起。
-- CI 检查 AIDL 版本常量：改了 AIDL 文件就必须升版本号。
+- CI 检查 AIDL 版本常量：改了 AIDL 文件就必须升版本号。实现（WP12）：
+  - `privileged/protocol-history.txt` 是只追加的 `<版本号> <指纹>` 列表；指纹是所有 `.aidl` 文件去掉注释、压缩空白后按相对路径算的 SHA-256，所以只改注释不算协议变更；
+  - `:privileged:verifyPrivilegedProtocol`（挂在 `check` 上，CI 的 `privileged-build` 也单独跑）要求最后一行等于当前的 `PrivilegedProtocol.VERSION` 和当前指纹，失败时直接给出要追加的那一行；
+  - AIDL 的 1–4 号事务（`protocolVersion`、`identity`、`releaseAll`、`shutdown`）永久冻结，任何版本的 App 都能让任何版本的旧 helper 释放并退出（phase1-architecture §3.5）。
 
 **签名密钥**
 - release keystore 离线保存两份。CI 只通过 environment secret 使用它。

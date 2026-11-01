@@ -6,4 +6,39 @@ This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 Third-party code adapted into this repository is listed below with its origin
 and license, as required by the respective licenses.
 
-(none yet)
+--------------------------------------------------------------------------------
+Mika
+  Source:   https://github.com/wangzan101/Mika
+  Commit:   9cef3750addd20b2af9e3214a8f5e56301670174
+  License:  Apache License, Version 2.0
+  NOTICE of the original work:
+    Mika
+    Copyright 2026 wangzan101
+
+  Adapted files (original -> PhoneAgent):
+    core/src/main/kotlin/com/wangzan101/mika/core/shell/HelperHandoff.kt
+      -> privileged/src/main/kotlin/dev/phoneagent/privileged/handoff/HandoffContract.kt
+      -> privileged/src/main/kotlin/dev/phoneagent/privileged/handoff/HandoffGate.kt
+      -> privileged/src/main/kotlin/dev/phoneagent/privileged/handoff/HandoffNonces.kt
+    app/src/main/java/com/wangzan101/mika/cap/phone/shell/HelperProcess.kt
+      -> privileged/src/main/kotlin/dev/phoneagent/privileged/helper/ProviderHandoff.kt
+      -> privileged/src/main/kotlin/dev/phoneagent/privileged/helper/AppProcessWatcher.kt
+    app/src/main/java/com/wangzan101/mika/cap/phone/shell/HelperHub.kt
+      -> app/src/main/kotlin/dev/phoneagent/app/helper/HandoffAdmission.kt
+      -> app/src/main/kotlin/dev/phoneagent/app/helper/HelperClient.kt
+    app/src/main/java/com/wangzan101/mika/cap/phone/shell/ShellContext.kt
+      -> privileged/src/main/kotlin/dev/phoneagent/privileged/helper/ShellContext.kt
+
+  Each adapted file keeps the original copyright header and states what
+  PhoneAgent contributors modified.
+
+--------------------------------------------------------------------------------
+scrcpy (through Mika's ShellContext.kt)
+  Source:   https://github.com/Genymobile/scrcpy
+  License:  Apache License, Version 2.0
+  Copyright (C) 2018 Genymobile
+  Copyright (C) 2018-2024 Romain Vimont
+
+  Adapted files:
+    privileged/src/main/kotlin/dev/phoneagent/privileged/helper/ShellContext.kt
+      (obtaining a system Context as the shell user via ActivityThread)

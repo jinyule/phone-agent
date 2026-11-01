@@ -96,10 +96,24 @@ phone-agent/
                 │          ② Shizuku UserService  ③ 开发者在 USB 下运行启动脚本
 ```
 
-**Binder 交接**（参考 Mika 的 `HelperHandoff` / `HelperProcess`）：
-- 助手启动后，通过 App 的 ContentProvider `call()` 把 Binder 交过去；交之前先核对 App 的签名证书指纹。
-- App 收下前，调用 `identity()` 核对对方确实是 uid 2000，并且就是来交接的那个 pid。
-- 一次性口令通过 stdin 传给助手，不放进命令行，因为同为 shell 身份的其他进程能读到 cmdline。
+**Binder 交接**（参考 Mika 的 `HelperHandoff` / `HelperProcess`；WP12 已落地，取舍见 `docs/adr/2026-11-01-privileged-handoff.md`）：
+- 助手启动后，通过 App 的 ContentProvider（authority `<applicationId>.helper`，`call("attach")`）把 Binder 交过去；交之前先核对 App 的签名证书指纹。
+  - 指纹不从外部传入，而是**自钉**：助手只在 `CLASSPATH` 等于这个包当前安装的 `sourceDir` 时才启动（运行的代码就来自这个 APK），启动时记下包的 uid 和签名证书的 SHA-256。
+  - 之后每次交接前都重新确认：包还装着、uid 和证书没变，Provider 也属于这个 uid。
+- App 收下前按顺序检查，任何一步不过都拒绝：
+  1. 调用方是 uid 2000，并且助手自报的 uid/pid 就是这次 Binder 调用的 uid/pid；
+  2. 口令有效（在碰对方 Binder 之前检查）；
+  3. `identity()` 返回的 `[uid, pid]` 就是来交接的那个进程；
+  4. `protocolVersion()`、助手代码所在 APK 的 versionCode 和路径与 App 自己一致。只有这一项不符的是"旧助手"：App 让它 `releaseAll()`，然后回复拒绝，助手收到拒绝就退出；App 进入"需要重新拉起"状态（WP13 之前只在 logcat 提示运行启动脚本）。
+- 一次性口令通过 stdin 传给助手，不放进命令行，因为同为 shell 身份的其他进程能读到 cmdline。每个口令只能用一次，有三种来源：
+  - **启动口令**：App 自己拉起助手时（WP13 的内置 ADB）由 App 生成，30 秒内有效；
+  - **预约口令**：电脑侧的 `scripts/start-helper.sh` 自己生成口令，先用 `content call --method arm` 把口令的 SHA-256 交给 App（App 只接受 uid 2000 的 arm），再经 stdin 把明文交给助手，60 秒内有效；
+  - **续接口令**：每次交接成功，App 都回给助手下一个口令（App 侧持久化），App 进程重启后助手用它重新交接。
+- 生命周期：
+  - App 进程死后助手不退出，进入"孤儿"状态；宽限期（默认 10 秒，`--orphan-grace-ms`）过后 `releaseAll()`。
+  - 助手监听 App uid 的进程状态，App 进程再起来时用续接口令重新交接。新会话开始前一定先释放上一会话的资源，所以迟到的计时器不会释放新会话建的东西。
+  - App 被卸载或换了签名证书：释放并退出。
+  - App 收下新助手时，用 `shutdown()` 让被替换的旧助手释放并退出。
 
 ---
 
@@ -261,23 +275,31 @@ interface SurfaceManager {
 
 ```aidl
 interface IPrivilegedCore {
-    int protocolVersion();
-    int[] identity();                                     // [uid, pid]
-    Bundle probe();                                       // 能力探针：建小屏 + 注入一次无害点击
-    int createDisplay(in Surface s, int w, int h, int dpi);   // flags 按系统版本递增；返回 displayId，负数为错误
-    void releaseDisplay(int displayId);
-    int startActivity(int displayId, in Intent intent, int userId, boolean cold); // 用户正在主屏用的 App 不启动
-    int topTask(int displayId);
-    boolean moveTask(int taskId, int displayId);
-    int watchMainScreen(int windowMs);                    // 动作前开始盯主屏
-    Bundle mainArrivals(long sinceUptimeMs);              // 动作后取：期间冒到主屏的任务
-    boolean injectStroke(int displayId, in int[] xs, in int[] ys, in long[] t);
-    boolean injectKey(int displayId, int keyCode);        // 白名单
-    boolean setAudioMuted(String pkg, boolean muted);
-    int grantSelf(String permission);                     // 只允许 WRITE_SECURE_SETTINGS
-    void releaseAll();
+    // 冻结区：事务号和签名在所有协议版本里都不变
+    int protocolVersion() = 1;
+    int[] identity() = 2;                                 // [uid, pid]
+    void releaseAll() = 3;
+    oneway void shutdown() = 4;                           // releaseAll，然后助手进程退出
+    // 能力区
+    Bundle probe() = 10;                                  // 能力探针：建小屏 + 注入一次无害点击
+    int createDisplay(in Surface s, int w, int h, int dpi) = 11;   // flags 按系统版本递增；返回 displayId，负数为错误
+    void releaseDisplay(int displayId) = 12;
+    int startActivity(int displayId, in Intent intent, int userId, boolean cold) = 13; // 用户正在主屏用的 App 不启动
+    int topTask(int displayId) = 14;
+    boolean moveTask(int taskId, int displayId) = 15;
+    int watchMainScreen(int windowMs) = 16;               // 动作前开始盯主屏
+    Bundle mainArrivals(long sinceUptimeMs) = 17;         // 动作后取：期间冒到主屏的任务
+    boolean injectStroke(int displayId, in int[] xs, in int[] ys, in long[] t) = 18;
+    boolean injectKey(int displayId, int keyCode) = 19;   // 白名单
+    boolean setAudioMuted(String pkg, boolean muted) = 20;
+    int grantSelf(String permission) = 21;                // 只允许 WRITE_SECURE_SETTINGS
 }
 ```
+
+接口文件是 `privileged/src/main/aidl/dev/phoneagent/privileged/IPrivilegedCore.aidl`。线上约定（WP12）：
+- **事务号显式写死，1–4 号冻结**。任何版本的 App 都能读出任何版本助手的协议号和身份，也能让它释放并退出，这是版本错配处理（engineering-baseline §6）的前提。`shutdown()` 是为此在原草图上补的。
+- 只有助手为之启动的那个 App uid 能调用，其他调用方收到 `SecurityException`。
+- 还没实现的方法抛 `UnsupportedOperationException`，消息以 `NOT_IMPLEMENTED` 开头（`PrivilegedError.isNotImplemented` 判定），不占用各方法自己的返回值或错误码。Binder 原生就能跨进程传这个异常；`ServiceSpecificException` 不在公开 SDK 里，所以不用它。
 
 **刻意不提供**任意命令执行的接口。setup 需要的命令（授权、写无障碍列表）在助手内部写死成白名单方法。这是针对 Mika `phone_system_command` 的教训。
 
