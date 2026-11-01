@@ -26,6 +26,8 @@ jobs:
       - uses: ./.github/actions/setup-build
       - name: Format, detekt (with type resolution), detekt canary, Android lint
         run: ./gradlew spotlessCheck detektMain detektTest verifyDetektCanary :app:lintDebug :privileged:lintDebug --continue
+      - name: start-helper.sh against a fake adb
+        run: bash scripts/test/start-helper-test.sh
       - name: Secret scan
         env:
           GITLEAKS_VERSION: 8.30.1

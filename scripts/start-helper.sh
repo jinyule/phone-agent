@@ -2,8 +2,8 @@
 # Starts the PhoneAgent shell-uid helper on a device over adb (USB or emulator) and waits until the
 # app has admitted it (docs/design/phase1-architecture.md §2.2).
 #
-#   scripts/start-helper.sh -s <serial> [-p <package>] [--orphan-grace-ms <ms>] [--package-check-ms <ms>]
-#                           [--timeout <s>]
+#   scripts/start-helper.sh -s <serial> [-p <package>] [--orphan-grace-ms <1..600000>]
+#                           [--package-check-ms <1000..600000>] [--timeout <1..3600 s>]
 #
 # The one-time nonce is generated here and reaches the helper only through stdin: other shell-uid
 # processes can read every command line on the device, so only the nonce's SHA-256 is passed to the
@@ -39,12 +39,18 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# in_range <value> <min> <max>: a decimal integer within [min, max] (at most 7 digits, so no overflow).
+in_range() {
+  [[ "$1" =~ ^[0-9]{1,7}$ ]] && [ "$((10#$1))" -ge "$2" ] && [ "$((10#$1))" -le "$3" ]
+}
+
+# Every argument is checked here, before anything touches the device. The ranges are HelperArgs'.
 # Never guess the device: with several attached, a bare `adb` hits the wrong one or fails.
 [ -n "$serial" ] || die "no device: pass -s <serial> or set ANDROID_SERIAL"
 [[ "$package" =~ ^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$ ]] || die "invalid package name '$package'"
-[ -z "$grace" ] || [[ "$grace" =~ ^[0-9]+$ ]] || die "--orphan-grace-ms must be a number of milliseconds"
-[ -z "$check" ] || [[ "$check" =~ ^[0-9]+$ ]] || die "--package-check-ms must be a number of milliseconds"
-[[ "$timeout_s" =~ ^[0-9]+$ ]] || die "--timeout must be a number of seconds"
+[ -z "$grace" ] || in_range "$grace" 1 600000 || die "--orphan-grace-ms must be 1..600000 milliseconds, was '$grace'"
+[ -z "$check" ] || in_range "$check" 1000 600000 || die "--package-check-ms must be 1000..600000 milliseconds, was '$check'"
+in_range "$timeout_s" 1 3600 || die "--timeout must be 1..3600 seconds, was '$timeout_s'"
 
 adbs() { adb -s "$serial" "$@"; }
 
@@ -74,13 +80,14 @@ armed="$(adbs shell content call --uri "$authority" --method arm --arg "$hash" |
 #    until it has, because adbd kills the session's process group when the session ends.
 before=" $(adbs shell pidof "$name" | tr -d '\r' || true) "
 extra=""
-[ -z "$grace" ] || extra=" --orphan-grace-ms=$grace"
-[ -z "$check" ] || extra="$extra --package-check-ms=$check"
+[ -z "$grace" ] || extra=" --orphan-grace-ms=$((10#$grace))"
+[ -z "$check" ] || extra="$extra --package-check-ms=$((10#$check))"
 remote="read n; (echo \"\$n\" | CLASSPATH='$apk' setsid app_process /system/bin --nice-name='$name' $main_class '$package'$extra > /dev/null 2>&1 &); sleep 1"
 printf '%s\n' "$nonce" | adbs shell "$remote"
 
 # 5. Wait until the app reports a new helper pid as connected.
 started=$SECONDS
+status=""
 while [ $((SECONDS - started)) -lt "$timeout_s" ]; do
   status="$(adbs shell content call --uri "$authority" --method status | tr -d '\r')"
   pid="$(sed -n 's/.*helperPid=\([0-9-]*\).*/\1/p' <<< "$status")"
