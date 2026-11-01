@@ -197,7 +197,7 @@ core/src/test/resources/sessions/<scenario>/
 | 标签 | 只用 `kind/*`（feat/fix/refactor/docs/infra/test），不强制 area | P0 |
 | ADR | 需要长期保留的决策理由，写进 `docs/adr/`，"Alternatives considered"必填；机械性改动不写 | P0 |
 | postmortem | 只给"微妙、系统性、重新排查代价高"的问题写；固定章节：摘要 / 影响 / 时间线 / 根因 / **为什么测试没抓住** / 新增的防护 / 教训 | P1 |
-| 持久化变更 | Room 导出 schema + `MigrationTestHelper`；session 日志格式升版本时，旧版本的 fixture **永不改写** | P1 |
+| 持久化变更 | Room 导出 schema + `MigrationTestHelper`；session 日志格式升版本时，旧版本的 fixture **永不改写**：新版本的 fixture 只由 `./gradlew :core:generateSessionFormatFixture` 生成，它拒绝覆盖已有的版本目录；落盘的 enum 和判别名登记在 `session-format/format-names.txt` | P1 |
 | 升级指南、CHANGELOG | 先用 Release notes 代替；有外部用户和配置项之后再加升级指南 | P2 |
 | 不采用 | 基于 blame 的加权审批、Issue 策略机器人、强制堆叠 PR、双语配对门禁 | — |
 
