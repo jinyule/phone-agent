@@ -75,7 +75,7 @@ internal class PhoneLaunchTool(
             is Resolved -> {
                 when (val launched = screenCall { screen.launch(resolved.target) }) {
                     is ScreenCall.Done -> ToolResults.outcome(resolved.done, launched.value, null, presenter)
-                    is ScreenCall.Unavailable -> ToolResults.unavailable(launched.error)
+                    is ScreenCall.Unavailable -> ToolResults.unavailable(launched.error, presenter)
                 }
             }
         }

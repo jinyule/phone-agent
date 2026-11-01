@@ -83,6 +83,14 @@ class PromptSurfaceTest {
     }
 
     @Test
+    fun `screens - number forms masked at the output boundary`() {
+        Golden.assertMatches(
+            "screens/masked-number-forms.expected.txt",
+            formatter.page(Samples.numberForms, SnapshotDetail.FULL),
+        )
+    }
+
+    @Test
     fun `screens - sparse tree with OCR`() {
         Golden.assertMatches(
             "screens/sparse-with-ocr.expected.txt",
@@ -387,6 +395,25 @@ internal object Samples {
             activity = "com.example.wallet.BindCardActivity",
             flags = setOf(ScreenFlag.PAYMENT, ScreenFlag.KEYBOARD),
         )
+
+    /** Card and id numbers in the forms apps print them; only the two order numbers stay readable. */
+    val numberForms: ScreenSnapshot =
+        snapshot(
+            "s31",
+            listOf(
+                el("e1", ElementRole.TEXT, "卡号\u00A06222\u00A00212\u00A03456\u00A07894", box(40, 200, 960, 240)),
+                el("e2", ElementRole.TEXT, "储蓄卡 6222\u20090212\u20093456\u20097894", box(40, 250, 960, 290)),
+                el("e3", ElementRole.TEXT, "信用卡 4111\u202F1111\u202F1111\u202F1111", box(40, 300, 960, 340)),
+                el("e4", ElementRole.TEXT, "卡号　６２２２　０２１２　３４５６　７８９４", box(40, 350, 960, 390)),
+                el("e5", ElementRole.TEXT, "身份证 110105 19491231 002X", box(40, 400, 960, 440)),
+                el("e6", ElementRole.TEXT, "证件号 1101 0519 4912 3100 2X", box(40, 450, 960, 490)),
+                el("e7", ElementRole.TEXT, "订单支付 银行卡 6222021234567894", box(40, 500, 960, 540)),
+                el("e8", ElementRole.TEXT, "银行卡编号 6222 0212 3456 7894", box(40, 550, 960, 590)),
+                el("e9", ElementRole.TEXT, "订单号：6222021234567894", box(40, 600, 960, 640)),
+                el("e10", ElementRole.TEXT, "运单号 6222 0212 3456 7894 已签收", box(40, 650, 960, 690)),
+                el("e11", ElementRole.TEXT, "电话 138 0013 8000 · 金额 ¥6,222.02", box(40, 700, 960, 740)),
+            ),
+        ).copy(pkg = "com.example.wallet", activity = "com.example.wallet.CardsActivity")
 
     val sparse: ScreenSnapshot =
         snapshot(

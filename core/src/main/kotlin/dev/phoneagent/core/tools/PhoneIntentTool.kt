@@ -75,7 +75,7 @@ internal class PhoneIntentTool(
         val done = presenter.mask("已发出系统请求：" + IntentFields.describe(target))
         return when (val launched = screenCall { screen.launch(target) }) {
             is ScreenCall.Done -> ToolResults.outcome(done, launched.value, null, presenter)
-            is ScreenCall.Unavailable -> ToolResults.unavailable(launched.error)
+            is ScreenCall.Unavailable -> ToolResults.unavailable(launched.error, presenter)
         }
     }
 }

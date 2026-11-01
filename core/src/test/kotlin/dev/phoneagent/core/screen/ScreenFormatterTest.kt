@@ -175,6 +175,19 @@ class ScreenFormatterTest {
         }
 
         @Test
+        fun `Unicode spaces count as whitespace and as digit-group separators`() {
+            val lines =
+                body(
+                    el("e1", ElementRole.TEXT, "卡号\u00A06222\u00A00212\u2009 3456\u202F7894"),
+                    el("e2", ElementRole.TEXT, "持卡人\u3000张三\u00A0 身份证\u3000110105\u300019491231\u3000002X"),
+                    el("e3", ElementRole.TEXT, "订单使用的银行卡 6222021234567894"),
+                )
+            assertEquals("@e1 \"卡号 「银行卡 尾号7894」\"", lines[0])
+            assertEquals("@e2 \"持卡人 张三 身份证 「身份证 尾号002X」\"", lines[1])
+            assertEquals("@e3 \"订单使用的银行卡 「银行卡 尾号7894」\"", lines[2])
+        }
+
+        @Test
         fun `marks risky actionable elements with a warning, plain text never`() {
             val lines =
                 body(

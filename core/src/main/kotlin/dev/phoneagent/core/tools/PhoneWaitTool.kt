@@ -71,7 +71,7 @@ internal class PhoneWaitTool(
     ): ToolResult {
         val screen = ctx.screen ?: return ToolResults.NO_SCREEN
         return when (val waited = screenCall { waitFor(screen, wait) }) {
-            is ScreenCall.Unavailable -> ToolResults.unavailable(waited.error)
+            is ScreenCall.Unavailable -> ToolResults.unavailable(waited.error, presenter)
             is ScreenCall.Done -> report(wait, waited.value)
         }
     }

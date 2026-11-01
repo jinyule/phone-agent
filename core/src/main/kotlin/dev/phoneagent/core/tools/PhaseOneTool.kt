@@ -21,7 +21,13 @@ import kotlinx.serialization.json.JsonPrimitive
  *
  * Cards are pure functions of the call and result: the summary is the call's `reason`; details
  * are the given arguments in schema order, then the result's `details`, all keyed by name (the
- * app maps keys to labels) and passed through [mask]; the image is the result's first image.
+ * app maps keys to labels); summary and details are passed through [mask]; the image is the
+ * result's first image.
+ *
+ * Masking in the model-visible result text: tools mask what comes from the screen or the device.
+ * They do not mask the model's own arguments echoed back (the model wrote them, and an echo that
+ * differs from its arguments would only confuse it) nor what the user answered in ask_user (the
+ * user gave it to the agent on purpose, e.g. a card number to fill into a form).
  */
 internal abstract class PhaseOneTool(
     name: String,
@@ -39,7 +45,7 @@ internal abstract class PhaseOneTool(
     /** A reader for [call]'s arguments. */
     protected fun reader(call: ToolCall): ArgReader = ArgReader(call.args, argNames)
 
-    final override fun presentCall(call: ToolCall): StepCard = StepCard(call.name, call.reason, argDetails(call))
+    final override fun presentCall(call: ToolCall): StepCard = StepCard(call.name, mask(call.reason), argDetails(call))
 
     final override fun presentResult(
         call: ToolCall,
@@ -49,7 +55,7 @@ internal abstract class PhaseOneTool(
             result.details.orEmpty().mapNotNull { (key, value) -> display(value)?.let { StepDetail(key, mask(it)) } }
         return StepCard(
             tool = call.name,
-            summary = call.reason,
+            summary = mask(call.reason),
             details = argDetails(call) + resultDetails,
             image =
                 result.content

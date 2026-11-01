@@ -5,6 +5,7 @@ import dev.phoneagent.core.ports.Frame
 import dev.phoneagent.core.ports.ScreenFlag
 import dev.phoneagent.core.ports.ScreenPort
 import dev.phoneagent.core.ports.ScreenSnapshot
+import dev.phoneagent.core.ports.ScreenUnavailableException
 import dev.phoneagent.core.ports.SnapshotDetail
 import dev.phoneagent.core.ports.SnapshotOptions
 import dev.phoneagent.core.ports.TreeQuality
@@ -62,7 +63,7 @@ internal class PhoneObserveTool(
     ): ToolResult {
         val screen = ctx.screen ?: return ToolResults.NO_SCREEN
         return when (val read = screenCall { screen.snapshot(SnapshotOptions(detail)) }) {
-            is ScreenCall.Unavailable -> ToolResults.unavailable(read.error)
+            is ScreenCall.Unavailable -> ToolResults.unavailable(read.error, presenter)
             is ScreenCall.Done -> withImage(ctx, screen, read.value, presenter.page(read.value, detail), image)
         }
     }
@@ -87,7 +88,7 @@ internal class PhoneObserveTool(
             when {
                 skipped != null -> listOf(Part.Text(page + skipped))
                 frame is ScreenCall.Done && frame.value != null -> attach(ctx, page, frame.value)
-                frame is ScreenCall.Unavailable -> listOf(Part.Text("$page\n（截图失败：${frame.error.message}）"))
+                frame is ScreenCall.Unavailable -> listOf(Part.Text("$page\n（截图失败：${failure(frame.error)}）"))
                 else -> listOf(Part.Text("$page\n（截不到图）"))
             }
         val details =
@@ -113,6 +114,9 @@ internal class PhoneObserveTool(
         } else {
             listOf(Part.Text("$page\n（截图格式 ${frame.mime} 不支持，没有附图）"))
         }
+
+    /** Why the frame failed, masked: the message comes from the device. */
+    private fun failure(error: ScreenUnavailableException): String = presenter.mask(error.message.orEmpty())
 
     private companion object {
         const val USAGE = "phone_observe(detail=brief/full?, image?)"

@@ -56,7 +56,7 @@ internal abstract class ScreenActionTool(
         val screen = ctx.screen ?: return ToolResults.NO_SCREEN
         return when (val acted = screenCall { screen.act(plan.action, plan.on) }) {
             is ScreenCall.Done -> ToolResults.outcome(plan.done, acted.value, plan.on, presenter)
-            is ScreenCall.Unavailable -> ToolResults.unavailable(acted.error)
+            is ScreenCall.Unavailable -> ToolResults.unavailable(acted.error, presenter)
         }
     }
 }

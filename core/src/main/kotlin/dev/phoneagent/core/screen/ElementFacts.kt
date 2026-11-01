@@ -35,8 +35,11 @@ internal fun UiElement.isScrollContainer(): Boolean = ElementState.SCROLLABLE in
 /** Whether the element is editable text. */
 internal fun UiElement.isEditable(): Boolean = role == ElementRole.INPUT || ElementState.EDITABLE in states
 
-/** [text] on one line: whitespace runs (including newlines) collapsed to one space, trimmed. */
-internal fun oneLine(text: String): String = WHITESPACE.replace(text, " ").trim()
+/**
+ * [text] on one line: whitespace runs (newlines and Unicode spaces such as U+00A0 or U+3000
+ * included) collapsed to one space, trimmed.
+ */
+internal fun oneLine(text: String): String = WHITESPACE.replace(text, " ").trim { it.isWhitespace() }
 
 /** [text] cut to at most [max] characters, ending in `…` when cut. */
 internal fun clip(
@@ -44,4 +47,4 @@ internal fun clip(
     max: Int,
 ): String = if (text.length <= max) text else text.take(max - 1) + "…"
 
-private val WHITESPACE = Regex("\\s+")
+private val WHITESPACE = Regex("[\\s\\p{Z}]+")

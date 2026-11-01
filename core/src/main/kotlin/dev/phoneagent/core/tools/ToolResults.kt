@@ -15,6 +15,9 @@ import kotlinx.serialization.json.put
 /**
  * Model-facing results shared by the tools. Results carry state, not new tool descriptions
  * (phase1 §3.2): "cannot do that now" is explained here, with what to do next.
+ *
+ * Text that comes from the device (failure and refusal reasons, exception messages) goes through
+ * [ScreenPresenter.mask] like screen text, since it may quote what is on screen.
  */
 internal object ToolResults {
     /** The task has no surface yet ([dev.phoneagent.core.tool.ToolContext.screen] is `null`). */
@@ -27,11 +30,14 @@ internal object ToolResults {
     /** Arguments failed the boundary check; [message] lists the problems and the usage. */
     fun invalid(message: String): ToolResult = ToolResult.failure(ToolStatus.INVALID_ARGS, message)
 
-    /** The surface threw [error]: it cannot be used at all right now. */
-    fun unavailable(error: ScreenUnavailableException): ToolResult =
+    /** The surface threw [error]: it cannot be used at all right now; its message is masked by [presenter]. */
+    fun unavailable(
+        error: ScreenUnavailableException,
+        presenter: ScreenPresenter,
+    ): ToolResult =
         ToolResult.failure(
             ToolStatus.ERROR,
-            "屏幕暂时用不了（${error.message}），这一步可能没有执行。过一会儿先 phone_observe，再决定下一步。",
+            "屏幕暂时用不了（${presenter.mask(error.message.orEmpty())}），这一步可能没有执行。过一会儿先 phone_observe，再决定下一步。",
         )
 
     /**
@@ -54,11 +60,11 @@ internal object ToolResults {
                 }
 
                 is ActionOutcome.Status.Failed -> {
-                    ToolStatus.ERROR to "没有做成：${result.reason}。看一下现在的画面再决定下一步。\n$screen"
+                    ToolStatus.ERROR to "没有做成：${presenter.mask(result.reason)}。看一下现在的画面再决定下一步。\n$screen"
                 }
 
                 is ActionOutcome.Status.Refused -> {
-                    ToolStatus.REFUSED to "手机拒绝了这个动作：${result.reason}。不要重试同一个动作，换个办法，或者 end_not_done。"
+                    ToolStatus.REFUSED to "手机拒绝了这个动作：${presenter.mask(result.reason)}。不要重试同一个动作，换个办法，或者 end_not_done。"
                 }
 
                 ActionOutcome.Status.StaleRef -> {

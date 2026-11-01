@@ -14,6 +14,9 @@ import kotlinx.serialization.json.put
 /**
  * `ask_user(question, options?)` (phase1 §5): asks through [ToolContext.interaction] and returns
  * the answer. Anything but an answer is an error result telling the model not to guess.
+ *
+ * The answer reaches the model unmasked: the user gave it to the agent on purpose (a card number
+ * to fill in must stay usable). The trajectory card still masks it, like every card detail.
  */
 internal class AskUserTool(
     mask: (String) -> String,

@@ -39,6 +39,9 @@ public interface ScreenPresenter {
         plannedOn: SnapshotId?,
     ): String
 
-    /** [text] with bank-card and national-id numbers masked, for echoes of model input and step cards. */
+    /**
+     * [text] with bank-card and national-id numbers masked: for device-side text in tool results
+     * (failure and refusal reasons, exception messages) and for step cards.
+     */
     public fun mask(text: String): String
 }
