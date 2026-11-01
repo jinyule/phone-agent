@@ -25,11 +25,13 @@ public interface ScreenPresenter {
      * - [ActionOutcome.after] is `null`: a one-line note telling the model to observe.
      * - The full page of `after` (as [page] at `BRIEF`, elements new since the earlier snapshot
      *   marked `+`) when [ActionOutcome.diff] is `null`, the effect is `NEW_APP`, more than a
-     *   configured share (by default half) of the elements were added, removed or changed, or the
-     *   diff text would not fit the page budget.
-     * - Otherwise only the diff: `+` added and `~` changed elements as they are now, then the refs
-     *   of the earlier snapshot that disappeared. An element that is not listed keeps its ref, text
-     *   and place, so the model may keep using what it saw before.
+     *   configured share (by default half) of the page's lines were added, removed or changed, the
+     *   diff names an element `after` does not have, or the diff text would not fit the page budget.
+     * - Otherwise only the diff ([dev.phoneagent.core.ports.ScreenDiff]): `+` added and `~`
+     *   changed elements as they are now, then the refs the earlier page showed that are no longer
+     *   valid (a removed ref is left out only when the diff prints its new binding), then OCR lines
+     *   that appeared, moved or went away. An element that is not listed keeps its ref, line and
+     *   place, so the model may keep using what it saw before.
      *
      * Whenever `after` exists the text starts with `screen <id of after>`, so the model always
      * knows the id of the latest snapshot.

@@ -20,9 +20,11 @@ import dev.phoneagent.core.tool.ScreenPresenter
  * and a line says how many items are hidden and where to scroll; the header and the top and
  * bottom zones are always kept.
  *
- * After an action ([afterAction]) the model gets only the diff (`+` new, `~` changed, `-` gone)
- * unless the app changed, there is no diff, or more than [ScreenFormatConfig.fullPageShare] of the
- * elements changed; then it gets the full page with new elements marked `+`.
+ * After an action ([afterAction]) the model gets only the diff (`+` new, `~` changed, `-` gone,
+ * for elements and then OCR lines; see [ScreenDiffer] for what counts) unless the app changed,
+ * there is no diff, more than [ScreenFormatConfig.fullPageShare] of the lines changed, or the
+ * diff cannot be shown faithfully or within the budget; then it gets the full page with new
+ * elements marked `+`.
  */
 public class ScreenFormatter(
     private val config: ScreenFormatConfig = ScreenFormatConfig(),
@@ -99,8 +101,9 @@ public class ScreenFormatter(
     }
 
     /**
-     * The diff as `+` / `~` / `-` lines, or `null` when it would not fit the brief budget (the
-     * caller then sends the folded full page instead).
+     * The diff as `+` / `~` / `-` lines (elements, then OCR lines), or `null` when it cannot be
+     * shown faithfully: it names an element [after] does not have, or it would not fit the brief
+     * budget. The caller then sends the folded full page instead.
      */
     private fun diffView(
         after: ScreenSnapshot,
@@ -108,13 +111,12 @@ public class ScreenFormatter(
         since: String,
     ): String? {
         val layout = PageLayout(after, config)
+        val owners = (diff.added + diff.changed).map { layout.shownAs(it.ref) ?: return null }
         val risky = riskyRefs(after, layout)
-        val lines = briefLines
         val addedRefs = diff.added.map { it.ref }.toSet()
         val order = after.elements.withIndex().associate { it.value.ref to it.index }
         val shown =
-            (diff.added + diff.changed)
-                .mapNotNull { layout.shownAs(it.ref) }
+            owners
                 .filter { layout.isPrinted(it) || it.isScrollContainer() }
                 .distinctBy { it.ref }
                 .sortedBy { order.getValue(it.ref) }
@@ -123,11 +125,11 @@ public class ScreenFormatter(
                 val mark = if (element.ref in addedRefs) "+ " else "~ "
                 mark +
                     if (element.isScrollContainer()) {
-                        lines.list(element, added = false)
+                        briefLines.list(element, added = false)
                     } else {
-                        lines.element(element, layout.absorbed[element.ref].orEmpty(), false, element.ref in risky)
+                        briefLines.element(element, layout.absorbed[element.ref].orEmpty(), false, element.ref in risky)
                     }
-            } + listOfNotNull(gone(after, diff))
+            } + listOfNotNull(gone(diff, shown.map { it.ref }.toSet())) + ocrChanges(diff)
         val head =
             if (body.isEmpty()) {
                 listOf("screen ${after.id} · ${since}没有可见变化")
@@ -139,16 +141,30 @@ public class ScreenFormatter(
     }
 
     /**
-     * The `-` line: refs of the earlier snapshot that disappeared. A ref the new snapshot reuses for
-     * another element is left out; that element is listed as `+` or `~` under its ref.
+     * The `-` line: refs of the earlier snapshot that are gone. A ref is left out only when the body
+     * prints its new binding ([listed]); otherwise the model would keep the old meaning of it.
      */
     private fun gone(
-        after: ScreenSnapshot,
         diff: ScreenDiff,
+        listed: Set<ElementRef>,
     ): String? {
-        val reused = after.elements.map { it.ref }.toSet()
-        val gone = diff.removed.filter { it !in reused }
+        val gone = diff.removed.filter { it !in listed }
         return if (gone.isEmpty()) null else gone.joinToString(" ", prefix = "- ") { "@$it" }
+    }
+
+    /** OCR lines that appeared (`+`), moved (`~`, same text in both lists) or went away (`-`). */
+    private fun ocrChanges(diff: ScreenDiff): List<String> {
+        val gone = diff.ocrRemoved.toMutableList()
+        val appeared =
+            diff.ocrAdded.map { line ->
+                val moved = gone.firstOrNull { fullLines.clean(it.text) == fullLines.clean(line.text) }
+                moved?.let(gone::remove)
+                val center = line.bounds.center()
+                "${if (moved == null) "+" else "~"} $OCR_WORD \"${briefLines.clean(
+                    line.text,
+                )}\" (${center.x},${center.y})"
+            }
+        return appeared + gone.map { "- $OCR_WORD \"${briefLines.clean(it.text)}\"" }
     }
 
     private fun riskyRefs(
@@ -160,16 +176,20 @@ public class ScreenFormatter(
             .map { it.ref }
             .toSet()
 
+    /** Share of the page's lines (elements and OCR) that the diff adds, removes or changes. */
     private fun changedShare(
         after: ScreenSnapshot,
         diff: ScreenDiff,
     ): Double {
-        val before = after.elements.size - diff.added.size + diff.removed.size
-        val total = maxOf(before, after.elements.size, 1)
-        return (diff.added.size + diff.removed.size + diff.changed.size).toDouble() / total
+        val afterLines = PageLayout(after, config).blocks.sumOf { it.lines.size } + after.ocr.orEmpty().size
+        val added = diff.added.size + diff.ocrAdded.size
+        val removed = diff.removed.size + diff.ocrRemoved.size
+        val beforeLines = afterLines - added + removed
+        return (added + removed + diff.changed.size).toDouble() / maxOf(beforeLines, afterLines, 1)
     }
 
     private companion object {
         const val INDENT = "  "
+        const val OCR_WORD = "屏上文字"
     }
 }

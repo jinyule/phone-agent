@@ -548,7 +548,7 @@ class ScreenFormatterTest {
         }
 
         @Test
-        fun `a removed ref that the new screen reuses is not listed as gone`() {
+        fun `a removed ref that the new screen prints again is listed under its new line, not as gone`() {
             // e6 disappeared and the surface gave its ref to the new message.
             val reused = el("e6", ElementRole.TEXT, "我：十点半", box(600, 400, 960, 460)).under("e5")
             val now =
@@ -558,11 +558,36 @@ class ScreenFormatterTest {
                         before.elements.filterNot { it.ref.value == "e6" } + reused,
                 )
             val diff = ScreenDiffer().diff(before, now)
-            assertEquals(listOf(ElementRef("e6")), diff.removed)
+            assertTrue(diff.removed.isEmpty())
+            // A diff that still lists the reused ref as removed (another analyzer) prints the same.
+            assertEquals(
+                after(ActionOutcome(Status.Ok, Effect.CHANGED, now, diff)),
+                after(ActionOutcome(Status.Ok, Effect.CHANGED, now, diff.copy(removed = listOf(ElementRef("e6"))))),
+            )
             assertEquals(
                 listOf("screen s13 · 与 s12 相比的变化（其余不变）", "状态：键盘已弹出", "+ @e6 \"我：十点半\""),
                 after(ActionOutcome(Status.Ok, Effect.CHANGED, now, diff)).lines(),
             )
+        }
+
+        @Test
+        fun `a removed ref is left out only when the body prints its new binding`() {
+            // Another analyzer's diff: e10 went to an unprinted container, and it reports that as added.
+            val container = el("e10", ElementRole.CONTAINER, bounds = box(880, 930, 980, 980))
+            val now = before.copy(id = SnapshotId("s13"), elements = before.elements.dropLast(1) + container)
+            val diff = ScreenDiff(added = listOf(container), removed = listOf(ElementRef("e10")))
+            assertEquals(
+                listOf("screen s13 · 与 s12 相比的变化（其余不变）", "状态：键盘已弹出", "- @e10"),
+                after(ActionOutcome(Status.Ok, Effect.CHANGED, now, diff)).lines(),
+            )
+        }
+
+        @Test
+        fun `a diff naming an element the screen does not have falls back to the full page`() {
+            val now = before.copy(id = SnapshotId("s13"))
+            val stray = el("e99", ElementRole.TEXT, "别的屏")
+            val text = after(ActionOutcome(Status.Ok, Effect.CHANGED, now, ScreenDiff(changed = listOf(stray))))
+            assertEquals("（与 s12 相比变化较大，下面是完整一屏，+ 是新出现的元素）", text.lines()[2], text)
         }
 
         @Test

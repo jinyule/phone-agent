@@ -23,7 +23,7 @@ public class ScreenAnalyzer(
     diff: DiffConfig = DiffConfig(),
 ) : SnapshotAnalyzer {
     private val quality = TreeQualityAssessor(quality, format)
-    private val differ = ScreenDiffer(diff)
+    private val differ = ScreenDiffer(diff, format)
 
     override fun fingerprint(
         pkg: String?,

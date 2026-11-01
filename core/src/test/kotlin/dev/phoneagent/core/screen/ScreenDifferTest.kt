@@ -3,6 +3,7 @@ package dev.phoneagent.core.screen
 import dev.phoneagent.core.ports.ElementRef
 import dev.phoneagent.core.ports.ElementRole
 import dev.phoneagent.core.ports.ElementState
+import dev.phoneagent.core.ports.OcrLine
 import dev.phoneagent.core.ports.ScreenDiff
 import dev.phoneagent.core.testing.Screens
 import dev.phoneagent.core.testing.Screens.box
@@ -21,8 +22,31 @@ class ScreenDifferTest {
     @Test
     fun `same content is no change`() {
         assertTrue(differ.diff(before, before).isEmpty)
+        // Parents that change nothing on the page change nothing in the diff.
+        val listless =
+            before.copy(
+                elements =
+                    before.elements.map {
+                        if (it.parent?.value ==
+                            "e5"
+                        ) {
+                            it.copy(parent = null)
+                        } else {
+                            it
+                        }
+                    },
+            )
+        assertTrue(differ.diff(before, listless).isEmpty)
+    }
+
+    @Test
+    fun `a new parent that changes what a row absorbs changes the row`() {
+        // e4 ("更多") stops being part of the button e3 and gets a line of its own.
         val reparented = before.copy(elements = before.elements.map { it.copy(parent = null) })
-        assertTrue(differ.diff(before, reparented).isEmpty)
+        val diff = differ.diff(before, reparented)
+        assertEquals(listOf("e3"), diff.changed.map { it.ref.value })
+        assertEquals(listOf("e4"), diff.added.map { it.ref.value })
+        assertTrue(diff.removed.isEmpty())
     }
 
     @Test
@@ -39,7 +63,8 @@ class ScreenDifferTest {
         val diff = differ.diff(before, before.copy(elements = shifted))
         assertEquals(listOf("e10", "e11", "e8"), (diff.changed + diff.added).map { it.ref.value })
         assertEquals(listOf("e8"), diff.added.map { it.ref.value })
-        assertTrue(diff.removed.isEmpty())
+        // e9 is not on the new page at all: the model must drop it.
+        assertEquals(listOf(ElementRef("e9")), diff.removed)
     }
 
     @Test
@@ -68,26 +93,33 @@ class ScreenDifferTest {
                 snapshot("s2", listOf(field.copy(value = "ab"), label.copy(name = "4 条新消息"))),
             )
         assertEquals(listOf("e1"), diff.changed.map { it.ref.value })
+        // The renamed text is a new element under the same ref: listed as added, not as gone.
         assertEquals(listOf("e2"), diff.added.map { it.ref.value })
-        assertEquals(listOf(ElementRef("e2")), diff.removed)
+        assertTrue(diff.removed.isEmpty())
     }
 
     @Test
-    fun `a move beyond the tolerance is a change, a small one is not`() {
+    fun `printed coordinates count any move, a line without coordinates only one beyond the tolerance`() {
         val button = el("e1", ElementRole.BUTTON, "发送", box(880, 930, 980, 980))
-        val nudged = button.copy(bounds = box(880, 940, 980, 990))
-        val moved = button.copy(bounds = box(880, 500, 980, 550))
-        assertTrue(differ.diff(snapshot("s1", listOf(button)), snapshot("s2", listOf(nudged))).isEmpty)
-        assertEquals(listOf(moved), differ.diff(snapshot("s1", listOf(button)), snapshot("s2", listOf(moved))).changed)
-        val horizontal = button.copy(bounds = box(100, 930, 200, 980))
+        val nudged = button.copy(bounds = box(880, 931, 980, 981))
+        assertEquals(
+            listOf(nudged),
+            differ.diff(snapshot("s1", listOf(button)), snapshot("s2", listOf(nudged))).changed,
+        )
+        val text = el("e1", ElementRole.TEXT, "说明", box(100, 500, 300, 540))
+        val shifted = text.copy(bounds = box(100, 510, 300, 550))
+        val moved = text.copy(bounds = box(100, 600, 300, 640))
+        assertTrue(differ.diff(snapshot("s1", listOf(text)), snapshot("s2", listOf(shifted))).isEmpty)
+        assertEquals(listOf(moved), differ.diff(snapshot("s1", listOf(text)), snapshot("s2", listOf(moved))).changed)
+        val horizontal = text.copy(bounds = box(300, 500, 500, 540))
         assertEquals(
             listOf(horizontal),
-            differ.diff(snapshot("s1", listOf(button)), snapshot("s2", listOf(horizontal))).changed,
+            differ.diff(snapshot("s1", listOf(text)), snapshot("s2", listOf(horizontal))).changed,
         )
         val strict = ScreenDiffer(DiffConfig(moveTolerance = 0))
         assertEquals(
-            listOf(nudged),
-            strict.diff(snapshot("s1", listOf(button)), snapshot("s2", listOf(nudged))).changed,
+            listOf(shifted),
+            strict.diff(snapshot("s1", listOf(text)), snapshot("s2", listOf(shifted))).changed,
         )
     }
 
@@ -112,6 +144,21 @@ class ScreenDifferTest {
         val old = snapshot("s1", listOf(like("e1", 100), like("e2", 200), like("e3", 300)))
         val now = snapshot("s2", listOf(like("e1", 100), like("e2", 200)))
         assertEquals(ScreenDiff(removed = listOf(ElementRef("e3"))), differ.diff(old, now))
+    }
+
+    @Test
+    fun `OCR lines are compared as printed`() {
+        val loading = OcrLine("加载中", box(400, 500, 600, 560), 0.9)
+        val done = OcrLine("已完成", box(400, 500, 600, 560), 0.8)
+        val old = snapshot("s1", emptyList()).copy(ocr = listOf(loading, loading))
+        assertTrue(differ.diff(old, old.copy(ocr = listOf(loading.copy(confidence = 0.5), loading))).isEmpty)
+        val diff = differ.diff(old, old.copy(ocr = listOf(loading, done)))
+        assertEquals(listOf(done), diff.ocrAdded)
+        assertEquals(listOf(loading), diff.ocrRemoved, "repeated lines pair one to one")
+        val moved = loading.copy(bounds = box(400, 600, 600, 660))
+        val movedDiff = differ.diff(old.copy(ocr = listOf(loading)), old.copy(ocr = listOf(moved)))
+        assertEquals(ScreenDiff(ocrAdded = listOf(moved), ocrRemoved = listOf(loading)), movedDiff)
+        assertEquals(ScreenDiff(ocrRemoved = listOf(loading, loading)), differ.diff(old, old.copy(ocr = null)))
     }
 
     @Test

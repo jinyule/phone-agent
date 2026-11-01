@@ -1,6 +1,8 @@
 package dev.phoneagent.core.ports
 
 import dev.phoneagent.core.ids.SnapshotId
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 
 /**
@@ -284,18 +286,31 @@ public enum class ScreenFlag {
 }
 
 /**
- * Change between two snapshots of the same surface, keyed by element identity rather than ref.
+ * Change between two snapshots of the same surface as the model reads them (phase1 §4): by the
+ * lines of the screen format (one per printed element, with the texts a row absorbs) and by the
+ * OCR lines. Applying it to what the model saw of the earlier snapshot gives what it would see of
+ * the later one: an element in none of the lists still shows the same line under the same ref.
  *
- * @property added elements present only after the action (`+`).
- * @property removed refs (in the earlier snapshot) of elements that disappeared (`-`).
- * @property changed elements whose name, value or state changed, as they are now (`~`).
+ * @property added printed elements of the later snapshot that are new (`+`), as they are now.
+ * @property removed refs the earlier snapshot showed that the later one no longer shows: the
+ *   element went away, was hidden or absorbed, or its ref went to an element that is not shown
+ *   (`-`). A ref of [added] or [changed] is never in it.
+ * @property changed printed elements that are still there but read differently (text, absorbed
+ *   texts, value, hint, states, ref, printed coordinates), as they are now (`~`).
+ * @property ocrAdded OCR lines of the later snapshot whose text or place is new.
+ * @property ocrRemoved OCR lines of the earlier snapshot that are gone; a line that moved is in both lists.
  */
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 public data class ScreenDiff(
     val added: List<UiElement> = emptyList(),
     val removed: List<ElementRef> = emptyList(),
     val changed: List<UiElement> = emptyList(),
+    // Left out when empty, so logs written before these fields existed read and write the same.
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val ocrAdded: List<OcrLine> = emptyList(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val ocrRemoved: List<OcrLine> = emptyList(),
 ) {
     /** Whether nothing changed. */
-    public val isEmpty: Boolean get() = added.isEmpty() && removed.isEmpty() && changed.isEmpty()
+    public val isEmpty: Boolean
+        get() = added.isEmpty() && removed.isEmpty() && changed.isEmpty() && ocrAdded.isEmpty() && ocrRemoved.isEmpty()
 }

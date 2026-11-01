@@ -137,6 +137,24 @@ class PromptSurfaceTest {
         }
 
     @Test
+    fun `results - a diff lists OCR changes and refs that went away`() =
+        runTest {
+            // The picture's OCR text changed, and the send button e10 is gone: its ref now names a
+            // plain container that is not printed, so e10 must be dropped.
+            val picture = OcrLine("二维码加载中", box(300, 400, 700, 440), 0.9)
+            val before = Screens.CHAT.copy(id = SnapshotId("s15"), ocr = listOf(picture))
+            val overlay = el("e10", ElementRole.CONTAINER, null, box(880, 930, 980, 980))
+            val after =
+                before.copy(
+                    id = SnapshotId("s16"),
+                    elements = Screens.CHAT_ELEMENTS.dropLast(1) + overlay,
+                    ocr = listOf(picture.copy(text = "二维码已过期，点击刷新")),
+                )
+            val result = act("phone_tap", """{"screen":"s15","x":500,"y":420}""", before, after)
+            Golden.assertMatches("results/tap-diff-ocr-and-gone.expected.txt", result)
+        }
+
+    @Test
     fun `results - tap opens a new page in full`() =
         runTest {
             val result = act("phone_tap", """{"screen":"s12","ref":"e3"}""", Screens.CHAT, Samples.chatInfo)
