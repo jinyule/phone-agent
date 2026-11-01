@@ -63,7 +63,9 @@ internal object HelperSelfCheck {
                 failures += "identity is not [2000, ${state.pid}]"
             }
 
-            lines += "probe -> ${notImplemented { core.probe() }}"
+            val probe = probeRefusal { core.probe() }
+            lines += "probe -> ${probe ?: PrivilegedError.NOT_IMPLEMENTED}"
+            if (probe != null) failures += "probe $probe"
             core.releaseAll()
             lines += "releaseAll ok"
         } catch (e: RemoteException) {
@@ -73,12 +75,16 @@ internal object HelperSelfCheck {
         return lines
     }
 
-    /** Runs a capability the A-stage helper does not implement and describes how it refused. */
-    private fun notImplemented(call: () -> Unit): String =
+    /**
+     * A-stage contract: `probe()` refuses with [PrivilegedError.NOT_IMPLEMENTED]. Null when it does,
+     * otherwise how it broke the contract. Once the B stage implements `probe()`, this check must
+     * check the probe result instead.
+     */
+    private fun probeRefusal(call: () -> Unit): String? =
         try {
             call()
             "returned (expected ${PrivilegedError.NOT_IMPLEMENTED})"
         } catch (e: UnsupportedOperationException) {
-            if (PrivilegedError.isNotImplemented(e)) PrivilegedError.NOT_IMPLEMENTED else "unexpected: ${e.message}"
+            if (PrivilegedError.isNotImplemented(e)) null else "threw an unexpected refusal: ${e.message}"
         }
 }

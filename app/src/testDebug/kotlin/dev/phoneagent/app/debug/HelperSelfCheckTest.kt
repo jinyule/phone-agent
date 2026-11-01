@@ -1,6 +1,7 @@
 package dev.phoneagent.app.debug
 
 import android.content.pm.PackageManager
+import android.os.Bundle
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.phoneagent.app.helper.FakeHelper
@@ -29,6 +30,20 @@ class HelperSelfCheckTest {
         assertTrue(HelperSelfCheck.run(HelperState.Connected(wrongProtocol, FakeHelper.PID)).last().startsWith("FAIL"))
         val wrongIdentity = FakeHelper(reportedIdentity = intArrayOf(HandoffContract.SHELL_UID, 1))
         assertTrue(HelperSelfCheck.run(HelperState.Connected(wrongIdentity, FakeHelper.PID)).last().startsWith("FAIL"))
+    }
+
+    @Test
+    fun failsWhenProbeReturnsInsteadOfRefusing() {
+        val helper = FakeHelper().apply { onProbe = { Bundle() } }
+        val last = HelperSelfCheck.run(HelperState.Connected(helper, FakeHelper.PID)).last()
+        assertTrue(last, last.startsWith("FAIL") && last.contains("probe"))
+    }
+
+    @Test
+    fun failsWhenProbeRefusesWithAnotherUnsupportedOperation() {
+        val helper = FakeHelper().apply { onProbe = { throw UnsupportedOperationException("boom") } }
+        val last = HelperSelfCheck.run(HelperState.Connected(helper, FakeHelper.PID)).last()
+        assertTrue(last, last.startsWith("FAIL") && last.contains("boom"))
     }
 
     @Test

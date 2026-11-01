@@ -23,6 +23,8 @@ class FakeHelper(
     var onIdentity: () -> Unit = {},
     var failRelease: Exception? = null,
 ) : IPrivilegedCore.Stub() {
+    /** What [probe] does; by default it refuses as the A-stage helper does. */
+    var onProbe: () -> Bundle = { throw PrivilegedError.notImplemented("probe") }
     val calls = mutableListOf<String>()
     private val recipients = mutableListOf<IBinder.DeathRecipient>()
 
@@ -66,7 +68,7 @@ class FakeHelper(
         calls += "shutdown"
     }
 
-    override fun probe(): Bundle = throw PrivilegedError.notImplemented("probe")
+    override fun probe(): Bundle = onProbe()
 
     override fun createDisplay(
         s: Surface?,
