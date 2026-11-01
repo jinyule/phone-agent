@@ -52,6 +52,8 @@ phase1-architecture §2.2 / §3.5 和 engineering-baseline §6 定了特权助�
 
    只有第 4 步不过的是**旧助手**：App 用掉它的口令，调它的 `releaseAll()`，回复 `STALE_PROTOCOL` 或 `STALE_APK`。助手收到拒绝就释放并退出，App 进入 `NeedsLaunch`。
 
+   四步都通过后，App 先 `linkToDeath`，成功了才把"消耗口令、换发续接口令、替换连接"作为一次提交。之前任何一步失败，口令状态都不变，在用助手的续接口令也不受影响。口令在检查期间失效（过期，或被新的 `arm` 替换），`consume` 返回 null，按 `BAD_NONCE` 拒绝；旧助手分支也先检查这一点，失效就不再调它的 `releaseAll()`。
+
 4. **三种一次性口令**，都是 32 字节随机数的十六进制，比较时用常量时间：
    - **启动口令**：App 自己拉起助手时（WP13）签发，30 秒有效；
    - **预约口令**：`scripts/start-helper.sh` 在电脑上生成口令，先用 `content call --method arm` 把口令的 SHA-256 交给 App，再经 stdin 把明文交给助手，60 秒有效。App 只存哈希；

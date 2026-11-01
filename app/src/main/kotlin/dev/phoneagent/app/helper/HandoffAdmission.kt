@@ -25,7 +25,13 @@ import dev.phoneagent.privileged.handoff.HelperOffer
  * caller is uid 2000 and reports its own uid/pid → the nonce is live (before touching the Binder)
  * → `identity()` names the calling process → `protocolVersion()`, versionCode and APK match this
  * build. A helper failing only the last check is stale: its nonce is burnt and it is told to
- * `releaseAll()`; the rejection then makes it exit. Admission uses up the nonce and issues the next one.
+ * `releaseAll()`; the rejection then makes it exit.
+ *
+ * [decide] does not use up the nonce of an admitted helper: the caller first follows the helper's
+ * death, then [commit]s, which uses up the nonce and issues the next resume nonce. Until then
+ * nothing is written, so a handoff that fails late leaves the connected helper's resume nonce alone.
+ * A nonce that stopped being live while the helper was queried (expired, replaced by a new `arm`)
+ * is refused as [HandoffReject.BAD_NONCE], for stale helpers too.
  *
  * Not thread-safe; [HelperClient] serializes calls.
  */
@@ -43,14 +49,21 @@ internal class HandoffAdmission(
             val reason: HandoffReject,
         ) : Decision
 
+        /** Passed every check with [nonce]; nothing is written until [commit]. */
         data class Admitted(
             val core: IPrivilegedCore,
             val binder: IBinder,
-            val nextNonce: String,
+            val nonce: String?,
         ) : Decision {
             override fun toString(): String = "Admitted"
         }
     }
+
+    /**
+     * Uses up the nonce of [admitted] and returns the helper's next resume nonce, or null when the
+     * nonce is no longer live (the caller then refuses with [HandoffReject.BAD_NONCE]).
+     */
+    fun commit(admitted: Decision.Admitted): String? = nonces.consume(admitted.nonce)?.let { nonces.issueResume() }
 
     fun decide(
         extras: Bundle?,
@@ -90,8 +103,7 @@ internal class HandoffAdmission(
             }
 
             else -> {
-                nonces.consume(offer.nonce)
-                Decision.Admitted(core, binder, nonces.issueResume())
+                Decision.Admitted(core, binder, offer.nonce)
             }
         }
     }
@@ -102,7 +114,7 @@ internal class HandoffAdmission(
         offer: HelperOffer,
         pid: Int,
     ): Decision {
-        nonces.consume(offer.nonce)
+        if (nonces.consume(offer.nonce) == null) return rejected(HandoffReject.BAD_NONCE, offer)
         try {
             core.releaseAll()
         } catch (e: RemoteException) {

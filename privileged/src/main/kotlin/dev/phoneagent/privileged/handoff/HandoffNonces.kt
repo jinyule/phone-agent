@@ -61,8 +61,9 @@ public enum class NonceSlot {
  * stdin, because every shell-uid process can read `/proc/<pid>/cmdline` (phase1-architecture §2.2).
  *
  * The app first [match]es (before touching the offered Binder), then [consume]s once every other
- * check passed, and gives the accepted helper a fresh [issueResume] nonce. All methods are
- * serialized on this object.
+ * check passed and the helper's death is followed, and gives the accepted helper a fresh
+ * [issueResume] nonce. A null from [consume] means the nonce stopped being live after [match]: the
+ * helper is refused. All methods are serialized on this object.
  */
 public class HandoffNonces(
     private val store: NonceStore,
@@ -126,7 +127,12 @@ public class HandoffNonces(
     @Synchronized
     public fun issueResume(): String = random().also { store.save(store.load().copy(resume = it)) }
 
-    /** Forgets every nonce: no running helper can hand off again until a new launch. */
+    /**
+     * Forgets every nonce: no running helper can hand off again until a new launch.
+     *
+     * The caller must serialize this with admission (in the app: under `HelperClient`'s lock).
+     * Otherwise a clear that lands after an admission's [consume] does not stop that helper.
+     */
     @Synchronized
     public fun clear(): Unit = store.save(NonceSlots())
 

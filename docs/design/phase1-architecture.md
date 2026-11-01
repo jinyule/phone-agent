@@ -105,6 +105,7 @@ phone-agent/
   2. 口令有效（在碰对方 Binder 之前检查）；
   3. `identity()` 返回的 `[uid, pid]` 就是来交接的那个进程；
   4. `protocolVersion()`、助手代码所在 APK 的 versionCode 和路径与 App 自己一致。只有这一项不符的是"旧助手"：App 让它 `releaseAll()`，然后回复拒绝，助手收到拒绝就退出；App 进入"需要重新拉起"状态（WP13 之前只在 logcat 提示运行启动脚本）。
+- 全部通过后，App 先对助手的 Binder `linkToDeath`，成功了才消耗口令、换发续接口令、替换连接，所以晚到的失败不会让在用助手的续接口令失效。口令在检查期间失效（过期，或被新的 `arm` 替换）就按 `BAD_NONCE` 拒绝，旧助手也一样。
 - 一次性口令通过 stdin 传给助手，不放进命令行，因为同为 shell 身份的其他进程能读到 cmdline。每个口令只能用一次，有三种来源：
   - **启动口令**：App 自己拉起助手时（WP13 的内置 ADB）由 App 生成，30 秒内有效；
   - **预约口令**：电脑侧的 `scripts/start-helper.sh` 自己生成口令，先用 `content call --method arm` 把口令的 SHA-256 交给 App（App 只接受 uid 2000 的 arm），再经 stdin 把明文交给助手，60 秒内有效；

@@ -38,9 +38,10 @@ class HelperClientTest {
     private val build = AppBuild(versionCode = 10001, apkPath = "/data/app/~~a==/dev.phoneagent-b==/base.apk")
     private val store = MemoryStore()
     private val launches = mutableListOf<HelperState.NeedsLaunch>()
+    private var now = 1_000L
     private val client = newClient()
 
-    private fun newClient() = HelperClient(HandoffNonces(store, { 1_000L }), { build }) { launches += it }
+    private fun newClient() = HelperClient(HandoffNonces(store, { now }), { build }) { launches += it }
 
     /** Arms a fresh nonce the way `scripts/start-helper.sh` does and returns it. */
     private fun armed(): String =
@@ -246,6 +247,53 @@ class HelperClientTest {
         val helper = FakeHelper(failLink = true)
         assertEquals(HandoffReject.BINDER_ELSEWHERE, client.offer(extras(helper, armed()), shell, pid).reject())
         assertEquals(HelperState.NotConnected, client.state)
+    }
+
+    @Test
+    fun aHandoffThatFailsToLinkKeepsTheConnectedHelpersResumeNonce() {
+        val first = FakeHelper()
+        val resume = client.offer(extras(first, armed()), shell, pid).accepted().nextNonce
+        val dying = FakeHelper(reportedIdentity = intArrayOf(shell, pid + 1), failLink = true)
+        assertEquals(
+            HandoffReject.BINDER_ELSEWHERE,
+            client.offer(extras(dying, armed()) { copy(reportedPid = pid + 1) }, shell, pid + 1).reject(),
+        )
+        assertEquals(HelperState.Connected(first, pid), client.state)
+
+        val restarted = newClient()
+        val again = FakeHelper()
+        assertNull("the connected helper's resume nonce", restarted.offer(extras(again, resume), shell, pid).reject())
+        assertEquals(HelperState.Connected(again, pid), restarted.state)
+    }
+
+    @Test
+    fun aNonceThatExpiresWhileTheHelperIsQueriedIsRefused() {
+        val helper = FakeHelper(onIdentity = { now += HandoffNonces.DEFAULT_ARMED_TTL_MS + 1 })
+        assertEquals(HandoffReject.BAD_NONCE, client.offer(extras(helper, armed()), shell, pid).reject())
+        assertEquals(HelperState.NotConnected, client.state)
+        assertEquals("no longer followed", 0, helper.linked)
+    }
+
+    @Test
+    fun aNonceReplacedWhileTheHelperIsQueriedIsRefused() {
+        val nonce = armed()
+        val helper = FakeHelper(onIdentity = { armed() })
+        assertEquals(HandoffReject.BAD_NONCE, client.offer(extras(helper, nonce), shell, pid).reject())
+        assertEquals(HelperState.NotConnected, client.state)
+        assertEquals(0, helper.linked)
+    }
+
+    @Test
+    fun aStaleHelperWhoseNonceWentAwayIsRefusedWithoutBeingReleased() {
+        val old =
+            FakeHelper(protocol = PrivilegedProtocol.VERSION + 1, onIdentity = {
+                now +=
+                    HandoffNonces.DEFAULT_ARMED_TTL_MS + 1
+            })
+        assertEquals(HandoffReject.BAD_NONCE, client.offer(extras(old, armed()), shell, pid).reject())
+        assertEquals(listOf("identity", "protocolVersion"), old.calls)
+        assertEquals(HelperState.NotConnected, client.state)
+        assertEquals(emptyList<HelperState.NeedsLaunch>(), launches)
     }
 
     @Test

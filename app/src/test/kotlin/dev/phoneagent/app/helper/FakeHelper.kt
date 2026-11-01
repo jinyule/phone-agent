@@ -19,6 +19,8 @@ class FakeHelper(
     var protocol: Int = PrivilegedProtocol.VERSION,
     var failIdentity: Exception? = null,
     var failLink: Boolean = false,
+    /** Runs inside [identity], while the app is admitting this helper. */
+    var onIdentity: () -> Unit = {},
 ) : IPrivilegedCore.Stub() {
     val calls = mutableListOf<String>()
     private val recipients = mutableListOf<IBinder.DeathRecipient>()
@@ -49,6 +51,7 @@ class FakeHelper(
 
     override fun identity(): IntArray {
         calls += "identity"
+        onIdentity()
         failIdentity?.let { throw it }
         return reportedIdentity
     }
