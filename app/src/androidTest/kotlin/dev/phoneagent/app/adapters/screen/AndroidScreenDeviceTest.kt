@@ -129,16 +129,23 @@ class AndroidScreenDeviceTest {
             log("back: ${back.describe()}")
             assertEquals(ActionOutcome.Status.Ok, back.status)
             val again = screen.snapshot()
-            assertTrue(again.elements.any { it.name?.startsWith("Network & internet") == true })
+            val rowAgain = again.find { it.name?.startsWith("Network & internet") == true }
 
             val scrolled = screen.act(UiAction.Scroll(null, Direction.DOWN), on = null)
             log("scroll down: ${scrolled.describe()}")
             assertEquals(ActionOutcome.Status.Ok, scrolled.status)
             assertEquals(ActionOutcome.Effect.CHANGED, scrolled.effect)
+            assertNotNull("diffed against the screen read before", scrolled.diff)
+            val kept =
+                scrolled.after!!.elements.filter { moved ->
+                    moved.name != null && again.elements.any { it.ref == moved.ref && it.name == moved.name }
+                }
+            log("refs kept across the scroll: ${kept.map { "@${it.ref.value} ${it.name}" }}")
+            assertTrue("rows still on screen keep their refs", kept.isNotEmpty())
 
-            // The row planned on the old screen has moved: refused without touching the device.
-            val stale = screen.act(UiAction.Tap(Target.Ref(row.ref)), again.id)
-            log("tap @${row.ref} planned on ${again.id} after scrolling: ${stale.describe()}")
+            // The row planned on the screen before scrolling has moved: refused without touching the device.
+            val stale = screen.act(UiAction.Tap(Target.Ref(rowAgain.ref)), again.id)
+            log("tap @${rowAgain.ref} planned on ${again.id} after scrolling: ${stale.describe()}")
             assertEquals(ActionOutcome.Status.StaleRef, stale.status)
         }
 
@@ -151,6 +158,8 @@ class AndroidScreenDeviceTest {
             val opened = screen.act(UiAction.Tap(Target.Ref(search.ref)), home.id)
             log("tap search: ${opened.describe()}")
             assertEquals(ActionOutcome.Status.Ok, opened.status)
+            // The search screen belongs to another package; QUERY_ALL_PACKAGES makes its activity visible.
+            assertNotNull("activity of ${opened.after?.pkg}", opened.after?.activity)
             opened.after
                 ?.elements
                 ?.filter { it.role == ElementRole.INPUT }
@@ -271,6 +280,18 @@ class AndroidScreenDeviceTest {
             log("tap on own screen: ${tap.describe()}")
             assertTrue(tap.status is ActionOutcome.Status.Refused)
             screen.act(UiAction.Key(SystemKey.HOME), on = null)
+        }
+
+    @Test
+    fun listsTheAppsOfTheUser() =
+        runBlocking<Unit> {
+            val apps = AndroidAppCatalog(context).apps()
+
+            log("app catalog: ${apps.size} apps, ${apps.count { it.launchable }} launchable")
+            apps.take(LOGGED_ELEMENTS).forEach { log("  $it") }
+            assertTrue(apps.any { it.packageName == SETTINGS && it.launchable })
+            assertTrue("apps without a launcher entry are listed too", apps.any { !it.launchable })
+            assertTrue(apps.none { it.packageName == context.packageName })
         }
 
     @Test
