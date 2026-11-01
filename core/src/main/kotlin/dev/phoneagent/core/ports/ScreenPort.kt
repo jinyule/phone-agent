@@ -33,8 +33,14 @@ public interface ScreenPort {
     public suspend fun launch(target: LaunchTarget): ActionOutcome
 
     /**
-     * Captures a frame scaled so that its longer edge is at most [maxEdge] pixels, with Set-of-Mark
-     * boxes when [som]. Returns `null` when the surface cannot be captured (e.g. FLAG_SECURE).
+     * Captures a frame scaled so that its longer edge is at most [maxEdge] pixels. Returns `null`
+     * when the surface cannot be captured (e.g. FLAG_SECURE).
+     *
+     * With [som], Set-of-Mark boxes are drawn for the elements of the latest snapshot this port
+     * returned from [snapshot], labelled with their refs, so the labels match that snapshot's screen
+     * format. Without such a snapshot, or when the boxes cannot be placed, the frame is returned
+     * without boxes and `Frame.som` is `false`. The caller records the snapshot's id in
+     * `screen/frame.snapshotId`.
      */
     public suspend fun frame(
         maxEdge: Int = DEFAULT_FRAME_EDGE,

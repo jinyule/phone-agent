@@ -22,13 +22,23 @@ public interface SurfaceManager {
     /** Releases [task]'s display, if any. Idempotent. */
     public suspend fun release(task: TaskId)
 
-    /** Moves [task]'s app to the main display so the user can act; see [takeBack]. */
+    /**
+     * Moves [task]'s app to the main display so the user can act; see [takeBack]. Throws
+     * [ScreenUnavailableException] when it cannot be moved; nothing has moved then. The runtime
+     * ends the handoff without asking the user and records `handoff/end` with
+     * [HandoffResult.FAILED] and the exception message as detail.
+     */
     public suspend fun handToUser(
         task: TaskId,
         kind: HandoffKind,
     ): HandoffTicket
 
-    /** Moves the app back to the agent display after a handoff. The caller must observe again. */
+    /**
+     * Moves the app back to the agent display after a handoff. The caller must observe again.
+     * Throws [ScreenUnavailableException] when it cannot be moved back; the app stays on the main
+     * display and [ticket] is spent. The runtime then records `handoff/end` with
+     * [HandoffResult.FAILED] and the exception message as detail, whatever the user answered.
+     */
     public suspend fun takeBack(ticket: HandoffTicket): SurfaceRef
 }
 
