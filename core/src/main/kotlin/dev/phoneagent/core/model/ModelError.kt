@@ -18,6 +18,13 @@ public sealed class ModelError(
     /** Whether sending the same request again may succeed. */
     public val retryable: Boolean get() = kind.retryable
 
+    /**
+     * Delay the server asked for before a retry (`Retry-After`), in milliseconds, or `null` when it
+     * named none. Only [RateLimited], [Overloaded] and [Server] carry one; adapters drop values
+     * they cannot parse or that are negative.
+     */
+    public open val retryAfterMs: Long? get() = null
+
     /** The API key is invalid or lacks permission. */
     public class Auth(
         detail: String,
@@ -47,7 +54,7 @@ public sealed class ModelError(
     /** Too many requests; wait [retryAfterMs] when the server said so (`null` = not stated). */
     public class RateLimited(
         /** Server-requested delay, or `null`. */
-        public val retryAfterMs: Long?,
+        override val retryAfterMs: Long?,
     ) : ModelError("rate limited (retry after ${retryAfterMs ?: "?"} ms)") {
         override val kind: ModelErrorKind get() = ModelErrorKind.RATE_LIMITED
     }
@@ -55,7 +62,7 @@ public sealed class ModelError(
     /** The provider is temporarily overloaded (e.g. HTTP 529). */
     public class Overloaded(
         /** Server-requested delay, or `null`. */
-        public val retryAfterMs: Long?,
+        override val retryAfterMs: Long?,
     ) : ModelError("provider overloaded") {
         override val kind: ModelErrorKind get() = ModelErrorKind.OVERLOADED
     }
@@ -105,6 +112,8 @@ public sealed class ModelError(
         /** HTTP status. */
         public val status: Int,
         detail: String,
+        /** Server-requested delay, or `null`. */
+        override val retryAfterMs: Long? = null,
     ) : ModelError("server error $status: $detail") {
         override val kind: ModelErrorKind get() = ModelErrorKind.SERVER
     }

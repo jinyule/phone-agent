@@ -95,6 +95,29 @@ fun interface BlobSource {              // 读当前会话 BlobStore 里 Part.Im
 - 密钥不进日志、异常消息和 `toString`。
 - blob 按会话存放：每个会话建一个 ChatModel，或者用会话感知的 `BlobSource`，组装时决定。
 
+**线路快照**（`core.model.WireProfile`，随 `ChatRequest.wire` 传给适配器，冻结在 `request/header` 和 `side/request` 里）：
+
+```kotlin
+data class WireProfile(
+    val mappingVersion: Int,                    // 适配器映射规则的版本：同样的输入会发出不同字节时就升
+    val credential: CredentialKind,             // API_KEY / CHATGPT_PLAN / NONE，只记种类，不记密钥引用的解析值
+    val headers: Map<String, String> = emptyMap(),        // 非秘密的额外 header，名字不能像凭据
+    val images: ImageMode = ImageMode.INLINE,             // INLINE 原图 / PLACEHOLDER 换成固定的占位文字（没有 vision）
+    val reasoningField: String? = null, val echoReasoning: Boolean = false,   // Chat Completions 的推理字段与回传
+    val reasoningEffort: WireSetting? = null,   // 推理档位映射后的字段和值（如 reasoning.effort = high）；null = 不发
+    val maxTokensField: String? = null,         // max_tokens / max_completion_tokens / max_output_tokens；null = 不发上限
+    val parallelToolCalls: Boolean = false, val streamOptions: Boolean = false,
+    val includeEncryptedReasoning: Boolean = false,       // Responses：include: ["reasoning.encrypted_content"]
+    val recoverLeakedToolCalls: Boolean = false,          // 把漏成正文的工具调用还原（§3.1）
+    val options: Map<String, String> = emptyMap(),        // 还没有专门字段的其他设置，小写名字，不放秘密
+)
+```
+
+- **适配器只从 `request.wire` 读这些项**，不读实时的 `ProviderProfile` 或 `ModelCapabilities`：它们在任务中途可能被改。profile 只提供 endpoint 和凭据引用。
+- 适配器在发送前拒绝两种请求（`InvalidRequest`）：`credential` 的种类和 profile 不一致；`mappingVersion` 不是它实现的版本。
+- `ProviderProfile.wire(mappingVersion)` 填来自 profile 的部分（凭据种类、headers、推理字段与回传），其余由适配器的规则在写请求头时决定（WP03）。`ChatRequest.reasoning` 是钳制到模型档位之后的中性档位（`ReasoningLevel.clampTo`），线路上的值在 `reasoningEffort`。
+- 回放时，同一个 `mappingVersion` 的规则加上日志里的请求，必须逐字节重建当时发出的请求。
+
 ---
 
 ## 3. 各协议要点
@@ -103,7 +126,7 @@ fun interface BlobSource {              // 读当前会话 BlobStore 里 Part.Im
 
 - **工具调用**：`tools[].function` + `tool_choice:"auto"`。主循环每轮只执行一个调用，所以服务商支持时发 `parallel_tool_calls:false`。如果模型仍然返回多个调用，第一个之外的每个都要配一条结果"已跳过：每步只执行一个动作"，否则下一次请求会被拒。
 - **流式**：`stream:true` + `stream_options.include_usage`；要兼容某些网关返回 `usage:null` 的情况。
-- **推理内容**：字段名和"要不要回传"各家不同（`reasoning_content` 等）。在 `ProviderProfile.reasoningEcho` 里按服务商配置，由能力探测确认；**探测不了的标"未验证"**。
+- **推理内容**：字段名和"要不要回传"各家不同（`reasoning_content` 等）。在 `ProviderProfile.reasoningField` 和 `ProviderProfile.echoReasoning` 里按服务商配置，由能力探测确认；**探测不了的标"未验证"**。写请求头时这两项冻结进 `wire`（§2"线路快照"）。
 - **工具调用漏成文字**：有的模型会把工具调用写成正文里的标记（DeepSeek DSML、`<tool_call>` 等），参考 Mika 的 `LeakedToolMarkup`，识别出来按工具调用处理。
 - **缓存**：靠服务端隐式前缀缓存，所以历史要尽量只追加；命中情况从 usage 里读。
 

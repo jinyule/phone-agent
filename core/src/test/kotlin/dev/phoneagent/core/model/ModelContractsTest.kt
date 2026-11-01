@@ -3,6 +3,7 @@ package dev.phoneagent.core.model
 import dev.phoneagent.core.ids.ModelId
 import dev.phoneagent.core.ids.ProviderId
 import dev.phoneagent.core.ids.ToolCallId
+import dev.phoneagent.core.testing.TEST_WIRE
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -19,18 +20,19 @@ class ModelContractsTest {
     @Test
     fun `requests reject duplicate tools and bad caps`() {
         val tool = ToolDef("a", "d", schema)
-        assertThrows<IllegalArgumentException> { ChatRequest(emptyList(), listOf(tool, tool), emptyList()) }
+        assertThrows<IllegalArgumentException> { ChatRequest(emptyList(), listOf(tool, tool), emptyList(), TEST_WIRE) }
         assertThrows<IllegalArgumentException> {
             ChatRequest(
                 emptyList(),
                 emptyList(),
                 emptyList(),
+                TEST_WIRE,
                 maxOutputTokens = 0,
             )
         }
         assertThrows<IllegalArgumentException> { ToolDef("bad name", "d", schema) }
         assertThrows<IllegalArgumentException> { ToolDef("x".repeat(65), "d", schema) }
-        val request = ChatRequest(emptyList(), listOf(tool), emptyList())
+        val request = ChatRequest(emptyList(), listOf(tool), emptyList(), TEST_WIRE)
         assertEquals(CacheLayout.DEFAULT, request.cache)
         assertEquals(ContextEditPolicy.ClientSide, request.contextEdits)
     }
@@ -142,6 +144,13 @@ class ModelContractsTest {
         assertEquals(1500L, (errors[4] as ModelError.RateLimited).retryAfterMs)
         assertEquals(null, (errors[5] as ModelError.Overloaded).retryAfterMs)
         assertEquals(503, (errors[11] as ModelError.Server).status)
+        assertEquals(listOf(1500L, null, null), listOf(errors[4], errors[5], errors[11]).map { it.retryAfterMs })
+        assertEquals(2000L, ModelError.Server(503, "busy", retryAfterMs = 2000).retryAfterMs, "Retry-After on a 5xx")
+        assertEquals(
+            emptyList<ModelError>(),
+            errors.filter { it.retryAfterMs != null && it !is ModelError.RateLimited },
+            "only errors that carry a server delay report one",
+        )
         assertEquals("temperature", (errors[7] as ModelError.InvalidRequest).param)
         assertEquals("not allowed", (errors[7] as ModelError.InvalidRequest).detail)
         assertEquals("cyber", (errors[8] as ModelError.Refusal).category)
@@ -178,13 +187,13 @@ class ModelContractsTest {
                     }
                 }
             val seen = mutableListOf<Delta>()
-            val response = model.complete(ChatRequest(emptyList(), emptyList(), emptyList())) { seen += it }
+            val response = model.complete(ChatRequest(emptyList(), emptyList(), emptyList(), TEST_WIRE)) { seen += it }
             assertEquals("hey", seen.filterIsInstance<Delta.Text>().joinToString("") { it.text })
             assertEquals(5, seen.size)
             assertEquals(StopReason.END_TURN, response.stopReason)
             assertEquals(
                 StopReason.END_TURN,
-                model.complete(ChatRequest(emptyList(), emptyList(), emptyList())).stopReason,
+                model.complete(ChatRequest(emptyList(), emptyList(), emptyList(), TEST_WIRE)).stopReason,
             )
         }
 }

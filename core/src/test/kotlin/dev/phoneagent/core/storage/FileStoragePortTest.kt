@@ -2,10 +2,12 @@ package dev.phoneagent.core.storage
 
 import dev.phoneagent.core.ids.SessionId
 import dev.phoneagent.core.ids.TaskId
+import dev.phoneagent.core.policy.SecurityLevel
 import dev.phoneagent.core.ports.Clock
 import dev.phoneagent.core.ports.StoragePath
 import dev.phoneagent.core.session.SessionFiles
 import dev.phoneagent.core.session.SessionStore
+import dev.phoneagent.core.session.TaskStarted
 import dev.phoneagent.core.session.TurnStarted
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -178,7 +180,7 @@ class FileStoragePortTest {
             io.runAll()
             assertEquals(1, ops.opened.size, "the channel was opened on the I/O dispatcher")
             open.cancel()
-            assertTrue(runCatching { open.await() }.exceptionOrNull() is CancellationException)
+            assertThrows<CancellationException> { open.await() }
             assertFalse(ops.opened.single().isOpen, "closed because nobody else can")
         }
 
@@ -210,7 +212,13 @@ class FileStoragePortTest {
             val files = SessionFiles(FileStoragePort(root, io, ops), StoragePath("sessions/s1"))
             val create =
                 async(start = CoroutineStart.UNDISPATCHED) {
-                    SessionStore.create(files, SessionId("s1"), TaskId("t1"), Clock { 0 })
+                    SessionStore.create(
+                        files,
+                        SessionId("s1"),
+                        TaskId("t1"),
+                        TaskStarted(SecurityLevel.STANDARD, false),
+                        Clock { 0 },
+                    )
                 }
             while (true) {
                 io.runAll()
@@ -218,7 +226,7 @@ class FileStoragePortTest {
                 testScheduler.runCurrent()
             }
             create.cancel()
-            assertTrue(runCatching { create.await() }.exceptionOrNull() is CancellationException)
+            assertThrows<CancellationException> { create.await() }
             assertFalse(ops.opened.single().isOpen)
         }
 
@@ -226,11 +234,25 @@ class FileStoragePortTest {
     fun `a session log round-trips through real files`() =
         runTest {
             val files = SessionFiles(port(testScheduler), StoragePath("sessions/s1"))
-            val store = SessionStore.create(files, SessionId("s1"), TaskId("t1"), Clock { 0 })
+            val store =
+                SessionStore.create(
+                    files,
+                    SessionId(
+                        "s1",
+                    ),
+                    TaskId("t1"),
+                    TaskStarted(SecurityLevel.STANDARD, false),
+                    Clock {
+                        0
+                    },
+                )
             store.append(TurnStarted(1))
             store.flush()
             store.close()
-            assertEquals(listOf(TurnStarted(1)), SessionStore.read(files).records.map { it.event })
+            assertEquals(
+                listOf(TaskStarted(SecurityLevel.STANDARD, false), TurnStarted(1)),
+                SessionStore.read(files).records.map { it.event },
+            )
             assertTrue(Files.isRegularFile(root.resolve("sessions/s1/session.jsonl")))
         }
 }

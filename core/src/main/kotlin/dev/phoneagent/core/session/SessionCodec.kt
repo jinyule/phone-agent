@@ -116,6 +116,7 @@ public class SessionCodec(
             val lineNumber = index + 2
             reader.take(decode(utf8(lineBytes, lineNumber), header.version, lineNumber), lineNumber)
         }
+        if (reader.records.isEmpty()) throw SessionCorruptedException(HEADER_LINE + 1, "missing task/start")
         val tail = split.tail?.let { TruncatedTail(line = split.lines.size + 1, bytes = it) }
         return SessionLog(header, reader.records, reader.skipped, tail)
     }
@@ -139,8 +140,14 @@ public class SessionCodec(
             if (seq != expectedSeq) throw SessionCorruptedException(lineNumber, "expected seq $expectedSeq, found $seq")
             expectedSeq++
             when (decoded) {
-                is DecodedLine.Event -> accept(decoded.record, lineNumber)
-                is DecodedLine.Skipped -> skipped += decoded.record
+                is DecodedLine.Event -> {
+                    accept(decoded.record, lineNumber)
+                }
+
+                is DecodedLine.Skipped -> {
+                    if (seq == 1L) throw SessionCorruptedException(lineNumber, "a log starts with task/start")
+                    skipped += decoded.record
+                }
             }
         }
 
@@ -223,10 +230,10 @@ public class SessionCodec(
 private const val HEADER_LINE = 1
 private const val NEWLINE = '\n'.code.toByte()
 
-/** Envelope and header: fields at their default are omitted. */
+/** Envelope: fields at their default (`ignorable`, `surfaceOp`, `sources`) are omitted. */
 private val envelopeJson = Json { encodeDefaults = false }
 
-/** Payloads: every field is written, so a later change of a default cannot alter old records. */
+/** Header and payloads: every field is written, so a later change of a default cannot alter old records. */
 private val payloadJson = Json { encodeDefaults = true }
 
 /** One decoded record line. */

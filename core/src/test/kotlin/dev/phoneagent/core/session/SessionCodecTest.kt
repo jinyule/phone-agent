@@ -17,9 +17,10 @@ class SessionCodecTest {
 
     private fun log(vararg lines: String): ByteArray = lines.joinToString("") { "$it\n" }.encodeToByteArray()
 
+    /** Record [seq] of a valid log: `task/start` first, then `turn/start` records. */
     private fun line(
         seq: Long,
-        event: SessionEvent = TurnStarted(seq.toInt()),
+        event: SessionEvent = if (seq == 1L) SessionSamples.start else TurnStarted(seq.toInt() - 1),
     ): String = codec.encode(SessionRecord(seq, 0, event))
 
     @Test
@@ -46,9 +47,8 @@ class SessionCodecTest {
 
     @Test
     fun `the committed v1 log decodes to the samples and the samples encode to it byte for byte`() {
-        val fixture = File("src/test/resources/session-format/v1/session.jsonl")
-        val expected = (listOf(headerLine) + SessionSamples.records.map(codec::encode)).joinToString("") { "$it\n" }
-        if (System.getenv("PA_WRITE_FORMAT_FIXTURE") == "1") fixture.writeText(expected)
+        val fixture = File("src/test/resources/session-format/v1/${FormatFixture.FILE}")
+        val expected = FormatFixture.text(codec)
         val read = codec.read(fixture.readBytes())
         assertEquals(SessionSamples.header, read.header)
         assertEquals(SessionSamples.records, read.records)
@@ -88,25 +88,26 @@ class SessionCodecTest {
     fun `unknown keys, bad payloads and broken invariants are corruption`() {
         val cases =
             listOf(
-                """{"seq":1,"time":0,"type":"turn/start","data":{"turn":1,"extra":true}}""",
-                """{"seq":1,"time":0,"type":"turn/start","data":{"turn":"one"}}""",
-                """{"seq":1,"time":0,"type":"turn/start","sources":[1],"data":{"turn":1}}""",
-                """{"seq":1,"time":0,"type":"Turn_Start","data":{}}""",
-                """{"seq":1,"time":0,"type":"user/message","data":{"kind":"USER","parts":[],"source":null}}""",
-                """{"seq":1,"time":0,"type":"turn/start","data":{"turn":1},"extra":0}""",
+                """{"seq":2,"time":0,"type":"turn/start","data":{"turn":1,"extra":true}}""",
+                """{"seq":2,"time":0,"type":"turn/start","data":{"turn":"one"}}""",
+                """{"seq":2,"time":0,"type":"turn/start","sources":[2],"data":{"turn":1}}""",
+                """{"seq":2,"time":0,"type":"Turn_Start","data":{}}""",
+                """{"seq":2,"time":0,"type":"user/message","data":{"kind":"USER","parts":[],"source":null}}""",
+                """{"seq":2,"time":0,"type":"turn/start","data":{"turn":1},"extra":0}""",
                 """[1,2]""",
             )
         cases.forEach { bad ->
-            val error = assertThrows<SessionCorruptedException>(bad) { codec.read(log(headerLine, bad)) }
-            assertEquals(2, error.line, bad)
+            val error = assertThrows<SessionCorruptedException>(bad) { codec.read(log(headerLine, line(1), bad)) }
+            assertEquals(3, error.line, bad)
         }
+        assertEquals(2, codec.read(log(headerLine, line(1), line(2))).records.size, "the valid prefix itself reads")
     }
 
     @Test
     fun `payload errors name the record`() {
-        val bad = """{"seq":1,"time":0,"type":"turn/start","data":{"turn":"one"}}"""
-        val error = assertThrows<SessionCorruptedException> { codec.read(log(headerLine, bad)) }
-        assertTrue("seq 1 (turn/start)" in error.message.orEmpty(), error.message)
+        val bad = """{"seq":2,"time":0,"type":"turn/start","data":{"turn":"one"}}"""
+        val error = assertThrows<SessionCorruptedException> { codec.read(log(headerLine, line(1), bad)) }
+        assertTrue("seq 2 (turn/start)" in error.message.orEmpty(), error.message)
     }
 
     @Test
@@ -166,15 +167,19 @@ class SessionCodecTest {
     fun `older versions are read through the migration chain`() {
         val migrating = SessionCodec(listOf(RenameTurnField), currentVersion = 2)
         assertEquals(1, migrating.oldestReadableVersion)
-        val oldLine = """{"seq":1,"time":5,"type":"turn/start","data":{"n":4}}"""
-        val read = migrating.read(log(headerLine, oldLine, line(2, TurnEnded(4, TurnEndReason.STOPPED))))
+        val oldLine = """{"seq":2,"time":5,"type":"turn/start","data":{"n":4}}"""
+        val read = migrating.read(log(headerLine, line(1), oldLine, line(3, TurnEnded(4, TurnEndReason.STOPPED))))
         assertEquals(1, read.header.version)
         assertEquals(
-            listOf(SessionRecord(1, 5, TurnStarted(4)), SessionRecord(2, 0, TurnEnded(4, TurnEndReason.STOPPED))),
+            listOf(
+                SessionRecord(1, 0, SessionSamples.start),
+                SessionRecord(2, 5, TurnStarted(4)),
+                SessionRecord(3, 0, TurnEnded(4, TurnEndReason.STOPPED)),
+            ),
             read.records,
         )
         // Without the migration the same file is refused, and a v2 file is too new for a v1 codec.
-        assertThrows<SessionCorruptedException> { codec.read(log(headerLine, oldLine)) }
+        assertThrows<SessionCorruptedException> { codec.read(log(headerLine, line(1), oldLine)) }
         val v2Header = migrating.encodeHeader(SessionSamples.header.copy(version = 2))
         assertThrows<UnsupportedSessionVersionException> { codec.read(log(v2Header)) }
     }
@@ -278,5 +283,6 @@ class SessionCodecTest {
         assertEquals(header.contextEdits, request.contextEdits)
         assertEquals(header.maxOutputTokens, request.maxOutputTokens)
         assertEquals(header.reasoning, request.reasoning)
+        assertEquals(header.wire, request.wire)
     }
 }

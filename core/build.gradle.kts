@@ -1,6 +1,7 @@
 plugins {
     id("phoneagent.kotlin.jvm")
     id("phoneagent.coverage")
+    id("phoneagent.session-format")
     // Only :core persists JSON (session log, profiles), so the plugin is applied here, not in the convention.
     alias(libs.plugins.kotlin.serialization)
 }

@@ -151,36 +151,38 @@ public class SessionStore private constructor(
     /** Factories. */
     public companion object {
         /**
-         * Starts a new session log in [files], writing the header atomically and durably.
-         * Throws [SessionWriteException] if a log already exists there or the write fails.
+         * Starts a new session log in [files], in the current format version: the header and
+         * [start] as record 1, in one atomic and durable write, so every log names its task
+         * settings from the start. Acquiring the appender is the last step, so no later failure
+         * can leak it. Throws [SessionWriteException] if a log already exists there or the write
+         * fails.
          */
         public suspend fun create(
             files: SessionFiles,
             sessionId: SessionId,
             taskId: TaskId,
+            start: TaskStarted,
             clock: Clock,
-            codec: SessionCodec = SessionCodec(),
         ): SessionStore {
+            val codec = SessionCodec()
             val (storage, path) = files.storage to files.log
+            val now = clock.epochMillis()
             val header =
-                SessionHeader(
-                    version = codec.currentVersion,
-                    sessionId = sessionId,
-                    taskId = taskId,
-                    createdAt = clock.epochMillis(),
-                )
-            val headerLine = (codec.encodeHeader(header) + "\n").encodeToByteArray()
+                SessionHeader(version = codec.currentVersion, sessionId = sessionId, taskId = taskId, createdAt = now)
+            val first = SessionRecord(1, now, start)
+            val lines = (codec.encodeHeader(header) + "\n" + codec.encode(first) + "\n").encodeToByteArray()
             if (writing(path, "create") { storage.exists(path) }) {
                 throw SessionWriteException("session log $path already exists")
             }
-            writing(path, "create") { storage.writeAtomically(path, headerLine) }
+            writing(path, "create") { storage.writeAtomically(path, lines) }
             val appender = writing(path, "create") { storage.openAppender(path) }
-            return SessionStore(codec, clock, header, appender, emptyList(), 0)
+            return SessionStore(codec, clock, header, appender, listOf(first), 1)
         }
 
         /**
          * Reopens the log in [files] for appending. A torn last line is removed from the file
-         * (atomic rewrite of the valid prefix) and reported in [Opened.log]. Throws what [read]
+         * (atomic rewrite of the valid prefix) and reported in [Opened.log]. Acquiring the appender
+         * is the last step. Throws what [read]
          * throws, [UnsupportedSessionVersionException] for a log not in [SessionCodec.currentVersion],
          * and [SessionWriteException] when the repair or opening fails.
          */

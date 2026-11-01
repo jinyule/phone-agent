@@ -13,7 +13,8 @@ import kotlinx.serialization.json.JsonElement
  * earlier records.
  *
  * @property seq position in the log, from 1, contiguous.
- * @property time wall-clock milliseconds when the record was appended (zeroed in fixtures).
+ * @property time wall-clock milliseconds when the record was appended, from the store's clock
+ *   (fixtures use a fixed clock: seq × 10).
  * @property type the event type, e.g. `tool/result`.
  * @property ignorable a reader that does not know [type] may skip this record and still derive a
  *   correct model view; otherwise it must refuse the whole log.

@@ -4,6 +4,7 @@ import dev.phoneagent.core.ids.BlobRef
 import dev.phoneagent.core.ids.ModelId
 import dev.phoneagent.core.ids.ProviderId
 import dev.phoneagent.core.ids.ToolCallId
+import dev.phoneagent.core.testing.TEST_WIRE
 import kotlinx.serialization.descriptors.elementNames
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
@@ -68,6 +69,7 @@ class PartRoundTripTest {
                         Message(Role.ASSISTANT, listOf(reasoning, Part.Text("t"), parts[2])),
                         Message(Role.TOOL, listOf(parts[3])),
                     ),
+                wire = TEST_WIRE,
                 reasoning = ReasoningLevel.XHIGH,
             )
         assertEquals(request, Json.decodeFromString<ChatRequest>(Json.encodeToString(request)))

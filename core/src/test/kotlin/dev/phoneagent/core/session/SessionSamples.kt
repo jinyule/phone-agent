@@ -9,7 +9,12 @@ import dev.phoneagent.core.ids.SnapshotId
 import dev.phoneagent.core.ids.TaskId
 import dev.phoneagent.core.ids.ToolCallId
 import dev.phoneagent.core.model.CacheLayout
+import dev.phoneagent.core.model.ChatRequest
+import dev.phoneagent.core.model.ChatResponse
 import dev.phoneagent.core.model.ContextEditPolicy
+import dev.phoneagent.core.model.CredentialKind
+import dev.phoneagent.core.model.ImageMode
+import dev.phoneagent.core.model.Message
 import dev.phoneagent.core.model.ModelErrorKind
 import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.ModelRole
@@ -17,9 +22,12 @@ import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.PromptBlock
 import dev.phoneagent.core.model.ReasoningKind
 import dev.phoneagent.core.model.ReasoningLevel
+import dev.phoneagent.core.model.Role
 import dev.phoneagent.core.model.StopReason
 import dev.phoneagent.core.model.ToolDef
 import dev.phoneagent.core.model.Usage
+import dev.phoneagent.core.model.WireProfile
+import dev.phoneagent.core.model.WireSetting
 import dev.phoneagent.core.policy.ActionIntent
 import dev.phoneagent.core.policy.FieldClass
 import dev.phoneagent.core.policy.IntentKind
@@ -71,6 +79,25 @@ object SessionSamples {
     val prompt = PromptId("prompt-1")
     val blob = BlobRef("a".repeat(64))
     val header = SessionHeader(version = 1, sessionId = session, taskId = task, createdAt = 1_000)
+    val start = TaskStarted(SecurityLevel.STANDARD, unattended = false)
+
+    /** A wire snapshot with every field set away from its default. */
+    val wire =
+        WireProfile(
+            mappingVersion = 1,
+            credential = CredentialKind.API_KEY,
+            headers = mapOf("anthropic-beta" to "context-management-2025-06-27"),
+            images = ImageMode.PLACEHOLDER,
+            reasoningField = "reasoning_content",
+            echoReasoning = true,
+            reasoningEffort = WireSetting("output_config.effort", "high"),
+            maxTokensField = "max_tokens",
+            parallelToolCalls = true,
+            streamOptions = true,
+            includeEncryptedReasoning = true,
+            recoverLeakedToolCalls = true,
+            options = mapOf("tool_choice" to "auto"),
+        )
 
     val image = Part.Image(blob, "image/jpeg", 720, 1280)
     val reasoning =
@@ -122,8 +149,36 @@ object SessionSamples {
     private val card =
         ConfirmCard(call, ConfirmReason.SPEND, "pay", "Shop", amount = Money(1999, "CNY"), pkg = "com.example.pay")
 
-    val events: List<SessionEvent> =
+    private val replyWithCall =
+        AssistantMessage(
+            attempt = 3,
+            provider = provider,
+            model = model,
+            parts = listOf(reasoning, Part.Text("点发送"), toolCallPart),
+            stopReason = StopReason.TOOL_USE,
+            usage = Usage(1000, 50, cacheReadTokens = 800, cacheWriteTokens = 100, reasoningTokens = 20),
+            providerMetadata = buildJsonObject { put("id", "msg_1") },
+        )
+    private val sideCall =
+        SideRequest(
+            ModelRole.VISION,
+            provider,
+            model,
+            ModelProtocol.ANTHROPIC_MESSAGES,
+            ChatRequest(
+                system = listOf(PromptBlock("vision", "Describe the screen.")),
+                tools = emptyList(),
+                messages = listOf(Message(Role.USER, listOf(image))),
+                wire = WireProfile(mappingVersion = 1, credential = CredentialKind.NONE),
+                cache = CacheLayout.NONE,
+                maxOutputTokens = 256,
+            ),
+        )
+
+    private val head: List<SessionEvent> =
         listOf(
+            start,
+            TaskLevelChanged(SecurityLevel.CAUTIOUS),
             TurnStarted(1),
             InboxSpliced(
                 InboxQueue.NEXT_TURN,
@@ -140,10 +195,10 @@ object SessionSamples {
             UserMessage(UserMessageKind.INJECTED, listOf(Part.Text("timer fired")), source = "timer"),
             StepStarted(1, 1),
             RequestHeader(
-                role = ModelRole.MAIN,
                 provider = provider,
                 model = model,
                 protocol = ModelProtocol.ANTHROPIC_MESSAGES,
+                wire = wire,
                 system = listOf(PromptBlock("identity", "You operate a phone.")),
                 tools = listOf(ToolDef("phone_tap", "Tap an element.", schema)),
                 cache = CacheLayout.DEFAULT,
@@ -151,28 +206,17 @@ object SessionSamples {
                 maxOutputTokens = 64_000,
                 reasoning = ReasoningLevel.HIGH,
             ),
-            RequestHeader(
-                ModelRole.LIGHT,
-                provider,
-                model,
-                ModelProtocol.OPENAI_CHAT_COMPLETIONS,
-                emptyList(),
-                emptyList(),
-                CacheLayout.NONE,
-                ContextEditPolicy.ClientSide,
+            sideCall,
+            SideResponse(SideOutcome.Completed(ChatResponse(listOf(Part.Text("a chat screen")), StopReason.END_TURN))),
+            sideCall,
+            SideResponse(
+                SideOutcome.Failed(ModelErrorKind.SERVER, "server error 503", httpStatus = 503, retryAfterMs = 0),
             ),
             AssistantAttempt(1, ModelErrorKind.OVERLOADED, "provider overloaded", httpStatus = 529, retryAfterMs = 500),
             RequestRetry(2, 500, ModelErrorKind.OVERLOADED),
             AssistantMessage(2, provider, model, listOf(Part.Text("我先看看")), stopReason = null, interrupted = true),
-            AssistantMessage(
-                attempt = 3,
-                provider = provider,
-                model = model,
-                parts = listOf(reasoning, Part.Text("点发送"), toolCallPart),
-                stopReason = StopReason.TOOL_USE,
-                usage = Usage(1000, 50, cacheReadTokens = 800, cacheWriteTokens = 100, reasoningTokens = 20),
-                providerMetadata = buildJsonObject { put("id", "msg_1") },
-            ),
+            RequestRetry(3, 1000, ModelErrorKind.NETWORK),
+            replyWithCall,
             ToolCallRecorded(toolCall),
             PolicyVerdictRecorded(
                 call,
@@ -302,6 +346,10 @@ object SessionSamples {
                 ToolResult.failure(ToolStatus.SKIPPED, "only one action per step"),
             ),
             StepEnded(1, 1, StepOutcome.COMPLETED),
+        )
+
+    private val tail: List<SessionEvent> =
+        listOf(
             CompactionStarted(CompactionTrigger.PRESSURE, 120_000),
             CompactionSummary(listOf(Part.Text("summary of earlier steps"))),
             CompactionPrune(listOf(Part.Text("[screenshot removed]"))),
@@ -311,18 +359,40 @@ object SessionSamples {
             SessionResumed(droppedTailBytes = 17),
         )
 
-    private val replacements =
-        mapOf(
-            CompactionSummary::class to SurfaceOp.Replace(4, 6),
-            CompactionPrune::class to SurfaceOp.Replace(5, 5),
-        )
+    val events: List<SessionEvent> =
+        head + ReasoningDropped(upToSeq = head.indexOfFirst { it === replyWithCall } + 1L) + tail
 
-    /** [events] as consecutive records; compaction records replace earlier ranges, results point to calls. */
+    private fun seqOf(event: SessionEvent): Long = events.indexOfFirst { it === event } + 1L
+
+    private fun seqsOf(predicate: (SessionEvent) -> Boolean): List<Long> =
+        events.withIndex().filter { predicate(it.value) }.map { it.index + 1L }
+
+    /** [events] as consecutive records, with the links and replace ranges the format requires. */
     val records: List<SessionRecord> =
-        events.mapIndexed { index, event ->
-            val seq = index + 1L
-            val surfaceOp = replacements[event::class] ?: SurfaceOp.Append
-            val sources = if (event is ToolResultRecorded) listOf(14L) else emptyList()
-            SessionRecord(seq, seq * 10, event, surfaceOp, sources)
+        run {
+            val users = seqsOf { it is UserMessage }
+            val sideRequests = seqsOf { it is SideRequest }
+            val sideResponses = seqsOf { it is SideResponse }
+            val dispatch = seqsOf { it is ToolCallRecorded }.single()
+            val reply = seqOf(replyWithCall)
+            val step = seqsOf { it is StepStarted }.single()
+            events.mapIndexed { index, event ->
+                val seq = index + 1L
+                val surfaceOp =
+                    when {
+                        event is CompactionSummary -> SurfaceOp.Replace(users.first(), users.last())
+                        event is CompactionPrune -> SurfaceOp.Replace(users[1], users[1])
+                        else -> SurfaceOp.Append
+                    }
+                val sources =
+                    when {
+                        event is ToolCallRecorded -> listOf(reply)
+                        event is ToolResultRecorded -> listOf(if (event.callId == call) dispatch else reply)
+                        event is SideRequest -> listOf(step)
+                        event is SideResponse -> listOf(sideRequests[sideResponses.indexOf(seq)])
+                        else -> emptyList()
+                    }
+                SessionRecord(seq, seq * 10, event, surfaceOp, sources)
+            }
         }
 }

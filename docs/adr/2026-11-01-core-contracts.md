@@ -26,21 +26,22 @@ M1/M2 的主循环、OpenAI 系适配器、Anthropic 适配器、PolicyEngine、
 - 少数 id 有格式，因为它们会进文件路径或屏幕格式：
   - `SessionId`：一个文件名段 `[A-Za-z0-9._-]{1,128}`，不能是 `.` 或 `..`；
   - `BlobRef`：64 位小写 sha256 十六进制；
-  - `ElementRef`：`[a-z]+[1-9][0-9]*`（屏幕格式里的 `b3`）；
+  - `ElementRef`：`[a-z]+[1-9][0-9]*`（屏幕格式里的 `e12`）；
   - `StoragePath`：相对路径，每段 `[A-Za-z0-9._-]{1,255}`。
 
 ### 3. 事件 type 命名
 
 - 形如 `<域>/<名>`，全小写，单词间用 `-`（`[a-z]+(-[a-z]+)*/[a-z]+(-[a-z]+)*`），由各事件类的 `@SerialName` 给出。
 - `SessionEventTypes` 是唯一登记处，同时登记每种类型的 `ignorable`。测试核对三者一致：登记表、`SessionEvent` 密封层次、样例。
-- **`ignorable` 由类型决定，不由写入方决定。** 推导模型消息或回合结构要用到的类型不可忽略：
+- **`ignorable` 由类型决定，不由写入方决定。** 推导模型消息、回合结构或任务设置要用到的类型不可忽略：
+  - `task/start`、`task/level-changed`；
   - `turn/*`、`step/*`、`inbox/spliced`、`user/message`；
-  - `request/header`、`assistant/message`；
+  - `request/header`、`assistant/message`、`context/reasoning-dropped`；
   - `tool/call`、`tool/result`；
   - `compaction/summary`、`compaction/prune`。
 
-  其余只用于轨迹、诊断和审计，可以忽略：
-  - `assistant/attempt`、`request/retry`；
+  其余只用于轨迹、诊断、审计和回放，可以忽略：
+  - `assistant/attempt`、`request/retry`、`side/request`、`side/response`；
   - `policy/verdict`、`approval/*`、`question/*`、`handoff/*`；
   - `compaction/start|end`、`screen/*`、`session/resumed`。
 - 名字和 `ignorable` 发布后不再改。改负载形状就升格式版本，并写迁移函数。
@@ -59,17 +60,18 @@ M1/M2 的主循环、OpenAI 系适配器、Anthropic 适配器、PolicyEngine、
 - **嵌套的多态类型**都用 sealed 加 `@SerialName`（snake_case），判别字段是 kotlinx 默认的 `"type"`。不用 `SerializersModule` 开放多态，也不改 `classDiscriminator`。涉及的类型有：
   - `Part`、`Credential`、`ContextEditPolicy`；
   - `Target`、`UiAction`、`LaunchTarget`、`ActionOutcome.Status`、`SurfaceCapability`；
-  - `Verdict`、`SurfaceOp`。
+  - `Verdict`、`SurfaceOp`、`SideOutcome`。
 - **事件不走 kotlinx 多态。** `Envelope.type` 就是判别符，`data` 是不带 `type` 的负载对象，由 `SessionEventTypes` 按 type 选 serializer。这样遇到未知 type 时可以先看 `ignorable` 再决定跳过还是拒绝，并报出 seq。
 - **Json 配置**：
   - Envelope 用 `encodeDefaults = false`：默认值 `ignorable=false`、`surfaceOp=Append`、`sources=[]` 不写出。
   - 文件头和负载用 `encodeDefaults = true`：负载完整写出，以后改了默认值也不会改变旧日志的含义。
   - 不认识的键一律拒绝。加字段就要升版本。
-  - enum 按常量名写出，**常量名是格式的一部分**，不能改名。
+  - enum 按常量名写出，**常量名是格式的一部分**，不能改名。所有落盘的 enum 常量名、sealed 判别名、事件 type 及其 `ignorable` 都列在 `core/src/test/resources/session-format/format-names.txt`，`FormatNamesTest` 逐项比对；core 里其余 `@Serializable` 的 enum / sealed 必须登记为"不落盘"。
 - **格式版本**：
   - 第一行文件头 `{"format":"phoneagent.session","version":N,…}`；
   - `SessionMigration(fromVersion)` 在原始 envelope JSON 上把版本 v 迁到 v+1；迁移链必须连续到当前版本；
-  - **v1 格式的发布点是 WP01 合入集成分支。** 从那之后 `core/src/test/resources/session-format/v1/session.jsonl` 永不改写。发布前（本 WP 内）为第 9 节的补充要求重新生成过一次：此前没有任何代码在测试之外写过 v1 日志。
+  - **v1 格式的发布点是 WP01 合入集成分支。** 从那之后 `core/src/test/resources/session-format/v1/session.jsonl` 永不改写。发布前（本 WP 内）重新生成过两次：一次为第 9 节的补充要求，一次为修复清单第 1 轮（第 11 节）。此前没有任何代码在测试之外写过 v1 日志。
+  - fixture 只由 `./gradlew :core:generateSessionFormatFixture` 生成（约定插件 `phoneagent.session-format`），它拒绝写入已经存在的版本目录；测试只读 fixture，没有写回开关。
 - **代码里写 `serializer<X>()`，不写 `X.serializer()`**：detekt 做类型解析时不跑 serialization 插件，后者在它看来是未解析的引用。
 - 不可序列化的类型（运行时对象，不进日志）：`Delta`、`Frame`、`agent` 包的类型、`PolicyContext`、`ElementRisk`。
 
@@ -138,6 +140,28 @@ M1/M2 的主循环、OpenAI 系适配器、Anthropic 适配器、PolicyEngine、
 - **`core.model.CredentialResolver` / `BlobSource`**：构造适配器时注入。`ChatModel.complete` 的签名不变，密钥和 blob 字节都不进请求以外的地方。
 - **`phone_intent` 的字段键名**：以 phase1 §5 的字段表为准（表由 WP06 维护），`LaunchTarget.SystemIntent` 的 KDoc 引用它；类型不变，仍是 `Map<String, String>`。
 
+### 11. 修复清单第 1 轮（fix-list-r1，协调者评审）
+
+这些改动都发生在 v1 发布之前，v1 fixture 重新生成了一次（第 5 节）。
+
+- **线路快照 `WireProfile`**（B1）：`request/header.wire` 和 `ChatRequest.wire` 带上一切影响线路字节、但不属于中性内容的设置，字段见 `model-layer.md` §2。只记凭据的种类，不记密钥引用的解析值；baseUrl 这类不影响模型输入的不记。
+  - 适配器只从 `request.wire` 读这些项，不读实时的 `ProviderProfile`。`credential` 种类或 `mappingVersion` 对不上时，发送前以 `InvalidRequest` 拒绝。
+  - `mappingVersion` 是适配器映射规则的版本，和 session 格式版本互相独立：同样的输入会发出不同字节时就升。回放用同版本的规则重建字节。
+  - 具体取值由 WP03 的规则决定；core 只固定字段、校验和 `toString` 不输出 header 值。还没有专门字段的设置先放进 `options`（小写名字，不放秘密）。
+  - `ChatRequest.reasoning` 记钳制以后的有效档位（`ReasoningLevel.clampTo`），线路上的字段和值在 `wire.reasoningEffort`。
+- **旁路请求**（B2）：`request/header` 去掉 `role`，它和 `assistant/message` 只属于主对话。看图、轻量请求记成可忽略的 `side/request`（role、provider、model、protocol、完整的 `ChatRequest`）和 `side/response`（`Completed(response)` 或 `Failed(kind, message, httpStatus, retryAfterMs)`）。`side/response` 的 sources 恰好是一条还没有回复的 `side/request`；`side/request` 的 sources 指向触发它的主对话位置。
+- **任务设置进日志**（B3）：选了不可忽略的 `task/start(level, unattended)` 事件，不放进文件头。
+  - 文件头不经过迁移链（`SessionMigration` 只迁 envelope），在头里加字段以后就没法再改；而级别变化本来就要一个事件（`task/level-changed`），初值和变化用同一种机制，推导也只读事件。
+  - `SessionStore.create` 把文件头和 `task/start` 一次原子写入，读取时第 1 条记录必须是它（被跳过的未知记录也不能顶替），其他位置不能出现。
+  - `PolicyContextSourcesTest` 为 `PolicyContext` 的每个属性列出日志来源，新增属性不补来源就失败。
+- **去掉 thinking 重试**（B5）：选了不可忽略的事件 `context/reasoning-dropped(upToSeq)`，不给请求头加字段。决定发生在 `requestError`，按日志顺序记一次就够；放在头里，之后每个头都得重复它。推导规则：之后的请求丢掉 seq ≤ upToSeq 的 `Part.Reasoning`，文字、工具调用和工具结果不变，丢光 parts 的消息整条省略。
+- **中断前缀的投影**（B6）：interrupted 的 `assistant/message` 是否进模型视图，看它后面先出现的是另一条 `assistant/message`（同一 step 的重试取代了它，只给 UI 看）还是 `user/message`（steer、或 stop / 最终失败之后的下一次输入，前缀跟着进视图）。现有的记录顺序足够判断，不加新字段；interrupted 的消息 parts 不能为空。规则写在 `SessionEvent` 的 KDoc 里，样例在测试源码的 `DeriveRuleSamples`，WP02 的推导测试逐条运行。
+- **`ModelError.retryAfterMs`**（B7）：基类属性，默认 `null`；`RateLimited`、`Overloaded`、`Server` 可以带上服务端给的延迟。
+- **跨记录不变量**（S4）：写入和读取都检查 `SessionInvariants`（surfaceOp 和类型匹配、每个调用 id 最多一条 `tool/call` 和一条 `tool/result`、上面几条 B2/B3/B5 的规则）。
+- **追加与取消**（S2、S3）：等锁时可以取消，什么都不写；拿到锁以后先检查取消；开始写的记录一定写完并计入，即使调用方已被取消（方法返回记录，job 报取消，调用方以 `records()` 为准）。写入过程中的任何失败都让 store 进入失败状态。收尾代码在 `withContext(NonCancellable)` 里追加。
+- **存储的持久性**（B4、S8）：新建目录后，从最深的新目录往上逐个 fsync 父目录，直到第一个原本存在的祖先；写入失败删除临时文件。`StoragePort.openAppender` 的契约：调用方在拿到句柄前被取消时，由实现关闭句柄。
+- **值域校验**（S9）：turn、step、attempt ≥ 1，`request/retry.attempt` ≥ 2，延迟 ≥ 0，请求头按它产生的 `ChatRequest` 校验。坏值在解码时成为所在行的 `SessionCorruptedException`。
+
 ## Alternatives considered
 
 - **id 用裸 `String` 或 typealias**：编译器分不清 `TaskId` 和 `SessionId`，传错参数只能靠测试发现。
@@ -162,6 +186,12 @@ M1/M2 的主循环、OpenAI 系适配器、Anthropic 适配器、PolicyEngine、
 - **v1 加了字段就升到 v2**：v1 还没有合入，也没有任何代码写过 v1 日志；升版本只会留下一个永远用不到的空迁移。
 - **给 `Tool` 加 `plan(call): PlannedEffect`，由工具自己申报效果**：要改每个工具和 fake，而且安全结论会依赖工具的申报（AGENTS.md §3.3）。所以改用 policy 里的 `IntentResolver`。
 - **`ScreenPort` 实现自带指纹和差分算法**：Android 侧和 core 会各有一套，回放和单测对不上。
+
+- **任务设置放进 `SessionHeader`**（B3 的另一个选项）：文件头不经过迁移链，字段一旦发布就改不了；级别变化仍然需要事件，同一个事实会有两种来源。
+- **`RequestHeader.dropReasoningUpTo`**（B5 的另一个选项）：每个后续请求头都要重复它，漏写一次就会把旧 Reasoning 又发出去。
+- **`request/header` 保留 `role`，旁路请求也写请求头**：主视图推导就得按 role 过滤所有头和回复，旁路的回复还会混进 `assistant/message`。
+- **线路设置在回放时从当时的 `ProviderProfile` 取**：profile 会被用户修改，日志就不再能单独重建请求。
+- **fixture 用环境变量开关写回**：一次误设就会改写已发布的版本；改用拒绝覆盖的生成任务。
 
 ## 后果
 

@@ -1,0 +1,88 @@
+# Names that reach disk (FormatNamesTest): enum values, sealed discriminators, event types and
+# their ignorable flags, for the session log and the stored provider settings.
+# Renaming or removing a line needs a new format version with a migration; additions are
+# listed here in the same commit.
+enum model.CredentialKind: API_KEY, CHATGPT_PLAN, NONE
+enum model.ImageMode: INLINE, PLACEHOLDER
+enum model.ModelErrorKind: AUTH, SIGN_IN_EXPIRED, PLAN_NOT_ELIGIBLE, QUOTA_EXCEEDED, RATE_LIMITED, OVERLOADED, CONTEXT_OVERFLOW, INVALID_REQUEST, REFUSAL, PREFIX_BINDING_MISMATCH, NETWORK, SERVER, BAD_RESPONSE
+enum model.ModelProtocol: OPENAI_CHAT_COMPLETIONS, OPENAI_RESPONSES, ANTHROPIC_MESSAGES
+enum model.ModelRole: MAIN, VISION, LIGHT
+enum model.PromptCaching: IMPLICIT, EXPLICIT, NONE
+enum model.ReasoningKind: ANTHROPIC_THINKING, ANTHROPIC_REDACTED_THINKING, ANTHROPIC_COMPACTION, RESPONSES_ENCRYPTED, CHAT_REASONING_FIELD
+enum model.ReasoningLevel: MINIMAL, LOW, MEDIUM, HIGH, XHIGH, MAX
+enum model.Role: USER, ASSISTANT, TOOL
+enum model.StopReason: END_TURN, TOOL_USE, MAX_TOKENS, OTHER
+enum model.ThinkingBinding: NONE, PREFIX_BOUND
+enum model.VerifiedCapability: TOOL_CALL, VISION, GROUNDING, REASONING_ECHO
+enum policy.FieldClass: PLAIN, PASSWORD, VERIFICATION_CODE, PAYMENT_PASSWORD, BANK_CARD, ID_NUMBER
+enum policy.IntentKind: READ, NAVIGATE, INPUT, OUTWARD, SPEND, DELETE, SETTINGS
+enum policy.SecurityLevel: CAUTIOUS, STANDARD, AUTONOMOUS
+enum ports.ActionOutcome.Effect: CHANGED, NO_CHANGE, NEW_APP, SPILLED_BACK, RATE_LIMITED, SECURE_PAGE, UNKNOWN
+enum ports.ConfirmReason: SPEND, OUTWARD, DELETE, SETTINGS, FIRST_IN_APP, REQUESTED_BY_MODEL
+enum ports.ConfirmResult: APPROVED, REJECTED, EXPIRED, UNAVAILABLE
+enum ports.Direction: UP, DOWN, LEFT, RIGHT
+enum ports.ElementRole: BUTTON, TEXT, INPUT, IMAGE, CHECKBOX, SWITCH, RADIO, LIST, TAB, LINK, PICKER, PROGRESS, CONTAINER, OTHER
+enum ports.ElementState: CLICKABLE, LONG_CLICKABLE, EDITABLE, SCROLLABLE, FOCUSED, CHECKED, SELECTED, DISABLED
+enum ports.HandoffKind: LOGIN, PASSWORD, CAPTCHA, PAYMENT, SECURE_PAGE, CHOOSE, OTHER
+enum ports.HandoffResult: DONE, DECLINED, EXPIRED, UNAVAILABLE, FAILED
+enum ports.ScreenFlag: SECURE, KEYBOARD, SYSTEM_PICKER, LOGIN, CAPTCHA, PAYMENT, RATE_LIMIT, LOCKED
+enum ports.SurfaceKind: AGENT, MAIN
+enum ports.SystemIntentKind: ALARM, TIMER, CALENDAR, SHARE, DIAL, NAVIGATE, SETTINGS
+enum ports.SystemKey: BACK, HOME, ENTER
+enum ports.TreeQuality: GOOD, SPARSE, EMPTY
+enum session.CompactionOutcome: COMPLETED, SKIPPED, FAILED
+enum session.CompactionTrigger: PRESSURE, OVERFLOW, MANUAL
+enum session.InboxEntryKind: FOLLOWUP, STEER, INJECT
+enum session.InboxQueue: NEXT_TURN, NEXT_STEP
+enum session.StepOutcome: COMPLETED, FAILED, CANCELLED
+enum session.TurnEndReason: COMPLETED, END_NOT_DONE, MAX_TOKENS, PRE_STEP_REFUSED, LIMIT, STOPPED, FAILED
+enum session.UserMessageKind: USER, RUNTIME_CONTEXT, INJECTED
+enum tool.EndReason: IMPOSSIBLE, BLOCKED, USER_STOPPED, OTHER
+enum tool.ToolStatus: OK, ERROR, REFUSED, INVALID_ARGS, TIMEOUT, CANCELLED, SKIPPED, NOT_STARTED, OUTCOME_UNKNOWN
+sealed model.ContextEditPolicy: client, server
+sealed model.Credential: api_key, chatgpt_plan, none
+sealed model.Part: image, reasoning, text, tool_call, tool_result
+sealed policy.Verdict: allow, confirm, hand_off, refuse
+sealed ports.ActionOutcome.Status: failed, ok, refused, stale_ref
+sealed ports.AskResult: answered, declined, expired, unavailable
+sealed ports.LaunchTarget: app, link, system
+sealed ports.Target: point, ref
+sealed ports.UiAction: key, scroll, set_wheel, swipe, tap, type
+sealed session.SessionEvent: approval/asked, approval/decided, assistant/attempt, assistant/message, compaction/end, compaction/prune, compaction/start, compaction/summary, handoff/end, handoff/start, inbox/spliced, policy/verdict, prompt/withdrawn, question/answered, question/asked, context/reasoning-dropped, request/header, request/retry, screen/action, screen/frame, screen/launch, screen/snapshot, session/resumed, side/request, side/response, step/end, step/start, task/level-changed, task/start, tool/call, tool/result, turn/end, turn/start, user/message
+sealed session.SideOutcome: completed, failed
+sealed session.SurfaceOp: append, replace
+sealed tool.ToolControl: end_turn
+event approval/asked ignorable=true
+event approval/decided ignorable=true
+event assistant/attempt ignorable=true
+event assistant/message ignorable=false
+event compaction/end ignorable=true
+event compaction/prune ignorable=false
+event compaction/start ignorable=true
+event compaction/summary ignorable=false
+event context/reasoning-dropped ignorable=false
+event handoff/end ignorable=true
+event handoff/start ignorable=true
+event inbox/spliced ignorable=false
+event policy/verdict ignorable=true
+event prompt/withdrawn ignorable=true
+event question/answered ignorable=true
+event question/asked ignorable=true
+event request/header ignorable=false
+event request/retry ignorable=true
+event screen/action ignorable=true
+event screen/frame ignorable=true
+event screen/launch ignorable=true
+event screen/snapshot ignorable=true
+event session/resumed ignorable=true
+event side/request ignorable=true
+event side/response ignorable=true
+event step/end ignorable=false
+event step/start ignorable=false
+event task/level-changed ignorable=false
+event task/start ignorable=false
+event tool/call ignorable=false
+event tool/result ignorable=false
+event turn/end ignorable=false
+event turn/start ignorable=false
+event user/message ignorable=false

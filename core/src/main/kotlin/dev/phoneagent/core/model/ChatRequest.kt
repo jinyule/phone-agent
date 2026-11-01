@@ -4,22 +4,27 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
- * One model request (phase1 §3.1). Built as `request/header` + `deriveMessages(log)`; frozen
- * once built. Everything here is recorded in the session log.
+ * One model request (phase1 §3.1). Built as `request/header` + `deriveMessages(log)` for the main
+ * conversation, or recorded whole in `side/request`; frozen once built. Everything here is
+ * recorded in the session log, and an adapter's output depends only on this value (plus the
+ * secret it resolves), never on live profile or capability settings.
  *
  * @property system static system prompt blocks (cache segment 1); stable within a session.
  * @property tools tool definitions; within a session the list only grows at the end.
  * @property messages the conversation; append-only across steps (sent messages are never edited).
+ * @property wire the non-secret wire settings the adapter applies (see [WireProfile]).
  * @property cache where explicit cache breakpoints go (Anthropic); other protocols rely on prefix stability.
  * @property contextEdits who trims old context: the client (via log Replace events) or the server.
- * @property maxOutputTokens output cap, or `null` for the adapter's protocol default.
- * @property reasoning requested reasoning depth, or `null` to send none (provider default).
+ * @property maxOutputTokens output cap, or `null` for none; sent in [WireProfile.maxTokensField].
+ * @property reasoning requested reasoning level after clamping to the model ([clampTo]), or `null`
+ *   for none; its wire form is [WireProfile.reasoningEffort].
  */
 @Serializable
 public data class ChatRequest(
     val system: List<PromptBlock>,
     val tools: List<ToolDef>,
     val messages: List<Message>,
+    val wire: WireProfile,
     val cache: CacheLayout = CacheLayout.DEFAULT,
     val contextEdits: ContextEditPolicy = ContextEditPolicy.ClientSide,
     val maxOutputTokens: Int? = null,

@@ -44,5 +44,9 @@ gradlePlugin {
             id = "phoneagent.coverage"
             implementationClass = "dev.phoneagent.buildlogic.CoverageConventionPlugin"
         }
+        register("sessionFormat") {
+            id = "phoneagent.session-format"
+            implementationClass = "dev.phoneagent.buildlogic.SessionFormatConventionPlugin"
+        }
     }
 }

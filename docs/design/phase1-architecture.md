@@ -342,7 +342,11 @@ sealed interface Phase { data object Idle : Phase; data class Running(val turn: 
 - 单一超时真相源：工具层先作答，外层后超时。等待用户的时间不计入工具超时。
 - 挂起等待（确认、接管）之后、真正执行之前，再确认一次这个调用仍然有效。
 - **被放弃的调用绝不晚些执行**；收尾时写日志的代码放在 `withContext(NonCancellable)` 里。
-- **流被中断**：用户已经看到的部分回复写成 `assistant/message(interrupted=true)`。
+- **流被中断**：用户已经看到的部分回复写成 `assistant/message(interrupted=true)`，parts 不能为空（什么都没显示就不写）。它进不进模型视图只看后面先来的是什么：
+  - 先来的是另一条 `assistant/message`（同一 step 的重试，期间没有新的用户输入）：前缀只给 UI 看。重试重发的是产生它的那个请求，回复是在没有前缀的情况下生成的；
+  - 先来的是 `user/message`（steer 截断后重开 step，或者 stop / 最终失败之后下一个 turn 的输入）：前缀跟着这条输入进入模型视图；
+  - 规则样例在 `core` 测试源码的 `DeriveRuleSamples`，WP02 的 `deriveMessages` 测试逐条运行。
+- **去掉 thinking 重试**：签名失效等情况下，`requestError` 先写 `context/reasoning-dropped(upToSeq)`，之后的请求不再带 seq ≤ upToSeq 的 `Part.Reasoning`，文字、工具调用和工具结果不变。
 - **step 失败或进程被杀**，恢复时修复日志：
   - 没有 `tool/call` 的，补 `NOT_STARTED`；
   - 有 `tool/call` 但没有结果的，补 `OUTCOME_UNKNOWN`，并附提示："这一步可能已经生效，先 `phone_observe` 核实再决定"。
@@ -359,7 +363,7 @@ interface Chain<I, O> { suspend fun proceed(input: I): O }   // 不调用 procee
 | 拦截点 | 时机 | 能做什么 | 第一阶段的使用者 |
 |---|---|---|---|
 | `preStep` | 每个 step 之前 | **拒绝本 step**；追加 runtime-context（前台 App、时间、知识提示）；压缩；刷盘 | StepLimit、RuntimeContext、Compaction、Checkpoint |
-| `request` | 每次 attempt 之前 | 选模型（主 / 看图 / 轻量）、推理强度；**不能改消息** | ModelRouter |
+| `request` | 每次 attempt 之前 | 为主请求选推理档位；看图和轻量请求走旁路（`side/*`）；**不能改消息** | ModelRouter |
 | `requestError` | attempt 失败后（step 仍打开） | 返回 Retry 接管恢复 | LlmRetry、OverflowCompaction、ImageOffload |
 | `toolPreExecute` | 每个调用，按模型输出顺序 | allow / deny / ask / handoff | **PolicyEngine**（作为不可被重排的 guard，固定排在最后一个、外部无法绕过） |
 | `toolExecute` | 包住执行体 | 超时、刷盘、spill-back 检测 | Timeout、Checkpoint、MainScreenWatch |
@@ -381,8 +385,9 @@ data class Envelope(
     val sources: List<Long> = emptyList(),   // 例如 tool/result 指回对应的 tool/call
     val data: JsonElement,
 )
-sealed interface SessionEvent   // turn/start|end、step/start|end、user/message、assistant/message|attempt、
-                                // request/header、tool/call|result、policy/verdict、approval/asked|decided、
+sealed interface SessionEvent   // task/start|level-changed、turn/start|end、step/start|end、user/message、
+                                // assistant/message|attempt、request/header|retry、context/reasoning-dropped、
+                                // side/request|response、tool/call|result、policy/verdict、approval/asked|decided、
                                 // handoff/start|end、question/asked|answered、prompt/withdrawn、compaction/*、
                                 // inbox/spliced、screen/frame(blobRef)…
 ```
@@ -391,6 +396,9 @@ sealed interface SessionEvent   // turn/start|end、step/start|end、user/messag
 
 **规则**：
 1. **模型可见 ⟺ 已记录**：请求 = 请求头 + `deriveMessages(events)` + 工具清单。`deriveMessages` 是纯函数；请求组装好后冻结。回放测试会逐字节核对。
+   - 请求头带非秘密的线路快照 `wire: WireProfile`（凭据种类、非秘密 headers、推理字段与回传、图片发法、推理档位映射后的字段和值、输出上限字段名、`parallel_tool_calls` / `stream_options` / `include` 开关、正文工具调用还原、映射规则版本）。适配器只从请求读这些项，不读实时的 ProviderProfile（`model-layer.md` §2）；
+   - `request/header` 和 `assistant/message` 只属于主对话。看图、轻量等旁路请求整份记成 `side/request`（含快照），结果记成 `side/response`，二者不进主视图；
+   - PolicyEngine 的输入都能从日志算出：第 1 条记录固定是 `task/start(level, unattended)`，级别中途变化记 `task/level-changed`。
 2. **大对象存 blob**：截图存为 `blobs/<sha256>`（不带扩展名），日志里只记引用、mime 和尺寸。**旧截图怎么瘦身按协议区分**（见 `model-layer.md` §5）：
    - Responses / Chat Completions：越过阈值时在客户端做一次 Replace，只保留最近 N 张图（默认 3），更早的换成文字占位。
    - Anthropic：**不在客户端改写历史**，因为 preserved thinking 会让之后的思考块失效。改用服务端 context editing / compaction，Replace 只用于 UI 投影。

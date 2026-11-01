@@ -29,19 +29,21 @@ class SessionStoreTest {
     private var now = 100L
     private val clock = Clock { now++ }
 
-    private suspend fun newStore() = SessionStore.create(files, SessionSamples.session, SessionSamples.task, clock)
+    private suspend fun newStore() =
+        SessionStore.create(files, SessionSamples.session, SessionSamples.task, SessionSamples.start, clock)
 
     @Test
     fun `appends get consecutive seqs and clock times and read back in order`() =
         runTest {
             val store = newStore()
+            val start = SessionRecord(1, 100, SessionSamples.start)
             val first = store.append(TurnStarted(1))
-            val second = store.append(StepStarted(1, 1), sources = listOf(1))
+            val second = store.append(StepStarted(1, 1), sources = listOf(2))
             store.flush()
-            assertEquals(SessionRecord(1, 101, TurnStarted(1)), first)
-            assertEquals(SessionRecord(2, 102, StepStarted(1, 1), sources = listOf(1)), second)
-            assertEquals(2, store.lastSeq)
-            assertEquals(listOf(first, second), store.records())
+            assertEquals(SessionRecord(2, 101, TurnStarted(1)), first)
+            assertEquals(SessionRecord(3, 102, StepStarted(1, 1), sources = listOf(2)), second)
+            assertEquals(3, store.lastSeq)
+            assertEquals(listOf(start, first, second), store.records())
             val log = SessionStore.read(files)
             assertEquals(store.header, log.header)
             assertEquals(
@@ -53,7 +55,7 @@ class SessionStoreTest {
                 ),
                 log.header,
             )
-            assertEquals(listOf(first, second), log.records)
+            assertEquals(listOf(start, first, second), log.records)
             assertEquals(1, storage.syncCount)
         }
 
@@ -69,6 +71,7 @@ class SessionStoreTest {
                         SessionFiles(failing, StoragePath("s")),
                         SessionSamples.session,
                         SessionSamples.task,
+                        SessionSamples.start,
                         clock,
                     )
                 }
@@ -80,16 +83,16 @@ class SessionStoreTest {
         runTest {
             val store = newStore()
             store.append(TurnStarted(1))
-            assertThrows<IllegalArgumentException> { store.append(StepStarted(1, 1), sources = listOf(2)) }
+            assertThrows<IllegalArgumentException> { store.append(StepStarted(1, 1), sources = listOf(3)) }
             assertThrows<IllegalArgumentException> {
                 store.append(
                     CompactionPrune(emptyList()),
-                    SurfaceOp.Replace(1, 2),
+                    SurfaceOp.Replace(2, 3),
                 )
             }
-            assertEquals(1, store.lastSeq)
-            assertEquals(2, storage.text(logPath).lines().count { it.isNotEmpty() })
-            assertEquals(2, store.append(StepStarted(1, 1)).seq)
+            assertEquals(2, store.lastSeq)
+            assertEquals(3, storage.text(logPath).lines().count { it.isNotEmpty() })
+            assertEquals(3, store.append(StepStarted(1, 1)).seq)
         }
 
     @Test
@@ -101,7 +104,7 @@ class SessionStoreTest {
             assertThrows<SessionFlushException> { store.flush() }
             storage.failSync = false
             val append = assertThrows<SessionWriteException> { store.append(StepStarted(1, 1)) }
-            assertTrue("flush after seq 1 failed" in append.message.orEmpty(), append.message)
+            assertTrue("flush after seq 2 failed" in append.message.orEmpty(), append.message)
             assertThrows<SessionWriteException> { store.flush() }
         }
 
@@ -118,16 +121,16 @@ class SessionStoreTest {
             val torn = storage.files.getValue(logPath).size
             val opened = SessionStore.open(files, clock)
             val tail = opened.log.truncatedTail
-            assertEquals(3, tail?.line)
+            assertEquals(4, tail?.line)
             assertEquals(torn - storage.text(logPath).length, tail?.bytes)
             assertTrue(storage.text(logPath).endsWith("\n"), "torn bytes removed from the file")
-            assertEquals(listOf(TurnStarted(1)), opened.log.records.map { it.event })
+            assertEquals(listOf(SessionSamples.start, TurnStarted(1)), opened.log.records.map { it.event })
 
             val next = opened.store.append(StepStarted(1, 1))
-            assertEquals(2, next.seq)
+            assertEquals(3, next.seq)
             opened.store.flush()
-            assertEquals(listOf(1L, 2L), SessionStore.read(files).records.map { it.seq })
-            assertEquals(listOf(1L, 2L), opened.store.records().map { it.seq })
+            assertEquals(listOf(1L, 2L, 3L), SessionStore.read(files).records.map { it.seq })
+            assertEquals(listOf(1L, 2L, 3L), opened.store.records().map { it.seq })
         }
 
     @Test
@@ -141,7 +144,7 @@ class SessionStoreTest {
             val opened = SessionStore.open(files, clock)
             assertNull(opened.log.truncatedTail)
             assertEquals(writesBefore, storage.writes.getValue(logPath), "no rewrite without a torn tail")
-            assertEquals(2, opened.store.append(TurnStarted(2)).seq)
+            assertEquals(3, opened.store.append(TurnStarted(2)).seq)
         }
 
     @Test
@@ -152,11 +155,11 @@ class SessionStoreTest {
                 (
                     storage.text(
                         logPath,
-                    ) + """{"seq":2,"time":0,"type":"future/x","ignorable":true,"data":{}}""" + "\n"
+                    ) + """{"seq":3,"time":0,"type":"future/x","ignorable":true,"data":{}}""" + "\n"
                 ).encodeToByteArray()
             val opened = SessionStore.open(files, clock)
-            assertEquals(listOf(SkippedRecord(2, "future/x")), opened.log.skipped)
-            assertEquals(3, opened.store.append(TurnEnded(1, TurnEndReason.COMPLETED)).seq)
+            assertEquals(listOf(SkippedRecord(3, "future/x")), opened.log.skipped)
+            assertEquals(4, opened.store.append(TurnEnded(1, TurnEndReason.COMPLETED)).seq)
         }
 
     @Test
@@ -166,10 +169,10 @@ class SessionStoreTest {
             store.append(TurnStarted(1))
             store.append(StepStarted(1, 1))
             val lines = storage.text(logPath).lines().toMutableList()
-            lines[1] = lines[1].dropLast(3)
+            lines[2] = lines[2].dropLast(3)
             storage.files[logPath] = lines.joinToString("\n").encodeToByteArray()
             val error = assertThrows<SessionCorruptedException> { SessionStore.open(files, clock) }
-            assertEquals(2, error.line)
+            assertEquals(3, error.line)
         }
 
     @Test
@@ -179,7 +182,7 @@ class SessionStoreTest {
             val v2 = SessionCodec(listOf(Identity), currentVersion = 2)
             val error = assertThrows<UnsupportedSessionVersionException> { SessionStore.open(files, clock, v2) }
             assertEquals(1, error.version)
-            assertEquals(1, SessionStore.read(files, v2).records.size, "reading through migrations still works")
+            assertEquals(2, SessionStore.read(files, v2).records.size, "reading through migrations still works")
             assertThrows<FileNotFoundException> {
                 SessionStore.open(
                     SessionFiles(storage, StoragePath("missing")),
@@ -215,9 +218,9 @@ class SessionStoreTest {
             release.complete(Unit)
             append.join()
             storage.beforeAppend = {}
-            assertEquals(1, store.lastSeq, "the written record is counted")
-            assertEquals(2, store.append(TurnEnded(1, TurnEndReason.STOPPED)).seq)
-            assertEquals(listOf(1L, 2L), SessionStore.read(files).records.map { it.seq })
+            assertEquals(2, store.lastSeq, "the written record is counted")
+            assertEquals(3, store.append(TurnEnded(1, TurnEndReason.STOPPED)).seq)
+            assertEquals(listOf(1L, 2L, 3L), SessionStore.read(files).records.map { it.seq })
         }
 
     @Test
@@ -242,7 +245,7 @@ class SessionStoreTest {
                 release.complete(Unit)
             }
             holder.await()
-            assertTrue(runCatching { waiter.await() }.exceptionOrNull() is CancellationException)
+            assertThrows<CancellationException> { waiter.await() }
             assertFalse(TurnStarted(99) in store.records().map { it.event }, "the waiting append was not written")
             assertFalse("\"turn\":99" in storage.text(logPath))
         }
@@ -257,7 +260,7 @@ class SessionStoreTest {
                     coroutineContext.cancel()
                     store.append(TurnStarted(1))
                 }
-            assertTrue(runCatching { append.await() }.exceptionOrNull() is CancellationException)
+            assertThrows<CancellationException> { append.await() }
             assertEquals(before, store.records())
             assertFalse("turn/start" in storage.text(logPath))
         }
@@ -295,7 +298,7 @@ class SessionStoreTest {
             entered.await()
             append.cancel()
             release.complete(Unit)
-            assertTrue(runCatching { append.await() }.exceptionOrNull() is CancellationException, "job result")
+            assertThrows<CancellationException>("job result") { append.await() }
             val record = checkNotNull(returned) { "the method returned the record" }
             assertEquals(record, store.records().last(), "committed: callers check records(), not the exception")
             assertEquals(record.seq, store.lastSeq)
@@ -341,7 +344,14 @@ class SessionStoreTest {
                         storage.openAppender(path).also { calls += "openAppender" }
                 }
             val recordingFiles = SessionFiles(recording, StoragePath("sessions/session-1"))
-            SessionStore.create(recordingFiles, SessionSamples.session, SessionSamples.task, clock).close()
+            SessionStore
+                .create(
+                    recordingFiles,
+                    SessionSamples.session,
+                    SessionSamples.task,
+                    SessionSamples.start,
+                    clock,
+                ).close()
             assertEquals("openAppender", calls.last(), "nothing after the handle is taken can fail and leak it")
             calls.clear()
             SessionStore.open(recordingFiles, clock).store.close()

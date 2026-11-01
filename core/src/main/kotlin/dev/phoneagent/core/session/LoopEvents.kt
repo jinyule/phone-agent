@@ -1,21 +1,54 @@
 package dev.phoneagent.core.session
 
 import dev.phoneagent.core.model.Part
+import dev.phoneagent.core.policy.SecurityLevel
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+
+/**
+ * `task/start`: the settings the task started with; always record 1, written by
+ * `SessionStore.create` together with the header. With [TaskLevelChanged] it is the log source of
+ * `PolicyContext.level` and `PolicyContext.unattended` (the task id is in the header). Not
+ * ignorable: verdicts cannot be replayed without it.
+ *
+ * @property level the security level in force from the start.
+ * @property unattended no user is watching (scheduled task); fixed for the task.
+ */
+@Serializable
+@SerialName("task/start")
+public data class TaskStarted(
+    val level: SecurityLevel,
+    val unattended: Boolean,
+) : SessionEvent
+
+/**
+ * `task/level-changed`: the user changed the security level of the running task; it applies to
+ * calls evaluated after this record. Not ignorable, for the same reason as [TaskStarted].
+ *
+ * @property level the new level.
+ */
+@Serializable
+@SerialName("task/level-changed")
+public data class TaskLevelChanged(
+    val level: SecurityLevel,
+) : SessionEvent
 
 /** `turn/start`: a turn began after inputs were taken from the inbox. [turn] counts from 1. */
 @Serializable
 @SerialName("turn/start")
 public data class TurnStarted(
-    /** Turn number within the session. */
+    /** Turn number within the session, >= 1. */
     val turn: Int,
-) : SessionEvent
+) : SessionEvent {
+    init {
+        require(turn >= 1) { "turn/start: turn must be >= 1, got $turn" }
+    }
+}
 
 /**
  * `turn/end`: a turn finished.
  *
- * @property turn the turn.
+ * @property turn the turn, >= 1.
  * @property reason why it ended.
  * @property detail diagnostic text (e.g. the refusing interceptor), or `null`.
  */
@@ -25,7 +58,11 @@ public data class TurnEnded(
     val turn: Int,
     val reason: TurnEndReason,
     val detail: String? = null,
-) : SessionEvent
+) : SessionEvent {
+    init {
+        require(turn >= 1) { "turn/end: turn must be >= 1, got $turn" }
+    }
+}
 
 /** Why a turn ended (phase1 §3.7 stop conditions). */
 @Serializable
@@ -56,23 +93,31 @@ public enum class TurnEndReason {
 @Serializable
 @SerialName("step/start")
 public data class StepStarted(
-    /** The turn. */
+    /** The turn, >= 1. */
     val turn: Int,
-    /** Step number within the turn, from 1. */
+    /** Step number within the turn, >= 1. */
     val step: Int,
-) : SessionEvent
+) : SessionEvent {
+    init {
+        require(turn >= 1 && step >= 1) { "step/start: turn and step must be >= 1, got $turn/$step" }
+    }
+}
 
 /** `step/end`. */
 @Serializable
 @SerialName("step/end")
 public data class StepEnded(
-    /** The turn. */
+    /** The turn, >= 1. */
     val turn: Int,
-    /** The step. */
+    /** The step, >= 1. */
     val step: Int,
     /** How it ended. */
     val outcome: StepOutcome,
-) : SessionEvent
+) : SessionEvent {
+    init {
+        require(turn >= 1 && step >= 1) { "step/end: turn and step must be >= 1, got $turn/$step" }
+    }
+}
 
 /** How a step ended. */
 @Serializable

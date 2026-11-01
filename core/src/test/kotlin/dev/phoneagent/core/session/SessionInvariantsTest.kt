@@ -22,7 +22,7 @@ class SessionInvariantsTest {
     private val codec = SessionCodec()
 
     private suspend fun newStore() =
-        SessionStore.create(files, SessionSamples.session, SessionSamples.task, Clock { 0 })
+        SessionStore.create(files, SessionSamples.session, SessionSamples.task, SessionSamples.start, Clock { 0 })
 
     private fun call(id: String) =
         ToolCall(ToolCallId(id), SessionSamples.task, SessionSamples.session, "phone_tap", JsonObject(emptyMap()), "r")
@@ -91,7 +91,7 @@ class SessionInvariantsTest {
             assertThrows<IllegalArgumentException> { reopened.append(result("c1")) }
         }
 
-    private val prefix: List<SessionRecord> = emptyList()
+    private val prefix: List<SessionRecord> = listOf(SessionRecord(1, 0, SessionSamples.start))
 
     private fun read(vararg records: SessionRecord): SessionLog {
         val lines = listOf(codec.encodeHeader(SessionSamples.header)) + (prefix + records).map(codec::encode)

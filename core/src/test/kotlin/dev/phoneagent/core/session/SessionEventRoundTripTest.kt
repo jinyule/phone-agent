@@ -53,6 +53,7 @@ class SessionEventRoundTripTest {
                 serializer<ContextEditPolicy>(),
                 serializer<AskResult>(),
                 serializer<ToolControl>(),
+                serializer<SideOutcome>(),
             ).flatMap { it.descriptor.getElementDescriptor(1).elementNames }
         // tool_result parts only occur in derived messages (tool/result stores a ToolResult); see PartRoundTripTest.
         val expected = nested - "tool_result"
@@ -69,6 +70,8 @@ class SessionEventRoundTripTest {
         val notIgnorable = SessionEventTypes.names.filter { SessionEventTypes.isIgnorable(it) == false }.toSet()
         assertEquals(
             setOf(
+                "task/start",
+                "task/level-changed",
                 "turn/start",
                 "turn/end",
                 "step/start",
@@ -81,6 +84,7 @@ class SessionEventRoundTripTest {
                 "tool/result",
                 "compaction/summary",
                 "compaction/prune",
+                "context/reasoning-dropped",
             ),
             notIgnorable,
         )
