@@ -323,6 +323,7 @@ interface IPrivilegedCore {
 - `injectKey` 只放行导航和编辑键；音量、电源、Home、最近任务、助手、相机、媒体键作用于整机，一律拒绝。
 - `injectStroke` 校验点数、时间单调、总时长和坐标是否在本屏内。
 - `grantSelf` 只接受 `WRITE_SECURE_SETTINGS`，写完回读确认。
+- `releaseAll` 逐个资源尽力释放（静音、屏、任务归属）：一个失败只记日志，不挡其余的，失败的留到下一次再试；它本身不抛。
 - 隐藏接口全部反射调用，缺失时报出具体原因（logcat + `probe()`），不静默失败；`moveRootTaskToDisplay`、`startActivityAsUser` 有 `am` 命令兜底。
 
 **刻意不提供**任意命令执行的接口。setup 需要的命令（授权、写无障碍列表）在助手内部写死成白名单方法，程序名也有白名单（`am`/`pm`/`appops`/`input`），参数由助手自己拼。这是针对 Mika `phone_system_command` 的教训。

@@ -81,7 +81,11 @@ internal interface Capabilities {
 
     fun probe(): Bundle
 
-    /** Undoes everything held for the app: displays, mutes, task ownership. Returns what was released. */
+    /**
+     * Undoes everything held for the app: mutes, displays, task ownership. Every kind and every
+     * resource within it is released on its own: a failure is logged, the rest still go, and the
+     * resource that failed is kept for the next call. Returns what was released. Never throws.
+     */
     fun releaseAll(): String
 }
 
@@ -202,12 +206,12 @@ internal class AndroidCapabilities(
         }
     }
 
-    override fun releaseAll(): String {
-        val unmuted = ops.unmuteAll()
-        val released = virtualDisplays.releaseAll()
-        ownership.clear()
-        return "$released display(s), $unmuted mute(s)"
-    }
+    override fun releaseAll(): String =
+        releaseSteps(
+            "mutes restored" to ops::unmuteAll,
+            "displays released" to virtualDisplays::releaseAll,
+            "tasks forgotten" to ownership::clear,
+        )
 
     companion object {
         private const val TAG = "PhoneAgentHelper"

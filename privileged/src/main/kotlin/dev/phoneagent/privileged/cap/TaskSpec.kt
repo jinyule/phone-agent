@@ -101,10 +101,8 @@ internal class TaskOwnership {
         if (taskId >= 0) synchronized(lock) { owned += taskId }
     }
 
-    /** Forgets every task; used by `releaseAll` once the displays are gone. */
-    fun clear() {
-        synchronized(lock) { owned.clear() }
-    }
+    /** Forgets every task and returns how many there were; used by `releaseAll`. */
+    fun clear(): Int = synchronized(lock) { owned.size.also { owned.clear() } }
 
     fun owns(taskId: Int): Boolean = synchronized(lock) { taskId in owned }
 

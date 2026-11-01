@@ -157,7 +157,7 @@ class TaskOwnershipTest {
     fun releaseForgetsOwnership() {
         ownership.remember(1)
         assertTrue(ownership.owns(1))
-        ownership.clear()
+        assertEquals("how many were forgotten", 1, ownership.clear())
         assertFalse(ownership.owns(1))
         val tasks = listOf(task(1, TaskRow.MAIN_DISPLAY))
         assertTrue(ownership.refuse(1, agent, tasks, agentDisplays).orEmpty().contains("neither started"))

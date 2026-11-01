@@ -65,5 +65,5 @@ phase1-architecture §3.5 列出了 `IPrivilegedCore` 的能力面，调研报�
 - 窗口内冒到主屏的任务都可以被挪回，包括用户在这 3 秒内自己切换到的 App。窗口短、且只有 App 显式调用才会挪，但这是一个真实的权衡；要更严格的话，需要把"是不是 agent 引起的"判定（Mika 的 `MainScreenSpill`）也做进来，那属于 WP14 的 ScreenPort。
 - 只支持主用户：分身、工作资料里的 App 现在启动不了（`StartResult.REFUSED`）。
 - 只在 API 36 模拟器上验证过。API 30–33 没有 `OWN_FOCUS`，虚拟屏会抢主屏焦点，这正是 D2 "后台屏要求 API 34+"的原因；API 34/35 的行为未实测。
-- `releaseAll` 会释放所有屏并解除静音，屏上的任务随之销毁（`DESTROY_CONTENT_ON_REMOVAL`）。App 死后的宽限期语义不变（A 段 ADR），所以 App 重启后虚拟屏上的任务不会保留。要让任务跨 App 重启存活，需要新的协议方法，见 A 段 ADR 的"后果"。
+- `releaseAll` 会解除静音、释放所有屏、清掉任务归属，屏上的任务随之销毁（`DESTROY_CONTENT_ON_REMOVAL`）。三类资源分开释放，每类里的每个资源（每块屏、每个被静音的包）也单独释放：某一个抛异常只记日志，其余照常释放，失败的那个留到下一次 `releaseAll` 再试；`releaseAll` 本身不抛（与 A 段 `HeldResource` 的语义一致，代码在 `cap/Release.kt`）。单独的 `releaseDisplay` 失败时，屏也留在助手手里，由下一次 `releaseAll` 重试。App 死后的宽限期语义不变（A 段 ADR），所以 App 重启后虚拟屏上的任务不会保留。要让任务跨 App 重启存活，需要新的协议方法，见 A 段 ADR 的"后果"。
 - `probe()` 会建一块小屏并注入一次点击，大约几百毫秒；它只在 onboarding 和诊断时调用。

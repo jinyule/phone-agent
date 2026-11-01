@@ -45,8 +45,17 @@ internal class PrivilegedCore(
 
     override fun identity(): IntArray = intArrayOf(Process.myUid(), Process.myPid())
 
+    /** Undoes everything [capabilities] hold for the app, see [Capabilities.releaseAll]. Never throws. */
+    @Suppress("TooGenericExceptionCaught") // releaseAll is how the app and the lifecycle let go; it must not throw.
     override fun releaseAll() {
-        Log.i(TAG, "releaseAll: released ${capabilities.releaseAll()}")
+        val released =
+            try {
+                capabilities.releaseAll()
+            } catch (e: RuntimeException) {
+                Log.e(TAG, "releaseAll failed", e)
+                "failed ($e)"
+            }
+        Log.i(TAG, "releaseAll: $released")
     }
 
     override fun shutdown() {

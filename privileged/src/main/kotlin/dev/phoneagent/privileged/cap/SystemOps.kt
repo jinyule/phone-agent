@@ -58,7 +58,10 @@ internal class SystemOps(
         return restored
     }
 
-    /** Unmutes everything this helper muted; returns how many packages were restored. */
+    /**
+     * Unmutes everything this helper muted, each package on its own: one that cannot be restored
+     * stays in the ledger for the next call. Returns how many packages were restored.
+     */
     fun unmuteAll(): Int =
         synchronized(lock) {
             val pending = ledger.packages()

@@ -122,6 +122,15 @@ class PrivilegedCoreTest {
     }
 
     @Test
+    fun releaseAllNeverThrowsEvenWhenTheCapabilitiesDo() {
+        caps.failRelease = IllegalStateException("display busy")
+        core.releaseAll()
+        caps.failRelease = null
+        core.releaseAll()
+        assertEquals("the next call still reaches the capabilities", 2, caps.releases)
+    }
+
+    @Test
     fun shutdownIsHandedToTheLifecycle() {
         core.shutdown()
         assertEquals(1, shutdowns)

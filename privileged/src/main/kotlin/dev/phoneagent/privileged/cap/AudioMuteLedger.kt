@@ -58,10 +58,14 @@ internal class AudioMuteLedger(
 
     /**
      * Restores every recorded package through [write] (true when the op was written) and forgets
-     * the ones that came back. Returns whether the ledger is empty afterwards.
+     * the ones that came back. Each package is restored on its own (see [releaseEach]): one whose
+     * [write] returns false or throws stays in the ledger. Returns whether the ledger is empty
+     * afterwards.
      */
     fun restoreAll(write: (packageName: String, mode: String) -> Boolean): Boolean {
-        packages().forEach { pkg -> if (write(pkg, restoreMode(modes.getValue(pkg)))) remove(pkg) }
+        releaseEach(packages(), { "the audio of $it" }) { pkg ->
+            if (write(pkg, restoreMode(modes.getValue(pkg)))) remove(pkg)
+        }
         return modes.isEmpty()
     }
 

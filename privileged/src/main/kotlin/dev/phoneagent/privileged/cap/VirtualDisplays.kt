@@ -25,6 +25,8 @@ internal class VirtualDisplays(
     bridge: SystemBridge,
     private val sdkInt: Int,
     private val name: String = "phoneagent-agent",
+    /** `VirtualDisplay.release`; replaceable so a test can make it throw. */
+    private val releaseDisplay: (VirtualDisplay) -> Unit = VirtualDisplay::release,
 ) {
     private val ime = DisplayImePolicy(bridge)
     private val displayManager = bridge.displayManager
@@ -94,22 +96,30 @@ internal class VirtualDisplays(
             displayManager.createVirtualDisplay(name, width, height, dpi, surface, flags)
         } ?: throw CapabilityUnavailable("createVirtualDisplay returned no display (flags refused?)")
 
-    /** Releases one display; tasks on it are destroyed with it. */
+    /**
+     * Releases one display; tasks on it are destroyed with it. A display whose release throws is
+     * logged and stays ours, so the next [releaseAll] tries again.
+     */
     fun release(displayId: Int) {
         val held = synchronized(lock) { displays.remove(displayId) }
         if (held == null) {
             Log.w(TAG, "releaseDisplay($displayId): not ours")
             return
         }
-        held.display.release()
-        Log.i(TAG, "display $displayId released")
+        if (releaseHeld(listOf(displayId to held)).isEmpty()) Log.i(TAG, "display $displayId released")
     }
 
-    /** Releases every display; returns how many were released. */
+    /** Releases every display, each on its own (see [releaseEach]); returns how many were released. */
     fun releaseAll(): Int {
-        val held = synchronized(lock) { displays.values.toList().also { displays.clear() } }
-        held.forEach { it.display.release() }
-        return held.size
+        val held = synchronized(lock) { displays.toList().also { displays.clear() } }
+        return held.size - releaseHeld(held).size
+    }
+
+    /** Releases [held]; the ones that throw go back into [displays] and are returned. */
+    private fun releaseHeld(held: List<Pair<Int, Held>>): List<Pair<Int, Held>> {
+        val kept = releaseEach(held, { (id, _) -> "display $id" }) { (_, it) -> releaseDisplay(it.display) }
+        synchronized(lock) { kept.forEach { (id, it) -> displays.putIfAbsent(id, it) } }
+        return kept
     }
 
     private val flags: Int get() = DisplaySpec.flagsFor(sdkInt)

@@ -19,6 +19,9 @@ internal class FakeCapabilities : Capabilities {
     var arrivalsResult: Bundle = Bundle()
     var displayIdResult = 42
 
+    /** Thrown by [releaseAll] when set. */
+    var failRelease: RuntimeException? = null
+
     override val displays: DisplayCaps =
         object : DisplayCaps {
             override fun createDisplay(
@@ -117,6 +120,7 @@ internal class FakeCapabilities : Capabilities {
     override fun releaseAll(): String {
         releases++
         calls += "releaseAll()"
+        failRelease?.let { throw it }
         return "nothing"
     }
 }

@@ -5,8 +5,12 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 import java.io.IOException
 
+// Robolectric: a restore that throws is logged.
+@RunWith(RobolectricTestRunner::class)
 class AudioMuteLedgerTest {
     private class FakeStore(
         var text: String = "",
@@ -66,6 +70,24 @@ class AudioMuteLedgerTest {
         ledger.put("c.d", "allow")
         assertFalse(ledger.restoreAll { pkg, _ -> pkg != "c.d" })
         assertEquals(listOf("c.d"), ledger.packages())
+    }
+
+    @Test
+    fun aRestoreThatThrowsDoesNotStopTheOthersAndStaysInTheLedger() {
+        val ledger = AudioMuteLedger(FakeStore())
+        ledger.put("a.b", "allow")
+        ledger.put("c.d", "ignore")
+        ledger.put("e.f", "default")
+        val written = mutableListOf<String>()
+        val empty =
+            ledger.restoreAll { pkg, mode ->
+                check(pkg != "a.b") { "appops could not start" }
+                written += "$pkg $mode"
+                true
+            }
+        assertFalse(empty)
+        assertEquals("the failure does not stop the others", listOf("c.d ignore", "e.f allow"), written)
+        assertEquals("kept for the next releaseAll", listOf("a.b"), ledger.packages())
     }
 
     @Test
