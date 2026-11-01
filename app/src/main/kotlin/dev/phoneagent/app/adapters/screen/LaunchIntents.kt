@@ -33,9 +33,31 @@ internal object LaunchIntents {
         ) : Built
     }
 
-    /** Schemes never opened as links: they smuggle intents or read local data. */
-    val BLOCKED_SCHEMES: Set<String> =
-        setOf("intent", "android-app", "file", "content", "javascript", "data", "about", "blob", "filesystem", "jar")
+    /**
+     * The only schemes `phone_launch link=` opens, with why each is safe to hand to the system as a
+     * browsable VIEW. The URI is never parsed into an Intent (no `Intent.parseUri`), so a link
+     * cannot name a component, extras or flags. App-specific deep-link schemes are not listed: each
+     * one needs its own review before it is added here.
+     */
+    val LINK_SCHEMES: Map<String, String> =
+        mapOf(
+            "https" to "a web page in the user's browser",
+            "http" to "a web page in the user's browser",
+            "geo" to "a place in the maps app; navigation still needs the user",
+            "mailto" to "the mail composer; sending is a separate, confirmed step",
+            "market" to "an app's page in the store; installing is a separate step",
+        )
+
+    /** Why the schemes models most often try are refused (others get the generic reason). */
+    private val REFUSED_SCHEMES: Map<String, String> =
+        mapOf(
+            "intent" to "it can start any component of any app",
+            "android-app" to "it can start any component of any app",
+            "content" to "it reads data from other apps",
+            "file" to "it reads local files",
+            "javascript" to "it runs code",
+            "data" to "it embeds content instead of linking to it",
+        )
 
     /** Longest value of one system intent field. */
     const val MAX_FIELD: Int = 4_000
@@ -79,7 +101,10 @@ internal object LaunchIntents {
         }
     }
 
-    /** A browsable VIEW intent for [target]. */
+    /**
+     * A browsable VIEW intent for [target] when its scheme is in [LINK_SCHEMES]; anything else is
+     * Invalid with the reason.
+     */
     fun link(target: LaunchTarget.Link): Built {
         val uri = Uri.parse(target.uri.trim())
         val scheme = uri.scheme?.lowercase()
@@ -89,8 +114,10 @@ internal object LaunchIntents {
                 Built.Invalid("link needs an absolute URI with a scheme, got '${target.uri}'")
             }
 
-            scheme in BLOCKED_SCHEMES -> {
-                Built.Invalid("links with scheme '$scheme' are not opened")
+            scheme !in LINK_SCHEMES -> {
+                val why = REFUSED_SCHEMES[scheme] ?: "it is not a web or known deep link"
+                val allowed = LINK_SCHEMES.keys.sorted()
+                Built.Invalid("links with scheme '$scheme' are not opened: $why; allowed: $allowed")
             }
 
             web && uri.host.isNullOrEmpty() -> {
@@ -98,9 +125,8 @@ internal object LaunchIntents {
             }
 
             else -> {
+                // Built from the parsed URI only: no component, selector, package, extras or grant flags.
                 val intent = Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE)
-                intent.component = null
-                intent.selector = null
                 Built.Ready(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), null)
             }
         }

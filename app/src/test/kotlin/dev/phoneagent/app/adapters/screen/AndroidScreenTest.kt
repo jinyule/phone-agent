@@ -472,7 +472,10 @@ class AndroidScreenTest {
             )
             assertTrue(system.started.isEmpty())
             assertEquals(
-                ActionOutcome.Status.Failed("links with scheme 'intent' are not opened"),
+                ActionOutcome.Status.Failed(
+                    "links with scheme 'intent' are not opened: it can start any component of any app; " +
+                        "allowed: [geo, http, https, mailto, market]",
+                ),
                 screen.launch(LaunchTarget.Link("intent:#Intent;end")).status,
             )
             system.onStart = { StartResult.NotFound }

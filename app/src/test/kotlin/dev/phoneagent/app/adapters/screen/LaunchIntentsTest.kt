@@ -47,29 +47,83 @@ class LaunchIntentsTest {
         )
     }
 
+    private fun link(uri: String) = LaunchIntents.link(LaunchTarget.Link(uri))
+
     @Test
     fun linksAreBrowsableViewsWithoutComponent() {
-        val intent = ready(LaunchIntents.link(LaunchTarget.Link(" https://example.com/a?b=1 "))).intent
+        val intent = ready(link(" https://example.com/a?b=1 ")).intent
 
         assertEquals(Intent.ACTION_VIEW, intent.action)
         assertEquals("https://example.com/a?b=1", intent.dataString)
-        assertTrue(intent.hasCategory(Intent.CATEGORY_BROWSABLE))
+        assertEquals(setOf(Intent.CATEGORY_BROWSABLE), intent.categories)
         assertNull(intent.component)
         assertNull(intent.selector)
-        assertTrue(intent.flags and Intent.FLAG_ACTIVITY_NEW_TASK != 0)
-        assertEquals("geo", ready(LaunchIntents.link(LaunchTarget.Link("geo:0,0?q=cafe"))).intent.data?.scheme)
+        assertNull(intent.`package`)
+        assertNull(intent.extras)
+        assertEquals(Intent.FLAG_ACTIVITY_NEW_TASK, intent.flags)
     }
 
     @Test
-    fun linksThatSmuggleIntentsOrReadLocalDataAreRefused() {
-        val smuggling =
-            listOf("intent:#Intent;component=a/.B;end", "file:///x", "content://contacts/1", "JavaScript:alert(1)")
-        for (uri in smuggling) {
-            assertTrue(uri, invalid(LaunchIntents.link(LaunchTarget.Link(uri))).startsWith("links with scheme"))
+    fun onlyListedSchemesAreOpened() {
+        for (uri in listOf("http://example.com", "geo:0,0?q=cafe", "mailto:a@example.com", "market://details?id=a.b")) {
+            assertEquals(uri, uri, ready(link(uri)).intent.dataString)
         }
-        val noHost = LaunchIntents.link(LaunchTarget.Link("https:///path"))
-        assertEquals("web link has no host: 'https:///path'", invalid(noHost))
-        assertTrue(invalid(LaunchIntents.link(LaunchTarget.Link("1http:x"))).startsWith("link needs an absolute URI"))
+        assertEquals(setOf("geo", "http", "https", "mailto", "market"), LaunchIntents.LINK_SCHEMES.keys)
+    }
+
+    @Test
+    fun linksThatSmuggleIntentsOrReadLocalDataAreRefusedWithTheReason() {
+        val allowed = "allowed: [geo, http, https, mailto, market]"
+        assertEquals(
+            "links with scheme 'intent' are not opened: it can start any component of any app; $allowed",
+            invalid(link("intent:#Intent;component=com.android.settings/.Settings;end")),
+        )
+        assertEquals(
+            "links with scheme 'android-app' are not opened: it can start any component of any app; $allowed",
+            invalid(link("android-app://com.android.settings/https/example.com")),
+        )
+        assertEquals(
+            "links with scheme 'content' are not opened: it reads data from other apps; $allowed",
+            invalid(link("content://contacts/people/1")),
+        )
+        assertEquals(
+            "links with scheme 'file' are not opened: it reads local files; $allowed",
+            invalid(link("file:///sdcard/x")),
+        )
+        assertEquals(
+            "links with scheme 'javascript' are not opened: it runs code; $allowed",
+            invalid(link("JavaScript:alert(1)")),
+        )
+    }
+
+    @Test
+    fun deepLinksOutsideTheListAreRefused() {
+        for (uri in listOf("weixin://dl/scan", "alipays://platformapi/startapp?appId=1", "sms:123", "tel:123")) {
+            assertEquals(
+                uri,
+                "links with scheme '${uri.substringBefore(':')}' are not opened: it is not a web or known deep link; " +
+                    "allowed: [geo, http, https, mailto, market]",
+                invalid(link(uri)),
+            )
+        }
+    }
+
+    @Test
+    fun anIntentFragmentInAWebLinkStaysPartOfTheUri() {
+        // Intent.parseUri would turn this into an explicit intent for the named component.
+        val uri = "https://example.com/#Intent;component=com.evil/.Steal;S.x=y;end"
+
+        val intent = ready(link(uri)).intent
+
+        assertEquals(uri, intent.dataString)
+        assertNull(intent.component)
+        assertNull(intent.extras)
+    }
+
+    @Test
+    fun malformedWebLinksAreRefused() {
+        assertEquals("web link has no host: 'https:///path'", invalid(link("https:///path")))
+        assertTrue(invalid(link("1http:x")).startsWith("link needs an absolute URI"))
     }
 
     @Test

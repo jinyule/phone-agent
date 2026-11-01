@@ -244,7 +244,13 @@ class AndroidScreenDeviceTest {
                     LaunchTarget.Link("intent:#Intent;component=com.android.settings/.Settings;end"),
                 )
             log("intent: link: ${smuggled.describe()}")
-            assertEquals(ActionOutcome.Status.Failed("links with scheme 'intent' are not opened"), smuggled.status)
+            assertEquals(
+                ActionOutcome.Status.Failed(
+                    "links with scheme 'intent' are not opened: it can start any component of any app; " +
+                        "allowed: [geo, http, https, mailto, market]",
+                ),
+                smuggled.status,
+            )
 
             val missing = screen.launch(LaunchTarget.App("com.example.notinstalled"))
             log("missing app: ${missing.describe()}")
