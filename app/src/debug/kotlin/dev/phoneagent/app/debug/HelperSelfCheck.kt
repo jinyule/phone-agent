@@ -8,21 +8,23 @@ import android.os.RemoteException
 import android.util.Log
 import dev.phoneagent.app.helper.HelperClient
 import dev.phoneagent.app.helper.HelperState
-import dev.phoneagent.privileged.PrivilegedError
 import dev.phoneagent.privileged.PrivilegedProtocol
 import dev.phoneagent.privileged.handoff.HandoffContract
 import kotlin.concurrent.thread
 
 /**
- * Debug-only check of the helper connection, triggered from a computer:
+ * Debug-only check of the helper, triggered from a computer:
  *
  * ```
  * adb shell am broadcast -n dev.phoneagent/dev.phoneagent.app.debug.HelperSelfCheckReceiver
+ * adb shell am broadcast -n dev.phoneagent/… --es scenario display
  * ```
  *
- * Logs each step under the `PhoneAgentSelfCheck` tag and returns the summary as the broadcast's
- * result data; the broadcast always finishes, with a `FAIL: …` when the helper or the check threw.
- * Exported only to holders of DUMP (shell): `am` cannot reach unexported receivers.
+ * `handoff` (the default) checks the connection; `display` walks through the display and input
+ * capabilities ([DisplaySelfCheck]). Logs each step under the `PhoneAgentSelfCheck` tag and
+ * returns the verdict as the broadcast's result data; the broadcast always finishes, with a
+ * `FAIL: …` when the helper or the check threw. Exported only to holders of DUMP (shell): `am`
+ * cannot reach unexported receivers.
  */
 class HelperSelfCheckReceiver : BroadcastReceiver() {
     override fun onReceive(
@@ -30,12 +32,23 @@ class HelperSelfCheckReceiver : BroadcastReceiver() {
         intent: Intent,
     ) {
         val pending = goAsync()
+        val scenario = intent.getStringExtra("scenario") ?: SCENARIO_HANDOFF
+        val request =
+            HelperSelfCheck.Request(
+                scenario = scenario,
+                expect = intent.getIntExtra("expect", 0),
+                cold = intent.getBooleanExtra("cold", false),
+            )
         thread(name = "helper-selfcheck") {
-            HelperSelfCheck.report({ HelperClient.of(context).state }) { summary ->
-                pending.resultData = summary
+            HelperSelfCheck.report({ HelperSelfCheck.run(context, HelperClient.of(context).state, request) }) {
+                pending.resultData = it
                 pending.finish()
             }
         }
+    }
+
+    private companion object {
+        const val SCENARIO_HANDOFF = "handoff"
     }
 }
 
@@ -43,18 +56,25 @@ class HelperSelfCheckReceiver : BroadcastReceiver() {
 internal object HelperSelfCheck {
     private const val TAG = "PhoneAgentSelfCheck"
 
+    /** What the broadcast asked for. */
+    data class Request(
+        val scenario: String,
+        val expect: Int = 0,
+        val cold: Boolean = false,
+    )
+
     /**
-     * Runs the check on what [state] returns, logs every line, then calls [finish] exactly once
-     * with the last line: `PASS`, or `FAIL: …`, also when the check itself threw.
+     * Runs [check], logs every line, then calls [finish] exactly once with the last line: `PASS`,
+     * or `FAIL: …`, also when the check itself threw.
      */
     @Suppress("TooGenericExceptionCaught") // Whatever breaks, the broadcast must finish, with a FAIL.
     fun report(
-        state: () -> HelperState,
+        check: () -> List<String>,
         finish: (String) -> Unit,
     ) {
         var summary = "FAIL: the self-check did not finish"
         try {
-            summary = run(state()).onEach { Log.i(TAG, it) }.last()
+            summary = check().onEach { Log.i(TAG, it) }.last()
         } catch (e: RuntimeException) {
             Log.e(TAG, "the self-check threw", e)
             summary = "FAIL: the self-check threw $e"
@@ -63,9 +83,50 @@ internal object HelperSelfCheck {
         }
     }
 
-    /** Every step runs, so `releaseAll` is tried even after an earlier call failed. */
-    fun run(state: HelperState): List<String> {
+    /** Runs [request] against the currently connected helper. */
+    fun run(
+        context: Context,
+        state: HelperState,
+        request: Request,
+    ): List<String> {
         if (state !is HelperState.Connected) return listOf("helper state ${state.name}", "FAIL: no helper connected")
+        val header = "helper state CONNECTED pid ${state.pid}"
+        return when (request.scenario) {
+            "handoff" -> {
+                handoff(state)
+            }
+
+            "display" -> {
+                listOf(header) + capabilities(state) { DisplaySelfCheck(context, state.core).run() }
+            }
+
+            "launch" -> {
+                listOf(header) +
+                    capabilities(state) { LaunchGateSelfCheck(state.core, request.expect, request.cold).run() }
+            }
+
+            else -> {
+                listOf("unknown scenario '${request.scenario}'", "FAIL: scenario must be handoff, display or launch")
+            }
+        }
+    }
+
+    /** A capability walk; a helper call it lets through fails the walk rather than the broadcast. */
+    @Suppress("TooGenericExceptionCaught") // Parcel.readException rethrows any RuntimeException of the helper.
+    private fun capabilities(
+        state: HelperState.Connected,
+        check: () -> List<String>,
+    ): List<String> =
+        try {
+            check()
+        } catch (e: RemoteException) {
+            listOf("helper ${state.pid} call failed: $e", "FAIL: the helper went away")
+        } catch (e: RuntimeException) {
+            listOf("helper ${state.pid} call threw: $e", "FAIL: a helper call threw")
+        }
+
+    /** Every step runs, so `releaseAll` is tried even after an earlier call failed. */
+    private fun handoff(state: HelperState.Connected): List<String> {
         val core = state.core
         val lines = mutableListOf("helper state CONNECTED pid ${state.pid}")
         val failures = mutableListOf<String>()
@@ -79,9 +140,6 @@ internal object HelperSelfCheck {
                 failures += "identity is not [2000, ${state.pid}]"
             }
         }
-        val probe = probeRefusal { core.probe() }
-        lines += "probe -> ${probe ?: PrivilegedError.NOT_IMPLEMENTED}"
-        if (probe != null) failures += "probe $probe"
         failures.ask("releaseAll") { core.releaseAll() }?.let { lines += "releaseAll ok" }
         lines += if (failures.isEmpty()) "PASS" else "FAIL: ${failures.joinToString("; ")}"
         return lines
@@ -104,23 +162,5 @@ internal object HelperSelfCheck {
         } catch (e: RuntimeException) {
             add("$what threw: $e")
             null
-        }
-
-    /**
-     * A-stage contract: `probe()` refuses with [PrivilegedError.NOT_IMPLEMENTED]. Null when it does,
-     * otherwise how it broke the contract. Once the B stage implements `probe()`, this check must
-     * check the probe result instead.
-     */
-    @Suppress("TooGenericExceptionCaught") // As in ask: any RuntimeException of the helper is reported.
-    private fun probeRefusal(call: () -> Unit): String? =
-        try {
-            call()
-            "returned (expected ${PrivilegedError.NOT_IMPLEMENTED})"
-        } catch (e: UnsupportedOperationException) {
-            if (PrivilegedError.isNotImplemented(e)) null else "threw an unexpected refusal: ${e.message}"
-        } catch (e: RemoteException) {
-            "failed: $e"
-        } catch (e: RuntimeException) {
-            "threw: $e"
         }
 }

@@ -1,9 +1,9 @@
 package dev.phoneagent.app.debug
 
 import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.os.Bundle
 import android.os.Looper
 import android.os.RemoteException
 import androidx.test.core.app.ApplicationProvider
@@ -23,35 +23,24 @@ import java.util.concurrent.atomic.AtomicReference
 
 @RunWith(AndroidJUnit4::class)
 class HelperSelfCheckTest {
+    private val context = ApplicationProvider.getApplicationContext<Context>()
+
+    private fun handoff(state: HelperState) = HelperSelfCheck.run(context, state, HelperSelfCheck.Request("handoff"))
+
     @Test
     fun passesAgainstAConformingHelper() {
         val helper = FakeHelper()
-        val lines = HelperSelfCheck.run(HelperState.Connected(helper, FakeHelper.PID))
-        assertEquals("PASS", lines.last())
-        assertTrue(lines.contains("probe -> NOT_IMPLEMENTED"))
+        val lines = handoff(HelperState.Connected(helper, FakeHelper.PID))
+        assertEquals(lines.toString(), "PASS", lines.last())
         assertEquals("releaseAll", helper.calls.last())
     }
 
     @Test
     fun failsOnAWrongProtocolOrIdentity() {
         val wrongProtocol = FakeHelper(protocol = PrivilegedProtocol.VERSION + 1)
-        assertTrue(HelperSelfCheck.run(HelperState.Connected(wrongProtocol, FakeHelper.PID)).last().startsWith("FAIL"))
+        assertTrue(handoff(HelperState.Connected(wrongProtocol, FakeHelper.PID)).last().startsWith("FAIL"))
         val wrongIdentity = FakeHelper(reportedIdentity = intArrayOf(HandoffContract.SHELL_UID, 1))
-        assertTrue(HelperSelfCheck.run(HelperState.Connected(wrongIdentity, FakeHelper.PID)).last().startsWith("FAIL"))
-    }
-
-    @Test
-    fun failsWhenProbeReturnsInsteadOfRefusing() {
-        val helper = FakeHelper().apply { onProbe = { Bundle() } }
-        val last = HelperSelfCheck.run(HelperState.Connected(helper, FakeHelper.PID)).last()
-        assertTrue(last, last.startsWith("FAIL") && last.contains("probe"))
-    }
-
-    @Test
-    fun failsWhenProbeRefusesWithAnotherUnsupportedOperation() {
-        val helper = FakeHelper().apply { onProbe = { throw UnsupportedOperationException("boom") } }
-        val last = HelperSelfCheck.run(HelperState.Connected(helper, FakeHelper.PID)).last()
-        assertTrue(last, last.startsWith("FAIL") && last.contains("boom"))
+        assertTrue(handoff(HelperState.Connected(wrongIdentity, FakeHelper.PID)).last().startsWith("FAIL"))
     }
 
     @Test
@@ -60,13 +49,11 @@ class HelperSelfCheckTest {
             listOf(
                 "protocolVersion" to FakeHelper().apply { failProtocol = IllegalStateException("bad protocol") },
                 "identity" to FakeHelper(failIdentity = SecurityException("bad identity")),
-                "probe" to FakeHelper().apply { onProbe = { throw IllegalStateException("bad probe") } },
-                "probe" to FakeHelper().apply { onProbe = { throw RemoteException("probe died") } },
                 "releaseAll" to FakeHelper(failRelease = IllegalStateException("bad release")),
                 "releaseAll" to FakeHelper(failRelease = RemoteException("release died")),
             )
         for ((call, helper) in broken) {
-            val last = HelperSelfCheck.run(HelperState.Connected(helper, FakeHelper.PID)).last()
+            val last = handoff(HelperState.Connected(helper, FakeHelper.PID)).last()
             assertTrue("$call: $last", last.startsWith("FAIL") && last.contains(call))
             assertEquals(call, "releaseAll", helper.calls.last())
         }
@@ -76,7 +63,7 @@ class HelperSelfCheckTest {
     fun theSummaryIsReportedOnceAlsoWhenTheCheckItselfThrows() {
         val finished = mutableListOf<String>()
 
-        HelperSelfCheck.report({ HelperState.NotConnected }) { finished += it }
+        HelperSelfCheck.report({ handoff(HelperState.NotConnected) }) { finished += it }
         HelperSelfCheck.report({ error("the client broke") }) { finished += it }
 
         assertEquals(2, finished.size)
@@ -86,13 +73,12 @@ class HelperSelfCheckTest {
 
     @Test
     fun theReceiverFinishesTheOrderedBroadcastWithTheSummary() {
-        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val intent = Intent().setComponent(android.content.ComponentName(context, HelperSelfCheckReceiver::class.java))
         val result = AtomicReference<String?>()
         val resultReceiver =
             object : BroadcastReceiver() {
                 override fun onReceive(
-                    context: android.content.Context,
+                    context: Context,
                     intent: Intent,
                 ) {
                     result.set(resultData ?: "finished without data")
@@ -112,12 +98,18 @@ class HelperSelfCheckTest {
 
     @Test
     fun failsWithoutAHelper() {
-        assertEquals("FAIL: no helper connected", HelperSelfCheck.run(HelperState.NotConnected).last())
+        assertEquals("FAIL: no helper connected", handoff(HelperState.NotConnected).last())
+    }
+
+    @Test
+    fun anUnknownScenarioIsRejected() {
+        val connected = HelperState.Connected(FakeHelper(), FakeHelper.PID)
+        val lines = HelperSelfCheck.run(context, connected, HelperSelfCheck.Request("nope"))
+        assertTrue(lines.last(), lines.last().startsWith("FAIL: scenario"))
     }
 
     @Test
     fun receiverIsReachableOnlyByDumpHolders() {
-        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val component = android.content.ComponentName(context, HelperSelfCheckReceiver::class.java)
         val info = context.packageManager.getReceiverInfo(component, PackageManager.ComponentInfoFlags.of(0))
         assertTrue(info.exported)
