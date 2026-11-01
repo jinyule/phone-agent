@@ -4,14 +4,15 @@ import dev.phoneagent.core.ids.PromptId
 import dev.phoneagent.core.ids.TaskId
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.session.StopCause
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
  * One task's driver: a turn/step state machine fed by a two-queue inbox (phase1 §3.7, D12).
  *
  * All input methods are non-suspending, thread-safe and return immediately; their effect is
- * recorded (`inbox/spliced`) before it is acted on. Calls after the task reached [Phase.Done]
- * or [Phase.Stopped] are ignored.
+ * recorded (`inbox/spliced`) before it is acted on. [Phase.Idle] and [Phase.Done] both accept
+ * input (a followup starts the next turn); calls after the task reached [Phase.Stopped] are ignored.
  */
 public interface TaskRuntime {
     /** The task. */
@@ -19,6 +20,13 @@ public interface TaskRuntime {
 
     /** Current phase; conflated, so observers may skip intermediate values. */
     public val phase: StateFlow<Phase>
+
+    /**
+     * Read-only observation (phase1 §3.8): every record as it is appended, streaming fragments and
+     * trajectory cards. Collecting never changes behaviour. A collector that falls behind loses the
+     * oldest events, so anything a UI must not miss is recovered from [phase] or the session log.
+     */
+    public val events: SharedFlow<LoopEvent>
 
     /** Queues [input] for the next turn (one message per turn). Wakes the driver. */
     public fun followup(input: UserInput)
@@ -33,13 +41,10 @@ public interface TaskRuntime {
     public fun inject(context: ContextInput)
 
     /**
-     * Stops this task's current run only, for [cause]; clears the inbox, so continuing takes a new
-     * command of the user. Pending tool calls end CANCELLED (`ToolStatus.CANCELLED` says what the
-     * model is told), and `task/stopped` is recorded last, once everything that may still append
-     * was cancelled and joined (inbox recording included). After it this instance appends
-     * nothing and takes no more input. No cause ends the session (D14): the task continues on a
-     * new instance, which writes `session/resumed` first, when the user's next input opens a new
-     * turn, never on its own.
+     * Stops this task only, for [cause]; clears the inbox. An in-flight model request is cancelled
+     * (its delivered prefix kept as interrupted), a pending prompt is withdrawn, and pending or
+     * running tool calls end CANCELLED; `task/stopped` is recorded last. Later calls to any method
+     * are ignored.
      */
     public fun stop(cause: StopCause)
 
@@ -56,7 +61,10 @@ public interface TaskRuntime {
 
 /** Driver state. */
 public sealed interface Phase {
-    /** Nothing queued. */
+    /**
+     * Nothing queued: not started yet, or the last turn ended without a final answer (failure,
+     * limit, `preStep` refusal, output cap). Nothing continues on its own (D14); a followup does.
+     */
     public data object Idle : Phase
 
     /** Working on [turn] (from 1), [step] (from 1 within the turn). */
@@ -75,10 +83,13 @@ public sealed interface Phase {
         val promptId: PromptId?,
     ) : Phase
 
-    /** Finished; the model ended the task. */
+    /**
+     * The last turn ended with the model's final answer or `end_not_done` and nothing is queued.
+     * Not terminal: a followup starts the next turn.
+     */
     public data object Done : Phase
 
-    /** Stopped before finishing. */
+    /** Stopped for good (by [TaskRuntime.stop], a shutdown or a session log failure). Terminal. */
     public data class Stopped(
         /** Why. */
         val cause: StopCause,

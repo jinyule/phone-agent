@@ -406,84 +406,89 @@ data class PolicyContext(
 ```kotlin
 interface TaskRuntime {
     val id: TaskId
-    val phase: StateFlow<Phase>              // Idle / Running(turn, step) / Waiting(user|handoff|lock) / Done / Stopped
+    val phase: StateFlow<Phase>              // Idle / Running(turn, step) / Waiting(USER|HANDOFF|LOCK, promptId) / Done / Stopped(cause)
+    val events: SharedFlow<LoopEvent>        // 只读观察：每条记录、流式分片、轨迹卡
     fun followup(input: UserInput)           // 进 nextTurn：一条消息独占一个 turn
     fun steer(input: UserInput)              // 进 nextStep：在下一个 step 边界被取走；阻止本 turn 结束
     fun inject(context: ContextInput)        // 进 nextStep，不唤醒驱动器（例如定时结果、通知）
-    fun stop(cause: StopCause)               // 只停这个任务的当前运行；清空 inbox；最后写 task/stopped(cause)；没有终态。StopCause 在 core.session
+    fun stop(cause: StopCause)               // USER / SHUTDOWN / LIMIT / ERROR；只停这一个任务，清空 inbox
     fun answer(promptId: PromptId, reply: UserReply): Boolean   // Approve / Reject / Answer / Decline / HandoffDone；提示已失效或回复不匹配时返回 false
 }
-sealed interface Phase { data object Idle : Phase; data class Running(val turn: Int, val step: Int) : Phase; /* … */ }
 ```
+
+实现是 `core.agent.AgentLoop`：`start(setup, sessionId, scope)` 新建会话，`resume(setup, scope)` 打开已有会话。`AgentSetup.plan.model` 是**为这个会话建的** `ChatModel`：适配器的 `BlobSource` 读本会话的 blobs，所以一个会话一个 `ChatModel` 实例。
+
+**输入与 Phase**：
+- 输入方法都不挂起、立即返回；先记成 `inbox/spliced`，再生效。
+- `Idle`：还没开始，或上一个 turn 没有最终回答就结束了（失败、上限、`preStep` 拒绝、max-tokens）。`Done`：上一个 turn 以最终回答或 `end_not_done` 结束。两者都接受 followup，都不会自己继续。
+- `Stopped(cause)` 是终态，之后的输入一律忽略。会话日志写不了或刷不了盘时，任务以 `StopCause.ERROR` 停止。
+- `events` 缓冲 256 条，收集者跟不上时丢最旧的；UI 不能错过的状态要从 `phase` 或日志恢复。
 
 **层级关系**：
 - **turn**：从 inbox 取出输入后的一次完整消化。
-- **step**：一次模型请求，加上这次响应里请求的全部工具调用。
-- **attempt**：同一 step 内的重试。重试时不重复组装请求，也不重复写用户消息。
+- **step**：一次模型回复，加上它请求的工具调用。**每个回复只执行第一个调用**，其余的记 `SKIPPED`，模型看到结果后重新决定。
+- **attempt**：同一 step 内的一次请求（重试，或 steer 之后重发）。每个 attempt 都重新走 `request` 链，再从日志推导消息；`request/header` 只在变化时写。重试的请求和上一次相同（失败 attempt 的中断前缀不进请求），steer 之后的请求带上新输入。
 
-**停止条件**（turn 怎么结束）：
-- 自然结束：模型回复里没有工具调用，或者调用了 `end_not_done`；
-- 带调用的正常结束：`TOOL_USE` 或 `END_TURN` 且带完整调用，调用照常执行，turn 继续。适配器应该把它归一化成 `TOOL_USE`，但网关可能在调用旁边给 stop / end_turn，主循环不能因为 `END_TURN` 就拒绝执行；
-- 回复没有正常结束（契约见 `ChatResponse.stopReason`）：
-  - `MAX_TOKENS` 且带调用：`assistant/message` 原样记录，调用也留着（历史只追加）。下一个请求之前，给每个调用写 `tool/result(SKIPPED)`（isError）和一段固定文字，告诉模型这次调用没有执行、它看到的参数（可能是 `{}`）不完整、不是它原本要发的那一份，请重新发起。这些调用不经过 PolicyEngine，没有 `tool/call`，也没有 `tool/started`；turn 以 `MAX_TOKENS` 结束；
-  - `OTHER` 且带调用：按 BadResponse 重试，只记录已经流出的前缀（interrupted，不含调用）和这次 attempt，不执行任何调用；
-  - `OTHER` 而且只有文字：照常算最终答案；
-- `preStep` 拒绝；
-- **步数上限**：默认每个 turn 80 步，可配置；
-- **turn-stopping 续跑上限**：默认每个 turn 最多 3 次；
-- 这两个逐 turn 的上限只结束这个 turn（`TurnEndReason.LIMIT`），不写 `task/stopped`。`StopCause.LIMIT` 只用于 app 跨 turn 的上限，例如任务总步数。
+**停止条件**（turn 的结束原因）：
+- 最终回答（没有工具调用）→ `turnStopping` → `COMPLETED`；`end_not_done` → `END_NOT_DONE`；
+- max-tokens：这次回复的工具调用全部记 `SKIPPED`、不执行 → `MAX_TOKENS`；
+- `preStep` 拒绝 → `PRE_STEP_REFUSED`；
+- **步数上限**：每个 turn 默认 80（`LoopConfig.maxStepsPerTurn`）→ `LIMIT`；
+- **turn-stopping 续跑上限**：每个 turn 默认 3 次（`maxContinuationsPerTurn`）→ `LIMIT`。
 
 **取消与超时契约**：
-- 单一超时真相源：工具层先作答，外层后超时。等待用户的时间不计入工具超时。
-- 挂起等待（确认、接管）之后、真正执行之前，再确认一次这个调用仍然有效。
+- 单一超时真相源：工具超时（`Tool.timeoutMs`）在 `toolExecute` 链里面，工具层先作答。等待用户的时间不计入工具超时。超时的结果是 `TIMEOUT`；非 READ 的调用还要附上"可能已生效"。
+- **刷盘**：每次模型请求前、每个非 READ 调用执行前。刷盘失败就不执行，调用记 `NOT_STARTED`，任务以 `ERROR` 停止。
+- 确认之后、执行之前，按 §3.8 的 `toolPreExecute` 在新屏幕上复核一次。
+- **steer 只打断模型 attempt 和重试前的等待**，不打断正在执行的工具。
 - **被放弃的调用绝不晚些执行**；收尾时写日志的代码放在 `withContext(NonCancellable)` 里。
 - **流被中断**：用户已经看到的部分回复写成 `assistant/message(interrupted=true)`，parts 不能为空（什么都没显示就不写）。例外：错误带 `ModelError.discardsStreamed`（回复里出现了本次的密钥，model-layer §2）时不写前缀，只写 `assistant/attempt` 和固定原因，界面撤回或标记作废已经显示的片段。前缀进不进模型视图只看后面先来的是什么：
   - 先来的是另一条 `assistant/message`（同一 step 的重试，期间没有新的用户输入）：前缀只给 UI 看。重试重发的是产生它的那个请求，回复是在没有前缀的情况下生成的；
   - 先来的是 `user/message`（steer 截断后重开 step，或者 stop / 最终失败之后下一个 turn 的输入）：前缀跟着这条输入进入模型视图，但去掉其中的 `Part.Reasoning`（没写完的推理块不能回传），compaction 块也一样：回复不完整，其中的 compaction 块不回传，之后的请求由服务端重新压缩。视图是对日志的纯函数，前缀进入视图以后每次请求里的样子都相同，不违反"历史只追加"（model-layer §5）。去掉后为空就整条不进；
   - 规则样例在 `core` 测试源码的 `DeriveRuleSamples`，WP02 的 `deriveMessages` 测试逐条运行。
-- **去掉 thinking 重试**：签名失效等情况下，`requestError` 先写 `context/reasoning-dropped(upToSeq)`，之后的请求不再带 seq ≤ upToSeq 的推理块（`ReasoningKind.isReasoning`：thinking、redacted thinking、Responses 加密推理、Chat 推理字段），文字、工具调用、工具结果和 **compaction 块**不变（compaction 块装的是压缩后的历史，去掉它服务端就要重新处理整段历史）。多条去掉记录累加；只剩推理的回复整条不进；upToSeq 之后的推理照常带上。
-- **执行事实写进日志**：真正调用 `Tool.execute` 之前写 `tool/started(callId, verdictSeq)` 并刷盘（verdictSeq 是这个调用最新的 verdict，必须是 Allow）；execute 返回后、`toolPostExecute` 之前写 `tool/executed(callId, status)`，记原始状态。拒绝、转交、等待或被拒的审批、拦截器短路都不写 `tool/started`。
-- **需要答复的调用**：每条 `assistant/message` 里的工具调用（interrupted 的消息没有调用），不管派发了没有；再加上每个已派发的调用（`tool/call`）。停止、崩溃修复、截断跳过和模型视图配对都用这一个集合。每个调用在关闭它的记录之前都有 `tool/result`：`step/end`、`turn/end`、`task/stopped`、`session/resumed` 都由不变量检查。
-- **step 失败或进程被杀**，修复时给每个需要答复、还没有结果的调用补结果，按落盘的 `tool/started` 区分：
-  - 没有 `tool/started` 的，补 `NOT_STARTED`（派发过也一样）；
-  - 有 `tool/started` 的，补 `OUTCOME_UNKNOWN`，并附提示："这一步可能已经生效，先 `phone_observe` 核实再决定"；
-  - 不变量保证两者不会写反。
-- **停止时的调用**（四种 cause 都一样，判断依据是落盘的 `tool/started`，不是有没有 `tool/call`）：
-
-  | 停止时的情况 | 状态 | 模型看到的正文 |
-  |---|---|---|
-  | 没有 `tool/started` | CANCELLED | 明确写"没有执行" |
-  | 有 `tool/started`，还没有结果 | CANCELLED | 明确写"可能已经生效，继续之前先 `phone_observe` 核实，再决定要不要重试" |
-  | 已经有 `tool/result` | 保留原结果 | 不追加第二条 |
-
-- **停止只结束当前这次运行**（D14），没有终态，`USER`、`LIMIT`、`SHUTDOWN`、`ERROR` 都一样。停止流程先取消并 join 所有还可能写日志的协程（工具执行、取消结果、`prompt/withdrawn`、录入 inbox 的协程），再按上表补结果，写 `prompt/withdrawn`、`step/end(CANCELLED)`、`turn/end(STOPPED)`，最后写 `task/stopped(cause)`：这次运行的所有 append 都在它之前完成，之后这个 runtime 实例不再写任何记录。`turn/end(STOPPED)` 后面紧跟 `task/stopped`；写 `task/stopped` 时没有打开的 turn。
-- **不自动续跑**，等用户说"继续"，用不变量机械保证：任何 `task/stopped` 或 `session/resumed` 之后，任务进入"等待用户输入"状态，直到某个 turn 里记下一条 kind = USER 的 `user/message`。等待期间可以开 turn、记 inbox、改安全级别、再次停止或恢复，也可以先记下排着队的后台消息（INJECTED、RUNTIME_CONTEXT，它们不结束等待）；但不能有 step、模型请求、回复、工具调用、提示、旁路请求或上下文改动。所以第一个 step 之前一定有用户自己的输入。
-- **turn 和 step 配对**：同一时间最多一个打开的 turn，编号比之前所有 turn 都大；step 只在打开的 turn 里开始，同一时间最多一个，编号在这个 turn 里递增；`step/end` 只结束打开的那个 step，`turn/end` 只结束打开的那个 turn，而且要等它的 step 结束。所以 step 不跨 turn，"没有打开的 turn"不会因为 turn 嵌套或重复开始而失真。读写两端用同一份不变量检查。
-- **先恢复再继续**：每个 `task/stopped` 之后，下一条记录都必须是 `session/resumed`，四种 cause 一样。停下的 runtime 实例不再接受输入，继续任务的总是一个新实例（进程重建以后，或同一进程里由新实例接管），它先写 `session/resumed`，再记新收到的用户命令（`inbox/spliced`）、开新 turn。所以 `task/stopped` 和 `session/resumed` 之间没有 inbox 或别的已知记录。
-- **半截停止**：进程在 `turn/end(STOPPED)` 和 `task/stopped` 之间退出，日志停在 `turn/end(STOPPED)`。这是合法的日志，下一条已知记录必须是 `task/stopped`。恢复时补写 `task/stopped(ERROR)`，含义是"停止收尾没有完成"（原来的原因没有落盘，不猜），再写 `session/resumed`，然后等待用户输入。
-- 未知的可忽略记录对这些规则透明：不打断配对，不结束等待，也不被拒绝。读和写用同一份不变量，store 自己写出的日志重新打开后状态一致。
-- 日志写不了的时候，`task/stopped(ERROR)` 可能缺失，按崩溃恢复处理。
-- **恢复前怎么判断**：打开日志以后看整份日志，不能只看最后一次停止的原因（SHUTDOWN 之后可能已经 resumed 过；USER 停止之后可能又跑了新 turn 再崩溃）。要同时看：最后一条 `task/stopped`；它后面有没有 `session/resumed`；之后有没有已经开始、又被截断的新运行；有没有半截停止；有没有打开的 step、turn；有没有需要答复但还没有结果的调用。修复按下面的顺序写，这也是 store 唯一接受的顺序：① 给需要答复、还没有结果的调用补结果（`NOT_STARTED` 或 `OUTCOME_UNKNOWN`，见上）；② 打开的 step 写 `step/end`；③ 打开的 turn 写 `turn/end`；④ 半截停止补 `task/stopped(ERROR)`；⑤ 写 `session/resumed`，然后等待用户输入。先关 step 再补结果会被 store 拒绝。实现归 runtime（WP02），`SessionStore.open` 的 KDoc 列了同一份清单，core 测试源码的 `RecoveryOrderTest` 按这个顺序在一次运行的每个截断点做恢复。
-- 插件或拦截器出故障，只结束当前 turn，不会让 TaskRuntime 停掉。
+- **去掉 thinking 重试**：签名失效等情况下，`requestError` 先写 `context/reasoning-dropped(upToSeq)`，之后的请求不再带 seq ≤ upToSeq 的 `Part.Reasoning`，文字、工具调用和工具结果不变。
+- **异常结束要修复日志**：停止、step 失败、进程被杀后恢复，三种情况用同一个对日志的纯函数（`repairOf`）推导修复内容，按顺序写入：
+  1. 未作答的提示写 `prompt/withdrawn`；
+  2. 缺结果的调用补 `tool/result`。有 `tool/call` 的（可能执行过）：停止时记 `CANCELLED` 并附"可能已生效"，失败或恢复时记 `OUTCOME_UNKNOWN` 并附"这一步可能已经生效，先 `phone_observe` 核实再决定"。没有 `tool/call` 的，或确知还没开始的：停止时记 `CANCELLED`，否则记 `NOT_STARTED`；
+  3. 写 `step/end` 和 `turn/end`：停止时是 `CANCELLED` / `STOPPED`，否则是 `FAILED`。
+- 停止时：取消在途请求，撤回待答提示，补完上面的修复。停止前已接受的输入，先记录、再记为移除。最后关闭日志。
+- **不自动续跑**：恢复时修复日志，写 `session/resumed`，然后等新输入。
+- 插件或拦截器出故障，只结束当前 turn（`FAILED`），不会让 TaskRuntime 停掉。
 
 ### 3.8 固定拦截点（主循环只能通过这些点扩展）
 
 ```kotlin
 fun interface Interceptor<I, O> { suspend fun intercept(input: I, chain: Chain<I, O>): O }
-interface Chain<I, O> { suspend fun proceed(input: I): O }   // 不调用 proceed 就截断后面的链
+fun interface Chain<I, O> { suspend fun proceed(input: I): O }   // 不调用 proceed 就截断后面的链
 ```
 
-| 拦截点 | 时机 | 能做什么 | 第一阶段的使用者 |
-|---|---|---|---|
-| `preStep` | 每个 step 之前 | **拒绝本 step**；追加 runtime-context（前台 App、时间、知识提示）；压缩；刷盘 | StepLimit、RuntimeContext、Compaction、Checkpoint |
-| `request` | 每次 attempt 之前 | 为主请求选模型和推理档位（之后对最终的模型 `prepare`，见 §7.2 第 3 步）；看图和轻量请求走旁路（`side/*`）；**不能改消息** | ModelRouter |
-| `requestError` | attempt 失败后（step 仍打开） | 返回 Retry 接管恢复 | LlmRetry、OverflowCompaction、ImageOffload |
-| `toolPreExecute` | 每个调用，按模型输出顺序 | allow / deny / ask / handoff | **PolicyEngine**（作为不可被重排的 guard，固定排在最后一个、外部无法绕过） |
-| `toolExecute` | 包住执行体 | 超时、刷盘、spill-back 检测；链的最内层由运行时写 `tool/started`（刷盘后再调 `Tool.execute`）和 `tool/executed`，拦截器短路不产生这两条 | Timeout、Checkpoint、MainScreenWatch |
-| `toolPostExecute` | 工具执行后 | 替换结果、附加上下文 | LoopGuard（含重复调用提醒）、OutwardPacing、KnowledgeNotice、Spill |
-| `turnStopping` | 本该结束且 nextStep 为空时 | 想继续就调用 `steer()`（受续跑上限约束） | TodoContinuation（M3） |
+每个点是一条按顺序执行的链（`Interceptors`），输入输出类型都在 `core.agent`：
 
-只读的观察事件（状态、流式分片、写日志）走 `SharedFlow`，不能改变行为。
+| 拦截点 | 时机 | 输入 → 输出 | 能做什么 | 第一阶段的使用者 |
+|---|---|---|---|---|
+| `preStep` | 每个 step 之前（本 step 的输入已写入日志） | `PreStepInput(turn, step, log)` → `Proceed` / `Refuse(detail)` | **拒绝本 step**；追加 runtime-context（前台 App、时间、知识提示）；压缩 | RuntimeContext、Compaction |
+| `request` | 每次 attempt 之前 | `RequestPlan` → `RequestPlan` | 为主请求选模型、推理档位、缓存断点；看图和轻量请求走旁路（`side/*`）；**不能改消息，也不能改 role**（改了本 turn 就 `FAILED`） | ModelRouter |
+| `requestError` | attempt 失败后（step 仍打开） | `RequestFailure(error, attempt, retries)` → `Retry(delayMs)` / `Fail` | 决定是否重试；每次重试记 `request/retry` | `RetryInterceptor`（默认）、OverflowCompaction、ImageOffload |
+| `toolPreExecute` | 每个通过校验的调用，已写 `tool/call` | `PreExecuteInput(call, tool)` → `Verdict` | allow / refuse / confirm / handoff | **PolicyEngine**（固定排在链后，不可重排、无法绕过） |
+| `toolExecute` | 包住执行体 | `ExecuteInput(call, tool, context)` → `ToolResult` | 刷盘之外的包装、spill-back 检测 | MainScreenWatch |
+| `toolPostExecute` | 每个调用有结果之后（执行、拒绝、转交都算） | `PostExecuteInput(call, tool, result)` → `PostExecuteResult(result, context)` | 替换结果；附加上下文（进 nextStep） | LoopGuard（含重复调用提醒）、OutwardPacing、KnowledgeNotice、Spill |
+| `turnStopping` | 有最终回答且 nextStep 里没有 steer 时 | `TurnStoppingInput(turn, step, continuations, reply)` → `End` / `Continue(context)` | 继续本 turn（受续跑上限约束） | TodoContinuation（M3） |
+
+主循环自带、不能被拦截器替换的部分：`preStep` 之前的步数上限；`request` 之后的刷盘；`toolPreExecute` 之后的 PolicyEngine；`toolExecute` 里面的非 READ 刷盘和工具超时。
+
+**`requestError` 默认行为**（`RetryInterceptor`）：可重试的错误每个 step 最多重试 5 次；服务端给了 retry-after 就按它等，否则从 500 ms 指数退避到 10 s，一半固定一半随机。retry-after 超过 `maxRetryAfterMs`（默认 60 s，构造时校验）**不重试**，直接按不可重试失败，不会把等待缩短到上限。重试前的等待可以被 steer 打断。
+
+**`toolPreExecute` 与 PolicyEngine**：
+- 拦截器链先跑。PolicyEngine 再用 `IntentResolver` 解析调用，在**模型看过的最新屏幕**上判定。这个屏幕从日志推导：已经有 `tool/result` 的调用所记录的最近一屏；运行时自己读的屏（`callId = null`）不算。
+- 链和策略的结论取更严的（Refuse > HandOff > Confirm > Allow，平手取策略的）。每个判定都写 `policy/verdict`。
+- Refuse：原因作为结果返回给模型。HandOff：转交给用户。Confirm：显示确认卡。
+- **批准后复核**：读一张新屏 S'，记成 `screen/snapshot(callId = null)`；以 `approved = card` 在 S' 上重新解析、判定。
+  - Allow → 执行；
+  - Refuse / HandOff → 按对应结局处理；
+  - 又是 Confirm（屏幕在批准后变了）→ 再确认一次。**每个调用最多再问 `LoopConfig.maxReconfirmations` 次（默认 1）**，超过就拒绝，并告诉模型屏幕已变、请重新观察。
+  - 读不了屏 → `ERROR`，不执行。
+
+只读的观察事件（记录、流式分片、轨迹卡）走 `TaskRuntime.events`，不能改变行为。
 
 **纪律**：改 `agent/` 包内的主循环代码，必须同步更新本节。
 
@@ -694,20 +699,20 @@ TaskRuntime 循环（每个 step，对应 §3.8 的拦截点）：
   1. 从 inbox 取出输入（turn 开始时：全部 nextStep + 1 条 nextTurn；step 之间：只取 nextStep）
   2. preStep 链：步数上限 → runtime-context（只在变化时追加用户消息，发过的消息一律不改）
                 → 达到上下文 60% 时压缩，按协议区分（Responses / Chat Completions：在客户端裁剪旧界面结果、折叠旧往返；Anthropic：交给服务端 context editing / compaction）→ 刷盘
-  3. request 链定下模型和想要的推理档位 → 对最终选定的模型调用 ChatModel.prepare
-       → 用同一个 RequestSettings 填 reasoning 和 wire → 写 request/header（有变化才写）
-       → deriveMessages → 冻结 → 刷盘 → ChatModel.complete
-       request 链换了模型或档位，就重新 prepare，不沿用旧的 wire
-       steer 到来、模型请求还在进行：取消这次 attempt（已输出的部分记成 interrupted），带上新输入重开本 step
+  3. request 链选模型 → 写 request/header（有变化才写）→ deriveMessages → 刷盘 → ChatModel.complete
+       steer 到来、模型请求还在进行：取消这次 attempt（已输出的部分记成 interrupted），取走 steer 后重发
        工具执行中不被插话打断
        失败 → requestError 链（重试 / 溢出压缩 / 卸载图片 / 思考块前缀不匹配时去掉 thinking 块重试一次）
+       撞到 max-tokens → 本次回复的工具调用全部 SKIPPED，turn 结束
   4. 没有工具调用 → 校验（空回复 / 工具调用漏成文字 / 语言是否对）→ 作为最终回答 → turnStopping
-  5. 有工具调用（每轮只执行第一个）→ 写 tool/call → toolPreExecute 链，PolicyEngine 是最后一道 guard：
+  5. 有工具调用（每轮只执行第一个，其余 SKIPPED）→ 参数校验（不过就 INVALID_ARGS，不写 tool/call）
+       → 写 tool/call → toolPreExecute 链，PolicyEngine 是最后一道 guard（§3.8）：
        Refuse  → 原因作为结果返回给模型
-       HandOff → SurfaceManager.handToUser → 等待 → takeBack → 重新读屏（记在交接调用的 callId 下）
+       HandOff → SurfaceManager.handToUser → 等待 → takeBack；结果告诉模型"用户已处理，请核实"
        Confirm → 显示确认卡（悬浮层 / 通知 / App 内）→ 等待（15 分钟没人回按拒绝）
+                 → 批准后读新屏、在新屏上复核（再要确认最多再问 1 次）
        Allow   ↓
-  6. toolExecute 链：刷盘 → watchMainScreen(3000) → ScreenPort.act → awaitChange → 回读快照
+  6. toolExecute 链：刷盘（非 READ）→ 工具超时内执行：watchMainScreen(3000) → ScreenPort.act → awaitChange → 回读快照
        → mainArrivals：期间有非用户打开的任务冒到主屏 → moveTask 挪回 → effect = SPILLED_BACK
   7. toolPostExecute 链：计算差分与效果 → LoopGuard → 节奏控制 → 知识提示 → 写 tool/result
   8. 附加的上下文进 nextStep → step/end → 下一个 step
