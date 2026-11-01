@@ -138,6 +138,73 @@ class WireGoldenTest {
         Kit.assertGolden("golden/chat-vision-echo.json", body)
     }
 
+    /** Calls answered over several tool messages, one result with an image. */
+    private val splitResults =
+        ChatRequest(
+            system = emptyList(),
+            tools = listOf(Kit.WEATHER, tap),
+            messages =
+                listOf(
+                    Kit.user("Check the screen."),
+                    Message(
+                        Role.ASSISTANT,
+                        listOf(
+                            Part.ToolCall(ToolCallId("call_a"), "tap", "{}"),
+                            Part.ToolCall(ToolCallId("call_b"), "get_weather", "{}"),
+                            Part.ToolCall(ToolCallId("call_c"), "tap", "{}"),
+                        ),
+                    ),
+                    Message(
+                        Role.TOOL,
+                        listOf(
+                            Part.ToolResult(
+                                ToolCallId("call_a"),
+                                listOf(Part.Text("Tapped."), Part.Image(shot, "image/jpeg", 540, 1200)),
+                                isError = false,
+                            ),
+                        ),
+                    ),
+                    Message(
+                        Role.TOOL,
+                        listOf(Part.ToolResult(ToolCallId("call_b"), listOf(Part.Text("Sunny.")), isError = false)),
+                    ),
+                    Message(
+                        Role.TOOL,
+                        listOf(
+                            Part.ToolResult(
+                                ToolCallId("call_c"),
+                                listOf(Part.Image(shot, "image/jpeg", 540, 1200)),
+                                isError = false,
+                            ),
+                        ),
+                    ),
+                    Message(Role.ASSISTANT, listOf(Part.Text("Done."))),
+                ),
+        )
+
+    @Test
+    fun `chat completions put tool images after the whole run of tool messages`() {
+        val body = chat(vision = true, echo = true).body(splitResults, images, ChatQuirks.DEFAULT)
+        val messages = (body["messages"] as JsonArray).map { it as JsonObject }
+        assertEquals(
+            listOf("user", "assistant", "tool", "tool", "tool", "user", "assistant"),
+            messages.map { (it["role"] as JsonPrimitive).content },
+            "no user message between the results of one assistant turn",
+        )
+        val follow = messages[5]["content"] as JsonArray
+        val captions = follow.mapNotNull { ((it as JsonObject)["text"] as? JsonPrimitive)?.content }
+        assertEquals(listOf("Images from tool call call_a:", "Images from tool call call_c:"), captions)
+        Kit.assertGolden("golden/chat-tool-results-split.json", body)
+
+        val endingInResults = splitResults.copy(messages = splitResults.messages.dropLast(1))
+        val next = chat(vision = true, echo = true).body(endingInResults, images, ChatQuirks.DEFAULT)
+        assertEquals(
+            messages.dropLast(1),
+            (next["messages"] as JsonArray).map { it as JsonObject },
+            "a request that ends in results still gets their images",
+        )
+    }
+
     @Test
     fun `chat completions without vision, echo or optional fields`() {
         val options =

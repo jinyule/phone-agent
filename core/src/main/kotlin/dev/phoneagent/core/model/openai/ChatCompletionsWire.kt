@@ -86,9 +86,10 @@ public enum class ReasoningEffortStyle {
  * - The system blocks become one leading `system` message.
  * - A user message is a string, or a content array once it holds an image (`image_url` with a
  *   base64 `data:` URL; a placeholder text when the model has no vision).
- * - A tool message becomes one `tool` message per result. Tool messages carry text only, so the
- *   images of all its results follow in one `user` message, each group introduced by its call id
- *   (a result with nothing but images says so in its `tool` message).
+ * - A tool message becomes one `tool` message per result. Tool messages carry text only, and
+ *   nothing may come between the `tool` messages answering one assistant turn, so the images of
+ *   a whole run of consecutive tool messages follow it in one `user` message, each group
+ *   introduced by its call id (a result with nothing but images says so in its `tool` message).
  *   `isError` has no wire field here: the result text itself states the failure.
  * - An assistant message carries its text, its tool calls, and — when [echoReasoning] — the reasoning
  *   this provider and model produced, under [reasoningField]. Other providers' reasoning is dropped.
@@ -137,13 +138,26 @@ internal class ChatCompletionsWire(
                     put("content", WireSupport.systemText(request.system))
                 }
             }
+            // Results with images in the current run of tool messages; their user message follows the run.
+            val withImages = mutableListOf<Part.ToolResult>()
             for (message in request.messages) {
+                if (message.role != Role.TOOL) toolImages(withImages, images)?.let(::add)
                 when (message.role) {
-                    Role.USER -> add(user(message.parts, images))
-                    Role.ASSISTANT -> add(assistant(message))
-                    Role.TOOL -> tool(message, images).forEach(::add)
+                    Role.USER -> {
+                        add(user(message.parts, images))
+                    }
+
+                    Role.ASSISTANT -> {
+                        add(assistant(message))
+                    }
+
+                    Role.TOOL -> {
+                        tool(message).forEach(::add)
+                        withImages += message.parts.filterIsInstance<Part.ToolResult>().filter(::hasImage)
+                    }
                 }
             }
+            toolImages(withImages, images)?.let(::add)
         }
 
     private fun user(
@@ -173,35 +187,41 @@ internal class ChatCompletionsWire(
             }
         }
 
-    private fun tool(
-        message: Message,
-        images: ImageData,
-    ): List<JsonObject> {
-        val results = message.parts.filterIsInstance<Part.ToolResult>()
-        val wire =
-            results.map { result ->
-                val visible = if (vision) result.parts.filterIsInstance<Part.Text>() else result.parts
-                val text = visible.joinToString(TEXT_SEPARATOR, transform = ::plainText)
-                val onlyImages = vision && text.isEmpty() && result.parts.any { it is Part.Image }
-                buildJsonObject {
-                    put("role", "tool")
-                    put("tool_call_id", result.id.value)
-                    put("content", if (onlyImages) IMAGES_FOLLOW else text)
-                }
+    private fun hasImage(result: Part.ToolResult): Boolean = vision && result.parts.any { it is Part.Image }
+
+    /** One `tool` message per result: its text, or a placeholder when it is only images. */
+    private fun tool(message: Message): List<JsonObject> =
+        message.parts.filterIsInstance<Part.ToolResult>().map { result ->
+            val visible = if (vision) result.parts.filterIsInstance<Part.Text>() else result.parts
+            val text = visible.joinToString(TEXT_SEPARATOR, transform = ::plainText)
+            buildJsonObject {
+                put("role", "tool")
+                put("tool_call_id", result.id.value)
+                put("content", if (hasImage(result) && text.isEmpty()) IMAGES_FOLLOW else text)
             }
-        val withImages = if (vision) results.filter { r -> r.parts.any { it is Part.Image } } else emptyList()
-        if (withImages.isEmpty()) return wire
+        }
+
+    /**
+     * The user message with the images of [results] (a run of tool messages), or `null` without
+     * any; [results] is emptied.
+     */
+    private fun toolImages(
+        results: MutableList<Part.ToolResult>,
+        images: ImageData,
+    ): JsonObject? {
+        if (results.isEmpty()) return null
         val follow =
             buildJsonObject {
                 put("role", "user")
                 putJsonArray("content") {
-                    for (result in withImages) {
+                    for (result in results) {
                         add(content(Part.Text("Images from tool call ${result.id.value}:"), images))
                         result.parts.filterIsInstance<Part.Image>().forEach { add(content(it, images)) }
                     }
                 }
             }
-        return wire + follow
+        results.clear()
+        return follow
     }
 
     private fun assistant(message: Message): JsonObject {
