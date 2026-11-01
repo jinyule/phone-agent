@@ -8,8 +8,9 @@ import java.io.IOException
 /**
  * In-memory [StoragePort] for tests, with fault injection. Shared by all core tests.
  *
- * Set [failSync] / [failAppend] / [failWrite] to make the next calls throw; [beforeAppend] runs
- * inside every append (e.g. to suspend on a barrier). [writes] counts atomic writes per path.
+ * Set [failSync] / [failAppend] / [failWrite] to make the next calls throw, or [syncFailures] /
+ * [appendFailures] to make only the next n calls throw; [beforeAppend] runs inside every append
+ * (e.g. to suspend on a barrier). [writes] counts atomic writes per path.
  */
 class InMemoryStoragePort : StoragePort {
     val files = linkedMapOf<String, ByteArray>()
@@ -17,11 +18,19 @@ class InMemoryStoragePort : StoragePort {
     var failSync = false
     var failAppend = false
     var failWrite = false
+    var syncFailures = 0
+    var appendFailures = 0
     var beforeAppend: suspend () -> Unit = {}
     var syncCount = 0
         private set
 
     fun text(path: String): String = files.getValue(path).decodeToString()
+
+    private fun consume(counter: kotlin.reflect.KMutableProperty0<Int>): Boolean {
+        val left = counter.get()
+        if (left > 0) counter.set(left - 1)
+        return left > 0
+    }
 
     override suspend fun read(path: StoragePath): ByteArray? = files[path.value]?.copyOf()
 
@@ -41,7 +50,7 @@ class InMemoryStoragePort : StoragePort {
         return object : StorageAppender {
             override suspend fun append(bytes: ByteArray) {
                 beforeAppend()
-                if (failAppend) {
+                if (failAppend || consume(::appendFailures)) {
                     // A torn write: half of the bytes reach the file before the failure.
                     files[path.value] = files.getValue(path.value) + bytes.copyOf(bytes.size / 2)
                     throw IOException("injected append failure")
@@ -50,7 +59,7 @@ class InMemoryStoragePort : StoragePort {
             }
 
             override suspend fun sync() {
-                if (failSync) throw IOException("injected sync failure")
+                if (failSync || consume(::syncFailures)) throw IOException("injected sync failure")
                 syncCount++
             }
 
