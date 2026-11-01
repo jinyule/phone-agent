@@ -33,7 +33,7 @@ public enum class TurnEndReason {
     /** The model replied without tool calls. */
     COMPLETED,
 
-    /** The model called `end_not_done`. */
+    /** A tool result carried `ToolControl.EndTurn` (`end_not_done`); detail is its summary. */
     END_NOT_DONE,
 
     /** The reply hit the output cap; its tool calls were discarded. */

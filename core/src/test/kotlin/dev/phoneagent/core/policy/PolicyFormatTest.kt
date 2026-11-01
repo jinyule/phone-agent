@@ -17,7 +17,7 @@ class PolicyFormatTest {
     private val element = """{"ref":"e1","role":"BUTTON","bounds":{"left":0,"top":0,"right":1,"bottom":1}}"""
     private val money = """{"minor":100,"currency":"CNY"}"""
     private val card =
-        """{"callId":"c","kind":"SPEND","action":"pay","target":"Shop","content":"x",""" +
+        """{"callId":"c","reason":"SPEND","action":"pay","target":"Shop","content":"x",""" +
             """"amount":$money,"pkg":"a.b"}"""
 
     private class Shape<T>(
@@ -29,18 +29,11 @@ class PolicyFormatTest {
 
     private val shapes =
         listOf(
-            Shape(serializer<Money>(), """{"minor":1}""", money, """{"currency":"CNY"}"""),
             Shape(
                 serializer<ActionIntent>(),
                 """{"kind":"READ"}""",
                 """{"kind":"INPUT","pkg":"a.b","target":$element,"amount":$money,"fieldClass":"PASSWORD"}""",
                 """{"pkg":"a.b"}""",
-            ),
-            Shape(
-                serializer<ConfirmCard>(),
-                """{"callId":"c","kind":"OUTWARD","action":"send"}""",
-                card,
-                """{"callId":"c","kind":"OUTWARD"}""",
             ),
             Shape(
                 serializer<Verdict>(),
@@ -66,13 +59,6 @@ class PolicyFormatTest {
     fun `optional fields default, full objects round-trip, missing required fields are rejected`() {
         shapes.forEach { check(it) }
         assertEquals(ActionIntent(IntentKind.READ), Json.decodeFromString<ActionIntent>("""{"kind":"READ"}"""))
-        assertEquals(Money(1), Json.decodeFromString<Money>("""{"minor":1}"""))
-    }
-
-    @Test
-    fun `decoding enforces the constructor invariants`() {
-        assertThrows<IllegalArgumentException> { Json.decodeFromString<Money>("""{"minor":-1}""") }
-        assertThrows<IllegalArgumentException> { Json.decodeFromString<Money>("""{"minor":1,"currency":"cny"}""") }
     }
 
     private fun <T> check(shape: Shape<T>) {

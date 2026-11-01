@@ -34,11 +34,15 @@ public interface TaskRuntime {
     /** Stops this task only, for [cause]; clears the inbox. Pending tool calls end CANCELLED. */
     public fun stop(cause: StopCause)
 
-    /** Answers the pending prompt [promptId]; answers to unknown or expired prompts are ignored. */
+    /**
+     * Answers the pending prompt [promptId]. Returns `false`, changing nothing, when the prompt
+     * is not pending (answered, expired, withdrawn, unknown) or [reply] does not fit its kind
+     * (see [UserReply]); the UI then drops its card.
+     */
     public fun answer(
         promptId: PromptId,
         reply: UserReply,
-    )
+    ): Boolean
 }
 
 /** Driver state. */
@@ -130,23 +134,31 @@ public enum class StopCause {
     ERROR,
 }
 
-/** The user's answer to a pending prompt. */
+/**
+ * What the user did with a pending prompt. The runtime turns it into the waiting call's result
+ * (`dev.phoneagent.core.ports.UserInteraction`); expiry and unavailability come from the runtime,
+ * not from the user.
+ */
 public sealed interface UserReply {
-    /** Confirmation granted (once). */
+    /** Confirmation granted, for that call only. Fits a confirmation. */
     public data object Approve : UserReply
 
-    /** Confirmation denied. */
+    /** Confirmation denied. Fits a confirmation. */
     public data object Reject : UserReply
 
-    /** Answer to an `ask_user` question. */
+    /** Answer to a question. Fits a question. */
     public data class Answer(
-        /** The answer text. */
+        /** The answer text, non-blank. */
         val text: String,
-    ) : UserReply
+    ) : UserReply {
+        init {
+            require(text.isNotBlank()) { "An answer must not be blank" }
+        }
+    }
 
-    /** The user finished a handed-off step. */
+    /** Dismissed without answering, or gave a handed-off task back undone. Fits a question or a handoff. */
+    public data object Decline : UserReply
+
+    /** The user finished the handed-off step. Fits a handoff. */
     public data object HandoffDone : UserReply
-
-    /** The user gave up on a handed-off step. */
-    public data object HandoffCancelled : UserReply
 }

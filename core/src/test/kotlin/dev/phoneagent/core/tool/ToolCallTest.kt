@@ -44,4 +44,29 @@ class ToolCallTest {
         assertThrows<IllegalArgumentException> { ToolResult(ToolStatus.OK, listOf(Part.ToolCall(id, "x", "{}"))) }
         assertEquals(ok, Json.decodeFromString<ToolResult>(Json.encodeToString(ok)))
     }
+
+    @Test
+    fun `a result may end the turn, and only a successful one`() {
+        val end = ToolControl.EndTurn(EndReason.BLOCKED, "需要登录，已交还给用户")
+        val result = ToolResult(ToolStatus.OK, listOf(Part.Text("ended")), control = end)
+        assertEquals(
+            """{"status":"OK","content":[{"type":"text","text":"ended"}],"control":""" +
+                """{"type":"end_turn","reason":"BLOCKED","summary":"需要登录，已交还给用户"}}""",
+            Json.encodeToString(result),
+        )
+        assertEquals(result, Json.decodeFromString<ToolResult>(Json.encodeToString(result)))
+        assertEquals(null, ToolResult.ok("x").control)
+        assertEquals(
+            ToolResult.ok("x"),
+            Json.decodeFromString<ToolResult>("""{"status":"OK","content":[{"type":"text","text":"x"}]}"""),
+        )
+        assertThrows<IllegalArgumentException> {
+            ToolResult(ToolStatus.ERROR, listOf(Part.Text("failed")), control = end)
+        }
+        assertThrows<IllegalArgumentException> { ToolControl.EndTurn(EndReason.OTHER, " ") }
+        assertEquals(
+            listOf("IMPOSSIBLE", "BLOCKED", "USER_STOPPED", "OTHER"),
+            EndReason.entries.map { it.name },
+        )
+    }
 }

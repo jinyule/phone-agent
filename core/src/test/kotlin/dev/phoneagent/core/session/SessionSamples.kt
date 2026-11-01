@@ -21,21 +21,26 @@ import dev.phoneagent.core.model.StopReason
 import dev.phoneagent.core.model.ToolDef
 import dev.phoneagent.core.model.Usage
 import dev.phoneagent.core.policy.ActionIntent
-import dev.phoneagent.core.policy.ConfirmCard
 import dev.phoneagent.core.policy.FieldClass
 import dev.phoneagent.core.policy.IntentKind
-import dev.phoneagent.core.policy.Money
 import dev.phoneagent.core.policy.SecurityLevel
 import dev.phoneagent.core.policy.Verdict
 import dev.phoneagent.core.ports.ActionOutcome
+import dev.phoneagent.core.ports.AskResult
 import dev.phoneagent.core.ports.Bounds
+import dev.phoneagent.core.ports.ConfirmCard
+import dev.phoneagent.core.ports.ConfirmReason
+import dev.phoneagent.core.ports.ConfirmResult
 import dev.phoneagent.core.ports.Direction
 import dev.phoneagent.core.ports.ElementRef
 import dev.phoneagent.core.ports.ElementRole
 import dev.phoneagent.core.ports.ElementState
 import dev.phoneagent.core.ports.HandoffKind
+import dev.phoneagent.core.ports.HandoffResult
 import dev.phoneagent.core.ports.LaunchTarget
+import dev.phoneagent.core.ports.Money
 import dev.phoneagent.core.ports.OcrLine
+import dev.phoneagent.core.ports.Question
 import dev.phoneagent.core.ports.ScreenDiff
 import dev.phoneagent.core.ports.ScreenFlag
 import dev.phoneagent.core.ports.ScreenSnapshot
@@ -47,7 +52,9 @@ import dev.phoneagent.core.ports.Target
 import dev.phoneagent.core.ports.TreeQuality
 import dev.phoneagent.core.ports.UiAction
 import dev.phoneagent.core.ports.UiElement
+import dev.phoneagent.core.tool.EndReason
 import dev.phoneagent.core.tool.ToolCall
+import dev.phoneagent.core.tool.ToolControl
 import dev.phoneagent.core.tool.ToolResult
 import dev.phoneagent.core.tool.ToolStatus
 import kotlinx.serialization.json.buildJsonObject
@@ -113,7 +120,7 @@ object SessionSamples {
     private val toolCall =
         ToolCall(call, task, session, "phone_tap", buildJsonObject { put("ref", "e2") }, reason = "打开聊天")
     private val card =
-        ConfirmCard(call, IntentKind.SPEND, "pay", "Shop", amount = Money(1999, "CNY"), pkg = "com.example.pay")
+        ConfirmCard(call, ConfirmReason.SPEND, "pay", "Shop", amount = Money(1999, "CNY"), pkg = "com.example.pay")
 
     val events: List<SessionEvent> =
         listOf(
@@ -192,12 +199,16 @@ object SessionSamples {
                 Verdict.Refuse("hard-deny", "Not allowed."),
             ),
             ApprovalAsked(prompt, card, expiresAt = 901_000),
-            ApprovalDecided(prompt, ApprovalDecision.APPROVED_ONCE),
-            QuestionAsked(prompt, call, "哪个张三？", listOf("同事", "同学")),
-            QuestionAnswered(prompt, QuestionOutcome.ANSWERED, "同事"),
-            QuestionAnswered(prompt, QuestionOutcome.EXPIRED),
+            ApprovalDecided(prompt, ConfirmResult.APPROVED),
+            QuestionAsked(prompt, call, Question("哪个张三？", listOf("同事", "同学"))),
+            QuestionAnswered(prompt, AskResult.Answered("同事")),
+            QuestionAnswered(prompt, AskResult.Declined),
+            QuestionAnswered(prompt, AskResult.Expired),
+            QuestionAnswered(prompt, AskResult.Unavailable),
             HandoffStarted(prompt, HandoffKind.LOGIN, "请登录", call),
-            HandoffEnded(prompt, HandoffOutcome.DONE),
+            HandoffEnded(prompt, HandoffResult.DONE),
+            HandoffEnded(prompt, HandoffResult.FAILED, detail = "moveTaskToDisplay failed"),
+            PromptWithdrawn(prompt),
             ScreenObserved(call, snapshot),
             ScreenObserved(null, snapshot.copy(ocr = null, pkg = null, activity = null)),
             ScreenActed(
@@ -274,6 +285,15 @@ object SessionSamples {
                     buildJsonObject {
                         put("effect", "CHANGED")
                     },
+                ),
+            ),
+            ToolResultRecorded(
+                ToolCallId("call-3"),
+                "end_not_done",
+                ToolResult(
+                    ToolStatus.OK,
+                    listOf(Part.Text("ended")),
+                    control = ToolControl.EndTurn(EndReason.BLOCKED, "需要登录，已交给用户"),
                 ),
             ),
             ToolResultRecorded(

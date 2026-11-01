@@ -43,22 +43,25 @@ public data class ToolCall(
 }
 
 /**
- * Outcome of a tool call. Content is model-visible; [details] is not.
+ * Outcome of a tool call. Content is model-visible; [details] and [control] are not.
  *
  * @property status how the call ended.
  * @property content what the model reads: text and images only.
  * @property details structured data for `presentResult` and projections; never sent to the model.
+ * @property control a signal to the loop (e.g. end the turn), or `null`; only on [ToolStatus.OK].
  */
 @Serializable
 public data class ToolResult(
     val status: ToolStatus,
     val content: List<Part>,
     val details: JsonObject? = null,
+    val control: ToolControl? = null,
 ) {
     init {
         require(content.all { it is Part.Text || it is Part.Image }) {
             "ToolResult content may be text and images only"
         }
+        require(control == null || status == ToolStatus.OK) { "Only an OK result may carry a control signal" }
     }
 
     /** The model-facing part answering [id]; every status except [ToolStatus.OK] is an error. */

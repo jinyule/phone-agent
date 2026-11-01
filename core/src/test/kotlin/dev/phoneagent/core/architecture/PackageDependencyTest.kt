@@ -38,6 +38,7 @@ class PackageDependencyTest {
                 "agent/KnowsAdapter.kt: contract agent must not use capability model.openai",
                 "model/openai/KnowsScreen.kt: capability model.openai must not use capability screen",
                 "ports/KnowsSession.kt: contract ports (layer 1) must not use session (layer 4)",
+                "screen/MarksRisk.kt: capability screen must not use capability policy.rules",
                 "tools/FullyQualified.kt: capability tools must not use capability policy.rules",
             ),
             violations(scope, root),

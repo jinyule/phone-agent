@@ -245,8 +245,9 @@ class SessionCodecTest {
             AssistantMessage(1, p.provider, p.model, listOf(p.image), dev.phoneagent.core.model.StopReason.END_TURN)
         }
         assertThrows<IllegalArgumentException> { UserMessage(UserMessageKind.USER, listOf(p.toolCallPart)) }
-        assertThrows<IllegalArgumentException> { QuestionAnswered(p.prompt, QuestionOutcome.ANSWERED) }
-        assertThrows<IllegalArgumentException> { QuestionAnswered(p.prompt, QuestionOutcome.CANCELLED, "x") }
+        assertThrows<IllegalArgumentException> {
+            HandoffEnded(p.prompt, dev.phoneagent.core.ports.HandoffResult.DONE, detail = "x")
+        }
         assertThrows<IllegalArgumentException> { InboxSpliced(InboxQueue.NEXT_STEP, removed = -1) }
         assertThrows<IllegalArgumentException> { InboxEntry(InboxEntryKind.STEER, listOf(p.reasoning)) }
         assertThrows<IllegalArgumentException> { CompactionSummary(listOf(p.toolCallPart)) }
@@ -262,7 +263,7 @@ class SessionCodecTest {
     fun `optional payload fields have defaults`() {
         val p = SessionSamples
         assertEquals(null, HandoffStarted(p.prompt, dev.phoneagent.core.ports.HandoffKind.OTHER, "x").callId)
-        assertEquals(emptyList<String>(), QuestionAsked(p.prompt, p.call, "q").options)
+        assertEquals(null, HandoffEnded(p.prompt, dev.phoneagent.core.ports.HandoffResult.DONE).detail)
         assertEquals(null, SessionFlushException("x").cause)
         assertEquals(null, SessionWriteException("x").cause)
     }

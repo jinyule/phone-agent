@@ -6,6 +6,7 @@ import dev.phoneagent.core.ids.TaskId
 import dev.phoneagent.core.model.ToolDef
 import dev.phoneagent.core.ports.Clock
 import dev.phoneagent.core.ports.ScreenPort
+import dev.phoneagent.core.ports.UserInteraction
 import kotlinx.serialization.Serializable
 
 /**
@@ -68,6 +69,9 @@ public interface ToolContext {
 
     /** Timestamp source. */
     public val clock: Clock
+
+    /** Asking, confirming and handing off to the user, bound to this call (see [UserInteraction]). */
+    public val interaction: UserInteraction
 
     /** Stores [bytes] in the session's blob store (deduplicated) and returns its reference. */
     public suspend fun storeBlob(bytes: ByteArray): BlobRef

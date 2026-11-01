@@ -4,8 +4,10 @@ import dev.phoneagent.core.model.ContextEditPolicy
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.policy.Verdict
 import dev.phoneagent.core.ports.ActionOutcome
+import dev.phoneagent.core.ports.AskResult
 import dev.phoneagent.core.ports.LaunchTarget
 import dev.phoneagent.core.ports.UiAction
+import dev.phoneagent.core.tool.ToolControl
 import kotlinx.serialization.descriptors.elementNames
 import kotlinx.serialization.serializer
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -49,6 +51,8 @@ class SessionEventRoundTripTest {
                 serializer<LaunchTarget>(),
                 serializer<ActionOutcome.Status>(),
                 serializer<ContextEditPolicy>(),
+                serializer<AskResult>(),
+                serializer<ToolControl>(),
             ).flatMap { it.descriptor.getElementDescriptor(1).elementNames }
         // tool_result parts only occur in derived messages (tool/result stores a ToolResult); see PartRoundTripTest.
         val expected = nested - "tool_result"

@@ -1,8 +1,9 @@
 package dev.phoneagent.core.policy
 
 import dev.phoneagent.core.ids.TaskId
-import dev.phoneagent.core.ids.ToolCallId
+import dev.phoneagent.core.ports.ConfirmCard
 import dev.phoneagent.core.ports.HandoffKind
+import dev.phoneagent.core.ports.Money
 import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.ports.UiElement
 import dev.phoneagent.core.tool.ToolCall
@@ -139,48 +140,6 @@ public enum class SecurityLevel {
     /** 自主: outward actions, deletes and settings run without asking. */
     AUTONOMOUS,
 }
-
-/**
- * Content of a confirmation card. The approval applies to exactly [callId]; a different call,
- * target or amount needs a new card.
- *
- * @property callId the call being approved.
- * @property kind effect class.
- * @property action what will happen, e.g. "send message" (model- or rule-provided text).
- * @property target who or what it affects, e.g. the contact name, or `null`.
- * @property content what will be sent or typed, masked when sensitive, or `null`.
- * @property amount money involved, or `null`.
- * @property pkg the app, or `null`.
- */
-@Serializable
-public data class ConfirmCard(
-    val callId: ToolCallId,
-    val kind: IntentKind,
-    val action: String,
-    val target: String? = null,
-    val content: String? = null,
-    val amount: Money? = null,
-    val pkg: String? = null,
-)
-
-/**
- * An amount of money in hundredths of the unit (two decimals regardless of currency).
- *
- * @property minor amount × 100, >= 0.
- * @property currency ISO 4217 code (`CNY`), or `null` when the screen shows no identifiable currency.
- */
-@Serializable
-public data class Money(
-    val minor: Long,
-    val currency: String? = null,
-) {
-    init {
-        require(minor >= 0) { "Money must be >= 0, got $minor" }
-        require(currency == null || CURRENCY.matches(currency)) { "Currency must be ISO 4217, got '$currency'" }
-    }
-}
-
-private val CURRENCY = Regex("[A-Z]{3}")
 
 /** Sensitivity of an input field. */
 @Serializable

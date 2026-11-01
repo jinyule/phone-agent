@@ -3,10 +3,14 @@ package dev.phoneagent.core.session
 import dev.phoneagent.core.ids.PromptId
 import dev.phoneagent.core.ids.ToolCallId
 import dev.phoneagent.core.policy.ActionIntent
-import dev.phoneagent.core.policy.ConfirmCard
 import dev.phoneagent.core.policy.SecurityLevel
 import dev.phoneagent.core.policy.Verdict
+import dev.phoneagent.core.ports.AskResult
+import dev.phoneagent.core.ports.ConfirmCard
+import dev.phoneagent.core.ports.ConfirmResult
 import dev.phoneagent.core.ports.HandoffKind
+import dev.phoneagent.core.ports.HandoffResult
+import dev.phoneagent.core.ports.Question
 import dev.phoneagent.core.tool.ToolCall
 import dev.phoneagent.core.tool.ToolResult
 import kotlinx.serialization.SerialName
@@ -73,90 +77,45 @@ public data class ApprovalAsked(
     val expiresAt: Long,
 ) : SessionEvent
 
-/** `approval/decided`. */
+/** `approval/decided`: how the card at [promptId] ended. Only [ConfirmResult.APPROVED] lets the call run. */
 @Serializable
 @SerialName("approval/decided")
 public data class ApprovalDecided(
     /** The prompt. */
     val promptId: PromptId,
-    /** The outcome. */
-    val decision: ApprovalDecision,
+    /** The result returned to the waiting call. */
+    val result: ConfirmResult,
 ) : SessionEvent
-
-/** Outcome of a confirmation. Only [APPROVED_ONCE] lets the call run. */
-@Serializable
-public enum class ApprovalDecision {
-    /** The user approved this one call. */
-    APPROVED_ONCE,
-
-    /** The user rejected it. */
-    REJECTED,
-
-    /** Nobody answered in time. */
-    EXPIRED,
-
-    /** The task stopped while waiting. */
-    CANCELLED,
-
-    /** No way to ask (unattended task, no UI). */
-    UNAVAILABLE,
-}
 
 /**
  * `question/asked`: `ask_user` put a question to the user.
  *
  * @property promptId the prompt to answer.
  * @property callId the `ask_user` call.
- * @property question the question, in the user's language.
- * @property options suggested answers; empty for free text.
+ * @property question what was asked.
  */
 @Serializable
 @SerialName("question/asked")
 public data class QuestionAsked(
     val promptId: PromptId,
     val callId: ToolCallId,
-    val question: String,
-    val options: List<String> = emptyList(),
+    val question: Question,
 ) : SessionEvent
 
-/**
- * `question/answered`.
- *
- * @property promptId the prompt.
- * @property outcome how it ended.
- * @property answer the user's answer; non-null exactly when [outcome] is [QuestionOutcome.ANSWERED].
- */
+/** `question/answered`: how the question at [promptId] ended. */
 @Serializable
 @SerialName("question/answered")
 public data class QuestionAnswered(
+    /** The prompt. */
     val promptId: PromptId,
-    val outcome: QuestionOutcome,
-    val answer: String? = null,
-) : SessionEvent {
-    init {
-        require((outcome == QuestionOutcome.ANSWERED) == (answer != null)) {
-            "question/answered: answer must be present exactly when ANSWERED"
-        }
-    }
-}
-
-/** How a question ended. */
-@Serializable
-public enum class QuestionOutcome {
-    /** The user answered. */
-    ANSWERED,
-
-    /** Nobody answered in time. */
-    EXPIRED,
-
-    /** The task stopped while waiting. */
-    CANCELLED,
-}
+    /** The result returned to the waiting call. */
+    val result: AskResult,
+) : SessionEvent
 
 /**
  * `handoff/start`: the task was handed to the user (phase1 §7.3).
  *
- * @property promptId answered by `UserReply.HandoffDone` / `HandoffCancelled`.
+ * @property promptId answered by `UserReply.HandoffDone` / `Decline`.
  * @property kind why.
  * @property reason explanation shown to the user (model or policy text).
  * @property callId the call that caused it (`hand_to_user`, or a call the policy handed off), or `null`.
@@ -170,28 +129,33 @@ public data class HandoffStarted(
     val callId: ToolCallId? = null,
 ) : SessionEvent
 
-/** `handoff/end`: the task is back on the agent display; the next step must observe first. */
+/**
+ * `handoff/end`: the task is back on the agent display (or never left it); the next step must
+ * observe first.
+ *
+ * @property promptId the prompt.
+ * @property result the result returned to the waiting call.
+ * @property detail why it failed, for diagnostics; `null` unless [result] is [HandoffResult.FAILED].
+ */
 @Serializable
 @SerialName("handoff/end")
 public data class HandoffEnded(
+    val promptId: PromptId,
+    val result: HandoffResult,
+    val detail: String? = null,
+) : SessionEvent {
+    init {
+        require(detail == null || result == HandoffResult.FAILED) { "handoff/end: detail only for FAILED" }
+    }
+}
+
+/**
+ * `prompt/withdrawn`: the prompt at [promptId] (card, question or handoff) was withdrawn because
+ * the task stopped while it waited. The waiting call was cancelled and got no result.
+ */
+@Serializable
+@SerialName("prompt/withdrawn")
+public data class PromptWithdrawn(
     /** The prompt. */
     val promptId: PromptId,
-    /** How it ended. */
-    val outcome: HandoffOutcome,
 ) : SessionEvent
-
-/** How a handoff ended. */
-@Serializable
-public enum class HandoffOutcome {
-    /** The user said they finished. */
-    DONE,
-
-    /** The user gave up. */
-    CANCELLED,
-
-    /** Nobody acted in time. */
-    EXPIRED,
-
-    /** Moving the app between displays failed. */
-    FAILED,
-}

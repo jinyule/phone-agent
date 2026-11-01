@@ -6,8 +6,16 @@ import dev.phoneagent.core.ids.TaskId
 import dev.phoneagent.core.ids.ToolCallId
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.ToolDef
+import dev.phoneagent.core.ports.AskResult
 import dev.phoneagent.core.ports.Clock
+import dev.phoneagent.core.ports.ConfirmCard
+import dev.phoneagent.core.ports.ConfirmReason
+import dev.phoneagent.core.ports.ConfirmResult
+import dev.phoneagent.core.ports.HandoffKind
+import dev.phoneagent.core.ports.HandoffResult
+import dev.phoneagent.core.ports.Question
 import dev.phoneagent.core.ports.ScreenPort
+import dev.phoneagent.core.ports.UserInteraction
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -172,6 +180,7 @@ class ToolRegistryTest {
                     override val sessionId = SessionId("s1")
                     override val screen: ScreenPort? = null
                     override val clock = Clock { 0 }
+                    override val interaction: UserInteraction = Unattended
 
                     override suspend fun storeBlob(bytes: ByteArray) = BlobRef("c".repeat(64))
                 }
@@ -183,5 +192,23 @@ class ToolRegistryTest {
             assertNull(ctx.screen)
             assertEquals(0, ctx.clock.epochMillis())
             assertEquals(ctx.sessionId, call.sessionId)
+            assertEquals(
+                ConfirmResult.UNAVAILABLE,
+                ctx.interaction.confirm(ConfirmCard(call.id, ConfirmReason.OUTWARD, "发送")),
+            )
+            assertEquals(AskResult.Unavailable, ctx.interaction.ask(Question("?")))
+            assertEquals(HandoffResult.UNAVAILABLE, ctx.interaction.handOff(HandoffKind.LOGIN, "登录"))
         }
+
+    /** What an unattended task gets: nobody can answer. */
+    private object Unattended : UserInteraction {
+        override suspend fun ask(question: Question) = AskResult.Unavailable
+
+        override suspend fun confirm(card: ConfirmCard) = ConfirmResult.UNAVAILABLE
+
+        override suspend fun handOff(
+            kind: HandoffKind,
+            reason: String,
+        ) = HandoffResult.UNAVAILABLE
+    }
 }

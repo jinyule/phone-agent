@@ -46,10 +46,11 @@ class AgentContractsTest {
                 UserReply.Approve,
                 UserReply.Reject,
                 UserReply.Answer("同事"),
+                UserReply.Decline,
                 UserReply.HandoffDone,
-                UserReply.HandoffCancelled,
             )
         assertEquals(5, replies.toSet().size)
+        assertThrows<IllegalArgumentException> { UserReply.Answer(" ") }
     }
 
     @Test

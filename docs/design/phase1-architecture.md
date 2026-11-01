@@ -153,9 +153,34 @@ data class ToolCall(
     val args: JsonObject,
     val reason: String,                 // 每个工具都有，用户的语言；界面上显示成"这一步在做什么"
 )
+
+data class ToolResult(
+    val status: ToolStatus, val content: List<Part>,   // content 只含文字和图片，模型可见
+    val details: JsonObject? = null,                  // 给轨迹卡片用，模型不可见
+    val control: ToolControl? = null,                 // 给主循环的信号，只能出现在 OK 结果上
+)
+sealed interface ToolControl { data class EndTurn(val reason: EndReason, val summary: String) : ToolControl }
+
+interface ToolContext {                 // 每次调用一个，由运行时实现
+    val taskId: TaskId; val sessionId: SessionId; val screen: ScreenPort?; val clock: Clock
+    val interaction: UserInteraction    // 提问 / 确认 / 转交，见下
+    suspend fun storeBlob(bytes: ByteArray): BlobRef
+}
+interface UserInteraction {             // core.ports；运行时实现，工具和运行时自己（Confirm / HandOff 判定）调用
+    suspend fun ask(question: Question): AskResult              // Answered(text) / Declined / Expired / Unavailable
+    suspend fun confirm(card: ConfirmCard): ConfirmResult       // APPROVED / REJECTED / EXPIRED / UNAVAILABLE
+    suspend fun handOff(kind: HandoffKind, reason: String): HandoffResult  // DONE / DECLINED / EXPIRED / UNAVAILABLE / FAILED
+}
 ```
 
 工具结果里**带状态、不带描述**："现在做不了"用结果文字说明原因，工具本身不增删，这样能保住 prompt 缓存。
+
+- **主循环只认 `ToolResult.control`，不认工具名**：`end_not_done` 返回 `EndTurn`，主循环记下结果后不再开新 step，本 turn 以 `END_NOT_DONE` 结束。
+- **等待用户**：`UserInteraction` 的方法挂起直到有结果。
+  - 超时返回 `EXPIRED`；
+  - 没人能回答（无人值守）时立即返回 `UNAVAILABLE`，不显示任何东西；
+  - 任务在等待时被停止，调用被取消（抛 `CancellationException`，不返回结果），日志记 `prompt/withdrawn`。
+  - 提问和结果在方法返回前已写进日志；等待时间不计入 `timeoutMs`；每个任务同时最多一个待答提示。
 
 ### 3.3 屏幕端口（主屏和虚拟屏共用一套实现，按 displayId 参数化）
 
@@ -254,9 +279,12 @@ data class ActionIntent(            // 执行前从"动作 + 目标元素 + 当�
 )
 sealed interface Verdict {
     data object Allow : Verdict
-    data class Confirm(val card: ConfirmCard) : Verdict            // 一次性同意，与目标和金额绑定
+    data class Confirm(val card: ConfirmCard) : Verdict            // 一次性同意，与目标和金额绑定；ConfirmCard、Money 在 core.ports
     data class HandOff(val kind: HandoffKind, val hint: String) : Verdict
     data class Refuse(val reason: String, val hintForModel: String) : Verdict
+}
+fun interface RiskLexicon {             // 共用的风险词表：屏幕格式的 ⚠ 和 PolicyEngine 都只依赖这个契约，实现在 policy 能力包
+    fun activationRisk(element: UiElement, screen: ScreenSnapshot): ElementRisk?   // kind ∈ OUTWARD / SPEND / DELETE / SETTINGS
 }
 ```
 
@@ -270,7 +298,7 @@ interface TaskRuntime {
     fun steer(input: UserInput)              // 进 nextStep：在下一个 step 边界被取走；阻止本 turn 结束
     fun inject(context: ContextInput)        // 进 nextStep，不唤醒驱动器（例如定时结果、通知）
     fun stop(cause: StopCause)               // 只停这一个任务；默认清空 inbox
-    fun answer(promptId: PromptId, reply: UserReply)   // 确认 / 提问 / 接管完成
+    fun answer(promptId: PromptId, reply: UserReply): Boolean   // Approve / Reject / Answer / Decline / HandoffDone；提示已失效或回复不匹配时返回 false
 }
 sealed interface Phase { data object Idle : Phase; data class Running(val turn: Int, val step: Int) : Phase; /* … */ }
 ```
@@ -331,7 +359,8 @@ data class Envelope(
 )
 sealed interface SessionEvent   // turn/start|end、step/start|end、user/message、assistant/message|attempt、
                                 // request/header、tool/call|result、policy/verdict、approval/asked|decided、
-                                // handoff/start|end、compaction/*、inbox/spliced、screen/frame(blobRef)…
+                                // handoff/start|end、question/asked|answered、prompt/withdrawn、compaction/*、
+                                // inbox/spliced、screen/frame(blobRef)…
 ```
 
 完整的类型表和每种类型是否 ignorable 登记在 `core.session.SessionEventTypes`；命名规则、序列化方式和格式版本见 ADR `2026-11-01-core-contracts`。
@@ -360,7 +389,7 @@ screen s12 · 微信 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · �
   @e7 + "我：十点"                    ← + = 相对上一屏新出现
 [底部]
 @e9 输入框 (提示:"发送消息") {可编辑,焦点} (480,955)
-@e10 ⚠ 按钮 "发送" (930,955)          ← ⚠ = 点它会触发确认（与 PolicyEngine 共用同一份词表）
+@e10 ⚠ 按钮 "发送" (930,955)          ← ⚠ = 高风险（对外 / 花钱 / 删除 / 设置），点它可能触发确认；与 PolicyEngine 共用 RiskLexicon
 … 另有 14 项（在 @e5 里滚动查看）
 ```
 

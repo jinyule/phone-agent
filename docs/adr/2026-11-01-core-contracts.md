@@ -69,9 +69,9 @@ M1/M2 的主循环、OpenAI 系适配器、Anthropic 适配器、PolicyEngine、
 - **格式版本**：
   - 第一行文件头 `{"format":"phoneagent.session","version":N,…}`；
   - `SessionMigration(fromVersion)` 在原始 envelope JSON 上把版本 v 迁到 v+1；迁移链必须连续到当前版本；
-  - `core/src/test/resources/session-format/v1/session.jsonl` 永不改写。
+  - `core/src/test/resources/session-format/v1/session.jsonl` 从合入集成分支起永不改写。合入前（本 WP 内）为第 9 节的三项补充要求重新生成过一次：此前没有任何代码在测试之外写过 v1 日志。
 - **代码里写 `serializer<X>()`，不写 `X.serializer()`**：detekt 做类型解析时不跑 serialization 插件，后者在它看来是未解析的引用。
-- 不可序列化的类型（运行时对象，不进日志）：`Delta`、`Frame`、`agent` 包的类型、`PolicyContext`。
+- 不可序列化的类型（运行时对象，不进日志）：`Delta`、`Frame`、`agent` 包的类型、`PolicyContext`、`ElementRisk`。
 
 ### 6. 包结构与依赖测试
 
@@ -89,7 +89,7 @@ M1/M2 的主循环、OpenAI 系适配器、Anthropic 适配器、PolicyEngine、
   - 其他顶层包：`storage`、`screen`、`tools`。
 
   能力包只引用契约包和自己，能力之间互不引用，由 app 负责组装。
-- 规则写在 `core/src/test/kotlin/dev/phoneagent/core/architecture/PackageDependencyTest.kt`，用 **Konsist** 检查 import（含通配符）和代码里的全限定类名（注释和字符串不算）。`core/src/test/resources/architecture/counterexample/` 里放了四个会被拒绝的反例：契约用了能力、能力互相引用、契约向上引用、全限定名引用。
+- 规则写在 `core/src/test/kotlin/dev/phoneagent/core/architecture/PackageDependencyTest.kt`，用 **Konsist** 检查 import（含通配符）和代码里的全限定类名（注释和字符串不算）。`core/src/test/resources/architecture/counterexample/` 里放了五个会被拒绝的反例：契约用了能力、契约向上引用，以及三种能力互相引用（import、全限定名、引用词表的实现）。其中 `screen/MarksRisk.kt` 演示第 9 节的词表用法：引用契约 `policy.RiskLexicon` 是允许的，引用实现 `policy.rules` 会被拒绝。
 
 ### 7. 依赖与插件位置
 
@@ -106,6 +106,22 @@ M1/M2 的主循环、OpenAI 系适配器、Anthropic 适配器、PolicyEngine、
 - `SurfaceManager.agentDisplay` 返回 `SurfaceAllocation`（`Ready` / `Unavailable(reason, detail)`），不返回 `Result<SurfaceRef>`。
 - `Tool.concurrencySafe` 是抽象属性，没有默认值。
 - 重试日志的 type 叫 `request/retry`，不叫 `llm/retry`。
+- `ConfirmCard` 和 `Money` 放在 `core.ports`，不在 `core.policy`（见第 9 节）。
+- `TaskRuntime.answer` 返回 `Boolean`；`UserReply` 是 `Approve` / `Reject` / `Answer` / `Decline` / `HandoffDone`。
+
+### 9. 等待用户、工具控制信号、共用的风险词表（协调者补充要求）
+
+- **`UserInteraction`**（`core.ports`）：`ask(Question): AskResult`、`confirm(ConfirmCard): ConfirmResult`、`handOff(kind, reason): HandoffResult`。三个方法都是 suspend，由运行时实现，通过 `ToolContext.interaction` 交给工具，每次调用一个实例；运行时处理 `Verdict.Confirm` / `HandOff` 时也用它。
+  - 每个方法有自己的结果类型，工具不会收到不可能的回复，`when` 可以穷举。
+  - 用户回复：`Answered` / `Declined`、`APPROVED` / `REJECTED`、`DONE` / `DECLINED`。
+  - 超过等待时限：`EXPIRED`；没人能回答（无人值守）：立即返回 `UNAVAILABLE`。
+  - 任务停止：调用被取消（`CancellationException`），没有结果，日志记 `prompt/withdrawn`。
+  - 日志直接记这些结果类型：`approval/decided.result`、`question/answered.result`、`handoff/end.result`。日志和工具用同一套词汇，不再有单独的 outcome 枚举。
+  - 放在 `ports` 是因为它是 core 通向用户的端口，而 `ToolContext`（`tool`，第 2 层）必须能引用它和 `ConfirmCard`。`ConfirmCard` 的 `kind: IntentKind` 改成 `reason: ConfirmReason`：确认的理由除了意图类型，还有"本任务首次进入某 App"和"模型用 `request_confirmation` 主动申报"。
+- **`ToolResult.control: ToolControl?`**（`core.tool`）：目前只有 `EndTurn(reason: EndReason, summary)`，只能出现在 `OK` 结果上。主循环只认这个信号，不认工具名；`end_not_done` 返回它，本 turn 以 `END_NOT_DONE` 结束。
+- **`RiskLexicon`**（`core.policy`，`fun interface`）：`activationRisk(element, screen): ElementRisk?`，`ElementRisk.kind` 只能是 OUTWARD / SPEND / DELETE / SETTINGS。
+  - 实现在 policy 能力包（WP05）；屏幕格式化器（`screen` 能力包）和 PolicyEngine 都只依赖这个契约，所以 ⚠ 标记和判定用的是同一份词表。
+  - ⚠ 表示"高风险，可能触发确认"。是否真的弹出确认卡，还取决于安全级别和任务历史，格式化器不知道这些。
 
 ## Alternatives considered
 
@@ -124,6 +140,11 @@ M1/M2 的主循环、OpenAI 系适配器、Anthropic 适配器、PolicyEngine、
 - **blob 文件名带 `.jpg`**：内容寻址不该依赖扩展名，而且 PNG / WebP 也会存进来。
 - **`agentDisplay` 返回 `Result<SurfaceRef>`**：`Result` 里装的是任意 `Throwable`，UI 无法穷举"为什么不能用后台屏"。
 - **`concurrencySafe` 默认 `false`**：新工具忘了声明也能编译，与"每个工具都要说明能不能并行"的要求冲突。
+- **`UserInteraction` 三个方法共用一个 `UserReply` 返回类型**：`confirm` 也得处理"回答了一段文字"这种不可能的情况；超时和无人值守也不是用户的回复。
+- **任务停止时返回 `CANCELLED` 结果**：工具可能把它当成普通结果继续往下执行；用协程取消，"停止"就只有一种表达。
+- **`ConfirmCard` 留在 `policy`，把 `UserInteraction` 放进新的 `interaction` 契约层**：要多加一层，而且 `IntentKind` 和 `Money` 仍要跟着下移。
+- **`ElementRisk` 带上"在当前级别下是否确认"**：格式化器拿不到安全级别和任务历史。要传进来，屏幕格式就得依赖 `PolicyContext`；而且同一屏的格式会随设置变化，回放和金样也要跟着分情况。
+- **v1 加了字段就升到 v2**：v1 还没有合入，也没有任何代码写过 v1 日志；升版本只会留下一个永远用不到的空迁移。
 
 ## 后果
 

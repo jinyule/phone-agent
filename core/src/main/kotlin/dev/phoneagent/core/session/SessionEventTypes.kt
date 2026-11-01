@@ -34,6 +34,7 @@ public object SessionEventTypes {
             type<QuestionAnswered>(ignorable = true),
             type<HandoffStarted>(ignorable = true),
             type<HandoffEnded>(ignorable = true),
+            type<PromptWithdrawn>(ignorable = true),
             type<CompactionStarted>(ignorable = true),
             type<CompactionSummary>(ignorable = false),
             type<CompactionPrune>(ignorable = false),
