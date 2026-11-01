@@ -92,7 +92,10 @@ public enum class ToolStatus {
     /** The tool ran and reports a failure, or threw. */
     ERROR,
 
-    /** The policy refused it; the content explains to the model. */
+    /**
+     * Refused, not attempted: by the PolicyEngine, or by a device-side guard (e.g. an action on this
+     * app's own UI). The content explains to the model.
+     */
     REFUSED,
 
     /** Arguments did not parse or did not match the schema. */

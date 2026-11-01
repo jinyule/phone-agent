@@ -17,6 +17,7 @@ screen s13 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · 坐标 0–
 =====
 
 手机拒绝了这个动作：the target is PhoneAgent's own window。不要重试同一个动作，换个办法，或者 end_not_done。
+（动作后没能读到屏幕，用 phone_observe 查看当前画面）
 
 =====
 

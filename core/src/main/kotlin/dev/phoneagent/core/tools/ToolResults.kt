@@ -44,6 +44,11 @@ internal object ToolResults {
      * The result of an action or launch: a status line ([done] says what was done, e.g.
      * "已点击 @e10"), then the screen after it from [presenter]. [plannedOn] is the snapshot the
      * action named, or `null`.
+     *
+     * Whenever the outcome has a screen after it, the text shows that screen (diff or page, for
+     * every status, refusals included) and `details.screen` names it; without one the text tells
+     * the model to observe and `details` has no `screen`. So `details.screen` is always a screen
+     * the model has seen.
      */
     fun outcome(
         done: String,
@@ -64,7 +69,8 @@ internal object ToolResults {
                 }
 
                 is ActionOutcome.Status.Refused -> {
-                    ToolStatus.REFUSED to "手机拒绝了这个动作：${presenter.mask(result.reason)}。不要重试同一个动作，换个办法，或者 end_not_done。"
+                    ToolStatus.REFUSED to
+                        "手机拒绝了这个动作：${presenter.mask(result.reason)}。不要重试同一个动作，换个办法，或者 end_not_done。\n$screen"
                 }
 
                 ActionOutcome.Status.StaleRef -> {

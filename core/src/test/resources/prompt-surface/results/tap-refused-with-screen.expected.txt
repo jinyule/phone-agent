@@ -1,0 +1,4 @@
+手机拒绝了这个动作：the target is PhoneAgent's own window。不要重试同一个动作，换个办法，或者 end_not_done。
+screen s13 · 与 s12 相比的变化（其余不变）
+状态：键盘已弹出
++ @e11 "张三：在吗"

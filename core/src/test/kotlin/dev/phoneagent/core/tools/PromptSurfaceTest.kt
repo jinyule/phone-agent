@@ -204,6 +204,24 @@ class PromptSurfaceTest {
         }
 
     @Test
+    fun `results - a refusal shows the screen read after it`() =
+        runTest {
+            // A message arrived while the phone refused the tap: the model must see that screen.
+            val after = Samples.chatWith("s13", sent = "张三：在吗")
+            val refused =
+                ActionOutcome(
+                    ActionOutcome.Status.Refused("the target is PhoneAgent's own window"),
+                    ActionOutcome.Effect.UNKNOWN,
+                    after,
+                    ScreenDiffer().diff(Screens.CHAT, after),
+                )
+            Golden.assertMatches(
+                "results/tap-refused-with-screen.expected.txt",
+                run("phone_tap", """{"screen":"s12","ref":"e7"}""", refused),
+            )
+        }
+
+    @Test
     fun `results - invalid arguments and no screen`() =
         runTest {
             val invalid =

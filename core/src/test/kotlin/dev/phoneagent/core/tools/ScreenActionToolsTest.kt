@@ -224,6 +224,49 @@ class ScreenActionToolsTest {
         }
 
     @Test
+    fun `a refusal with a screen after it shows that screen, one without says to observe`() =
+        runTest {
+            val args = """{"screen":"s12","ref":"e10"}"""
+            val withScreen =
+                run(
+                    "phone_tap",
+                    args,
+                    FakeScreen().apply {
+                        onAct =
+                            { _, _ -> ActionOutcome(Status.Refused("自己的界面"), Effect.UNKNOWN, after, ScreenDiff()) }
+                    },
+                )
+            assertEquals(ToolStatus.REFUSED, withScreen.status)
+            assertTrue(withScreen.text().contains("\nscreen s13 · 与 s12 相比没有可见变化"), withScreen.text())
+            assertEquals("s13", withScreen.detail("screen"))
+            val blind =
+                run(
+                    "phone_tap",
+                    args,
+                    FakeScreen().apply {
+                        onAct =
+                            { _, _ -> ActionOutcome(Status.Refused("自己的界面"), Effect.UNKNOWN) }
+                    },
+                )
+            assertTrue(blind.text().contains("phone_observe"), blind.text())
+            assertNull(blind.detail("screen"))
+            // Every outcome with a screen after it shows it, so details.screen always names a screen the model saw.
+            for (status in listOf(Status.Ok, Status.Failed("x"), Status.Refused("y"), Status.StaleRef)) {
+                val result =
+                    run(
+                        "phone_tap",
+                        args,
+                        FakeScreen().apply {
+                            onAct =
+                                { _, _ -> ActionOutcome(status, Effect.CHANGED, after, ScreenDiff()) }
+                        },
+                    )
+                assertTrue(result.text().contains("screen s13"), "$status: ${result.text()}")
+                assertEquals("s13", result.detail("screen"), "$status")
+            }
+        }
+
+    @Test
     fun `failed, refused and stale outcomes are not OK and say what to do`() =
         runTest {
             fun screen(outcome: ActionOutcome) = FakeScreen().apply { onAct = { _, _ -> outcome } }
@@ -243,7 +286,11 @@ class ScreenActionToolsTest {
 
             val refused = run("phone_tap", args, screen(ActionOutcome(Status.Refused("系统设置页不允许点击"), Effect.UNKNOWN)))
             assertEquals(ToolStatus.REFUSED, refused.status)
-            assertEquals("手机拒绝了这个动作：系统设置页不允许点击。不要重试同一个动作，换个办法，或者 end_not_done。", refused.text())
+            assertEquals(
+                "手机拒绝了这个动作：系统设置页不允许点击。不要重试同一个动作，换个办法，或者 end_not_done。\n" +
+                    "（动作后没能读到屏幕，用 phone_observe 查看当前画面）",
+                refused.text(),
+            )
 
             val staleBlind = run("phone_tap", args, screen(ActionOutcome(Status.StaleRef, Effect.UNKNOWN)))
             assertEquals(ToolStatus.ERROR, staleBlind.status)
