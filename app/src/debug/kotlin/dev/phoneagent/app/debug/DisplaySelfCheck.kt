@@ -31,7 +31,7 @@ internal class DisplaySelfCheck(
     private val steps = SelfCheckSteps()
 
     fun run(): List<String> {
-        probe()
+        if (!probe()) return steps.lines()
         val display = DebugAgentDisplay(core, WIDTH, HEIGHT, DPI)
         try {
             if (steps.check("createDisplay", display.displayId >= 0, "id ${display.displayId}")) {
@@ -44,14 +44,26 @@ internal class DisplaySelfCheck(
         return steps.lines()
     }
 
-    private fun probe() {
-        val result = core.probe()
+    /**
+     * Records every probe step. False when the helper refuses to probe at all (a helper whose
+     * capabilities are unavailable answers NOT_IMPLEMENTED with the reason): nothing else can
+     * work, so the check stops there.
+     */
+    private fun probe(): Boolean {
+        val result =
+            try {
+                core.probe()
+            } catch (e: UnsupportedOperationException) {
+                steps.fail("probe", e.message.orEmpty())
+                return false
+            }
         val names = result.getStringArray(ProbeKeys.STEPS).orEmpty()
         val outcomes = result.getStringArray(ProbeKeys.RESULTS).orEmpty()
         names.zip(outcomes).forEach { (name, outcome) ->
             steps.check("probe.$name", outcome == ProbeKeys.RESULT_OK, outcome)
         }
         steps.check("probe.ok", result.getBoolean(ProbeKeys.OK))
+        return true
     }
 
     private fun onDisplay(display: DebugAgentDisplay) {

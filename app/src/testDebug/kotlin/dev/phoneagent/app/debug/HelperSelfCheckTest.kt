@@ -8,6 +8,7 @@ import android.os.Looper
 import android.os.RemoteException
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import dev.phoneagent.app.debug.HelperSelfCheck.Request
 import dev.phoneagent.app.helper.FakeHelper
 import dev.phoneagent.app.helper.HelperState
 import dev.phoneagent.privileged.PrivilegedProtocol
@@ -94,6 +95,16 @@ class HelperSelfCheckTest {
             Thread.yield()
         }
         assertEquals("FAIL: no helper connected", result.get())
+    }
+
+    @Test
+    fun theDisplayCheckFailsAtTheProbeOfAHelperWithoutCapabilities() {
+        // FakeHelper refuses probe() with NOT_IMPLEMENTED, the way NoCapabilities does.
+        val helper = FakeHelper()
+        val lines = HelperSelfCheck.run(context, HelperState.Connected(helper, FakeHelper.PID), Request("display"))
+        assertTrue(lines.toString(), lines.last().startsWith("FAIL") && lines.last().contains("probe"))
+        assertTrue("the reason is shown: $lines", lines.any { it.startsWith("probe: FAILED NOT_IMPLEMENTED") })
+        assertEquals("nothing is built on a helper that cannot probe", emptyList<String>(), helper.calls)
     }
 
     @Test
