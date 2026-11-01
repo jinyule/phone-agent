@@ -11,16 +11,20 @@ import kotlinx.serialization.json.JsonPrimitive
  * returns a new registry. Every tool is validated when the registry is built; any problem
  * fails construction with an [IllegalArgumentException] listing all of them.
  *
- * Manifest order is deterministic and append-only: groups in expansion order, tools within a
- * group in registration order. Expanding a group only appends, so the cached prompt prefix holds.
+ * Manifest order is deterministic and append-only: groups in expansion order (the order of
+ * `expanded`, then of [expand] calls), tools within a group in registration order. Expanding a
+ * group only appends, so the cached prompt prefix holds.
+ *
+ * Parameter schemas must stay within [ToolSchema]'s subset, which the argument validator
+ * implements in full.
  *
  * @property tools every registered tool, expanded or not, in registration order.
  */
 public class ToolRegistry(
     public val tools: List<Tool>,
-    expanded: Collection<ToolGroup>,
+    expanded: List<ToolGroup>,
 ) {
-    /** Groups whose tools are visible, in expansion order. */
+    /** Groups whose tools are visible, in expansion order; repeats in `expanded` are dropped. */
     public val expandedGroups: List<ToolGroup> = expanded.distinct()
 
     init {
@@ -54,9 +58,9 @@ public class ToolRegistry(
         public const val MAX_DESCRIPTION_LENGTH: Int = 1024
 
         /**
-         * Problems with [tool]'s definition: blank or over-long description, non-positive timeout,
-         * or a schema that is not an object schema whose properties are objects, whose `required`
-         * names only declared properties, and which declares a required string `reason`.
+         * Problems with [tool]'s definition, each prefixed with the tool name: blank or over-long
+         * description, non-positive timeout, a parameter schema outside [ToolSchema]'s subset, or
+         * one without a required string property `reason`.
          */
         internal fun problemsOf(tool: Tool): List<String> {
             val def = tool.def
@@ -66,31 +70,18 @@ public class ToolRegistry(
                 problems += "${def.name}: description longer than $MAX_DESCRIPTION_LENGTH chars"
             }
             if (tool.timeoutMs <= 0) problems += "${def.name}: timeoutMs must be > 0"
-            problems += schemaProblems(def.parameters).map { "${def.name}: $it" }
+            problems +=
+                (ToolSchema.problems(def.parameters) + reasonProblems(def.parameters)).map { "${def.name}: $it" }
             return problems
         }
 
-        private fun schemaProblems(schema: JsonObject): List<String> {
-            val properties = schema["properties"] as? JsonObject
-            val required = schema["required"]
-            // null = "required" present but not an array; absent "required" means no required names.
-            val requiredNames: List<String?>? =
-                if (required == null) emptyList() else (required as? JsonArray)?.map(::stringOrNull)
-            val reason = properties?.get(ToolCall.REASON) as? JsonObject
-            return buildList {
-                if (schema["type"] != JsonPrimitive("object")) add("schema type must be \"object\"")
-                if (properties == null) add("schema needs a \"properties\" object")
-                properties?.filterValues { it !is JsonObject }?.keys?.forEach {
-                    add("property '$it' must be a schema object")
-                }
-                if (requiredNames == null) add("\"required\" must be an array")
-                if (requiredNames.orEmpty().contains(null)) add("\"required\" must contain only strings")
-                requiredNames.orEmpty().filterNotNull().filter { properties?.containsKey(it) != true }.forEach {
-                    add("required property '$it' is not declared")
-                }
-                if (reason?.get("type") != JsonPrimitive("string") || ToolCall.REASON !in requiredNames.orEmpty()) {
-                    add("schema must declare a required string property '${ToolCall.REASON}'")
-                }
+        private fun reasonProblems(schema: JsonObject): List<String> {
+            val reason = (schema["properties"] as? JsonObject)?.get(ToolCall.REASON) as? JsonObject
+            val required = (schema["required"] as? JsonArray)?.mapNotNull(::stringOrNull).orEmpty()
+            return if (reason?.get("type") == JsonPrimitive("string") && ToolCall.REASON in required) {
+                emptyList()
+            } else {
+                listOf("schema must declare a required string property '${ToolCall.REASON}'")
             }
         }
 

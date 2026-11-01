@@ -160,6 +160,7 @@ M1/M2 的主循环、OpenAI 系适配器、Anthropic 适配器、PolicyEngine、
 - **跨记录不变量**（S4）：写入和读取都检查 `SessionInvariants`（surfaceOp 和类型匹配、每个调用 id 最多一条 `tool/call` 和一条 `tool/result`、上面几条 B2/B3/B5 的规则）。
 - **追加与取消**（S2、S3）：等锁时可以取消，什么都不写；拿到锁以后先检查取消；开始写的记录一定写完并计入，即使调用方已被取消（方法返回记录，job 报取消，调用方以 `records()` 为准）。写入过程中的任何失败都让 store 进入失败状态。收尾代码在 `withContext(NonCancellable)` 里追加。
 - **存储的持久性**（B4、S8）：新建目录后，从最深的新目录往上逐个 fsync 父目录，直到第一个原本存在的祖先；写入失败删除临时文件。`StoragePort.openAppender` 的契约：调用方在拿到句柄前被取消时，由实现关闭句柄。
+- **工具参数的 schema 子集**（S5）：注册时只接受 `core.tool.ToolSchema` 的 KDoc 列出的子集（每个 schema 一个 `type`；object / array / string / integer / number / boolean 各自允许的关键字；计数非负、下限不高于上限、enum 非空且不重复），并递归检查每一层。WP02 的参数校验器照这个子集实现，模型看到的 schema 就都能被完整执行。`ToolRegistry` 的 `expanded` 改为 `List<ToolGroup>`，展开顺序由调用方给出。
 - **值域校验**（S9）：turn、step、attempt ≥ 1，`request/retry.attempt` ≥ 2，延迟 ≥ 0，请求头按它产生的 `ChatRequest` 校验。坏值在解码时成为所在行的 `SessionCorruptedException`。
 
 ## Alternatives considered

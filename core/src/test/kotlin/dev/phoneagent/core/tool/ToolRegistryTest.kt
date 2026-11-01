@@ -168,6 +168,78 @@ class ToolRegistryTest {
         assertTrue(problems(noRequired).any { "required string property 'reason'" in it })
     }
 
+    private fun problemsWith(
+        properties: String,
+        topLevel: String = "",
+    ): List<String> {
+        val text =
+            """{"type":"object","properties":{"reason":{"type":"string"}$properties},""" +
+                """"required":["reason"]$topLevel}"""
+        return ToolRegistry.problemsOf(FakeTool("t", ToolGroup.PHONE, Json.parseToJsonElement(text) as JsonObject))
+    }
+
+    @Test
+    fun `schemas outside the supported subset are rejected at every depth`() {
+        val bad =
+            mapOf(
+                "unknown type" to (""","x":{"type":"strng"}""" to "x"),
+                "type list" to (""","x":{"type":["string","null"]}""" to "x"),
+                "missing type" to (""","x":{"description":"no type"}""" to "x"),
+                "unsupported keyword" to (""","x":{"type":"string","oneOf":7}""" to "x"),
+                "pattern is not supported" to (""","x":{"type":"string","pattern":"a+"}""" to "x"),
+                "keyword value of the wrong type" to (""","x":{"type":"integer","minimum":"zero"}""" to "x"),
+                "keyword of another type" to (""","x":{"type":"string","minimum":1}""" to "x"),
+                "fractional bound for an integer" to (""","x":{"type":"integer","maximum":1.5}""" to "x"),
+                "array without items" to (""","x":{"type":"array"}""" to "x"),
+                "bad items" to (""","x":{"type":"array","items":{"type":"strng"}}""" to "x.items"),
+                "bad nested property" to
+                    (""","x":{"type":"object","properties":{"y":{"type":"integer","maximum":"ten"}}}""" to "x.y"),
+                "nested required not declared" to
+                    (""","x":{"type":"object","properties":{},"required":["z"]}""" to "x"),
+                "enum of the wrong type" to (""","x":{"type":"string","enum":[1]}""" to "x"),
+                "empty enum" to (""","x":{"type":"string","enum":[]}""" to "x"),
+                "duplicate enum values" to (""","x":{"type":"string","enum":["a","a"]}""" to "x"),
+                "min above max" to (""","x":{"type":"string","minLength":3,"maxLength":2}""" to "x"),
+                "negative length" to (""","x":{"type":"string","minLength":-1}""" to "x"),
+                "additionalProperties of the wrong type" to
+                    (""","x":{"type":"object","additionalProperties":"no"}""" to "x"),
+                "description not a string" to (""","x":{"type":"string","description":1}""" to "x"),
+                "nested properties not an object" to (""","x":{"type":"object","properties":[]}""" to "x"),
+                "nested property not a schema" to (""","x":{"type":"object","properties":{"y":1}}""" to "x"),
+                "required twice" to
+                    (""","x":{"type":"object","properties":{"y":{"type":"string"}},"required":["y","y"]}""" to "x"),
+                "items not a schema" to (""","x":{"type":"array","items":[{"type":"string"}]}""" to "x"),
+                "negative item count" to (""","x":{"type":"array","items":{"type":"string"},"minItems":-1}""" to "x"),
+                "enum not an array" to (""","x":{"type":"integer","enum":1}""" to "x"),
+                "bad additionalProperties schema" to
+                    (""","x":{"type":"object","additionalProperties":{"type":"null"}}""" to "x.additionalProperties"),
+                "keyword on a boolean" to (""","x":{"type":"boolean","enum":[true]}""" to "x"),
+                "number bound not a number" to (""","x":{"type":"number","minimum":true}""" to "x"),
+                "number bounds crossed" to (""","x":{"type":"number","minimum":2,"maximum":1.5}""" to "x"),
+                "integer enum with a fraction" to (""","x":{"type":"integer","enum":[1,1.5]}""" to "x"),
+            )
+        val accepted =
+            bad.mapNotNull { (name, case) ->
+                val (properties, path) = case
+                val problems = problemsWith(properties)
+                if (problems.any { it.startsWith("t: $path: ") }) null else "$name (at $path): $problems"
+            }
+        assertEquals(emptyList<String>(), accepted, "schemas that should have been rejected")
+        assertTrue(problemsWith("", ""","additionalProperties":"no"""").isNotEmpty(), "top level is checked too")
+        assertTrue(problemsWith("", ""","title":"T"""").isNotEmpty(), "unknown top-level keyword")
+        val supported =
+            ""","x":{"type":"array","minItems":1,"maxItems":3,"description":"points",""" +
+                """"items":{"type":"object","additionalProperties":false,"required":["n"],""" +
+                """"properties":{"n":{"type":"integer","minimum":0,"maximum":999,"description":"d"}}}},""" +
+                """"k":{"type":"string","enum":["a","b"],"minLength":1,"maxLength":5},""" +
+                """"m":{"type":"object","additionalProperties":{"type":"string"}},""" +
+                """"b":{"type":"boolean"},"f":{"type":"number","minimum":0.5,"enum":[0.5,1]}"""
+        assertEquals(
+            emptyList<String>(),
+            problemsWith(supported, ""","additionalProperties":false,"description":"d""""),
+        )
+    }
+
     @Test
     fun `tools execute with a context and present pure cards`() =
         runTest {
