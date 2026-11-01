@@ -1,3 +1,3 @@
 # Append-only: <PrivilegedProtocol.VERSION> <AIDL fingerprint>. Checked by :privileged:verifyPrivilegedProtocol
 # (engineering-baseline §6). Never edit or remove a line; bump VERSION and append instead.
-1 779f810717162081cf292b3a6626af353ee91e4e74a382d101172a28517579e8
+1 ded94e5c145d576835459dcf2ff2dcf3874e4e60e829172c6d2b5541972cd701

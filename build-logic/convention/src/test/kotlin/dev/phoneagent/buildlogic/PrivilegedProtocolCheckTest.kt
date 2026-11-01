@@ -71,6 +71,38 @@ class PrivilegedProtocolCheckTest {
         assertEquals(fp1, PrivilegedProtocolCheck.fingerprint(mapOf(path to reworded)))
     }
 
+    private fun fp(aidl: String) = PrivilegedProtocolCheck.fingerprint(mapOf(path to aidl))
+
+    @Test
+    fun whitespaceBetweenTokensIsNotProtocol() {
+        assertEquals(fp1, fp(v1.replace("int protocolVersion() = 1;", "int protocolVersion ()=1;")))
+        assertEquals(fp1, fp(v1.replace("int[] identity() = 2;", "int [] identity( ) =2 ;")))
+        assertEquals(fp1, fp(v1.replace("interface IPrivilegedCore {", "interface IPrivilegedCore{")))
+        assertEquals(fp1, fp(v1.replace("(int displayId, int keyCode)", "( int displayId,int keyCode )")))
+    }
+
+    @Test
+    fun stringConstantsAreProtocol() {
+        val one =
+            v1.replace(
+                "    int protocolVersion() = 1;",
+                "    const String URL = \"https://one\";\n    int protocolVersion() = 1;",
+            )
+        assertNotEquals(fp(one), fp(one.replace("https://one", "https://two")))
+        assertNotEquals(fp(one), fp(one.replace("https://one", "https:  //one")), "spaces inside a string are text")
+        val block = one.replace("https://one", "/* a */")
+        assertNotEquals(fp(block), fp(one.replace("https://one", "/* b */")))
+        val escaped = one.replace("https://one", "a\\\"//b")
+        assertNotEquals(fp(escaped), fp(one.replace("https://one", "a\\\"//c")))
+    }
+
+    @Test
+    fun unterminatedCommentsAndStringsFailLoudly() {
+        assertThrows<IllegalArgumentException> { fp(v1.replace("/* [uid, pid] */", "/* [uid, pid]")) }
+        val error = assertThrows<IllegalArgumentException> { fp(v1.replace("= 19;", "= 19; const String A = \"x;")) }
+        assertTrue(error.message.orEmpty().contains("line 7"), error.message)
+    }
+
     @Test
     fun renamingOrMovingAFileIsAProtocolChange() {
         assertNotEquals(fp1, PrivilegedProtocolCheck.fingerprint(mapOf("dev/other/IPrivilegedCore.aidl" to v1)))

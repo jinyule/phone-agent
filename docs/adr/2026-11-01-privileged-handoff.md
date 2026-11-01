@@ -80,7 +80,8 @@ phase1-architecture §2.2 / §3.5 和 engineering-baseline §6 定了特权助�
 7. **未实现的方法**抛 `UnsupportedOperationException`，消息以 `NOT_IMPLEMENTED` 开头，用 `PrivilegedError.isNotImplemented` 判定。Binder 原生就能跨进程传这个异常。
 
 8. **AIDL 变更检查**。
-   - `privileged/protocol-history.txt` 是只追加的 `<版本号> <指纹>` 列表。指纹是所有 `.aidl` 文件去掉注释、压缩空白后，按相对路径算出的 SHA-256。
+   - `privileged/protocol-history.txt` 是只追加的 `<版本号> <指纹>` 列表。指纹是所有 `.aidl` 文件按相对路径、按 AIDL 词元（`AidlTokens`：去掉注释和词元之间的空白，字符串和字符常量原样保留）算出的 SHA-256。`int f()=1;` 和 `int f ( ) = 1 ;` 指纹相同，常量 `"https://one"` 改成 `"https://two"` 指纹不同。
+   - 第一版按"去注释、压缩空白"算指纹，会把 `f()=1` 和 `f() = 1` 当成不同协议，也会把字符串里的 `//` 当成注释。评审修复（2026-11-01）改成按词元算，history 第 1 行按新算法重算了一次：当时还没有发布过带旧指纹的 APK，AIDL 本身也没改。以后再改算法，就要按改协议处理（升版本、追加一行），不能重算旧行。
    - `:privileged:verifyPrivilegedProtocol` 要求列表最后一行等于当前 `VERSION` 和当前指纹，失败时直接给出该追加的那一行。
    - 这个任务挂在 `check` 上，CI 的 `privileged-build` job 也单独跑它。
    - 反例单测：`PrivilegedProtocolCheckTest.changedAidlWithoutAVersionBumpFails`。

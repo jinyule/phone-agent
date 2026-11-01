@@ -182,7 +182,7 @@ core/src/test/resources/sessions/<scenario>/
 - helper 是从 `base.apk` 加载的，**App 更新后，旧的 helper 进程可能还在运行旧代码**。
 - 交接时比对 `protocolVersion` 和 APK 的 versionCode；不一致就让旧 helper `releaseAll()` 并退出，再重新拉起。
 - CI 检查 AIDL 版本常量：改了 AIDL 文件就必须升版本号。实现（WP12）：
-  - `privileged/protocol-history.txt` 是只追加的 `<版本号> <指纹>` 列表；指纹是所有 `.aidl` 文件去掉注释、压缩空白后按相对路径算的 SHA-256，所以只改注释不算协议变更；
+  - `privileged/protocol-history.txt` 是只追加的 `<版本号> <指纹>` 列表；指纹是所有 `.aidl` 文件按相对路径、按 AIDL 词元算的 SHA-256（去掉注释和词元之间的空白，字符串常量原样保留），所以只改注释或排版不算协议变更；
   - `:privileged:verifyPrivilegedProtocol`（挂在 `check` 上，CI 的 `privileged-build` 也单独跑）要求最后一行等于当前的 `PrivilegedProtocol.VERSION` 和当前指纹，失败时直接给出要追加的那一行；
   - AIDL 的 1–4 号事务（`protocolVersion`、`identity`、`releaseAll`、`shutdown`）永久冻结，任何版本的 App 都能让任何版本的旧 helper 释放并退出（phase1-architecture §3.5）。
 

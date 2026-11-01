@@ -12,15 +12,12 @@ data class ProtocolEntry(
  * "Changing the AIDL requires bumping `PrivilegedProtocol.VERSION`" (engineering-baseline §6).
  *
  * `privileged/protocol-history.txt` is an append-only list of `<version> <fingerprint>` lines.
- * The fingerprint is a SHA-256 over every `.aidl` file (by relative path, comments removed and
- * whitespace collapsed, so editing a comment is not a protocol change). The last line must be the
- * current VERSION with the current fingerprint.
+ * The fingerprint is a SHA-256 over every `.aidl` file, by relative path and [AidlTokens] (so
+ * comments and whitespace between tokens are not protocol, string constants are). The last line
+ * must be the current VERSION with the current fingerprint.
  */
 object PrivilegedProtocolCheck {
     private val VERSION_DECLARATION = Regex("""const\s+val\s+VERSION\s*:\s*Int\s*=\s*(\d+)""")
-    private val BLOCK_COMMENT = Regex("""/\*.*?\*/""", RegexOption.DOT_MATCHES_ALL)
-    private val LINE_COMMENT = Regex("""//[^\n]*""")
-    private val WHITESPACE = Regex("""\s+""")
     private val HISTORY_LINE = Regex("""(0|[1-9]\d*)\s+([0-9a-f]{64})""")
 
     /** The value of `const val VERSION: Int = <n>` in [kotlinSource]; it must be declared exactly once. */
@@ -32,13 +29,8 @@ object PrivilegedProtocolCheck {
         return matches.single().groupValues[1].toInt()
     }
 
-    /** AIDL text without comments, whitespace collapsed to single spaces. */
-    fun normalize(aidl: String): String =
-        aidl
-            .replace(BLOCK_COMMENT, " ")
-            .replace(LINE_COMMENT, " ")
-            .replace(WHITESPACE, " ")
-            .trim()
+    /** [AidlTokens] of [aidl] joined by single spaces. */
+    fun normalize(aidl: String): String = AidlTokens.of(aidl).joinToString(" ")
 
     /** Fingerprint of [files] (relative path with `/` separators → content). */
     fun fingerprint(files: Map<String, String>): String {
