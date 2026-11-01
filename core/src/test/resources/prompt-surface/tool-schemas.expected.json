@@ -1,0 +1,537 @@
+[
+  {
+    "name": "phone_observe",
+    "description": "读当前屏幕，返回这一屏的元素列表（格式见系统提示）。detail=full 列出全部元素；image=true 附一张带编号框的截图。界面元素读不全时会自动附图。动作类工具的结果里已经带了动作后的画面，通常不用紧接着再读屏。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "这一步要做什么、为什么。用用户的语言写一句话，会显示给用户看。"
+        },
+        "detail": {
+          "type": "string",
+          "description": "brief（默认）只列值得操作的内容并控制长度；full 列出全部元素。",
+          "enum": [
+            "brief",
+            "full"
+          ]
+        },
+        "image": {
+          "type": "boolean",
+          "description": "true 附截图，false 不附；不填时界面读不全才附。"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "phone_apps",
+    "description": "列出手机上能打开的 App（名字 · 包名）。query 按名字或包名筛选，不区分大小写。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "这一步要做什么、为什么。用用户的语言写一句话，会显示给用户看。"
+        },
+        "query": {
+          "type": "string",
+          "description": "名字或包名里包含的文字，如 地图、tencent。不填列出全部。"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "phone_wait",
+    "description": "等屏幕满足条件再返回：condition=appear 等 text 出现，disappear 等 text 消失，stable 等画面不再变化（加载、动画）。timeoutMs 最多 30000，默认 10000。返回等完之后的一屏。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "这一步要做什么、为什么。用用户的语言写一句话，会显示给用户看。"
+        },
+        "condition": {
+          "type": "string",
+          "description": "等什么。",
+          "enum": [
+            "appear",
+            "disappear",
+            "stable"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "description": "appear、disappear 时要等的文字（按包含匹配）。stable 时不填。"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "description": "最多等多久（毫秒）。默认 10000。",
+          "minimum": 500,
+          "maximum": 30000
+        }
+      },
+      "required": [
+        "reason",
+        "condition"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "phone_tap",
+    "description": "点击一个元素。优先用 ref 指定最近一屏里的元素编号（如 @e10）；没有编号时用 x、y 坐标（0–999）。screen 填这个元素所在那一屏的编号（如 s12）。long=true 是长按。返回点击后的画面变化。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "这一步要做什么、为什么。用用户的语言写一句话，会显示给用户看。"
+        },
+        "screen": {
+          "type": "string",
+          "description": "这次点击依据的那一屏的编号，如 s12。"
+        },
+        "ref": {
+          "type": "string",
+          "description": "要点的元素编号，如 @e10。和 x、y 二选一。"
+        },
+        "x": {
+          "type": "integer",
+          "description": "横坐标，0 在最左，999 在最右。和 ref 二选一，要和 y 一起给。",
+          "minimum": 0,
+          "maximum": 999
+        },
+        "y": {
+          "type": "integer",
+          "description": "纵坐标，0 在最上，999 在最下。",
+          "minimum": 0,
+          "maximum": 999
+        },
+        "long": {
+          "type": "boolean",
+          "description": "true 表示长按。默认 false。"
+        }
+      },
+      "required": [
+        "reason",
+        "screen"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "phone_type",
+    "description": "在输入框里输入文字。ref 指定输入框；不填就输入到当前有焦点的输入框。默认替换框里原有的内容，append=true 改为追加到末尾；submit=true 输入后按回车或键盘上的发送、搜索键。密码、验证码、支付密码不要自己输入，用 hand_to_user 请用户来。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "这一步要做什么、为什么。用用户的语言写一句话，会显示给用户看。"
+        },
+        "screen": {
+          "type": "string",
+          "description": "这次输入依据的那一屏的编号，如 s12。"
+        },
+        "ref": {
+          "type": "string",
+          "description": "输入框的编号，如 @e9。不填就用当前有焦点的输入框。"
+        },
+        "text": {
+          "type": "string",
+          "description": "要输入的文字。"
+        },
+        "append": {
+          "type": "boolean",
+          "description": "true 表示追加到原有内容后面。默认 false（替换）。"
+        },
+        "submit": {
+          "type": "boolean",
+          "description": "true 表示输入后按回车或发送、搜索键。默认 false。"
+        }
+      },
+      "required": [
+        "reason",
+        "screen",
+        "text"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "phone_scroll",
+    "description": "滚动一页。direction=down 看下面的内容，up 看上面的，left、right 看左右的。ref 指定要滚动的列表（屏幕里用 ↕ 或 ↔ 标出的）；不填就滚动主列表。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "这一步要做什么、为什么。用用户的语言写一句话，会显示给用户看。"
+        },
+        "screen": {
+          "type": "string",
+          "description": "这次滚动依据的那一屏的编号，如 s12。"
+        },
+        "direction": {
+          "type": "string",
+          "description": "想看哪个方向的内容。",
+          "enum": [
+            "up",
+            "down",
+            "left",
+            "right"
+          ]
+        },
+        "ref": {
+          "type": "string",
+          "description": "要滚动的列表编号，如 @e5。不填就滚动主列表。"
+        }
+      },
+      "required": [
+        "reason",
+        "screen",
+        "direction"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "phone_swipe",
+    "description": "从 (x1,y1) 滑到 (x2,y2)，坐标 0–999，用时 durationMs 毫秒。只在 phone_scroll 和 phone_tap 做不到时用，比如拖动滑块、翻轮播图、下拉刷新。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "这一步要做什么、为什么。用用户的语言写一句话，会显示给用户看。"
+        },
+        "x1": {
+          "type": "integer",
+          "description": "起点横坐标，0–999。",
+          "minimum": 0,
+          "maximum": 999
+        },
+        "y1": {
+          "type": "integer",
+          "description": "起点纵坐标，0–999。",
+          "minimum": 0,
+          "maximum": 999
+        },
+        "x2": {
+          "type": "integer",
+          "description": "终点横坐标，0–999。",
+          "minimum": 0,
+          "maximum": 999
+        },
+        "y2": {
+          "type": "integer",
+          "description": "终点纵坐标，0–999。",
+          "minimum": 0,
+          "maximum": 999
+        },
+        "durationMs": {
+          "type": "integer",
+          "description": "滑动用时（毫秒）。快速翻页约 300，拖动约 1000。",
+          "minimum": 50,
+          "maximum": 5000
+        }
+      },
+      "required": [
+        "reason",
+        "x1",
+        "y1",
+        "x2",
+        "y2",
+        "durationMs"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "phone_key",
+    "description": "按系统键：back 返回上一页或关闭弹窗，home 回到桌面（后台屏上没有桌面，换 App 用 phone_launch），enter 回车。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "这一步要做什么、为什么。用用户的语言写一句话，会显示给用户看。"
+        },
+        "key": {
+          "type": "string",
+          "description": "要按的键。",
+          "enum": [
+            "back",
+            "home",
+            "enter"
+          ]
+        }
+      },
+      "required": [
+        "reason",
+        "key"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "phone_launch",
+    "description": "打开 App 或链接。app 填 App 的名字（如 微信）或包名；cold=true 先结束这个 App 再从头打开。link 填网址或 App 深链（如 https://…、weixin://…）。app 和 link 只填一个。返回打开后的一屏。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "这一步要做什么、为什么。用用户的语言写一句话，会显示给用户看。"
+        },
+        "app": {
+          "type": "string",
+          "description": "App 名字（和桌面上显示的一样）或包名。"
+        },
+        "link": {
+          "type": "string",
+          "description": "网址或 App 深链。"
+        },
+        "cold": {
+          "type": "boolean",
+          "description": "true 表示先结束 App 再打开（从首页开始）。只和 app 一起用。"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "phone_intent",
+    "description": "用系统功能直接完成常见操作，不用先找到对应的 App。kind 和要填的字段：alarm 设闹钟（time 如 07:30，label?）；timer 倒计时（seconds，label?）；calendar 新建日程（title，start 如 2026-11-02T10:00，end?，location?）；share 分享文字（text）；dial 打开拨号盘并填好号码，不会拨出（number）；navigate 导航（place）；settings 打开设置页（page：wifi / bluetooth / display / sound / battery / date / locale / location / storage / app_details；app_details 还要填 package）。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "这一步要做什么、为什么。用用户的语言写一句话，会显示给用户看。"
+        },
+        "kind": {
+          "type": "string",
+          "description": "要用的系统功能。",
+          "enum": [
+            "alarm",
+            "timer",
+            "calendar",
+            "share",
+            "dial",
+            "navigate",
+            "settings"
+          ]
+        },
+        "time": {
+          "type": "string",
+          "description": "alarm：时间，24 小时制 HH:mm，如 07:30。"
+        },
+        "label": {
+          "type": "string",
+          "description": "alarm、timer：名称，可不填。"
+        },
+        "seconds": {
+          "type": "integer",
+          "description": "timer：倒计时秒数。",
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "title": {
+          "type": "string",
+          "description": "calendar：日程标题。"
+        },
+        "start": {
+          "type": "string",
+          "description": "calendar：开始时间，yyyy-MM-ddTHH:mm，如 2026-11-02T10:00。"
+        },
+        "end": {
+          "type": "string",
+          "description": "calendar：结束时间，格式同 start，可不填。"
+        },
+        "location": {
+          "type": "string",
+          "description": "calendar：地点，可不填。"
+        },
+        "text": {
+          "type": "string",
+          "description": "share：要分享的文字。"
+        },
+        "number": {
+          "type": "string",
+          "description": "dial：电话号码。"
+        },
+        "place": {
+          "type": "string",
+          "description": "navigate：目的地，地名或地址。"
+        },
+        "page": {
+          "type": "string",
+          "description": "settings：设置页。",
+          "enum": [
+            "wifi",
+            "bluetooth",
+            "display",
+            "sound",
+            "battery",
+            "date",
+            "locale",
+            "location",
+            "storage",
+            "app_details"
+          ]
+        },
+        "package": {
+          "type": "string",
+          "description": "settings 且 page=app_details：App 的包名。"
+        }
+      },
+      "required": [
+        "reason",
+        "kind"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "ask_user",
+    "description": "问用户一个问题，等用户回答。只在缺少必须由用户决定的信息时用（选哪个、填什么、要不要继续）。options 给出建议的选项，用户也可以自由回答。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "这一步要做什么、为什么。用用户的语言写一句话，会显示给用户看。"
+        },
+        "question": {
+          "type": "string",
+          "description": "要问的问题，用用户的语言。"
+        },
+        "options": {
+          "type": "array",
+          "description": "建议的选项（最多 6 个），可不填。",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 6
+        }
+      },
+      "required": [
+        "reason",
+        "question"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "hand_to_user",
+    "description": "请用户自己完成这一步：把 App 交到用户眼前，等用户处理完再拿回来。用于登录、验证码、支付、禁止截屏的页面，以及必须由用户亲手选择的情况。reason 写清楚要用户做什么。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "这一步要做什么、为什么。用用户的语言写一句话，会显示给用户看。"
+        },
+        "kind": {
+          "type": "string",
+          "description": "为什么要用户来。",
+          "enum": [
+            "login",
+            "captcha",
+            "payment",
+            "secure_page",
+            "choose",
+            "other"
+          ]
+        }
+      },
+      "required": [
+        "reason",
+        "kind"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "request_confirmation",
+    "description": "做一件有后果的事之前，主动请用户确认：action 写要做什么，target 写对谁或对什么，content 写具体内容，amount 写金额（如 ¥128.00）。用户同意才返回成功；用户拒绝就不要做。它只会多一次确认：系统规则要求的确认照样会出现。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "这一步要做什么、为什么。用用户的语言写一句话，会显示给用户看。"
+        },
+        "action": {
+          "type": "string",
+          "description": "要做的事，如 发送消息、下单、删除。"
+        },
+        "target": {
+          "type": "string",
+          "description": "对谁或对什么，如 联系人名字、商品名。"
+        },
+        "content": {
+          "type": "string",
+          "description": "具体内容，如 消息原文、订单内容。"
+        },
+        "amount": {
+          "type": "string",
+          "description": "涉及的金额和币种，如 ¥128.00。没有就不填。"
+        }
+      },
+      "required": [
+        "reason",
+        "action",
+        "target",
+        "content"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "end_not_done",
+    "description": "任务做不成时结束这一轮，不要硬做。cause：impossible 做不到（没有这个功能、找不到这个东西），blocked 被拦住（登录墙、风控、限流、需要用户但用户不在），user_stopped 用户要求停止，other 其他。summary 用用户的语言写清楚做了什么、卡在哪、用户可以怎么办。任务完成时不要用它，直接回复用户。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "这一步要做什么、为什么。用用户的语言写一句话，会显示给用户看。"
+        },
+        "cause": {
+          "type": "string",
+          "description": "为什么做不成。",
+          "enum": [
+            "impossible",
+            "blocked",
+            "user_stopped",
+            "other"
+          ]
+        },
+        "summary": {
+          "type": "string",
+          "description": "给用户的说明：做了什么、卡在哪、用户可以怎么办。"
+        }
+      },
+      "required": [
+        "reason",
+        "cause",
+        "summary"
+      ],
+      "additionalProperties": false
+    }
+  }
+]

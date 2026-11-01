@@ -1,0 +1,414 @@
+package dev.phoneagent.core.tools
+
+import dev.phoneagent.core.ids.SnapshotId
+import dev.phoneagent.core.model.ToolDef
+import dev.phoneagent.core.ports.ActionOutcome
+import dev.phoneagent.core.ports.AppEntry
+import dev.phoneagent.core.ports.ElementRef
+import dev.phoneagent.core.ports.ElementRole
+import dev.phoneagent.core.ports.ElementState
+import dev.phoneagent.core.ports.OcrLine
+import dev.phoneagent.core.ports.ScreenFlag
+import dev.phoneagent.core.ports.ScreenSnapshot
+import dev.phoneagent.core.ports.SnapshotDetail
+import dev.phoneagent.core.ports.TreeQuality
+import dev.phoneagent.core.screen.ScreenDiffer
+import dev.phoneagent.core.screen.ScreenFormatter
+import dev.phoneagent.core.testing.FakeCatalog
+import dev.phoneagent.core.testing.FakeContext
+import dev.phoneagent.core.testing.FakeInteraction
+import dev.phoneagent.core.testing.FakeScreen
+import dev.phoneagent.core.testing.Golden
+import dev.phoneagent.core.testing.Screens
+import dev.phoneagent.core.testing.Screens.box
+import dev.phoneagent.core.testing.Screens.el
+import dev.phoneagent.core.testing.Screens.snapshot
+import dev.phoneagent.core.testing.Screens.under
+import dev.phoneagent.core.testing.call
+import dev.phoneagent.core.testing.text
+import dev.phoneagent.core.tool.ToolContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.serializer
+import org.junit.jupiter.api.Test
+
+/**
+ * The prompt surface (engineering-baseline §3.1 L3): system prompt, tool schemas, typical screens
+ * and typical tool results, byte for byte against `src/test/resources/prompt-surface/`.
+ * A failure means model-visible text changed: review the diff (see [Golden]).
+ */
+class PromptSurfaceTest {
+    private val formatter = ScreenFormatter(lexicon = Screens.LEXICON)
+    private val tools = PhaseOneTools.create(formatter).associateBy { it.def.name }
+
+    @Test
+    fun `system prompt`() {
+        val text = SystemPrompt.BLOCKS.joinToString("\n\n") { "<!-- block: ${it.id} -->\n${it.text}" }
+        Golden.assertMatches("system-prompt.expected.md", text)
+    }
+
+    @OptIn(ExperimentalSerializationApi::class)
+    @Test
+    fun `tool schemas`() {
+        val json =
+            Json {
+                prettyPrint = true
+                prettyPrintIndent = "  "
+            }
+        val defs = PhaseOneTools.create(formatter).map { it.def }
+        Golden.assertMatches("tool-schemas.expected.json", json.encodeToString(serializer<List<ToolDef>>(), defs))
+    }
+
+    @Test
+    fun `screens - chat page`() {
+        Golden.assertMatches("screens/chat-page.expected.txt", formatter.page(Screens.CHAT, SnapshotDetail.BRIEF))
+    }
+
+    @Test
+    fun `screens - long list folded with the bottom bar kept`() {
+        Golden.assertMatches(
+            "screens/long-list-folded.expected.txt",
+            formatter.page(Samples.longList, SnapshotDetail.BRIEF),
+        )
+    }
+
+    @Test
+    fun `screens - masked numbers and a secret field`() {
+        Golden.assertMatches(
+            "screens/masked-and-secret.expected.txt",
+            formatter.page(Samples.login, SnapshotDetail.BRIEF),
+        )
+    }
+
+    @Test
+    fun `screens - sparse tree with OCR`() {
+        Golden.assertMatches(
+            "screens/sparse-with-ocr.expected.txt",
+            formatter.page(Samples.sparse, SnapshotDetail.FULL),
+        )
+    }
+
+    @Test
+    fun `results - type shows only the diff`() =
+        runTest {
+            val after = Samples.chatWith(id = "s13", draft = "十点半")
+            val result = act("phone_type", """{"screen":"s12","ref":"@e9","text":"十点半"}""", Screens.CHAT, after)
+            Golden.assertMatches("results/type-diff.expected.txt", result)
+        }
+
+    @Test
+    fun `results - tap send adds a message`() =
+        runTest {
+            val after = Samples.chatWith(id = "s14", sent = "我：十点半")
+            val result =
+                act("phone_tap", """{"screen":"s13","ref":"e10"}""", Samples.chatWith("s13", draft = "十点半"), after)
+            Golden.assertMatches("results/tap-diff.expected.txt", result)
+        }
+
+    @Test
+    fun `results - tap opens a new page in full`() =
+        runTest {
+            val result = act("phone_tap", """{"screen":"s12","ref":"e3"}""", Screens.CHAT, Samples.chatInfo)
+            Golden.assertMatches("results/tap-big-change.expected.txt", result)
+        }
+
+    @Test
+    fun `results - tap without visible change`() =
+        runTest {
+            val after = Samples.chatWith(id = "s13")
+            val outcome =
+                ActionOutcome(
+                    ActionOutcome.Status.Ok,
+                    ActionOutcome.Effect.NO_CHANGE,
+                    after,
+                    ScreenDiffer().diff(Screens.CHAT, after),
+                )
+            Golden.assertMatches(
+                "results/tap-no-change.expected.txt",
+                run("phone_tap", """{"screen":"s12","x":500,"y":230}""", outcome),
+            )
+        }
+
+    @Test
+    fun `results - stale ref, refused, failed`() =
+        runTest {
+            val stale =
+                ActionOutcome(
+                    ActionOutcome.Status.StaleRef,
+                    ActionOutcome.Effect.UNKNOWN,
+                    Samples.chatWith("s13", sent = "张三：在吗"),
+                )
+            val refused =
+                ActionOutcome(
+                    ActionOutcome.Status.Refused("the target is PhoneAgent's own window"),
+                    ActionOutcome.Effect.UNKNOWN,
+                )
+            val failed =
+                ActionOutcome(ActionOutcome.Status.Failed("element is not clickable"), ActionOutcome.Effect.UNKNOWN)
+            val tap = """{"screen":"s12","ref":"e7"}"""
+            val text =
+                listOf(stale, refused, failed)
+                    .map { outcome ->
+                        run("phone_tap", tap, outcome)
+                    }.joinToString("\n\n=====\n\n")
+            Golden.assertMatches("results/tap-stale-refused-failed.expected.txt", text)
+        }
+
+    @Test
+    fun `results - invalid arguments and no screen`() =
+        runTest {
+            val invalid =
+                tools
+                    .getValue(
+                        "phone_tap",
+                    ).execute(call("phone_tap", """{"ref":"@x","x":1200,"speed":3}"""), FakeContext())
+            val noScreen =
+                tools
+                    .getValue(
+                        "phone_tap",
+                    ).execute(call("phone_tap", """{"screen":"s12","ref":"e1"}"""), FakeContext(screen = null))
+            Golden.assertMatches(
+                "results/invalid-and-no-screen.expected.txt",
+                invalid.text() + "\n\n=====\n\n" + noScreen.text(),
+            )
+        }
+
+    @Test
+    fun `results - observe attaches a frame for a sparse tree, never on a secure page`() =
+        runTest {
+            val sparse =
+                tools
+                    .getValue(
+                        "phone_observe",
+                    ).execute(call("phone_observe"), FakeContext(FakeScreen(Samples.sparse)))
+            val secure = Samples.sparse.copy(id = SnapshotId("s31"), flags = setOf(ScreenFlag.SECURE))
+            val refused =
+                tools
+                    .getValue(
+                        "phone_observe",
+                    ).execute(call("phone_observe", """{"image":true}"""), FakeContext(FakeScreen(secure)))
+            Golden.assertMatches(
+                "results/observe-images.expected.txt",
+                sparse.text() + "\n\n=====\n\n" + refused.text(),
+            )
+        }
+
+    @Test
+    fun `results - wait that times out`() =
+        runTest {
+            val screen =
+                FakeScreen(Screens.CHAT).apply {
+                    onAwaitChange = {
+                        delay(it)
+                        false
+                    }
+                }
+            val result =
+                tools
+                    .getValue(
+                        "phone_wait",
+                    ).execute(
+                        call("phone_wait", """{"condition":"appear","text":"已送达","timeoutMs":3000}"""),
+                        FakeContext(screen),
+                    )
+            Golden.assertMatches("results/wait-timeout.expected.txt", result.text())
+        }
+
+    @Test
+    fun `results - apps and launching by name`() =
+        runTest {
+            val catalog = FakeCatalog(Samples.apps)
+            val ctx = FakeContext(apps = catalog)
+            val list = tools.getValue("phone_apps").execute(call("phone_apps", """{"query":"微"}"""), ctx)
+            val missing = tools.getValue("phone_launch").execute(call("phone_launch", """{"app":"微"}"""), ctx)
+            val launched = tools.getValue("phone_launch").execute(call("phone_launch", """{"app":"微信"}"""), ctx)
+            Golden.assertMatches(
+                "results/apps-and-launch.expected.txt",
+                listOf(
+                    list,
+                    missing,
+                    launched,
+                ).joinToString("\n\n=====\n\n") {
+                    it.text()
+                },
+            )
+        }
+
+    @Test
+    fun `results - user interaction and ending the turn`() =
+        runTest {
+            val ctx = FakeContext(interaction = FakeInteraction())
+            val asked =
+                tools
+                    .getValue(
+                        "ask_user",
+                    ).execute(call("ask_user", """{"question":"几点到？","options":["十点","十一点"]}"""), ctx)
+            val handed =
+                tools
+                    .getValue(
+                        "hand_to_user",
+                    ).execute(call("hand_to_user", """{"kind":"login"}""", reason = "请登录微信"), ctx)
+            val confirmed =
+                tools.getValue("request_confirmation").execute(
+                    call("request_confirmation", """{"action":"发送消息","target":"张三","content":"十点半到"}"""),
+                    ctx,
+                )
+            val ended =
+                tools
+                    .getValue(
+                        "end_not_done",
+                    ).execute(call("end_not_done", """{"cause":"blocked","summary":"需要登录"}"""), ctx)
+            Golden.assertMatches(
+                "results/interaction-and-end.expected.txt",
+                listOf(asked, handed, confirmed, ended).joinToString("\n\n=====\n\n") { it.text() },
+            )
+        }
+
+    private suspend fun act(
+        tool: String,
+        args: String,
+        before: ScreenSnapshot,
+        after: ScreenSnapshot,
+    ): String =
+        run(
+            tool,
+            args,
+            ActionOutcome(
+                ActionOutcome.Status.Ok,
+                ActionOutcome.Effect.CHANGED,
+                after,
+                ScreenDiffer().diff(before, after),
+            ),
+        )
+
+    private suspend fun run(
+        tool: String,
+        args: String,
+        outcome: ActionOutcome,
+    ): String {
+        val screen = FakeScreen().apply { onAct = { _, _ -> outcome } }
+        val ctx: ToolContext = FakeContext(screen)
+        return tools.getValue(tool).execute(call(tool, args), ctx).text()
+    }
+}
+
+/** Sample screens for the golden files (synthetic data only). */
+internal object Samples {
+    fun chatWith(
+        id: String,
+        draft: String? = null,
+        sent: String? = null,
+    ): ScreenSnapshot {
+        val message = sent?.let { el("e11", ElementRole.TEXT, it, box(600, 400, 960, 460)).under("e5") }
+        val elements =
+            Screens.CHAT_ELEMENTS.flatMap { element ->
+                when {
+                    element.ref.value == "e9" && draft != null -> listOf(element.copy(value = draft))
+                    element.ref.value == "e7" && message != null -> listOf(element, message)
+                    else -> listOf(element)
+                }
+            }
+        return Screens.CHAT.copy(id = SnapshotId(id), elements = elements)
+    }
+
+    private val click = setOf(ElementState.CLICKABLE)
+
+    val chatInfo: ScreenSnapshot =
+        snapshot(
+            "s13",
+            listOf(
+                el("e1", ElementRole.BUTTON, "返回", box(0, 30, 80, 90), click),
+                el("e20", ElementRole.TEXT, "聊天信息", box(380, 40, 620, 80)),
+                el("e21", ElementRole.CONTAINER, null, box(0, 120, 999, 260), click),
+                el("e22", ElementRole.IMAGE, "张三", box(40, 140, 160, 240)).under("e21"),
+                el("e23", ElementRole.SWITCH, "消息免打扰", box(0, 300, 999, 380), click),
+                el("e24", ElementRole.SWITCH, "置顶聊天", box(0, 380, 999, 460), click + ElementState.CHECKED),
+                el("e25", ElementRole.BUTTON, "清空聊天记录", box(0, 600, 999, 680), click),
+            ),
+        ).copy(activity = "com.tencent.mm.ui.SingleChatInfoUI")
+
+    val longList: ScreenSnapshot =
+        snapshot(
+            "s20",
+            buildList {
+                add(el("e1", ElementRole.TEXT, "微信(3)", box(400, 40, 600, 80)))
+                add(el("e2", ElementRole.BUTTON, "搜索", box(800, 30, 880, 90), click))
+                add(el("e3", ElementRole.LIST, null, box(0, 100, 999, 880), setOf(ElementState.SCROLLABLE)))
+                var next = 4
+                for (i in 1..60) {
+                    val top = 100 + (i - 1) * 13
+                    val row = "e${next++}"
+                    val time = "${8 + i / 30}:${(i * 2 % 60).toString().padStart(2, '0')}"
+                    add(
+                        el(
+                            row,
+                            ElementRole.CONTAINER,
+                            null,
+                            box(0, top, 999, top + 12),
+                            click + ElementState.LONG_CLICKABLE,
+                        ).under("e3"),
+                    )
+                    add(el("e${next++}", ElementRole.TEXT, "联系人$i", box(150, top, 500, top + 6)).under(row))
+                    add(
+                        el(
+                            "e${next++}",
+                            ElementRole.TEXT,
+                            "最近一条消息 $i：周末一起吃饭吗",
+                            box(150, top + 6, 800, top + 12),
+                        ).under(row),
+                    )
+                    add(el("e${next++}", ElementRole.TEXT, time, box(850, top, 980, top + 6)).under(row))
+                }
+                for ((i, tab) in listOf("微信", "通讯录", "发现", "我").withIndex()) {
+                    val states = if (i == 0) click + ElementState.SELECTED else click
+                    add(el("e${next++}", ElementRole.TAB, tab, box(i * 250, 900, i * 250 + 249, 999), states))
+                }
+            },
+        ).copy(activity = "com.tencent.mm.ui.LauncherUI")
+
+    val login: ScreenSnapshot =
+        snapshot(
+            "s30",
+            listOf(
+                el("e1", ElementRole.TEXT, "绑定银行卡", box(350, 40, 650, 80)),
+                el("e2", ElementRole.INPUT, "手机号", box(40, 200, 960, 260), click + ElementState.EDITABLE)
+                    .copy(value = "13800138000"),
+                el("e3", ElementRole.INPUT, "支付密码", box(40, 280, 960, 340), click + ElementState.EDITABLE)
+                    .copy(secret = true),
+                el("e4", ElementRole.TEXT, "卡号 6222 0212 3456 7894，持卡人身份证 11010519491231002X", box(40, 380, 960, 440)),
+                el("e5", ElementRole.TEXT, "订单号 6222021234567894 已提交", box(40, 460, 960, 500)),
+                el("e6", ElementRole.CHECKBOX, "同意《用户协议》", box(40, 540, 600, 580), click),
+                el("e7", ElementRole.BUTTON, "支付", box(40, 880, 960, 960), click + ElementState.DISABLED),
+            ),
+        ).copy(
+            pkg = "com.example.wallet",
+            activity = "com.example.wallet.BindCardActivity",
+            flags = setOf(ScreenFlag.PAYMENT, ScreenFlag.KEYBOARD),
+        )
+
+    val sparse: ScreenSnapshot =
+        snapshot(
+            "s40",
+            listOf(
+                el("e1", ElementRole.BUTTON, "关闭", box(900, 30, 980, 90), click),
+                el("e2", ElementRole.OTHER, null, box(0, 100, 999, 900)),
+                el("e3", ElementRole.BUTTON, null, box(400, 920, 600, 980), click),
+            ),
+        ).copy(
+            pkg = "com.example.game",
+            activity = "com.example.game.GameActivity",
+            quality = TreeQuality.SPARSE,
+            ocr = listOf(OcrLine("开始游戏", box(400, 500, 600, 560), 0.93), OcrLine("排行榜", box(400, 620, 600, 680), 0.9)),
+        )
+
+    val apps: List<AppEntry> =
+        listOf(
+            AppEntry("com.tencent.mm", "微信", launchable = true),
+            AppEntry("com.tencent.weread", "微信读书", launchable = true),
+            AppEntry("com.sina.weibo", "微博", launchable = true),
+            AppEntry("com.autonavi.minimap", "高德地图", launchable = true),
+            AppEntry("com.android.providers.media", "媒体存储", launchable = false),
+        )
+}

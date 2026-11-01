@@ -1,0 +1,84 @@
+package dev.phoneagent.core.tools
+
+import dev.phoneagent.core.ports.HandoffKind
+import dev.phoneagent.core.ports.HandoffResult
+import dev.phoneagent.core.tool.RiskClass
+import dev.phoneagent.core.tool.ToolCall
+import dev.phoneagent.core.tool.ToolContext
+import dev.phoneagent.core.tool.ToolGroup
+import dev.phoneagent.core.tool.ToolResult
+import dev.phoneagent.core.tool.ToolStatus
+
+/**
+ * `hand_to_user(kind, reason)` (phase1 §5, §7.3): the user does this step themselves. The call's
+ * `reason` is what the user is asked to do. Whatever the result, the screen has changed, so the
+ * model is told to observe before acting.
+ */
+internal class HandToUserTool(
+    mask: (String) -> String,
+    override val timeoutMs: Long,
+) : PhaseOneTool(
+        name = "hand_to_user",
+        description =
+            "请用户自己完成这一步：把 App 交到用户眼前，等用户处理完再拿回来。" +
+                "用于登录、验证码、支付、禁止截屏的页面，以及必须由用户亲手选择的情况。reason 写清楚要用户做什么。",
+        mask = mask,
+        declare = {
+            string("kind", "为什么要用户来。", required = true, enum = KINDS.keys.toList())
+        },
+    ) {
+    override val group: ToolGroup = ToolGroup.GENERAL
+    override val risk: RiskClass = RiskClass.READ
+    override val concurrencySafe: Boolean = false
+
+    override suspend fun execute(
+        call: ToolCall,
+        ctx: ToolContext,
+    ): ToolResult {
+        val args = reader(call)
+        return when (val parsed = args.finish(USAGE, args.choice("kind", KINDS, required = true))) {
+            is Parsed.Invalid -> ToolResults.invalid(parsed.message)
+            is Parsed.Ok -> report(ctx.interaction.handOff(parsed.value, call.reason))
+        }
+    }
+
+    private fun report(result: HandoffResult): ToolResult =
+        when (result) {
+            HandoffResult.DONE -> {
+                ToolResult.ok("用户说已经处理好了。画面已经变了：先 phone_observe 核实结果，再继续。")
+            }
+
+            HandoffResult.DECLINED -> {
+                ToolResult.failure(
+                    ToolStatus.ERROR,
+                    "用户没有处理就把任务交回来了。不要绕过这一步：问用户怎么办（ask_user），或者 end_not_done(cause=blocked)。",
+                )
+            }
+
+            HandoffResult.EXPIRED -> {
+                ToolResult.failure(ToolStatus.ERROR, "用户一直没有处理（已超时）。先 phone_observe 看看现在的画面，再决定。")
+            }
+
+            HandoffResult.UNAVAILABLE -> {
+                ToolResult.failure(ToolStatus.ERROR, "现在没有人能接手（无人值守的任务）。这一步只能用户来做：end_not_done(cause=blocked)。")
+            }
+
+            HandoffResult.FAILED -> {
+                ToolResult.failure(ToolStatus.ERROR, "没能把画面交给用户（切换屏幕失败）。先 phone_observe 看看现在的画面，再决定。")
+            }
+        }
+
+    private companion object {
+        const val USAGE = "hand_to_user(kind=login/captcha/payment/secure_page/choose/other)"
+    }
+}
+
+private val KINDS =
+    linkedMapOf(
+        "login" to HandoffKind.LOGIN,
+        "captcha" to HandoffKind.CAPTCHA,
+        "payment" to HandoffKind.PAYMENT,
+        "secure_page" to HandoffKind.SECURE_PAGE,
+        "choose" to HandoffKind.CHOOSE,
+        "other" to HandoffKind.OTHER,
+    )

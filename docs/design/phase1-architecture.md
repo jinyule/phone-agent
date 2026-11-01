@@ -49,9 +49,10 @@ phone-agent/
 │   agent/       主循环（turn/step 状态机）、Inbox、拦截链、上下文、压缩
 │   session/     SessionEvent、JSONL 存储、投影（推导模型消息 / UI 状态）、修复、版本
 │   model/       ChatModel 接口与协议适配（openai-compat、anthropic）
-│   tool/        Tool 接口、ToolRegistry（静态 schema、分组展开）
+│   tool/        Tool 接口、ToolRegistry（静态 schema、分组展开）、ScreenPresenter（工具取屏幕文字的契约）
 │   policy/      PolicyEngine、IrreversibleDetector、包名/页面/字段分类
-│   screen/      ScreenSnapshot 模型、格式化、差分、指纹、TreeQuality
+│   screen/      屏幕格式（ScreenFormatter，实现 ScreenPresenter）、差分、指纹、TreeQuality、号码打码（ScreenAnalyzer 实现 SnapshotAnalyzer）
+│   tools/       第一阶段工具（§5）与系统提示 SystemPrompt；屏幕文字只经 ScreenPresenter 拿，不引用 screen
 │   guard/       LoopGuard、OutwardPacing、效果判定
 │   ports/       ScreenPort / SurfaceManager / StoragePort / Clock 等接口
 │   adb/         无线调试配对与 ADB 连接（纯 Kotlin，可 JVM 测）
@@ -499,26 +500,43 @@ sealed interface SessionEvent   // task/start|level-changed、turn/start|end、s
 
 ## 4. 给模型的屏幕格式（v0）
 
+实现在 `core.screen.ScreenFormatter`，逐字节金样在 `core/src/test/resources/prompt-surface/`（改格式要同时改金样）。
+
 ```
-screen s12 · 微信 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · 坐标 0–999
+screen s12 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · 坐标 0–999
+状态：键盘已弹出
 [顶部]
 @e1 按钮 "返回" (40,60)
-@e2 标题 "张三"
-[中部] ↕ 列表 @e5
+@e2 "张三"
+@e3 按钮 "更多" (940,60)              ← 无名按钮吸收了子节点的文字
+[中部]
+↕ 列表 @e5 "聊天记录"                 ← 可滚动容器单独一行（横向的是 ↔），里面的行多缩进一级
   @e6 "张三：明天几点到？"
-  @e7 + "我：十点"                    ← + = 相对上一屏新出现
+  @e7 "我：十点"
+  … 另有 14 项（在 @e5 里滚动查看）     ← 超出预算时的折叠行，紧跟在该列表最后一行之后
 [底部]
 @e9 输入框 (提示:"发送消息") {可编辑,焦点} (480,955)
 @e10 ⚠ 按钮 "发送" (930,955)          ← ⚠ = 高风险（对外 / 花钱 / 删除 / 设置），点它可能触发确认；与 PolicyEngine 共用 RiskLexicon
-… 另有 14 项（在 @e5 里滚动查看）
 ```
 
 规则：
-- 一行一个元素；可点击的元素吸收其下纯文本子节点的文字。
+- 一行一个元素：`@eN`、类型词（纯文字不写）、引号里的文字、`值:"…"`、`(提示:"…")`、`{状态}`，能操作的元素末尾给中心坐标 `(x,y)`（0–999）。
+- 可点击的元素吸收其下纯文本子节点的文字（用 ` · ` 连接），不跨可滚动容器。
 - 按纵向位置分顶 / 中 / 底三区；可滚动容器多缩进一级。
-- 整页约 3500 字预算，超出折叠，**但底部导航区始终保留**。
-- 银行卡号和身份证号做校验位识别后打码；密码框只给 `secret` 标记，不给内容。
-- 动作后的结果默认只给差分；换了 App 或超过一半元素变了，给全量。
+- 首行之后可有"状态："行（页面标记，如 键盘已弹出、登录页、支付页、禁止截屏）和树质量提示（SPARSE / EMPTY 时提示看截图；禁止截屏的页面改为提示 hand_to_user）。
+- 整页约 3500 字预算（`detail=full` 约 20000），超出时只折叠中部，**顶部和底部导航区始终保留**；列表外被折叠的项在中部末尾计数。树里没有的 OCR 文字放在 `[屏上文字 · OCR，树里没有]` 段，最后折叠。
+- 银行卡号（Luhn）和身份证号（出生日期 + MOD 11-2 校验位）识别后打码为 `「银行卡 尾号7894」`、`「身份证 尾号002X」`；紧跟在订单号、运单号等标签后的数字串不打码。密码框只给 `secret` 标记，不给内容。
+- 动作后的结果默认只给差分（相对动作所依据的那一屏）：
+
+  ```
+  screen s13 · 与 s12 相比的变化（其余不变）
+  状态：键盘已弹出
+  + @e11 "我：十点半"                   ← 新出现
+  ~ @e9 输入框 值:"十点半" {可编辑,焦点} (480,955)   ← 有变化，给现在的样子
+  - @e6                                  ← 消失的编号
+  ```
+
+  元素的值、提示、状态、secret 变了，编号变了，或中心移动超过 10（0–999 坐标）都算"有变化"，免得模型拿旧编号或旧坐标去点；所以 ScreenPort 实现应让同一元素在相邻两屏里保持同一编号，否则差分会变大、退化成完整一屏。新屏复用了的旧编号不列在 `-` 行。换了 App、没有差分，或增删改的元素超过一半时给完整一屏，并用 `+` 标出新元素；差分本身超过预算时也给完整一屏。每次结果都带新的 screen 编号。
 
 ---
 
@@ -540,11 +558,25 @@ screen s12 · 微信 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · �
 | 通用 | `ask_user` | `question`, `options?` |
 | | `hand_to_user` | `kind: login/captcha/payment/secure_page/choose/other`, `reason` |
 | | `request_confirmation` | `action`, `target`, `content`, `amount?`（模型主动申报；只能**增加**确认，不能免除规则要求的确认） |
-| | `end_not_done` | `reason: impossible/blocked/user_stopped/…`, `summary` |
+| | `end_not_done` | `cause: impossible/blocked/user_stopped/other`, `summary`（经 `ToolResult.control = EndTurn` 结束本轮） |
 
 所有工具都带 `reason` 参数。模型回复里不带工具调用，就视为最终回答。每轮只执行第一个工具调用。
 
-`phone_intent` 各 kind 的字段键名以本节的 `phone_intent` 字段表为准（`LaunchTarget.SystemIntent.fields` 用这些键）。
+`phone_intent` 各 kind 的字段键名以下表为准（`LaunchTarget.SystemIntent.fields` 用这些键；工具在边界校验，WP05 解析、WP07 实现都用同一套键）：
+
+| kind | 字段 |
+|---|---|
+| `alarm` | `time`（"HH:mm"，24 小时制，必填）、`label`? |
+| `timer` | `seconds`（1–86400，必填）、`label`? |
+| `calendar` | `title`（必填）、`start`（"yyyy-MM-ddTHH:mm"，必填）、`end`?（晚于 start）、`location`? |
+| `share` | `text`（必填） |
+| `dial` | `number`（必填；只打开拨号盘，不拨出） |
+| `navigate` | `place`（必填） |
+| `settings` | `page`（必填，白名单：wifi、bluetooth、display、sound、battery、date、locale、location、storage、app_details）；`page=app_details` 时还要 `package` |
+
+无障碍、开发者选项、权限、安全类设置页不在白名单里。字段不属于该 kind、缺必填字段或格式不对，工具返回 `INVALID_ARGS` 并列出要改的地方。
+
+`phone_key home`：主屏模式（M1）由无障碍 `performGlobalAction` 回到桌面；后台屏（M2）上没有桌面，返回 Failed，原因写"后台屏上没有桌面，请用 phone_launch 切换 App"。
 
 ---
 
