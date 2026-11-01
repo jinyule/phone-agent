@@ -4,15 +4,24 @@ import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.provider.Property
 import org.gradle.api.tasks.CacheableTask
+import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputDirectory
 import org.gradle.api.tasks.InputFile
+import org.gradle.api.tasks.Optional
 import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
+import org.gradle.process.ExecOperations
+import javax.inject.Inject
 
-/** Fails unless `protocol-history.txt` records the current VERSION with the current AIDL fingerprint. */
+/**
+ * Fails unless transactions 1-4 are unchanged and `protocol-history.txt` records the current VERSION
+ * with the current AIDL fingerprint. With [baseRef] (CI only) the history must also start with the
+ * history of that commit.
+ */
 @CacheableTask
 abstract class VerifyPrivilegedProtocolTask : DefaultTask() {
     @get:InputDirectory
@@ -27,8 +36,16 @@ abstract class VerifyPrivilegedProtocolTask : DefaultTask() {
     @get:PathSensitive(PathSensitivity.NONE)
     abstract val history: RegularFileProperty
 
+    /** Commit whose history must stay a prefix (`-PprivilegedProtocolBaseRef`); unset locally. */
+    @get:Input
+    @get:Optional
+    abstract val baseRef: Property<String>
+
     @get:OutputFile
     abstract val marker: RegularFileProperty
+
+    @get:Inject
+    abstract val exec: ExecOperations
 
     @TaskAction
     fun verify() {
@@ -52,8 +69,16 @@ abstract class VerifyPrivilegedProtocolTask : DefaultTask() {
     private fun evaluate(files: Map<String, String>): String {
         val version = PrivilegedProtocolCheck.parseVersion(protocolSource.get().asFile.readText())
         val fingerprint = PrivilegedProtocolCheck.fingerprint(files)
-        val entries = PrivilegedProtocolCheck.parseHistory(history.get().asFile.readText())
-        PrivilegedProtocolCheck.verify(entries, version, fingerprint)?.let { throw GradleException(it) }
+        val historyFile = history.get().asFile
+        val entries = PrivilegedProtocolCheck.parseHistory(historyFile.readText())
+        val problem =
+            PrivilegedProtocolCheck.checkFrozen(files)
+                ?: PrivilegedProtocolCheck.verify(entries, version, fingerprint)
+                ?: baseRef.orNull?.let { ref ->
+                    val baseline = GitHistory(exec, historyFile.parentFile).read(ref, historyFile.name).orEmpty()
+                    PrivilegedProtocolCheck.verifyAppendOnly(PrivilegedProtocolCheck.parseHistory(baseline), entries)
+                }
+        problem?.let { throw GradleException(it) }
         return "$version $fingerprint"
     }
 }

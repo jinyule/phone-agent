@@ -9,6 +9,7 @@ dependencies {
     compileOnly(libs.kover.gradlePlugin)
     compileOnly(libs.spotless.gradlePlugin)
 
+    testImplementation(gradleTestKit())
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platform.launcher)

@@ -103,6 +103,71 @@ class PrivilegedProtocolCheckTest {
         assertTrue(error.message.orEmpty().contains("line 7"), error.message)
     }
 
+    private val core =
+        """
+        package dev.phoneagent.privileged;
+        interface IPrivilegedCore {
+            const int LIMIT = 3;
+            int protocolVersion() = 1;
+            int[] identity() = 2;
+            void releaseAll() = 3;
+            oneway void shutdown() = 4;
+            boolean injectKey(int displayId, int keyCode) = 19;
+        }
+        """.trimIndent()
+
+    private fun frozen(aidl: String) = PrivilegedProtocolCheck.checkFrozen(mapOf(path to aidl))
+
+    @Test
+    fun theFrozenTransactionsPassWhateverTheLayout() {
+        assertNull(frozen(core))
+        assertNull(
+            frozen(core.replace("int protocolVersion() = 1;", "int protocolVersion ()=1;").replace("int[]", "int []")),
+        )
+    }
+
+    @Test
+    fun droppingOnewayFromShutdownFailsEvenWithABump() {
+        val changed = core.replace("oneway void shutdown()", "void shutdown()")
+        val error = frozen(changed).orEmpty()
+        assertTrue(error.contains("4") && error.contains("oneway void shutdown ( ) = 4 ;"), error)
+        val fp = PrivilegedProtocolCheck.fingerprint(mapOf(path to changed))
+        assertNull(PrivilegedProtocolCheck.verify(listOf(ProtocolEntry(1, fp1), ProtocolEntry(2, fp)), 2, fp))
+    }
+
+    @Test
+    fun anyChangeToTransactionsOneToFourFails() {
+        val changes =
+            listOf(
+                "int[] identity() = 2;" to "Bundle identity() = 2;",
+                "void releaseAll() = 3;" to "void releaseAll(int flags) = 3;",
+                "void releaseAll() = 3;" to "",
+                "oneway void shutdown() = 4;" to "oneway void shutdown() = 5;",
+                "int protocolVersion() = 1;" to "int protocolVersion() = 1;\n    int other() = 1;",
+            )
+        for ((from, to) in changes) {
+            assertTrue(frozen(core.replace(from, to)) != null, "$from -> $to")
+        }
+        assertTrue(frozen(core.replace("interface IPrivilegedCore", "interface IOther")) != null, "no interface")
+        assertTrue(PrivilegedProtocolCheck.checkFrozen(mapOf("dev/other/I.aidl" to core)) != null, "file moved")
+    }
+
+    @Test
+    fun theHistoryOnlyGrowsAgainstTheBaseline() {
+        val fp2 = "2".repeat(64)
+        val history = listOf(ProtocolEntry(1, fp1), ProtocolEntry(2, fp2))
+        assertNull(PrivilegedProtocolCheck.verifyAppendOnly(emptyList(), history), "no baseline file")
+        assertNull(PrivilegedProtocolCheck.verifyAppendOnly(history.take(1), history), "appended")
+        assertNull(PrivilegedProtocolCheck.verifyAppendOnly(history, history), "unchanged")
+        val rewritten = listOf(ProtocolEntry(1, fp2))
+        assertTrue(
+            PrivilegedProtocolCheck.verifyAppendOnly(history.take(1), rewritten).orEmpty().contains("`1 $fp1`"),
+            "rewritten in place",
+        )
+        assertTrue(PrivilegedProtocolCheck.verifyAppendOnly(history, history.drop(1)) != null, "first line removed")
+        assertTrue(PrivilegedProtocolCheck.verifyAppendOnly(history, history.take(1)) != null, "last line removed")
+    }
+
     @Test
     fun renamingOrMovingAFileIsAProtocolChange() {
         assertNotEquals(fp1, PrivilegedProtocolCheck.fingerprint(mapOf("dev/other/IPrivilegedCore.aidl" to v1)))

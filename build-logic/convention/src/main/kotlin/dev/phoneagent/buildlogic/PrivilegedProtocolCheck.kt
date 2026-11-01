@@ -9,7 +9,9 @@ data class ProtocolEntry(
 )
 
 /**
- * "Changing the AIDL requires bumping `PrivilegedProtocol.VERSION`" (engineering-baseline §6).
+ * "Changing the AIDL requires bumping `PrivilegedProtocol.VERSION`" (engineering-baseline §6),
+ * plus the two rules a bump cannot bend: transactions 1-4 are [FROZEN], and the history only grows
+ * ([verifyAppendOnly], against the CI base commit).
  *
  * `privileged/protocol-history.txt` is an append-only list of `<version> <fingerprint>` lines.
  * The fingerprint is a SHA-256 over every `.aidl` file, by relative path and [AidlTokens] (so
@@ -19,6 +21,7 @@ data class ProtocolEntry(
 object PrivilegedProtocolCheck {
     private val VERSION_DECLARATION = Regex("""const\s+val\s+VERSION\s*:\s*Int\s*=\s*(\d+)""")
     private val HISTORY_LINE = Regex("""(0|[1-9]\d*)\s+([0-9a-f]{64})""")
+    private val INTERFACE_HEAD = listOf("interface", "IPrivilegedCore", "{")
 
     /** The value of `const val VERSION: Int = <n>` in [kotlinSource]; it must be declared exactly once. */
     fun parseVersion(kotlinSource: String): Int {
@@ -53,6 +56,73 @@ object PrivilegedProtocolCheck {
                 }
             ProtocolEntry(match.groupValues[1].toInt(), match.groupValues[2])
         }
+
+    /** The interface whose transactions 1-4 are frozen, relative to the AIDL source root. */
+    const val FROZEN_FILE: String = "dev/phoneagent/privileged/IPrivilegedCore.aidl"
+
+    /**
+     * Transactions 1-4 of `IPrivilegedCore` as [AidlTokens]. Any app build relies on them to read a
+     * helper's version and identity and to make it release and exit, whatever protocol the helper
+     * runs (engineering-baseline §6), so they never change, whatever VERSION says.
+     */
+    val FROZEN: Map<Int, String> =
+        mapOf(
+            1 to "int protocolVersion ( ) = 1 ;",
+            2 to "int [ ] identity ( ) = 2 ;",
+            3 to "void releaseAll ( ) = 3 ;",
+            4 to "oneway void shutdown ( ) = 4 ;",
+        )
+
+    /** Null when [FROZEN_FILE] in [files] declares exactly the [FROZEN] transactions 1-4; otherwise what differs. */
+    fun checkFrozen(files: Map<String, String>): String? {
+        val methods = files[FROZEN_FILE]?.let { methodsOf(AidlTokens.of(it)) }
+        val problems =
+            if (methods == null) {
+                listOf("$FROZEN_FILE must declare `interface IPrivilegedCore`")
+            } else {
+                FROZEN.mapNotNull { (id, expected) ->
+                    val found = methods.filter { it.endsWith(" = $id ;") }
+                    "transaction $id must be `$expected`, found ${found.map { "`$it`" }.ifEmpty { listOf("none") }}"
+                        .takeUnless { found == listOf(expected) }
+                }
+            }
+        return problems.takeIf { it.isNotEmpty() }?.joinToString(
+            separator = "; ",
+            prefix = "IPrivilegedCore transactions 1-4 never change, whatever PrivilegedProtocol.VERSION says: ",
+            postfix = ".",
+        )
+    }
+
+    /** Method declarations of `interface IPrivilegedCore` in [tokens], tokens joined by spaces; null without it. */
+    private fun methodsOf(tokens: List<String>): List<String>? {
+        val start = tokens.windowed(INTERFACE_HEAD.size).indexOf(INTERFACE_HEAD)
+        if (start < 0) return null
+        val declarations = mutableListOf<List<String>>()
+        var current = mutableListOf<String>()
+        for (token in tokens.drop(start + INTERFACE_HEAD.size).takeWhile { it != "}" }) {
+            current += token
+            if (token == ";") {
+                declarations += current
+                current = mutableListOf()
+            }
+        }
+        return declarations.filter { "(" in it && it.first() != "const" }.map { it.joinToString(" ") }
+    }
+
+    /**
+     * Null when [current] starts with every entry of [baseline] (the history at the CI base commit);
+     * otherwise which recorded line was rewritten or removed.
+     */
+    fun verifyAppendOnly(
+        baseline: List<ProtocolEntry>,
+        current: List<ProtocolEntry>,
+    ): String? {
+        val index = baseline.indices.firstOrNull { it >= current.size || current[it] != baseline[it] } ?: return null
+        val lost = baseline[index]
+        return "protocol-history.txt is append-only, but entry ${index + 1} of the base commit, " +
+            "`${lost.version} ${lost.fingerprint}`, was rewritten or removed. Restore it; " +
+            "a protocol change bumps PrivilegedProtocol.VERSION and appends a line."
+    }
 
     /** Null when [history] ends with ([version], [fingerprint]); otherwise what to fix. */
     fun verify(

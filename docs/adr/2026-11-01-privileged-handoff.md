@@ -83,8 +83,10 @@ phase1-architecture §2.2 / §3.5 和 engineering-baseline §6 定了特权助�
    - `privileged/protocol-history.txt` 是只追加的 `<版本号> <指纹>` 列表。指纹是所有 `.aidl` 文件按相对路径、按 AIDL 词元（`AidlTokens`：去掉注释和词元之间的空白，字符串和字符常量原样保留）算出的 SHA-256。`int f()=1;` 和 `int f ( ) = 1 ;` 指纹相同，常量 `"https://one"` 改成 `"https://two"` 指纹不同。
    - 第一版按"去注释、压缩空白"算指纹，会把 `f()=1` 和 `f() = 1` 当成不同协议，也会把字符串里的 `//` 当成注释。评审修复（2026-11-01）改成按词元算，history 第 1 行按新算法重算了一次：当时还没有发布过带旧指纹的 APK，AIDL 本身也没改。以后再改算法，就要按改协议处理（升版本、追加一行），不能重算旧行。
    - `:privileged:verifyPrivilegedProtocol` 要求列表最后一行等于当前 `VERSION` 和当前指纹，失败时直接给出该追加的那一行。
+   - 1–4 号事务的完整声明写死在检查器里（`PrivilegedProtocolCheck.FROZEN`，按词元比较），少了或改了任何一条都失败，不管版本号是多少。去掉 `shutdown` 的 `oneway` 再正常升版本、追加一行，照样失败。
+   - 只追加：CI 传 `-PprivilegedProtocolBaseRef=<基线 sha>`（`pull_request` 事件用 `pull_request.base.sha`，`push` 事件用 `before`，checkout 用 `fetch-depth: 0`），检查器用 `git show` 读出基线的 history，要求它是当前 history 的前缀。基线里没有这个文件按空前缀处理；基线 sha 不在 clone 里就失败。本地不传这个属性，这一项不做。
    - 这个任务挂在 `check` 上，CI 的 `privileged-build` job 也单独跑它。
-   - 反例单测：`PrivilegedProtocolCheckTest.changedAidlWithoutAVersionBumpFails`。
+   - 反例：`PrivilegedProtocolCheckTest`（改 AIDL 不升版本、改冻结区、改写或删除 history 行）和 `VerifyPrivilegedProtocolTaskTest`（TestKit，在临时 git 仓库里跑真实任务：原地改写 history 行只在带基线时失败）。
 
 9. **debug 自检入口**是 `HelperSelfCheckReceiver`，只在 `src/debug` 里。
    - 它声明为 `exported="true"`，同时要求 `android.permission.DUMP`：shell 持有这个权限，普通 App 拿不到。androidx 的 `ProfileInstallReceiver` 也是这个写法。
@@ -115,7 +117,7 @@ phase1-architecture §2.2 / §3.5 和 engineering-baseline §6 定了特权助�
   - 隐藏的 `IPackageManager.registerPackageMonitorCallback`：API 35 起才有，覆盖不了 30–34。以后可以作为更及时的触发加上，低频复核仍然保留作为兜底。
 - **用协程 / StateFlow 管理助手状态**。`privileged` 要尽量少依赖，所以用纯状态机加 HandlerThread，也方便在 JVM 上逐个事件测试。
 - **AIDL 检查的其他做法**：
-  - 和 git 基线比较：需要完整历史，fork 来的 PR 和离线环境都不稳；
+  - 每次都和 git 基线比较（本地也比）：本地没有可信的基线，fork 和离线环境也不稳。所以只在 CI 上比：PR 的 base sha 总是有的。冻结区不需要基线，写死在检查器里，本地也查；
   - 把哈希写在 Kotlin 常量里：不直观，而且容易连同 AIDL 一起被顺手改掉；
   - 用 stable AIDL 的 `aidl_interface`：只有 Soong 支持，Gradle 用不了。
 

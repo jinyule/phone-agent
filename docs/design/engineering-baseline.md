@@ -184,7 +184,8 @@ core/src/test/resources/sessions/<scenario>/
 - CI 检查 AIDL 版本常量：改了 AIDL 文件就必须升版本号。实现（WP12）：
   - `privileged/protocol-history.txt` 是只追加的 `<版本号> <指纹>` 列表；指纹是所有 `.aidl` 文件按相对路径、按 AIDL 词元算的 SHA-256（去掉注释和词元之间的空白，字符串常量原样保留），所以只改注释或排版不算协议变更；
   - `:privileged:verifyPrivilegedProtocol`（挂在 `check` 上，CI 的 `privileged-build` 也单独跑）要求最后一行等于当前的 `PrivilegedProtocol.VERSION` 和当前指纹，失败时直接给出要追加的那一行；
-  - AIDL 的 1–4 号事务（`protocolVersion`、`identity`、`releaseAll`、`shutdown`）永久冻结，任何版本的 App 都能让任何版本的旧 helper 释放并退出（phase1-architecture §3.5）。
+  - AIDL 的 1–4 号事务（`protocolVersion`、`identity`、`releaseAll`、`shutdown`）永久冻结，任何版本的 App 都能让任何版本的旧 helper 释放并退出（phase1-architecture §3.5）。这四条的完整声明（返回类型、方法名、参数、`oneway`、事务号）写死在检查器里（`PrivilegedProtocolCheck.FROZEN`），AIDL 里少了或改了任何一条都失败，升版本也不行；
+  - history 只追加：CI 的 `privileged-build` 传 `-PprivilegedProtocolBaseRef=<基线 sha>`（`pull_request` 用 `pull_request.base.sha`，`push` 用 `before`），检查器用 `git show` 读出基线的 history，要求它是当前 history 的前缀；基线里没有这个文件就当作空前缀。**这一项只在 CI 上做**：本地不传这个属性，只跑上面几项。
 
 **签名密钥**
 - release keystore 离线保存两份。CI 只通过 environment secret 使用它。

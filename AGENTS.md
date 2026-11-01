@@ -62,7 +62,7 @@ lefthook install                      # 每个 clone 装一次本地钩子
 | `core.policy`、`core.agent` | 分支覆盖 100%（`koverVerifyCritical`） |
 | 确实无法在 JVM 上测的代码 | `@ExcludeFromCoverage(reason = "…")`，reason 不能为空 |
 | 模型可见内容（提示词、工具 schema、反馈文字） | 同一个 PR 里更新回放 fixture 和金样（M1 起） |
-| `IPrivilegedCore` | 升 `PrivilegedProtocol.VERSION`，并在 `privileged/protocol-history.txt` 追加一行（`:privileged:verifyPrivilegedProtocol` 会给出这一行）；1–4 号事务不许改 |
+| `IPrivilegedCore` | 升 `PrivilegedProtocol.VERSION`，并在 `privileged/protocol-history.txt` 追加一行（`:privileged:verifyPrivilegedProtocol` 会给出这一行）；1–4 号事务不许改（检查器写死）；history 只追加（只在 CI 上对照基线检查） |
 | 版本号规则 | `AppVersionTest` |
 
 修 fixture，不修归一化器。
