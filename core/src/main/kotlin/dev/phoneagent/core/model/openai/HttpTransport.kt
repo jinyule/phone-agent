@@ -14,6 +14,9 @@ import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
+import okio.Buffer
+import okio.BufferedSource
+import okio.ByteString.Companion.encodeUtf8
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -86,21 +89,44 @@ internal class HttpReply(
             source.buffer.readUtf8(minOf(limit, source.buffer.size))
         }
 
+    /** A line ended by CR whose LF (if any) has not been read yet. */
+    private var lfPending = false
+
     /**
      * The next lines of the body without terminators: blocks for one, then takes every complete
-     * line already buffered. `null` at the end of the body.
+     * line already buffered. LF, CRLF and a lone CR each end a line (WHATWG SSE), also when a
+     * CRLF is split between two reads. A last line without terminator still counts. `null` at the
+     * end of the body.
      */
-    suspend fun lines(): List<String>? =
-        blocking(io, redactor) {
-            val source = response.body.source()
-            val first = source.readUtf8Line()
-            first?.let {
-                buildList {
-                    add(it)
-                    while (source.buffer.indexOf(NEWLINE) >= 0) add(source.readUtf8LineStrict())
-                }
-            }
+    suspend fun lines(): List<String>? = blocking(io, redactor) { readLines(response.body.source()) }
+
+    private fun readLines(source: BufferedSource): List<String>? {
+        val lines = mutableListOf<String>()
+        val buffer = source.buffer
+        while (true) {
+            takeBuffered(buffer, lines)
+            if (lines.isNotEmpty()) return lines
+            // Blocks for at least one more byte; false = the body ended.
+            if (!source.request(buffer.size + 1)) return if (buffer.size > 0) listOf(buffer.readUtf8()) else null
         }
+    }
+
+    /** Moves every complete line in [buffer] to [lines]. */
+    private fun takeBuffered(
+        buffer: Buffer,
+        lines: MutableList<String>,
+    ) {
+        while (true) {
+            if (lfPending && buffer.size > 0) {
+                if (buffer[0] == LF) buffer.skip(1)
+                lfPending = false
+            }
+            val end = buffer.indexOfElement(TERMINATORS)
+            if (end < 0) return
+            lines += buffer.readUtf8(end)
+            lfPending = buffer.readByte() == CR
+        }
+    }
 
     /**
      * Reads a successful body to the end, or until [onEvent] returns `true` (the protocol's
@@ -133,9 +159,13 @@ internal class HttpReply(
 
     private companion object {
         const val ERROR_BODY_LIMIT = 64L * 1024
-        const val NEWLINE = '\n'.code.toByte()
+        const val LF = '\n'.code.toByte()
+        const val CR = '\r'.code.toByte()
     }
 }
+
+/** Bytes that end a line. */
+private val TERMINATORS = "\r\n".encodeUtf8()
 
 /**
  * Keeps OkHttp from resending a 503 on its own: its follow-up logic retries a 503 whose
