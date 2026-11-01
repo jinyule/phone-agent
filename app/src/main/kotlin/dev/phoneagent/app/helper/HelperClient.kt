@@ -144,17 +144,18 @@ class HelperClient internal constructor(
             return Reply(HandoffBundles.rejected(HandoffReject.BINDER_ELSEWHERE))
         }
         val nextNonce = admission.commit(admitted)
-        if (nextNonce == null) {
+        return if (nextNonce != null) {
+            connection?.takeIf { it.core.asBinder() !== binder }?.let(::retire)
+            connection = Connection(admitted.core, pid, death)
+            val connected = HelperState.Connected(admitted.core, pid)
+            state = connected
+            Log.i(TAG, "helper pid $pid admitted")
+            Reply(HandoffBundles.accepted(nextNonce, token), connected)
+        } else {
             binder.unlinkToDeath(death, 0)
             Log.w(TAG, "helper $pid: its nonce expired or was replaced during the handoff")
-            return Reply(HandoffBundles.rejected(HandoffReject.BAD_NONCE))
+            Reply(HandoffBundles.rejected(HandoffReject.BAD_NONCE))
         }
-        connection?.takeIf { it.core.asBinder() !== binder }?.let(::retire)
-        connection = Connection(admitted.core, pid, death)
-        val connected = HelperState.Connected(admitted.core, pid)
-        state = connected
-        Log.i(TAG, "helper pid $pid admitted")
-        return Reply(HandoffBundles.accepted(nextNonce, token), connected)
     }
 
     private fun onHelperDied(binder: IBinder) {
