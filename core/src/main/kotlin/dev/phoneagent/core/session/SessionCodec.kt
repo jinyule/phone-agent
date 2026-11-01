@@ -15,7 +15,9 @@ import java.nio.charset.CodingErrorAction
  * Reading is strict: unknown types are skipped only when the record is ignorable
  * ([UnknownEventTypeException] otherwise), unknown keys are rejected, and any unreadable line
  * fails the whole log ([SessionCorruptedException]) except a torn last line, which is reported in
- * [SessionLog.truncatedTail]. Records older than [currentVersion] pass through the migration chain.
+ * [SessionLog.truncatedTail]. A readable line that breaks a rule spanning several records
+ * (see `SessionInvariants`) is corruption too. Records older than [currentVersion] pass through
+ * the migration chain.
  *
  * @param migrations one per version step; they must form a contiguous chain up to [currentVersion].
  * @property currentVersion the version this codec writes and migrates to.
@@ -109,21 +111,47 @@ public class SessionCodec(
         val split = splitLines(bytes)
         val headerBytes = split.lines.firstOrNull() ?: throw SessionCorruptedException(HEADER_LINE, "missing header")
         val header = decodeHeader(utf8(headerBytes, HEADER_LINE))
-        val records = mutableListOf<SessionRecord>()
-        val skipped = mutableListOf<SkippedRecord>()
-        var expectedSeq = 1L
+        val reader = LogReader()
         split.lines.drop(1).forEachIndexed { index, lineBytes ->
             val lineNumber = index + 2
+            reader.take(decode(utf8(lineBytes, lineNumber), header.version, lineNumber), lineNumber)
+        }
+        val tail = split.tail?.let { TruncatedTail(line = split.lines.size + 1, bytes = it) }
+        return SessionLog(header, reader.records, reader.skipped, tail)
+    }
+
+    /** Collects decoded lines, checking seq order and the rules that span records. */
+    private class LogReader {
+        val records = mutableListOf<SessionRecord>()
+        val skipped = mutableListOf<SkippedRecord>()
+        private val invariants = SessionInvariants()
+        private var expectedSeq = 1L
+
+        fun take(
+            decoded: DecodedLine,
+            lineNumber: Int,
+        ) {
             val seq =
-                when (val decoded = decode(utf8(lineBytes, lineNumber), header.version, lineNumber)) {
-                    is DecodedLine.Event -> decoded.record.seq.also { records += decoded.record }
-                    is DecodedLine.Skipped -> decoded.record.seq.also { skipped += decoded.record }
+                when (decoded) {
+                    is DecodedLine.Event -> decoded.record.seq
+                    is DecodedLine.Skipped -> decoded.record.seq
                 }
             if (seq != expectedSeq) throw SessionCorruptedException(lineNumber, "expected seq $expectedSeq, found $seq")
             expectedSeq++
+            when (decoded) {
+                is DecodedLine.Event -> accept(decoded.record, lineNumber)
+                is DecodedLine.Skipped -> skipped += decoded.record
+            }
         }
-        val tail = split.tail?.let { TruncatedTail(line = split.lines.size + 1, bytes = it) }
-        return SessionLog(header, records, skipped, tail)
+
+        private fun accept(
+            record: SessionRecord,
+            lineNumber: Int,
+        ) {
+            invariants.violation(record)?.let { throw SessionCorruptedException(lineNumber, "seq ${record.seq}: $it") }
+            invariants.accept(record)
+            records += record
+        }
     }
 
     private fun migrate(

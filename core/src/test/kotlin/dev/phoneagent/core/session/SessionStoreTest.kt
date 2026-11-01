@@ -2,12 +2,20 @@ package dev.phoneagent.core.session
 
 import dev.phoneagent.core.ports.Clock
 import dev.phoneagent.core.ports.StoragePath
+import dev.phoneagent.core.ports.StoragePort
 import dev.phoneagent.core.testing.InMemoryStoragePort
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -210,6 +218,134 @@ class SessionStoreTest {
             assertEquals(1, store.lastSeq, "the written record is counted")
             assertEquals(2, store.append(TurnEnded(1, TurnEndReason.STOPPED)).seq)
             assertEquals(listOf(1L, 2L), SessionStore.read(files).records.map { it.seq })
+        }
+
+    @Test
+    fun `an append cancelled while it waits for the lock writes nothing`() =
+        runTest {
+            val store = newStore()
+            val entered = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            storage.beforeAppend = {
+                entered.complete(Unit)
+                release.await()
+            }
+            val holder = async(start = CoroutineStart.UNDISPATCHED) { store.append(TurnStarted(1)) }
+            entered.await()
+            storage.beforeAppend = {}
+            val waiter = async(start = CoroutineStart.UNDISPATCHED) { store.append(TurnStarted(99)) }
+            waiter.cancel()
+            try {
+                testScheduler.runCurrent()
+                assertTrue(waiter.isCompleted, "cancellation does not wait for the lock holder")
+            } finally {
+                release.complete(Unit)
+            }
+            holder.await()
+            assertTrue(runCatching { waiter.await() }.exceptionOrNull() is CancellationException)
+            assertFalse(TurnStarted(99) in store.records().map { it.event }, "the waiting append was not written")
+            assertFalse("\"turn\":99" in storage.text(logPath))
+        }
+
+    @Test
+    fun `an append from an already cancelled coroutine writes nothing`() =
+        runTest {
+            val store = newStore()
+            val before = store.records()
+            val append =
+                async(start = CoroutineStart.UNDISPATCHED) {
+                    coroutineContext.cancel()
+                    store.append(TurnStarted(1))
+                }
+            assertTrue(runCatching { append.await() }.exceptionOrNull() is CancellationException)
+            assertEquals(before, store.records())
+            assertFalse("turn/start" in storage.text(logPath))
+        }
+
+    @Test
+    fun `cleanup code appends from a cancelled coroutine inside NonCancellable`() =
+        runTest {
+            val store = newStore()
+            val job =
+                launch(start = CoroutineStart.UNDISPATCHED) {
+                    try {
+                        awaitCancellation()
+                    } finally {
+                        withContext(NonCancellable) { store.append(TurnEnded(1, TurnEndReason.STOPPED)) }
+                    }
+                }
+            job.cancel()
+            job.join()
+            assertEquals(TurnEnded(1, TurnEndReason.STOPPED), store.records().last().event)
+        }
+
+    @Test
+    fun `a write cancelled midway commits and returns the record while the job reports cancellation`() =
+        runTest {
+            val store = newStore()
+            val entered = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            storage.beforeAppend = {
+                entered.complete(Unit)
+                release.await()
+            }
+            var returned: SessionRecord? = null
+            val append =
+                async(start = CoroutineStart.UNDISPATCHED) { store.append(TurnStarted(1)).also { returned = it } }
+            entered.await()
+            append.cancel()
+            release.complete(Unit)
+            assertTrue(runCatching { append.await() }.exceptionOrNull() is CancellationException, "job result")
+            val record = checkNotNull(returned) { "the method returned the record" }
+            assertEquals(record, store.records().last(), "committed: callers check records(), not the exception")
+            assertEquals(record.seq, store.lastSeq)
+        }
+
+    @Test
+    fun `any failure of the write itself fails the store and is rethrown as it is`() =
+        runTest {
+            val store = newStore()
+            storage.beforeAppend = { throw IllegalStateException("bug in a storage implementation") }
+            assertThrows<IllegalStateException> { store.append(TurnStarted(1)) }
+            storage.beforeAppend = {}
+            val error = assertThrows<SessionWriteException> { store.append(TurnStarted(1)) }
+            assertTrue("append of seq" in error.message.orEmpty(), error.message)
+            assertThrows<SessionWriteException> { store.flush() }
+        }
+
+    @Test
+    fun `argument errors before encoding leave the store writable`() =
+        runTest {
+            val store = newStore()
+            val last = store.append(TurnStarted(1)).seq
+            assertThrows<IllegalArgumentException> { store.append(StepStarted(1, 1), sources = listOf(last + 1)) }
+            assertEquals(last + 1, store.append(StepStarted(1, 1)).seq)
+        }
+
+    @Test
+    fun `create and open acquire the appender as their last storage step`() =
+        runTest {
+            val calls = mutableListOf<String>()
+            val recording =
+                object : StoragePort by storage {
+                    override suspend fun exists(path: StoragePath) = storage.exists(path).also { calls += "exists" }
+
+                    override suspend fun read(path: StoragePath) = storage.read(path).also { calls += "read" }
+
+                    override suspend fun writeAtomically(
+                        path: StoragePath,
+                        bytes: ByteArray,
+                    ) = storage.writeAtomically(path, bytes).also { calls += "write" }
+
+                    override suspend fun openAppender(path: StoragePath) =
+                        storage.openAppender(path).also { calls += "openAppender" }
+                }
+            val recordingFiles = SessionFiles(recording, StoragePath("sessions/session-1"))
+            SessionStore.create(recordingFiles, SessionSamples.session, SessionSamples.task, clock).close()
+            assertEquals("openAppender", calls.last(), "nothing after the handle is taken can fail and leak it")
+            calls.clear()
+            SessionStore.open(recordingFiles, clock).store.close()
+            assertEquals("openAppender", calls.last())
         }
 
     private object Identity : SessionMigration {

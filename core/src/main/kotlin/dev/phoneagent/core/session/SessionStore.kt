@@ -7,6 +7,8 @@ import dev.phoneagent.core.ports.StorageAppender
 import dev.phoneagent.core.ports.StoragePath
 import dev.phoneagent.core.ports.StoragePort
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -21,11 +23,21 @@ import java.io.IOException
  * to the device. Callers flush before every model request and before every write action, and
  * do neither when [flush] throws [SessionFlushException].
  *
- * Failure: after any [SessionWriteException] or [SessionFlushException] the store is failed and
- * every later [append] / [flush] throws [SessionWriteException]; reopen with [open], which repairs a
- * torn last line. One store per session at a time; methods are safe to call from any coroutine
- * and are serialized internally. Once started, an append or flush runs to completion even if
- * the caller is cancelled, so the file never holds a record the store did not count.
+ * Failure: after any [SessionWriteException] or [SessionFlushException], or any other exception
+ * from the storage while writing, the store is failed and every later [append] / [flush] throws
+ * [SessionWriteException]; reopen with [open], which repairs a torn last line. Arguments that
+ * break a rule ([append]'s [IllegalArgumentException]) are rejected before anything is written
+ * and do not fail the store. One store per session at a time; methods are safe to call from any
+ * coroutine and are serialized internally.
+ *
+ * Cancellation: an [append] or [flush] that is cancelled while it waits for the store, or that
+ * is called from an already cancelled coroutine, writes nothing and throws
+ * `CancellationException`. Once the write itself has started it runs to completion and the
+ * record is counted, so the file never holds a record the store did not count; the caller may
+ * still see `CancellationException` afterwards (the coroutine was cancelled meanwhile). Cleanup
+ * code therefore decides from [records] or [lastSeq] whether a record was written, never from
+ * the exception, and writes after cancellation (stop handling) inside
+ * `withContext(NonCancellable)`.
  */
 public class SessionStore private constructor(
     private val codec: SessionCodec,
@@ -38,6 +50,7 @@ public class SessionStore private constructor(
 ) {
     private val mutex = Mutex()
     private val recordList = initial.toMutableList()
+    private val invariants = SessionInvariants.after(initial)
     private var failure: String? = null
 
     /** Seq of the last record in the log (0 when empty), including skipped ignorable records. */
@@ -48,42 +61,34 @@ public class SessionStore private constructor(
 
     /**
      * Appends [event] as the next record, stamped with the clock. [sources] and a
-     * [SurfaceOp.Replace] range must point to earlier records (else [IllegalArgumentException],
-     * nothing written). Throws [SessionWriteException] when the store is failed or the write fails.
+     * [SurfaceOp.Replace] range must point to earlier records, and the record must keep the
+     * rules of [SessionInvariants] (else [IllegalArgumentException], nothing written). Throws
+     * [SessionWriteException] when the store is failed or the write fails. See the class
+     * comment for cancellation.
      */
     public suspend fun append(
         event: SessionEvent,
         surfaceOp: SurfaceOp = SurfaceOp.Append,
         sources: List<Long> = emptyList(),
     ): SessionRecord =
-        withContext(NonCancellable) {
-            mutex.withLock {
-                checkUsable()
-                val record = SessionRecord(lastSeqValue + 1, clock.epochMillis(), event, surfaceOp, sources)
-                val line = (codec.encode(record) + "\n").encodeToByteArray()
-                try {
-                    appender.append(line)
-                } catch (io: IOException) {
-                    failure = "append of seq ${record.seq} failed: ${io.message}"
-                    throw SessionWriteException("session ${header.sessionId}: $failure", io)
-                }
+        locked {
+            val record = SessionRecord(lastSeqValue + 1, clock.epochMillis(), event, surfaceOp, sources)
+            invariants.violation(record)?.let { throw IllegalArgumentException("seq ${record.seq}: $it") }
+            val line = (codec.encode(record) + "\n").encodeToByteArray()
+            withContext(NonCancellable) {
+                writing("append of seq ${record.seq}", ::SessionWriteException) { appender.append(line) }
                 lastSeqValue = record.seq
                 recordList += record
-                record
+                invariants.accept(record)
             }
+            record
         }
 
     /** Forces every appended record to the device. Throws [SessionFlushException] on failure. */
     public suspend fun flush(): Unit =
-        withContext(NonCancellable) {
-            mutex.withLock {
-                checkUsable()
-                try {
-                    appender.sync()
-                } catch (io: IOException) {
-                    failure = "flush after seq $lastSeqValue failed: ${io.message}"
-                    throw SessionFlushException("session ${header.sessionId}: $failure", io)
-                }
+        locked {
+            withContext(NonCancellable) {
+                writing("flush after seq $lastSeqValue", ::SessionFlushException) { appender.sync() }
             }
         }
 
@@ -96,8 +101,40 @@ public class SessionStore private constructor(
             }
         }
 
-    private fun checkUsable() {
-        failure?.let { throw SessionWriteException("session ${header.sessionId} is not writable: $it") }
+    /**
+     * Runs [block] holding the lock, if the store is usable. Waiting for the lock is cancellable,
+     * and a caller cancelled by the time it holds the lock does not run [block].
+     */
+    private suspend fun <T> locked(block: suspend () -> T): T {
+        mutex.lock()
+        try {
+            currentCoroutineContext().ensureActive()
+            failure?.let { throw SessionWriteException("session ${header.sessionId} is not writable: $it") }
+            return block()
+        } finally {
+            mutex.unlock()
+        }
+    }
+
+    /**
+     * Runs one storage write. Any exception fails the store and propagates: an [IOException] wrapped
+     * by [wrap], anything else (a storage bug, cancellation) unchanged.
+     */
+    private suspend fun writing(
+        what: String,
+        wrap: (String, IOException) -> SessionLogException,
+        write: suspend () -> Unit,
+    ) {
+        var done = false
+        try {
+            write()
+            done = true
+        } catch (io: IOException) {
+            failure = "$what failed: ${io.message}"
+            throw wrap("session ${header.sessionId}: $failure", io)
+        } finally {
+            if (!done && failure == null) failure = "$what did not complete"
+        }
     }
 
     /**
