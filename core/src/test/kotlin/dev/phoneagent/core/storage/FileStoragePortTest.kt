@@ -87,8 +87,12 @@ class FileStoragePortTest {
         val synced = mutableListOf<Path>()
         val opened = mutableListOf<FileChannel>()
         var failForce = false
+        var failSync = false
+        var failClose = false
+        var failDelete = false
 
         override fun syncDirectory(dir: Path) {
+            if (failSync) throw IOException("injected sync failure")
             synced.add(dir)
             FileOps.SYSTEM.syncDirectory(dir)
         }
@@ -99,6 +103,17 @@ class FileStoragePortTest {
         }
 
         override fun openAppend(file: Path): FileChannel = FileOps.SYSTEM.openAppend(file).also { opened += it }
+
+        /** Closes for real even when failing, so the test leaks nothing. */
+        override fun close(channel: FileChannel) {
+            FileOps.SYSTEM.close(channel)
+            if (failClose) throw IOException("injected close failure")
+        }
+
+        override fun deleteIfExists(file: Path) {
+            if (failDelete) throw IOException("injected delete failure")
+            FileOps.SYSTEM.deleteIfExists(file)
+        }
     }
 
     /** Runs dispatched blocks only when asked, so a test can act between the I/O and the caller's resumption. */
@@ -187,20 +202,44 @@ class FileStoragePortTest {
     @Test
     fun `a failed directory sync after opening closes the new handle`() =
         runTest {
-            val ops =
-                object : FileOps by RecordingOps() {
-                    val opened = mutableListOf<FileChannel>()
-
-                    override fun openAppend(file: Path): FileChannel =
-                        FileOps.SYSTEM.openAppend(file).also {
-                            opened +=
-                                it
-                        }
-
-                    override fun syncDirectory(dir: Path): Unit = throw IOException("injected sync failure")
-                }
+            val ops = RecordingOps().apply { failSync = true }
             val storage = FileStoragePort(root, StandardTestDispatcher(testScheduler), ops)
             assertThrows<IOException> { storage.openAppender(StoragePath("log.jsonl")) }
+            assertFalse(ops.opened.single().isOpen)
+        }
+
+    @Test
+    fun `cleanup failures are attached to the error the caller sees`() =
+        runTest {
+            val ops = RecordingOps()
+            val storage = FileStoragePort(root, StandardTestDispatcher(testScheduler), ops)
+            ops.failForce = true
+            ops.failDelete = true
+            val write = assertThrows<IOException> { storage.writeAtomically(StoragePath("f.bin"), byteArrayOf(1)) }
+            assertEquals("injected force failure", write.message)
+            assertEquals(listOf("injected delete failure"), write.suppressedInChain())
+
+            ops.failSync = true
+            ops.failClose = true
+            val open = assertThrows<IOException> { storage.openAppender(StoragePath("log.jsonl")) }
+            assertEquals("injected sync failure", open.message)
+            assertEquals(listOf("injected close failure"), open.suppressedInChain())
+        }
+
+    /** Coroutines may rethrow a copy for stack-trace recovery, with the original as its cause. */
+    private fun Throwable.suppressedInChain(): List<String?> =
+        generateSequence(this) { it.cause }.flatMap { it.suppressed.asSequence() }.map { it.message }.toList()
+
+    @Test
+    fun `a close failure of an undelivered handle does not replace the cancellation`() =
+        runTest {
+            val io = QueueDispatcher()
+            val ops = RecordingOps().apply { failClose = true }
+            val storage = FileStoragePort(root, io, ops)
+            val open = async(start = CoroutineStart.UNDISPATCHED) { storage.openAppender(StoragePath("x/log.jsonl")) }
+            io.runAll()
+            open.cancel()
+            assertThrows<CancellationException> { open.await() }
             assertFalse(ops.opened.single().isOpen)
         }
 

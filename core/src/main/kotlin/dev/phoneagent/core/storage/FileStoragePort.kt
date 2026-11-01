@@ -53,7 +53,7 @@ public class FileStoragePort internal constructor(
             try {
                 replace(file, temp, bytes)
             } catch (failure: IOException) {
-                deleteAfterFailure(temp, failure)
+                ops.deleteAfterFailure(temp, failure)
                 throw failure
             }
             ops.syncDirectory(dir)
@@ -72,7 +72,7 @@ public class FileStoragePort internal constructor(
             delivered = true
         } finally {
             // Cancelled after the file was opened: the result is dropped, and nobody else has the handle.
-            if (!delivered) opened.get()?.let(::closeUndelivered)
+            if (!delivered) opened.get()?.let(ops::closeUndelivered)
         }
         return FileAppender(opened.get(), io)
     }
@@ -127,7 +127,7 @@ public class FileStoragePort internal constructor(
             try {
                 ops.syncDirectory(dir)
             } catch (failure: IOException) {
-                closeAfterFailure(channel, failure)
+                ops.closeAfterFailure(channel, failure)
                 throw failure
             }
         }
@@ -147,42 +147,6 @@ public class FileStoragePort internal constructor(
     }
 
     private companion object {
-        /** Removes the temp file of a failed write; a second failure is attached to the first. */
-        fun deleteAfterFailure(
-            temp: Path,
-            failure: Throwable,
-        ) {
-            try {
-                Files.deleteIfExists(temp)
-            } catch (cleanup: IOException) {
-                failure.addSuppressed(cleanup)
-            }
-        }
-
-        /**
-         * Closes a handle that was opened for a caller who was cancelled before receiving it.
-         * A close failure is dropped: the caller already ends with its cancellation.
-         */
-        fun closeUndelivered(channel: FileChannel) {
-            try {
-                channel.close()
-            } catch (ignored: IOException) {
-                // Nobody holds the handle and nobody waits for a result to report this to.
-            }
-        }
-
-        /** Closes a handle that will not be handed out; a close failure is attached to [failure]. */
-        fun closeAfterFailure(
-            channel: FileChannel,
-            failure: Throwable,
-        ) {
-            try {
-                channel.close()
-            } catch (closing: IOException) {
-                failure.addSuppressed(closing)
-            }
-        }
-
         fun writeFully(
             channel: FileChannel,
             bytes: ByteArray,
@@ -190,6 +154,42 @@ public class FileStoragePort internal constructor(
             val buffer = ByteBuffer.wrap(bytes)
             while (buffer.hasRemaining()) channel.write(buffer)
         }
+    }
+}
+
+/** Removes the temp file of a failed write; a second failure is attached to the first. */
+private fun FileOps.deleteAfterFailure(
+    temp: Path,
+    failure: Throwable,
+) {
+    try {
+        deleteIfExists(temp)
+    } catch (cleanup: IOException) {
+        failure.addSuppressed(cleanup)
+    }
+}
+
+/**
+ * Closes a handle that was opened for a caller who was cancelled before receiving it.
+ * A close failure is dropped: the caller already ends with its cancellation.
+ */
+private fun FileOps.closeUndelivered(channel: FileChannel) {
+    try {
+        close(channel)
+    } catch (ignored: IOException) {
+        // Nobody holds the handle and nobody waits for a result to report this to.
+    }
+}
+
+/** Closes a handle that will not be handed out; a close failure is attached to [failure]. */
+private fun FileOps.closeAfterFailure(
+    channel: FileChannel,
+    failure: Throwable,
+) {
+    try {
+        close(channel)
+    } catch (closing: IOException) {
+        failure.addSuppressed(closing)
     }
 }
 
@@ -204,6 +204,12 @@ internal interface FileOps {
     /** Opens [file] for appending, creating it when absent. */
     fun openAppend(file: Path): FileChannel
 
+    /** Closes [channel]. */
+    fun close(channel: FileChannel)
+
+    /** Deletes [file] if it exists. */
+    fun deleteIfExists(file: Path)
+
     companion object {
         /** The real calls. Directories can be opened for reading on Linux and macOS. */
         val SYSTEM: FileOps =
@@ -215,6 +221,12 @@ internal interface FileOps {
                 override fun force(channel: FileChannel) = channel.force(true)
 
                 override fun openAppend(file: Path): FileChannel = FileChannel.open(file, APPEND_OPTIONS)
+
+                override fun close(channel: FileChannel) = channel.close()
+
+                override fun deleteIfExists(file: Path) {
+                    Files.deleteIfExists(file)
+                }
             }
 
         private val APPEND_OPTIONS =
