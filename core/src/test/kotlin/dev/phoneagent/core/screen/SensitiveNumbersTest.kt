@@ -47,6 +47,9 @@ class SensitiveNumbersTest {
         assertEquals("订单编号\u00A06222021234567894", mask("订单编号\u00A06222021234567894"))
         assertEquals("Order No. 6222021234567894", mask("Order No. 6222021234567894"))
         assertEquals("tracking number: 6222021234567894", mask("tracking number: 6222021234567894"))
+        // A label earlier in the text, not right before the number, exempts nothing, card word or not.
+        assertEquals("订单已发货 「银行卡 尾号7894」", mask("订单已发货 6222021234567894"))
+        assertEquals("Order shipped, 「银行卡 尾号7894」", mask("Order shipped, 6222021234567894"))
     }
 
     @Test

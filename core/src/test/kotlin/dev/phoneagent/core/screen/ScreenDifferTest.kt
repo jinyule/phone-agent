@@ -134,7 +134,7 @@ class ScreenDifferTest {
     }
 
     @Test
-    fun `equal elements are paired in reading order`() {
+    fun `equal elements pair by ref first, then in reading order`() {
         val like = {
             ref: String,
             top: Int,
@@ -144,6 +144,11 @@ class ScreenDifferTest {
         val old = snapshot("s1", listOf(like("e1", 100), like("e2", 200), like("e3", 300)))
         val now = snapshot("s2", listOf(like("e1", 100), like("e2", 200)))
         assertEquals(ScreenDiff(removed = listOf(ElementRef("e3"))), differ.diff(old, now))
+        // Same ref pairs first: a new equal button above e1 is the added one, e1 moved and changed.
+        val inserted = snapshot("s3", listOf(like("e7", 50), like("e1", 150)))
+        val diff = differ.diff(snapshot("s1", listOf(like("e1", 100))), inserted)
+        assertEquals(listOf("e7"), diff.added.map { it.ref.value })
+        assertEquals(listOf("e1"), diff.changed.map { it.ref.value })
     }
 
     @Test
