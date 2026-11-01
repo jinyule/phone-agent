@@ -1,7 +1,9 @@
 package dev.phoneagent.core.screen
 
+import dev.phoneagent.core.ports.Bounds
 import dev.phoneagent.core.ports.ElementRole
 import dev.phoneagent.core.ports.ElementState
+import dev.phoneagent.core.ports.ScreenCoordinates
 import dev.phoneagent.core.ports.UiElement
 
 /*
@@ -46,5 +48,11 @@ internal fun clip(
     text: String,
     max: Int,
 ): String = if (text.length <= max) text else text.take(max - 1) + "…"
+
+/** Share (0–1] of the screen these bounds cover. */
+internal fun Bounds.areaShare(): Double {
+    val side = ScreenCoordinates.MAX + 1.0
+    return (right - left + 1.0) * (bottom - top + 1.0) / (side * side)
+}
 
 private val WHITESPACE = Regex("[\\s\\p{Z}]+")

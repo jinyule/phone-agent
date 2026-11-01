@@ -9,7 +9,11 @@ import dev.phoneagent.core.ports.UiElement
  *
  * - **Absorption**: a plain text leaf (not actionable, not scrollable, not secret) whose nearest
  *   actionable ancestor is reached without crossing a scrollable container is merged into that
- *   ancestor's label and gets no line of its own.
+ *   ancestor's label and gets no line of its own, as long as the ancestor looks like a row: it
+ *   covers at most [ScreenFormatConfig.absorbMaxAreaShare] of the screen and its absorbable texts
+ *   are at most [ScreenFormatConfig.absorbMaxPieces] pieces and [ScreenFormatConfig.absorbMaxChars]
+ *   characters together. Otherwise all those texts keep their own lines (and the page budget
+ *   folds them like any other line).
  * - **Blocks**: every printed element outside scrollable containers is a block; a top-level
  *   scrollable container is one block holding its header and its whole subtree, children one
  *   indent level deeper per container.
@@ -20,22 +24,28 @@ import dev.phoneagent.core.ports.UiElement
  * as top-level, so every element is considered exactly once.
  */
 internal class PageLayout(
-    snapshot: ScreenSnapshot,
+    private val elements: List<UiElement>,
     private val config: ScreenFormatConfig,
 ) {
-    private val elements = snapshot.elements
+    constructor(snapshot: ScreenSnapshot, config: ScreenFormatConfig) : this(snapshot.elements, config)
+
     private val byRef = elements.associateBy { it.ref }
     private val children: Map<ElementRef?, List<UiElement>> = elements.groupBy { effectiveParent(it) }
 
     /** Owner of each absorbed element. */
     private val ownerOf: Map<ElementRef, ElementRef> =
-        elements.mapNotNull { element -> ownerOrNull(element)?.let { element.ref to it } }.toMap()
+        elements
+            .mapNotNull { element -> ownerOrNull(element)?.let { element to it } }
+            .groupBy({ it.second }, { it.first })
+            .filter { (owner, texts) -> isRow(byRef.getValue(owner), texts) }
+            .flatMap { (owner, texts) -> texts.map { it.ref to owner } }
+            .toMap()
 
     /** Texts merged into each owner's label, in reading order. */
     val absorbed: Map<ElementRef, List<String>> =
         elements
             .filter { it.ref in ownerOf }
-            .groupBy({ ownerOf.getValue(it.ref) }, { it.name?.takeIf(String::isNotBlank) ?: it.value.orEmpty() })
+            .groupBy({ ownerOf.getValue(it.ref) }, ::textOf)
 
     /** Blocks in reading order. */
     val blocks: List<Block> = buildBlocks()
@@ -123,6 +133,15 @@ internal class PageLayout(
         return seen.toList()
     }
 
+    /** Whether [owner] is small enough, and [texts] few and short enough, to print as one row. */
+    private fun isRow(
+        owner: UiElement,
+        texts: List<UiElement>,
+    ): Boolean =
+        owner.bounds.areaShare() <= config.absorbMaxAreaShare &&
+            texts.size <= config.absorbMaxPieces &&
+            texts.sumOf { oneLine(textOf(it)).length } <= config.absorbMaxChars
+
     private fun ownerOrNull(element: UiElement): ElementRef? {
         val plain =
             !element.isActionable() &&
@@ -135,6 +154,9 @@ internal class PageLayout(
         return stop?.takeIf { it.isActionable() && !it.isScrollContainer() }?.ref
     }
 }
+
+/** The text an absorbed element contributes: its name, else its value. */
+private fun textOf(element: UiElement): String = element.name?.takeIf(String::isNotBlank) ?: element.value.orEmpty()
 
 /** Vertical zone of a block. */
 internal enum class Zone(

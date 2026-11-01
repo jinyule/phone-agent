@@ -28,7 +28,8 @@ public class ScreenFormatter(
     private val config: ScreenFormatConfig = ScreenFormatConfig(),
     private val lexicon: RiskLexicon = RiskLexicon { _, _ -> null },
 ) : ScreenPresenter {
-    private val lines = ElementLines(config)
+    private val briefLines = ElementLines(config, SnapshotDetail.BRIEF)
+    private val fullLines = ElementLines(config, SnapshotDetail.FULL)
 
     override fun page(
         snapshot: ScreenSnapshot,
@@ -71,6 +72,7 @@ public class ScreenFormatter(
     ): String {
         val layout = PageLayout(snapshot, config)
         val risky = riskyRefs(snapshot, layout)
+        val lines = if (detail == SnapshotDetail.FULL) fullLines else briefLines
         val blocks =
             layout.blocks.map { block ->
                 block to
@@ -107,6 +109,7 @@ public class ScreenFormatter(
     ): String? {
         val layout = PageLayout(after, config)
         val risky = riskyRefs(after, layout)
+        val lines = briefLines
         val addedRefs = diff.added.map { it.ref }.toSet()
         val order = after.elements.withIndex().associate { it.value.ref to it.index }
         val shown =

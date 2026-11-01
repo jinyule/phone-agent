@@ -2,7 +2,6 @@ package dev.phoneagent.core.screen
 
 import dev.phoneagent.core.ports.Bounds
 import dev.phoneagent.core.ports.ElementRole
-import dev.phoneagent.core.ports.ScreenCoordinates
 import dev.phoneagent.core.ports.TreeQuality
 import dev.phoneagent.core.ports.UiElement
 
@@ -83,11 +82,6 @@ public data class TreeQualityConfig(
     private companion object {
         const val TWO_THIRDS = 2.0 / 3.0
     }
-}
-
-private fun Bounds.areaShare(): Double {
-    val side = ScreenCoordinates.MAX + 1.0
-    return (right - left + 1.0) * (bottom - top + 1.0) / (side * side)
 }
 
 private fun Bounds.containsCenterOf(other: Bounds): Boolean {

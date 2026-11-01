@@ -175,6 +175,27 @@ class ScreenFormatterTest {
         }
 
         @Test
+        fun `full detail keeps whole texts, values and rows, brief clips them`() {
+            val tail = "幸福路88号3栋1201室"
+            val address = ("收货地址：广东省深圳市南山区" + "科技园南区".repeat(30)).take(108 - tail.length) + tail
+            assertEquals(108, address.length)
+            val text = el("e1", ElementRole.TEXT, address, box(0, 200, 999, 260))
+            val field =
+                el("e2", ElementRole.INPUT, "备注", box(0, 300, 999, 360), click + ElementState.EDITABLE)
+                    .copy(value = address)
+            val row = el("e3", ElementRole.BUTTON, bounds = box(0, 400, 999, 500), states = click)
+            val parts = (4..6).map { el("e$it", ElementRole.TEXT, "$it".repeat(40)).under("e3") }
+            val joined = (4..6).joinToString(" · ") { "$it".repeat(40) }
+            val full = page(text, field, row, *parts.toTypedArray(), detail = SnapshotDetail.FULL)
+            assertTrue(full.contains("@e1 \"$address\"\n"), full)
+            assertTrue(full.contains("@e2 输入框 \"备注\" 值:\"$address\" {可编辑} (499,330)"), full)
+            assertTrue(full.contains("@e3 按钮 \"$joined\" (499,450)"), full)
+            val brief = page(text, field, row, *parts.toTypedArray())
+            assertTrue(brief.contains("@e1 \"${address.take(59)}…\"\n"), brief)
+            assertTrue(brief.contains("@e3 按钮 \"${joined.take(99)}…\" (499,450)"), brief)
+        }
+
+        @Test
         fun `Unicode spaces count as whitespace and as digit-group separators`() {
             val lines =
                 body(
@@ -272,6 +293,35 @@ class ScreenFormatterTest {
                 ),
                 lines,
             )
+        }
+
+        @Test
+        fun `a container too large to be a row keeps its texts as lines`() {
+            val root = el("e1", ElementRole.CONTAINER, bounds = box(0, 0, 999, 999), states = click)
+            val paragraphs =
+                (2..7).map {
+                    val name = "第 ${it - 1} 段：" + "这是一段比较长的正文内容，".repeat(2)
+                    el("e$it", ElementRole.TEXT, name, box(40, 100 * it, 960, 100 * it + 80)).under("e1")
+                }
+            val full = page(root, *paragraphs.toTypedArray(), detail = SnapshotDetail.FULL)
+            for (paragraph in paragraphs) {
+                assertTrue(full.contains("@${paragraph.ref} \"${paragraph.name}\""), full)
+            }
+            assertTrue(full.contains("@e1 (499,499)"), full)
+        }
+
+        @Test
+        fun `a row absorbs only a few short texts`() {
+            val row = el("e1", ElementRole.BUTTON, bounds = box(0, 400, 999, 500), states = click)
+
+            fun texts(
+                count: Int,
+                length: Int,
+            ) = (2..count + 1).map { el("e$it", ElementRole.TEXT, "$it".repeat(length)).under("e1") }.toTypedArray()
+            assertEquals(1, body(row, *texts(5, 4)).size, "five short texts are one row")
+            assertEquals(7, body(row, *texts(6, 4)).size, "six texts stay lines")
+            assertEquals(4, body(row, *texts(3, 80)).size, "too long together: they stay lines")
+            assertEquals(1, body(row, *texts(2, 80)).size)
         }
 
         @Test
@@ -583,5 +633,10 @@ class ScreenFormatterTest {
         assertThrows<IllegalArgumentException> { ScreenFormatConfig(bottomZoneStart = 1000) }
         assertThrows<IllegalArgumentException> { ScreenFormatConfig(fullPageShare = 0.0) }
         assertThrows<IllegalArgumentException> { ScreenFormatConfig(fullPageShare = 1.0) }
+        assertThrows<IllegalArgumentException> { ScreenFormatConfig(absorbMaxAreaShare = 0.0) }
+        assertThrows<IllegalArgumentException> { ScreenFormatConfig(absorbMaxAreaShare = 1.01) }
+        assertThrows<IllegalArgumentException> { ScreenFormatConfig(absorbMaxPieces = 0) }
+        assertThrows<IllegalArgumentException> { ScreenFormatConfig(absorbMaxChars = 7) }
+        ScreenFormatConfig(absorbMaxAreaShare = 1.0, absorbMaxPieces = 1, absorbMaxChars = 8)
     }
 }

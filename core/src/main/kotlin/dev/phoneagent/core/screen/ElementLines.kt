@@ -2,16 +2,23 @@ package dev.phoneagent.core.screen
 
 import dev.phoneagent.core.ports.ElementRole
 import dev.phoneagent.core.ports.ElementState
+import dev.phoneagent.core.ports.SnapshotDetail
 import dev.phoneagent.core.ports.UiElement
 
 /**
  * Renders one element as one line of the screen format (phase1 §4), e.g.
  * `@e10 ⚠ 按钮 "发送" (930,955)` or `@e9 输入框 (提示:"发送消息") {可编辑,焦点} (480,955)`.
- * All text is put on one line, masked ([SensitiveNumbers]) and clipped; secret values never appear.
+ * All text is put on one line and masked ([SensitiveNumbers]); at `brief` (pages and diffs) it is
+ * clipped to [ScreenFormatConfig.labelMax] and [ScreenFormatConfig.rowMax], at `full` it is kept
+ * whole. Secret values never appear.
  */
 internal class ElementLines(
-    private val config: ScreenFormatConfig,
+    config: ScreenFormatConfig,
+    detail: SnapshotDetail,
 ) {
+    private val labelMax = if (detail == SnapshotDetail.FULL) Int.MAX_VALUE else config.labelMax
+    private val rowMax = if (detail == SnapshotDetail.FULL) Int.MAX_VALUE else config.rowMax
+
     /**
      * The line of [element]; [absorbed] are texts of plain children merged into its label, [added]
      * prints `+` (new since the previous screen) and [risky] prints `⚠`.
@@ -59,8 +66,8 @@ internal class ElementLines(
                 ?.let { append(" \"").append(it).append('"') }
         }
 
-    /** [text] as shown inside quotes: one line, masked, no ASCII quotes, at most [ScreenFormatConfig.labelMax]. */
-    fun clean(text: String): String = clip(SensitiveNumbers.mask(oneLine(text)).replace('"', '＂'), config.labelMax)
+    /** [text] as shown inside quotes: one line, masked, no ASCII quotes, clipped at `brief`. */
+    fun clean(text: String): String = clip(SensitiveNumbers.mask(oneLine(text)).replace('"', '＂'), labelMax)
 
     private fun label(
         element: UiElement,
@@ -69,7 +76,7 @@ internal class ElementLines(
         val own = element.name?.let(::clean)?.takeIf { it.isNotEmpty() }
         val extras = absorbed.map(::clean).filter { it.isNotEmpty() && own?.contains(it) != true }.distinct()
         val parts = listOfNotNull(own) + extras
-        return if (parts.isEmpty()) null else clip(parts.joinToString(" · "), config.rowMax)
+        return if (parts.isEmpty()) null else clip(parts.joinToString(" · "), rowMax)
     }
 
     private fun states(element: UiElement): List<String> =
