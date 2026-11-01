@@ -157,7 +157,8 @@ data class WireProfile(
   - 可选字段 `parallel_tool_calls`、`stream_options` 发不发（`WireOptions.chat`），只在"测试并保存"时协商：试调用被 400 拒绝，并且结构化的 `error.param` 点名该字段（没有 `param` 时看服务商的消息有没有点名）时，去掉它再试一次，每个字段最多一次。试调用通过时用的选项写进 `ProbeResult.Passed.wire`，由 app 跟 profile 一起保存，创建模型时传入。运行时再遇到这类 400，就是不可重试的 `InvalidRequest(param)`，UI 可以据 `param` 提示重新测试。
   - 漏成文字的工具调用，ID 由适配器生成；流式预览会扣住可能是标记的文字，流结束时用 `DeltaLedger` 把预览漏掉的内容补发，保证增量拼起来和最终回复一致。
   - 发送前校验对话：每个工具调用都必须有结果，不能有孤立的结果；服务端上下文编辑只支持 Anthropic。不满足时直接报 `InvalidRequest`，不发请求。
-  - 预设的已知差异写在 `ProviderPresets` 里，每条注明 VERIFIED / DOCUMENTED / UNVERIFIED。
+  - 预设的已知差异写在 `ProviderPresets` 里，每条注明 VERIFIED / DOCUMENTED / UNVERIFIED。没有预设的 profile 用默认线路选项；指向某个预设官方地址的自定义 profile 用该预设的选项（`WireOptions.defaultsFor`）。
+  - 输出上限的字段名是线路选项 `ChatQuirks.maxTokensField`：官方 OpenAI 用 `max_completion_tokens`（`max_tokens` 已弃用），兼容网关默认 `max_tokens`。
 
 ### 3.2 OpenAI Responses
 

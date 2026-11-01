@@ -37,21 +37,26 @@ import kotlinx.serialization.json.putJsonObject
 public data class ChatQuirks(
     val parallelToolCalls: Boolean = true,
     val streamUsage: Boolean = true,
-    val maxTokensField: String = "max_tokens",
+    val maxTokensField: MaxTokensField = MaxTokensField.MAX_TOKENS,
     val reasoningEffort: ReasoningEffortStyle = ReasoningEffortStyle.REASONING_EFFORT,
 ) {
-    init {
-        require(maxTokensField in MAX_TOKENS_FIELDS) { "maxTokensField must be one of $MAX_TOKENS_FIELDS" }
-    }
-
     /** Defaults. */
     public companion object {
-        /** Accepted values of [maxTokensField]. */
-        public val MAX_TOKENS_FIELDS: Set<String> = setOf("max_tokens", "max_completion_tokens")
-
         /** What an unknown OpenAI-compatible endpoint gets. */
         public val DEFAULT: ChatQuirks = ChatQuirks()
     }
+}
+
+/** Where a Chat Completions provider takes the output cap (`ChatRequest.maxOutputTokens`). */
+public enum class MaxTokensField(
+    /** The request field. */
+    public val wireName: String,
+) {
+    /** `max_tokens`: what OpenAI-compatible gateways take. */
+    MAX_TOKENS("max_tokens"),
+
+    /** `max_completion_tokens`: OpenAI's own endpoint, where `max_tokens` is deprecated. */
+    MAX_COMPLETION_TOKENS("max_completion_tokens"),
 }
 
 /** Where a Chat Completions provider takes the reasoning level. */
@@ -100,7 +105,7 @@ internal class ChatCompletionsWire(
                 put("tool_choice", "auto")
                 if (options.parallelToolCalls) put("parallel_tool_calls", false)
             }
-            request.maxOutputTokens?.let { put(options.maxTokensField, it) }
+            request.maxOutputTokens?.let { put(options.maxTokensField.wireName, it) }
             WireSupport.effort(request.reasoning, reasoningLevels)?.let { effort ->
                 when (options.reasoningEffort) {
                     ReasoningEffortStyle.NONE -> Unit

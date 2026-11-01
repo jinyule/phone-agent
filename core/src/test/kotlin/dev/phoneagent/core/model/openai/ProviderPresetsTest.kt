@@ -79,10 +79,24 @@ class ProviderPresetsTest {
     }
 
     @Test
-    fun `quirks are validated`() {
-        assertThrows<IllegalArgumentException> { ChatQuirks(maxTokensField = "max_output_tokens") }
+    fun `quirk defaults and output cap fields`() {
         assertEquals(ChatQuirks(), ChatQuirks.DEFAULT)
-        assertEquals(setOf("max_tokens", "max_completion_tokens"), ChatQuirks.MAX_TOKENS_FIELDS)
+        assertEquals(MaxTokensField.MAX_TOKENS, ChatQuirks.DEFAULT.maxTokensField)
+        assertEquals(listOf("max_tokens", "max_completion_tokens"), MaxTokensField.entries.map { it.wireName })
+    }
+
+    @Test
+    fun `default wire options come from the preset or the official host`() {
+        fun defaults(
+            baseUrl: String,
+            preset: String? = null,
+        ) = WireOptions.defaultsFor(Kit.profile(baseUrl, preset = preset))
+        assertEquals(ProviderPresets.KIMI.chat, defaults("https://proxy.example/v1", "kimi").chat)
+        val openAi = defaults("https://api.openai.com/v1")
+        assertEquals(MaxTokensField.MAX_COMPLETION_TOKENS, openAi.chat.maxTokensField, "custom profile, official host")
+        assertEquals(ProviderPresets.DEEPSEEK.chat, defaults("https://api.deepseek.com", "retired-preset").chat)
+        assertEquals(WireOptions(), defaults("http://192.168.1.5:8000/v1"))
+        assertEquals(ResponsesQuirks(includeEncryptedReasoning = true), openAi.responses)
     }
 
     @Test

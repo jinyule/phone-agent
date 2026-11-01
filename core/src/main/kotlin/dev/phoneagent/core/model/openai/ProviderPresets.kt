@@ -95,7 +95,7 @@ public object ProviderPresets {
             needsKey = true,
             reasoningField = null,
             echoReasoning = false,
-            chat = ChatQuirks(maxTokensField = "max_completion_tokens"),
+            chat = ChatQuirks(maxTokensField = MaxTokensField.MAX_COMPLETION_TOKENS),
             officialHosts = setOf("api.openai.com"),
             facts =
                 listOf(
@@ -103,6 +103,7 @@ public object ProviderPresets {
                         "Stateless Responses: store:false, encrypted reasoning returned via include and sent back.",
                     ),
                     documented("Non-reasoning models reject include=reasoning.encrypted_content (400)."),
+                    documented("Chat Completions takes max_completion_tokens; max_tokens is deprecated."),
                 ),
         )
 

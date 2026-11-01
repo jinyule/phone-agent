@@ -142,7 +142,7 @@ class WireGoldenTest {
             ChatQuirks(
                 parallelToolCalls = false,
                 streamUsage = false,
-                maxTokensField = "max_completion_tokens",
+                maxTokensField = MaxTokensField.MAX_COMPLETION_TOKENS,
                 reasoningEffort = ReasoningEffortStyle.OPENROUTER,
             )
         val body =
