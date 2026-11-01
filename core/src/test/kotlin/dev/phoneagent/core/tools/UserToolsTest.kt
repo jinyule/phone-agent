@@ -34,11 +34,13 @@ class UserToolsTest {
     ): ToolResult = tools.getValue(tool).execute(call(tool, args, reason), FakeContext(interaction = interaction))
 
     @Test
-    fun `general tools are reads that never run concurrently`() {
+    fun `general tools never run concurrently, and only request_confirmation is a write`() {
         for (name in listOf("ask_user", "hand_to_user", "request_confirmation", "end_not_done")) {
             val tool = tools.getValue(name)
             assertEquals(ToolGroup.GENERAL, tool.group, name)
-            assertEquals(RiskClass.READ, tool.risk, name)
+            // request_confirmation is not a READ: a resolver that forgets it must not let it through as a read.
+            val risk = if (name == "request_confirmation") RiskClass.WRITE else RiskClass.READ
+            assertEquals(risk, tool.risk, name)
             assertFalse(tool.concurrencySafe, name)
         }
         assertEquals(5_000, tools.getValue("end_not_done").timeoutMs)

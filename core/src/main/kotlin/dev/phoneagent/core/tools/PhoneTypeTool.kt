@@ -18,7 +18,7 @@ internal class PhoneTypeTool(
         timeoutMs = timeoutMs,
         declare = {
             string("screen", "这次输入依据的那一屏的编号，如 s12。", required = true)
-            string("ref", "输入框的编号，如 @e9。不填就用当前有焦点的输入框。")
+            string("ref", "输入框的编号，写 @e9 或 e9。不填就用当前有焦点的输入框。")
             string("text", "要输入的文字。", required = true)
             boolean("append", "true 表示追加到原有内容后面。默认 false（替换）。")
             boolean("submit", "true 表示输入后按回车或发送、搜索键。默认 false。")

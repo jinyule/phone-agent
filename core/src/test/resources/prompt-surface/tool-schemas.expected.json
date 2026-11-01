@@ -102,7 +102,7 @@
         },
         "ref": {
           "type": "string",
-          "description": "要点的元素编号，如 @e10。和 x、y 二选一。"
+          "description": "要点的元素编号，写 @e10 或 e10。和 x、y 二选一。"
         },
         "x": {
           "type": "integer",
@@ -144,7 +144,7 @@
         },
         "ref": {
           "type": "string",
-          "description": "输入框的编号，如 @e9。不填就用当前有焦点的输入框。"
+          "description": "输入框的编号，写 @e9 或 e9。不填就用当前有焦点的输入框。"
         },
         "text": {
           "type": "string",
@@ -193,7 +193,7 @@
         },
         "ref": {
           "type": "string",
-          "description": "要滚动的列表编号，如 @e5。不填就滚动主列表。"
+          "description": "要滚动的列表编号，写 @e5 或 e5。不填就滚动主列表。"
         }
       },
       "required": [
@@ -285,7 +285,7 @@
   },
   {
     "name": "phone_launch",
-    "description": "打开 App 或链接。app 填 App 的名字（如 微信）或包名；cold=true 先结束这个 App 再从头打开。link 填网址或 App 深链（如 https://…、weixin://…）。app 和 link 只填一个。返回打开后的一屏。",
+    "description": "打开 App 或链接。app 填 App 的名字（如 微信）或包名；cold=true 先结束这个 App 再从头打开。link 填网址（https://…）或 geo:、mailto:、market: 链接；App 的深链打不开，打开 App 用 app。app 和 link 只填一个。返回打开后的一屏。",
     "parameters": {
       "type": "object",
       "properties": {
@@ -299,7 +299,7 @@
         },
         "link": {
           "type": "string",
-          "description": "网址或 App 深链。"
+          "description": "网址（https://… 或 http://…），或 geo:、mailto:、market: 链接。"
         },
         "cold": {
           "type": "boolean",

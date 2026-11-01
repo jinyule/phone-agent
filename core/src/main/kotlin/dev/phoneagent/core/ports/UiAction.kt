@@ -149,7 +149,12 @@ public sealed interface LaunchTarget {
         }
     }
 
-    /** A deep link or web URL. The adapter decides which schemes it opens. */
+    /**
+     * A link to open. Adapters open it only as a browsable `ACTION_VIEW` of the parsed URI, never
+     * by parsing it into an Intent (`Intent.parseUri`), so a link cannot name a component, extras
+     * or flags; and only when its scheme (case-insensitive) is in [SCHEMES]. Any other link fails
+     * without touching the device; tools refuse it before that.
+     */
     @Serializable
     @SerialName("link")
     public data class Link(
@@ -158,6 +163,16 @@ public sealed interface LaunchTarget {
     ) : LaunchTarget {
         init {
             require(uri.contains(':') && uri.isNotBlank()) { "Link must be an absolute URI, got '$uri'" }
+        }
+
+        /** The scheme whitelist shared by tools and adapters. */
+        public companion object {
+            /**
+             * The only schemes a link may have, in lower case: web pages (`https`, `http`), a place in
+             * the maps app (`geo`), the mail composer (`mailto`), an app's store page (`market`).
+             * App-specific deep links are not here: each needs its own review before it is added.
+             */
+            public val SCHEMES: Set<String> = setOf("https", "http", "geo", "mailto", "market")
         }
     }
 

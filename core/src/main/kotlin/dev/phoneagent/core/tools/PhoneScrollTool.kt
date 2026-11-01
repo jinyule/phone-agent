@@ -19,7 +19,7 @@ internal class PhoneScrollTool(
         declare = {
             string("screen", "这次滚动依据的那一屏的编号，如 s12。", required = true)
             string("direction", "想看哪个方向的内容。", required = true, enum = DIRECTIONS.keys.toList())
-            string("ref", "要滚动的列表编号，如 @e5。不填就滚动主列表。")
+            string("ref", "要滚动的列表编号，写 @e5 或 e5。不填就滚动主列表。")
         },
     ) {
     override val usage: String = "phone_scroll(screen, direction=up/down/left/right, ref?)"

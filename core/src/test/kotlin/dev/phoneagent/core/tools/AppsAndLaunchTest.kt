@@ -162,16 +162,16 @@ class AppsAndLaunchTest {
             }
 
         @Test
-        fun `opens web links and deep links, refuses intent-carrying schemes`() =
+        fun `opens web and store links, refuses intent-carrying schemes`() =
             runTest {
                 val screen = FakeScreen()
                 val opened = launch("""{"link":"https://example.com/a?card=6222021234567894"}""", screen)
                 assertTrue(opened.text().startsWith("已打开链接 https://example.com/a?card=「银行卡 尾号7894」"), opened.text())
-                launch("""{"link":"weixin://dl/scan"}""", screen)
+                launch("""{"link":"market://details?id=com.tencent.mm"}""", screen)
                 assertEquals(
                     listOf(
                         LaunchTarget.Link("https://example.com/a?card=6222021234567894"),
-                        LaunchTarget.Link("weixin://dl/scan"),
+                        LaunchTarget.Link("market://details?id=com.tencent.mm"),
                     ),
                     screen.launches,
                 )
@@ -195,6 +195,38 @@ class AppsAndLaunchTest {
             }
 
         @Test
+        fun `links are limited to the schemes the device opens`() =
+            runTest {
+                val screen = FakeScreen()
+                val allowed =
+                    listOf(
+                        "https://a.com/x",
+                        "HTTP://a.com",
+                        "geo:0,0?q=西湖",
+                        "mailto:a@example.com",
+                        "market://details?id=com.a",
+                    )
+                for (link in allowed) {
+                    assertEquals(ToolStatus.OK, launch("""{"link":"$link"}""", screen).status, link)
+                }
+                val refused =
+                    listOf(
+                        "weixin://dl/scan",
+                        "tel:10086",
+                        "sms:10086?body=hi",
+                        "alipays://platformapi/startapp?appId=1",
+                        "ftp://a.com/x",
+                    )
+                for (link in refused) {
+                    assertEquals(ToolStatus.INVALID_ARGS, launch("""{"link":"$link"}""", screen).status, link)
+                }
+                assertEquals(allowed.map { LaunchTarget.Link(it) }, screen.launches)
+                assertEquals(setOf("https", "http", "geo", "mailto", "market"), LaunchTarget.Link.SCHEMES)
+                val description = tools.getValue("phone_launch").def.description
+                assertFalse(description.contains("weixin"), description)
+            }
+
+        @Test
         fun `app and link are exclusive, cold goes with app only`() =
             runTest {
                 val both = launch("""{"app":"微信","link":"https://a.com"}""")
@@ -212,7 +244,7 @@ class AppsAndLaunchTest {
                 assertTrue(launch("""{"link":"https://a.com"}""", gone).text().startsWith("屏幕暂时用不了"))
                 val failure = ActionOutcome(ActionOutcome.Status.Failed("没有能打开这个链接的 App"), ActionOutcome.Effect.UNKNOWN)
                 val failing = FakeScreen().apply { onLaunch = { failure } }
-                val failed = launch("""{"link":"weixin://x"}""", failing)
+                val failed = launch("""{"link":"market://details?id=com.a"}""", failing)
                 assertEquals(ToolStatus.ERROR, failed.status)
                 assertTrue(failed.text().startsWith("没有做成：没有能打开这个链接的 App。"))
                 val tool = tools.getValue("phone_launch")

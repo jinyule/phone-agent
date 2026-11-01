@@ -15,8 +15,8 @@ import dev.phoneagent.core.tool.ToolStatus
 /**
  * `phone_launch(app | link, cold?)` (phase1 §5). `app` is a package name or an exact launcher
  * label, resolved through [ToolContext.apps]; near matches are suggested, never launched. `link`
- * is a web URL or app deep link; schemes that can carry an arbitrary Intent or local file are
- * refused at the boundary.
+ * must have a scheme of [LaunchTarget.Link.SCHEMES] (web pages, geo, mailto, market); anything
+ * else is refused at the boundary, the same way the adapter would.
  */
 internal class PhoneLaunchTool(
     private val presenter: ScreenPresenter,
@@ -25,11 +25,12 @@ internal class PhoneLaunchTool(
         name = "phone_launch",
         description =
             "打开 App 或链接。app 填 App 的名字（如 微信）或包名；cold=true 先结束这个 App 再从头打开。" +
-                "link 填网址或 App 深链（如 https://…、weixin://…）。app 和 link 只填一个。返回打开后的一屏。",
+                "link 填网址（https://…）或 geo:、mailto:、market: 链接；App 的深链打不开，打开 App 用 app。" +
+                "app 和 link 只填一个。返回打开后的一屏。",
         mask = presenter::mask,
         declare = {
             string("app", "App 名字（和桌面上显示的一样）或包名。")
-            string("link", "网址或 App 深链。")
+            string("link", "网址（https://… 或 http://…），或 geo:、mailto:、market: 链接。")
             boolean("cold", "true 表示先结束 App 再打开（从首页开始）。只和 app 一起用。")
         },
     ) {
@@ -182,17 +183,16 @@ internal class PhoneLaunchTool(
     }
 }
 
-/** Which links `phone_launch` may open. */
+/** Which links `phone_launch` may open: the shared [LaunchTarget.Link.SCHEMES]. */
 internal object Links {
     /** Problem text for a refused link. */
-    const val REFUSED: String = "`link` 只能是网址或 App 深链（如 https://…、weixin://…）；intent:、file:、content: 这类链接不能打开"
+    const val REFUSED: String =
+        "`link` 只能是网址（https://…、http://…）或 geo:、mailto:、market: 链接；" +
+            "App 深链、intent:、file: 这类链接不能打开。打开 App 用 `app`"
 
     private val SCHEME = Regex("^([A-Za-z][A-Za-z0-9+.-]*):\\S+$")
 
-    /** Schemes that can encode an arbitrary Intent, a local file, or script. */
-    private val BLOCKED = setOf("intent", "android-app", "file", "content", "javascript", "data", "jar")
-
-    /** Whether [uri] has a scheme, no whitespace, and the scheme is not [BLOCKED]. */
+    /** Whether [uri] has no whitespace and a scheme of [LaunchTarget.Link.SCHEMES]. */
     fun allowed(uri: String): Boolean {
         val scheme =
             SCHEME
@@ -200,6 +200,6 @@ internal object Links {
                 ?.groupValues
                 ?.get(1)
                 ?.lowercase()
-        return scheme != null && scheme !in BLOCKED
+        return scheme != null && scheme in LaunchTarget.Link.SCHEMES
     }
 }

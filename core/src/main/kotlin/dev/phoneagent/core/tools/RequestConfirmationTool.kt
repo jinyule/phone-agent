@@ -10,9 +10,15 @@ import dev.phoneagent.core.tool.ToolResult
  * `request_confirmation(action, target, content, amount?)` (phase1 §5): the model asks for a
  * confirmation it thinks is needed. It can only add confirmations.
  *
- * Contract (contracts addendum §5): the PolicyEngine answers every call of this tool with
- * `Verdict.Confirm` built from these arguments, and the runtime runs [execute] only after the user
- * approved; a rejection never reaches it. So [execute] reports the approval without asking again.
+ * Precondition (contracts addendum §5): [execute] runs only after the PolicyEngine answered the
+ * call with `Verdict.Confirm` built from these arguments, the user approved, and the re-check after
+ * approval gave Allow; a rejection, an expired or an impossible confirmation never reaches it. That
+ * is why [execute] reports "用户已确认" without asking again. The tool is declared [RiskClass.WRITE]
+ * as a conservative floor: a policy that does not know it must not let it through as a read, and
+ * the registry-by-resolver check (WP09) then flags the gap.
+ *
+ * The action is echoed back unmasked: the model wrote it, so masking would only make the echo
+ * differ from its own arguments; the trajectory card masks it like every card detail.
  */
 internal class RequestConfirmationTool(
     mask: (String) -> String,
@@ -32,7 +38,7 @@ internal class RequestConfirmationTool(
         },
     ) {
     override val group: ToolGroup = ToolGroup.GENERAL
-    override val risk: RiskClass = RiskClass.READ
+    override val risk: RiskClass = RiskClass.WRITE
     override val concurrencySafe: Boolean = false
 
     override suspend fun execute(

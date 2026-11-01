@@ -137,10 +137,10 @@ internal class ArgReader(
     }
 }
 
-/** An element ref of the latest screen: `@e5`, `e5` or `5`. */
+/** An element ref of the latest screen: `@e5` or `e5` (contracts addendum §6); a bare number is not one. */
 internal fun ArgReader.ref(name: String): ElementRef? {
     val text = string(name)?.trim() ?: return null
-    val normalized = text.removePrefix("@").let { if (DIGITS.matches(it)) "e$it" else it }
+    val normalized = text.removePrefix("@")
     val valid = REF.matches(normalized)
     if (!valid) problem("`$name` 应该是最近一屏里的元素编号，例如 @e5（收到 \"${clipShown(text)}\"）")
     return if (valid) ElementRef(normalized) else null
@@ -162,7 +162,6 @@ private fun clipShown(text: String): String = if (text.length <= SHOWN) text els
 
 private const val MAX_ID = 256
 private const val SHOWN = 40
-private val DIGITS = Regex("[1-9][0-9]*")
 private val REF = Regex("[a-z]+[1-9][0-9]*")
 
 /** Arguments after the boundary check. */

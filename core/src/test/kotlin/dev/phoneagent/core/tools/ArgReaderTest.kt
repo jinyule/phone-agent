@@ -146,7 +146,7 @@ class ArgReaderTest {
     }
 
     @Test
-    fun `refs accept @e5, e5 and 5`() {
+    fun `refs accept @e5 and e5, not a bare number`() {
         val args =
             reader(
                 """{"a":"@e5","b":"e12","c":"7","d":" @e3 ","e":"e0","f":"按钮","g":"0"}""",
@@ -160,7 +160,7 @@ class ArgReaderTest {
             )
         assertEquals(ElementRef("e5"), args.ref("a"))
         assertEquals(ElementRef("e12"), args.ref("b"))
-        assertEquals(ElementRef("e7"), args.ref("c"))
+        assertNull(args.ref("c"), "a bare number is not a ref")
         assertEquals(ElementRef("e3"), args.ref("d"))
         assertNull(args.ref("e"))
         assertNull(args.ref("f"))
@@ -168,6 +168,7 @@ class ArgReaderTest {
         assertNull(args.ref("missing"))
         assertEquals(
             listOf(
+                "`c` 应该是最近一屏里的元素编号，例如 @e5（收到 \"7\"）",
                 "`e` 应该是最近一屏里的元素编号，例如 @e5（收到 \"e0\"）",
                 "`f` 应该是最近一屏里的元素编号，例如 @e5（收到 \"按钮\"）",
                 "`g` 应该是最近一屏里的元素编号，例如 @e5（收到 \"0\"）",
