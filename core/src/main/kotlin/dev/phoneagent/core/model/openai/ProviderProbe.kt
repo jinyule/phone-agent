@@ -9,6 +9,7 @@ import dev.phoneagent.core.model.Message
 import dev.phoneagent.core.model.ModelCapabilities
 import dev.phoneagent.core.model.ModelError
 import dev.phoneagent.core.model.ModelErrorKind
+import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.PromptBlock
 import dev.phoneagent.core.model.ProviderProfile
@@ -31,14 +32,16 @@ import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.io.IOException
+import java.util.Locale
 import java.util.UUID
 
 /**
  * "Test and save" for OpenAI-style providers (model-layer §4.1): list the models, then let the
  * candidate main model really call a trial tool (a few dozen tokens). The profile passes only when
- * both steps do; the result then carries [VerifiedCapability.TOOL_CALL]. Failures keep the
- * provider's own words for the user. Saving and the "use the preset" hint
- * ([ProviderPresets.matchingOfficial]) are the app's part.
+ * both steps do; the result then carries [VerifiedCapability.TOOL_CALL] and the [WireOptions] the
+ * trial passed with. This is the only place where request options are negotiated: models never
+ * change their options at run time. Failures keep the provider's own words for the user. Saving
+ * and the "use the preset" hint ([ProviderPresets.matchingOfficial]) are the app's part.
  */
 public class ProviderProbe internal constructor(
     private val adapters: OpenAiAdapters,
@@ -73,12 +76,20 @@ public class ProviderProbe internal constructor(
      * Runs both steps for [candidate]. [capabilities] are the preset's or the listing's initial
      * values; on success they come back with `tools = true` and [VerifiedCapability.TOOL_CALL].
      * [token] is what the model must pass to the trial tool (random by default).
+     *
+     * [wire] is the request shape to start from. When the trial is refused (400) over an optional
+     * field the adapters send — `parallel_tool_calls`, `stream_options`, Responses `include` — the
+     * trial runs again without it, each field at most once; [ProbeResult.Passed.wire] is the shape
+     * that passed, for the app to save with the profile. A field counts as refused when the error's
+     * structured `param` names it or, without a `param`, when the provider's message names one of
+     * the Chat fields; a field turned off for a trial that then fails anyway is not reported.
      */
     public suspend fun testAndSave(
         profile: ProviderProfile,
         candidate: ModelId,
         capabilities: ModelCapabilities,
         token: String = "pa-" + UUID.randomUUID().toString().take(TOKEN_LENGTH),
+        wire: WireOptions = WireOptions.defaultsFor(profile),
     ): ProbeResult {
         val models =
             try {
@@ -86,27 +97,54 @@ public class ProviderProbe internal constructor(
             } catch (e: ModelError) {
                 return ProbeResult.Failed(ProbeStep.LIST_MODELS, e.kind, masked(e.message.orEmpty()))
             }
-        return trial(profile, candidate, capabilities, token, models)
+        return Trial(profile, candidate, capabilities, token).run(models, wire)
     }
 
-    private suspend fun trial(
-        profile: ProviderProfile,
-        candidate: ModelId,
-        capabilities: ModelCapabilities,
-        token: String,
-        models: List<ListedModel>?,
-    ): ProbeResult {
-        val model = adapters.model(profile, candidate, capabilities, NO_IMAGES)
-        val reply =
-            try {
-                model.complete(trialRequest(token))
-            } catch (e: ModelError) {
-                return ProbeResult.Failed(ProbeStep.TOOL_CALL, e.kind, masked(e.message.orEmpty()))
+    /** The trial call of one "test and save", with the negotiation of optional fields. */
+    private inner class Trial(
+        val profile: ProviderProfile,
+        val candidate: ModelId,
+        val capabilities: ModelCapabilities,
+        val token: String,
+    ) {
+        suspend fun run(
+            models: List<ListedModel>?,
+            wire: WireOptions,
+        ): ProbeResult {
+            var options = wire
+            while (true) {
+                val reply =
+                    try {
+                        adapters
+                            .model(
+                                profile,
+                                candidate,
+                                capabilities,
+                                NO_IMAGES,
+                                options,
+                            ).complete(trialRequest(token))
+                    } catch (e: ModelError) {
+                        options = WireNegotiation.without(options, profile.protocol, e) ?: return failed(e)
+                        null
+                    }
+                if (reply != null) return result(reply, models, options)
             }
-        val problem = checkTrialCall(reply, token)
-        val verified = capabilities.copy(tools = true, verified = capabilities.verified + VerifiedCapability.TOOL_CALL)
-        return problem?.let { ProbeResult.Failed(ProbeStep.TOOL_CALL, null, masked(it)) }
-            ?: ProbeResult.Passed(models, verified, models?.any { it.id == candidate })
+        }
+
+        private fun failed(error: ModelError): ProbeResult =
+            ProbeResult.Failed(ProbeStep.TOOL_CALL, error.kind, masked(error.message.orEmpty()))
+
+        private fun result(
+            reply: ChatResponse,
+            models: List<ListedModel>?,
+            wire: WireOptions,
+        ): ProbeResult {
+            val problem = checkTrialCall(reply, token)
+            val verified =
+                capabilities.copy(tools = true, verified = capabilities.verified + VerifiedCapability.TOOL_CALL)
+            return problem?.let { ProbeResult.Failed(ProbeStep.TOOL_CALL, null, masked(it)) }
+                ?: ProbeResult.Passed(models, verified, models?.any { it.id == candidate }, wire)
+        }
     }
 
     private fun parseListing(
@@ -208,6 +246,65 @@ private val TRIAL_SCHEMA: JsonObject =
         put("additionalProperties", false)
     }
 
+/** Which optional request field a refused trial names (see [ProviderProbe.testAndSave]). */
+internal object WireNegotiation {
+    /** [options] without the optional field [error] refuses, or `null` when it names none that is still sent. */
+    fun without(
+        options: WireOptions,
+        protocol: ModelProtocol,
+        error: ModelError,
+    ): WireOptions? {
+        val refused = error as? ModelError.InvalidRequest ?: return null
+        val param = refused.param?.lowercase(Locale.ROOT)
+        val message = refused.detail.lowercase(Locale.ROOT)
+        return when (protocol) {
+            ModelProtocol.OPENAI_CHAT_COMPLETIONS -> chat(options, param, message)
+            ModelProtocol.OPENAI_RESPONSES -> responses(options, param)
+            ModelProtocol.ANTHROPIC_MESSAGES -> null
+        }
+    }
+
+    private fun chat(
+        options: WireOptions,
+        param: String?,
+        message: String,
+    ): WireOptions? {
+        // A structured param decides; without one, the message must name the (distinctive) field.
+        fun names(field: String) = if (param != null) names(param, field) else field in message
+        val chat = options.chat
+        return when {
+            chat.parallelToolCalls &&
+                names(
+                    PARALLEL_TOOL_CALLS,
+                )
+            -> options.copy(chat = chat.copy(parallelToolCalls = false))
+
+            chat.streamUsage && names(STREAM_OPTIONS) -> options.copy(chat = chat.copy(streamUsage = false))
+
+            else -> null
+        }
+    }
+
+    /** `include` is too common a word to look for in a message: only the structured param counts. */
+    private fun responses(
+        options: WireOptions,
+        param: String?,
+    ): WireOptions? =
+        options
+            .takeIf { it.responses.includeEncryptedReasoning && param != null && names(param, INCLUDE) }
+            ?.let { it.copy(responses = it.responses.copy(includeEncryptedReasoning = false)) }
+
+    /** Whether [param] is [field] or a part of it (`stream_options.include_usage`, `include[0]`). */
+    private fun names(
+        param: String,
+        field: String,
+    ): Boolean = param == field || param.startsWith("$field.") || param.startsWith("$field[")
+
+    private const val PARALLEL_TOOL_CALLS = "parallel_tool_calls"
+    private const val STREAM_OPTIONS = "stream_options"
+    private const val INCLUDE = "include"
+}
+
 /** Blobs of the trial request, which has none: any read fails. */
 internal val NO_IMAGES: BlobSource = BlobSource { ref -> throw IOException("probe requests carry no images ($ref)") }
 
@@ -243,11 +340,13 @@ public sealed interface ProbeResult {
      * @property models the listing, or `null` when the provider has none.
      * @property capabilities the input capabilities with the verified tool call.
      * @property candidateListed whether the listing contains the candidate; `null` without a listing.
+     * @property wire the request shape the trial passed with; save it with the profile.
      */
     public data class Passed(
         val models: List<ListedModel>?,
         val capabilities: ModelCapabilities,
         val candidateListed: Boolean?,
+        val wire: WireOptions,
     ) : ProbeResult
 
     /**

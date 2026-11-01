@@ -52,24 +52,26 @@ public class OpenAiAdapters internal constructor(
     /**
      * The model [model] behind [profile]. [blobs] reads the images of the session it serves (blobs
      * are stored per session, so create one model per session or pass a session-aware source).
-     * Throws [IllegalArgumentException] for profiles the OpenAI adapters cannot serve: another
-     * protocol, or header values that are not valid HTTP.
+     * [wire] is the request shape saved with the profile by "test and save" (the preset's
+     * defaults until then); the model never changes it. Throws [IllegalArgumentException] for
+     * profiles the OpenAI adapters cannot serve: another protocol, or header values that are not
+     * valid HTTP.
      */
     public fun model(
         profile: ProviderProfile,
         model: ModelId,
         capabilities: ModelCapabilities,
         blobs: BlobSource,
+        wire: WireOptions = WireOptions.defaultsFor(profile),
     ): ChatModel {
         val info = ModelInfo(profile.id, model, profile.protocol, capabilities)
         return when (profile.protocol) {
             ModelProtocol.OPENAI_CHAT_COMPLETIONS -> {
-                val quirks = profile.preset?.let(ProviderPresets::byId)?.chat ?: ChatQuirks.DEFAULT
-                ChatCompletionsModel(profile, info, quirks, blobs, env)
+                ChatCompletionsModel(profile, info, wire, blobs, env)
             }
 
             ModelProtocol.OPENAI_RESPONSES -> {
-                ResponsesModel(profile, info, blobs, env)
+                ResponsesModel(profile, info, wire, blobs, env)
             }
 
             ModelProtocol.ANTHROPIC_MESSAGES -> {

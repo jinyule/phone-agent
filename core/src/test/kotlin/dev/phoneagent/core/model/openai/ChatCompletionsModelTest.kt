@@ -102,47 +102,12 @@ class ChatCompletionsModelTest {
         }
 
     @Test
-    fun `rejected optional fields are dropped once and stay off`() =
-        runTest {
-            server.enqueueError(
-                400,
-                """{"error":{"message":"Unrecognized request argument supplied: parallel_tool_calls"}}""",
-            )
-            server.enqueueError(
-                400,
-                """{"error":{"message":"stream_options is not supported","param":"stream_options"}}""",
-            )
-            server.enqueueSse(textReply)
-            server.enqueueSse(textReply)
-            val model = model()
-            model.complete(Kit.request())
-            val first = server.next().json()
-            val second = server.next().json()
-            val third = server.next().json()
-            assertTrue("parallel_tool_calls" in first && "stream_options" in first)
-            assertFalse("parallel_tool_calls" in second)
-            assertTrue("stream_options" in second)
-            assertFalse("parallel_tool_calls" in third || "stream_options" in third)
-            model.complete(Kit.request())
-            val later = server.next().json()
-            assertFalse("parallel_tool_calls" in later || "stream_options" in later)
-            assertEquals(4, server.requestCount)
-        }
-
-    @Test
     fun `other 400s fail at once`() =
         runTest {
             server.enqueueError(400, """{"error":{"message":"messages[1]: bad role","param":"messages"}}""")
             val error = assertThrows<ModelError.InvalidRequest> { model().complete(Kit.request()) }
             assertEquals("messages", error.param)
             assertEquals(1, server.requestCount)
-            // Once both optional fields are off, a 400 naming them is an ordinary error.
-            val quiet = Kit.profile(server.base(), preset = "kimi")
-            server.enqueueError(400, """{"error":{"message":"bad parallel_tool_calls"}}""")
-            assertThrows<ModelError.InvalidRequest> {
-                model(quiet).complete(Kit.request())
-            }
-            assertEquals(2, server.requestCount)
         }
 
     @Test

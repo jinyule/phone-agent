@@ -132,20 +132,18 @@ class WireGoldenTest {
 
     @Test
     fun `chat completions with vision and echoed reasoning`() {
-        val body = chat(vision = true, echo = true).body(conversation, images, ChatWireOptions(ChatQuirks.DEFAULT))
+        val body = chat(vision = true, echo = true).body(conversation, images, ChatQuirks.DEFAULT)
         Kit.assertGolden("golden/chat-vision-echo.json", body)
     }
 
     @Test
     fun `chat completions without vision, echo or optional fields`() {
         val options =
-            ChatWireOptions(
-                ChatQuirks(
-                    parallelToolCalls = false,
-                    streamUsage = false,
-                    maxTokensField = "max_completion_tokens",
-                    reasoningEffort = ReasoningEffortStyle.OPENROUTER,
-                ),
+            ChatQuirks(
+                parallelToolCalls = false,
+                streamUsage = false,
+                maxTokensField = "max_completion_tokens",
+                reasoningEffort = ReasoningEffortStyle.OPENROUTER,
             )
         val body =
             chat(
@@ -159,7 +157,7 @@ class WireGoldenTest {
     @Test
     fun `chat completions minimal request`() {
         val minimal = ChatRequest(emptyList(), emptyList(), listOf(Kit.user("Hi")), reasoning = ReasoningLevel.LOW)
-        val noEffort = ChatWireOptions(ChatQuirks(reasoningEffort = ReasoningEffortStyle.NONE))
+        val noEffort = ChatQuirks(reasoningEffort = ReasoningEffortStyle.NONE)
         val body = chat(vision = true, echo = true).body(minimal, ImageData.NONE, noEffort)
         Kit.assertGolden("golden/chat-minimal.json", body)
     }
@@ -192,7 +190,7 @@ class WireGoldenTest {
 
     @Test
     fun `wire bodies are pure functions of the request`() {
-        val options = ChatWireOptions(ChatQuirks.DEFAULT)
+        val options = ChatQuirks.DEFAULT
         assertEquals(
             chat(vision = true, echo = true).body(conversation, images, options),
             chat(vision = true, echo = true).body(conversation, images, options),

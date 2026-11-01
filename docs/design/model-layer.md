@@ -153,7 +153,8 @@ data class WireProfile(
 - **实现约定**（`core.model.openai`，WP03）：
   - `ToolResult.isError` 在 OpenAI 两种协议里都没有对应字段，失败只靠结果文字说明。
   - `tool` 消息只能带文字：结果里的图片在全部 `tool` 消息之后用一条 user 消息补上（每组以 "Images from tool call <id>:" 开头）；只有图片的结果，`tool` 消息写占位文字。不支持看图的模型，图片一律换成固定占位文字，保证前缀稳定。
-  - 可选字段协商：服务商用 400 点名拒绝 `parallel_tool_calls` 或 `stream_options` 时，去掉该字段重发一次，并在这个模型实例的生命周期内不再发送。这不改变模型可见内容，所以不算重试；其他重试都归 `requestError`。
+  - 线路选项（`WireOptions`）是创建模型时传入的固定输入，适配器运行时不协商、没有可变状态：一次 `complete()` 只发一个请求，同一个模型对同一请求发出的线路总是一样，所有重试都归 `requestError`。
+  - 可选字段 `parallel_tool_calls`、`stream_options` 发不发（`WireOptions.chat`），只在"测试并保存"时协商：试调用被 400 拒绝，并且结构化的 `error.param` 点名该字段（没有 `param` 时看服务商的消息有没有点名）时，去掉它再试一次，每个字段最多一次。试调用通过时用的选项写进 `ProbeResult.Passed.wire`，由 app 跟 profile 一起保存，创建模型时传入。运行时再遇到这类 400，就是不可重试的 `InvalidRequest(param)`，UI 可以据 `param` 提示重新测试。
   - 漏成文字的工具调用，ID 由适配器生成；流式预览会扣住可能是标记的文字，流结束时用 `DeltaLedger` 把预览漏掉的内容补发，保证增量拼起来和最终回复一致。
   - 发送前校验对话：每个工具调用都必须有结果，不能有孤立的结果；服务端上下文编辑只支持 Anthropic。不满足时直接报 `InvalidRequest`，不发请求。
   - 预设的已知差异写在 `ProviderPresets` 里，每条注明 VERIFIED / DOCUMENTED / UNVERIFIED。
@@ -178,7 +179,7 @@ data class WireProfile(
   适配器在套餐模式下**校验并剔除**不允许的字段；单测里要有"会被拒绝的反例"。
 
 - **实现约定**（WP03）：
-  - 模型拒绝 `include`（400 点名 `include` 或 `encrypted_content`，常见于不带推理的模型）时，去掉 `include` 重发一次，并在实例生命周期内不再发送。
+  - 发不发 `include`（`WireOptions.responses`）也只在"测试并保存"时协商：只认结构化的 `error.param == "include"`（这个词太常见，不看消息；`input[n].encrypted_content` 之类的错误不算）。运行时拒绝 `include` 的 400 是 `InvalidRequest(param = "include")`，和其他 400 一样交给上层。
   - 套餐模式遇到 401，向 `CredentialResolver` 要一次新令牌（`rejected = true`）后重发；再次 401 报 `SignInExpired`。
   - `response.completed` 和 `response.incomplete` 都算流的正常结束，在它们之前断流报 `Network`。
   - 带图片的 `function_call_output`，`output` 用 `input_text` / `input_image` 数组。
@@ -221,7 +222,7 @@ data class WireProfile(
 - **"测试并保存"**（参考 Mika）：
   1. 调列模型接口；
   2. 用一个试用工具，让候选主模型真的调用一次（花几十个 token）；
-  3. 两步都通过才保存，并写入 `verified` 能力。
+  3. 两步都通过才保存，并写入 `verified` 能力；同时保存试调用通过时用的线路选项（OpenAI 两种协议：`ProbeResult.Passed.wire`，见 §3.1/§3.2），运行时只读它。
   4. 失败时把服务端的报错原样告诉用户。
   5. 用户填的是官方地址时，提示改用对应的预设。
 

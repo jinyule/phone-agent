@@ -101,39 +101,23 @@ class ResponsesModelTest {
         }
 
     @Test
-    fun `models without encrypted reasoning get no include, for good`() =
+    fun `other failures go to the caller at once`() =
         runTest {
-            server.enqueueError(
-                400,
-                """{"error":{"message":"Encrypted content is not supported with this model.",""" +
-                    """"param":"include","code":"unsupported_parameter"}}""",
-            )
-            server.enqueueSse(completed)
-            server.enqueueSse(completed)
-            val model = model()
-            model.complete(Kit.request())
-            assertTrue("include" in server.next().json())
-            assertFalse("include" in server.next().json())
-            model.complete(Kit.request())
-            assertFalse("include" in server.next().json())
-        }
-
-    @Test
-    fun `include is recognized by message or code, other 400s fail`() =
-        runTest {
-            server.enqueueError(400, """{"error":{"message":"reasoning.encrypted_content is unavailable"}}""")
-            server.enqueueSse(completed)
-            model().complete(Kit.request())
-            assertEquals(2, server.requestCount)
-            server.enqueueError(400, """{"error":{"message":"bad include","code":"include"}}""")
-            server.enqueueSse(completed)
-            model().complete(Kit.request())
-            assertEquals(4, server.requestCount)
             server.enqueueError(400, """{"error":{"message":"input[0]: bad","param":"input"}}""")
             assertEquals("input", assertThrows<ModelError.InvalidRequest> { model().complete(Kit.request()) }.param)
             server.enqueueError(500, """{"error":{"message":"include broke"}}""")
             assertThrows<ModelError.Server> { model().complete(Kit.request()) }
-            assertEquals(6, server.requestCount)
+            assertEquals(2, server.requestCount)
+        }
+
+    @Test
+    fun `the saved options decide about include`() =
+        runTest {
+            server.enqueueSse(completed)
+            val profile = Kit.profile(server.base(), protocol = ModelProtocol.OPENAI_RESPONSES)
+            val wire = WireOptions(responses = ResponsesQuirks(includeEncryptedReasoning = false))
+            Kit.adapters().model(profile, Kit.MODEL, Kit.capabilities(), Kit.blobs(), wire).complete(Kit.request())
+            assertFalse("include" in server.next().json())
         }
 
     @Test

@@ -3,6 +3,7 @@ package dev.phoneagent.core.model.openai
 import dev.phoneagent.core.ids.ModelId
 import dev.phoneagent.core.model.ModelError
 import dev.phoneagent.core.model.ModelErrorKind
+import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.VerifiedCapability
 import dev.phoneagent.core.model.openai.Kit.assertBearer
 import dev.phoneagent.core.model.openai.Kit.base
@@ -110,6 +111,100 @@ class ProviderProbeTest {
             val tool = ((trial["tools"] as JsonArray)[0] as JsonObject)["function"] as JsonObject
             assertEquals(JsonPrimitive("confirm_connection"), tool["name"])
             assertTrue(trial.toString().contains("pa-1234"))
+        }
+
+    @Test
+    fun `test and save turns off what the provider refuses and reports the shape that passed`() =
+        runTest {
+            server.enqueueError(404, "{}")
+            server.enqueueError(
+                400,
+                """{"error":{"message":"Unrecognized request argument supplied: parallel_tool_calls",""" +
+                    """"param":"parallel_tool_calls","code":"unsupported_parameter"}}""",
+            )
+            server.enqueueError(400, """{"error":{"message":"extra_forbidden: body.stream_options"}}""")
+            server.enqueueSse(trialCall("{\"token\":\"pa-1\"}"))
+            val result = probe.testAndSave(profile, Kit.MODEL, Kit.capabilities(), token = "pa-1")
+            result as ProbeResult.Passed
+            assertEquals(ChatQuirks(parallelToolCalls = false, streamUsage = false), result.wire.chat)
+            server.next()
+            val sent = List(3) { server.next().json() }
+            assertTrue("parallel_tool_calls" in sent[0] && "stream_options" in sent[0])
+            assertTrue("parallel_tool_calls" !in sent[1] && "stream_options" in sent[1])
+            assertTrue("parallel_tool_calls" !in sent[2] && "stream_options" !in sent[2])
+            assertEquals(4, server.requestCount)
+            server.enqueueSse(trialCall("{}"))
+            Kit
+                .adapters()
+                .model(
+                    profile,
+                    Kit.MODEL,
+                    Kit.capabilities(),
+                    Kit.blobs(),
+                    result.wire,
+                ).complete(Kit.request())
+            assertEquals(
+                sent[2].keys,
+                server.next().json().keys,
+                "a model created with the saved options sends that shape",
+            )
+        }
+
+    @Test
+    fun `responses trials drop include only when the param names it`() =
+        runTest {
+            val responses = Kit.profile(server.base(), protocol = ModelProtocol.OPENAI_RESPONSES)
+            val call =
+                "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[" +
+                    "{\"type\":\"function_call\",\"call_id\":\"c\",\"name\":\"confirm_connection\"," +
+                    "\"arguments\":\"{\\\"token\\\":\\\"pa-1\\\"}\"}]}}\n\n"
+            server.enqueueError(404, "{}")
+            server.enqueueError(
+                400,
+                """{"error":{"message":"Encrypted content is not supported.","param":"include"}}""",
+            )
+            server.enqueueSse(call)
+            val passed =
+                probe.testAndSave(
+                    responses,
+                    Kit.MODEL,
+                    Kit.capabilities(),
+                    token = "pa-1",
+                ) as ProbeResult.Passed
+            assertEquals(ResponsesQuirks(includeEncryptedReasoning = false), passed.wire.responses)
+            server.enqueueError(404, "{}")
+            server.enqueueError(
+                400,
+                """{"error":{"message":"Invalid 'input[1].encrypted_content'.",""" +
+                    """"param":"input[1].encrypted_content"}}""",
+            )
+            val failed = probe.testAndSave(responses, Kit.MODEL, Kit.capabilities(), token = "pa-1")
+            assertEquals(ModelErrorKind.INVALID_REQUEST, (failed as ProbeResult.Failed).kind)
+            server.enqueueError(404, "{}")
+            server.enqueueError(400, """{"error":{"message":"please include a valid model"}}""")
+            assertTrue(
+                probe.testAndSave(responses, Kit.MODEL, Kit.capabilities(), token = "pa-1") is ProbeResult.Failed,
+            )
+            assertEquals(7, server.requestCount, "no retry without a structured include param")
+        }
+
+    @Test
+    fun `a refusal that dropping a field does not cure fails with the provider's error`() =
+        runTest {
+            val stubborn =
+                """{"error":{"message":"parallel_tool_calls is broken here","param":"parallel_tool_calls"}}"""
+            server.enqueueError(404, "{}")
+            server.enqueueError(400, stubborn)
+            server.enqueueError(400, stubborn)
+            val result = probe.testAndSave(profile, Kit.MODEL, Kit.capabilities(), token = "pa-1")
+            result as ProbeResult.Failed
+            assertEquals(ModelErrorKind.INVALID_REQUEST, result.kind)
+            assertTrue(result.message.contains("parallel_tool_calls"), result.message)
+            assertEquals(3, server.requestCount, "each field is dropped at most once")
+            server.enqueueError(404, "{}")
+            server.enqueueError(400, """{"error":{"message":"bad stream_options","param":"messages"}}""")
+            assertTrue(probe.testAndSave(profile, Kit.MODEL, Kit.capabilities(), token = "pa-1") is ProbeResult.Failed)
+            assertEquals(5, server.requestCount, "a structured param naming another field wins over the message")
         }
 
     @Test

@@ -24,9 +24,10 @@ import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 
 /**
- * Chat Completions request quirks of one provider (model-layer §3.1). Presets set them; custom
- * providers get the defaults, and the adapter drops `parallel_tool_calls` / `stream_options` for
- * its lifetime once the provider rejects them by name.
+ * Chat Completions request quirks of one provider (model-layer §3.1), part of its [WireOptions].
+ * Presets set them and custom providers start from the defaults; "test and save" turns off
+ * `parallel_tool_calls` / `stream_options` when the provider refuses them ([ProviderProbe]).
+ * Models read them once and never change them.
  *
  * @property parallelToolCalls send `parallel_tool_calls:false` with tools (the loop runs one call per step).
  * @property streamUsage send `stream_options.include_usage` (usage in the last chunk).
@@ -65,21 +66,6 @@ public enum class ReasoningEffortStyle {
     OPENROUTER,
 }
 
-/** What the adapter currently sends; starts from [ChatQuirks] and only ever loses fields. */
-internal data class ChatWireOptions(
-    val parallelToolCalls: Boolean,
-    val streamUsage: Boolean,
-    val maxTokensField: String,
-    val reasoningEffort: ReasoningEffortStyle,
-) {
-    constructor(quirks: ChatQuirks) : this(
-        quirks.parallelToolCalls,
-        quirks.streamUsage,
-        quirks.maxTokensField,
-        quirks.reasoningEffort,
-    )
-}
-
 /**
  * Neutral request → Chat Completions JSON, as a pure function (golden-tested). Mapping:
  *
@@ -104,7 +90,7 @@ internal class ChatCompletionsWire(
     fun body(
         request: ChatRequest,
         images: ImageData,
-        options: ChatWireOptions,
+        options: ChatQuirks,
     ): JsonObject =
         buildJsonObject {
             put("model", model.value)
