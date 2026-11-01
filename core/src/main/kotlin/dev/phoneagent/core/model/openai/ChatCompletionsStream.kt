@@ -286,9 +286,11 @@ internal class StreamedText(
 }
 
 /**
- * Tool calls of one streamed reply, assembled from `delta.tool_calls` fragments. A call is announced
- * ([Delta.ToolCallStarted]) once its name is known; its id is the provider's, or a fresh one when
- * the provider sends none.
+ * Tool calls of one streamed reply, assembled from `delta.tool_calls` fragments. Some gateways
+ * split the name over fragments, so a call is announced ([Delta.ToolCallStarted]) only once its
+ * name is complete: when its arguments start (calls before it are complete then too), or at the
+ * end of the reply ([DeltaLedger.catchUp]). Its id is the provider's, or a fresh one when the
+ * provider sends none.
  */
 internal class ToolCallAssembler(
     private val newCallId: () -> String,
@@ -316,11 +318,11 @@ internal class ToolCallAssembler(
             // Some gateways repeat the whole name in every fragment; others split it.
             if (slot.name.toString() != name) slot.name.append(name)
         }
-        if (!slot.started && slot.name.isNotEmpty()) start(slot)
         val args = argumentsOf(function?.get("arguments"))
-        if (args.isNotEmpty()) {
-            slot.args.append(args)
-            if (slot.started) ledger.args(ToolCallId(checkNotNull(slot.id)), args)
+        slot.args.append(args)
+        when {
+            slot.started -> ledger.args(ToolCallId(checkNotNull(slot.id)), args)
+            args.isNotEmpty() && slot.name.isNotEmpty() -> startThrough(slot)
         }
     }
 
@@ -340,6 +342,12 @@ internal class ToolCallAssembler(
                 )
             }
         }
+
+    /** Announces [slot] and the named calls before it that are not announced yet, in order. */
+    private fun startThrough(slot: Slot) {
+        slots.takeWhile { it !== slot }.filter { !it.started && it.name.isNotEmpty() }.forEach(::start)
+        start(slot)
+    }
 
     private fun start(slot: Slot) {
         slot.started = true

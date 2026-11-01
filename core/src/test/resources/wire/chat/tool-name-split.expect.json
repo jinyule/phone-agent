@@ -1,0 +1,43 @@
+{
+  "source": "constructed from reports: gateways that split the tool name over chunks, one call without arguments",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "tool_call",
+          "id": "call_split1",
+          "name": "get_weather",
+          "argsJson": "{\"city\": \"Paris\"}"
+        },
+        {
+          "type": "tool_call",
+          "id": "call_split2",
+          "name": "tap",
+          "argsJson": "{}"
+        }
+      ],
+      "stopReason": "TOOL_USE",
+      "providerMetadata": {
+        "id": "chatcmpl-test",
+        "model": "test-model",
+        "finish_reason": "tool_calls"
+      }
+    },
+    "deltas": {
+      "text": "",
+      "reasoning": "",
+      "calls": [
+        {
+          "id": "call_split1",
+          "name": "get_weather",
+          "args": "{\"city\": \"Paris\"}"
+        },
+        {
+          "id": "call_split2",
+          "name": "tap",
+          "args": "{}"
+        }
+      ]
+    }
+  }
+}
