@@ -164,6 +164,42 @@ class HelperClientTest {
     }
 
     @Test
+    fun anyRuntimeExceptionFromIdentityIsARefusalAndKeepsTheNonce() {
+        val nonce = armed()
+        for (failure in listOf(
+            IllegalStateException("bad state"),
+            IllegalArgumentException("bad arg"),
+            NullPointerException(),
+        )) {
+            val helper = FakeHelper(failIdentity = failure)
+            assertEquals(
+                failure.toString(),
+                HandoffReject.BINDER_ELSEWHERE,
+                client.offer(extras(helper, nonce), shell, pid).reject(),
+            )
+        }
+        assertEquals(HelperState.NotConnected, client.state)
+        client.offer(extras(FakeHelper(), nonce), shell, pid).accepted()
+    }
+
+    @Test
+    fun aStaleHelperWhoseReleaseAllThrowsIsStillRejectedAndRelaunched() {
+        val failures = listOf(IllegalStateException("busy"), SecurityException("not you"), RemoteException("dead"))
+        for (failure in failures) {
+            val old = FakeHelper(protocol = PrivilegedProtocol.VERSION + 1, failRelease = failure)
+            assertEquals(
+                failure.toString(),
+                HandoffReject.STALE_PROTOCOL,
+                client.offer(extras(old, armed()), shell, pid).reject(),
+            )
+            assertEquals("releaseAll", old.calls.last())
+        }
+        val needs = HelperState.NeedsLaunch(HelperState.LaunchReason.Stale(HandoffReject.STALE_PROTOCOL), pid)
+        assertEquals(needs, client.state)
+        assertEquals(List(failures.size) { needs }, launches)
+    }
+
+    @Test
     fun aHelperOfAnotherProtocolIsReleasedRejectedAndRelaunched() {
         val nonce = armed()
         val old = FakeHelper(protocol = PrivilegedProtocol.VERSION + 1)

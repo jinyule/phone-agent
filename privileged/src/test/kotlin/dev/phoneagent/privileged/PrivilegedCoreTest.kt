@@ -77,6 +77,24 @@ class PrivilegedCoreTest {
     }
 
     @Test
+    fun releaseAllGoesOnPastAFailureAndKeepsTheFailedResourceForTheNextCall() {
+        val released = mutableListOf<String>()
+        var displayFails = true
+        core.hold {
+            check(!displayFails) { "display busy" }
+            released += "display"
+        }
+        core.hold { released += "mute" }
+        core.releaseAll()
+        assertEquals("the failure does not stop the other release", listOf("mute"), released)
+        displayFails = false
+        core.releaseAll()
+        assertEquals(listOf("mute", "display"), released)
+        core.releaseAll()
+        assertEquals("released ones are gone", listOf("mute", "display"), released)
+    }
+
+    @Test
     fun shutdownIsHandedToTheLifecycle() {
         core.shutdown()
         assertEquals(1, shutdowns)

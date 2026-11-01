@@ -108,6 +108,8 @@ internal class HandoffAdmission(
         }
     }
 
+    // TooGenericExceptionCaught: the stale helper is untrusted and may throw anything; it must still be rejected.
+    @Suppress("TooGenericExceptionCaught")
     private fun release(
         reason: HandoffReject,
         core: IPrivilegedCore,
@@ -119,6 +121,9 @@ internal class HandoffAdmission(
             core.releaseAll()
         } catch (e: RemoteException) {
             Log.w(TAG, "stale helper $pid did not take releaseAll; it exits on the rejection anyway", e)
+        } catch (e: RuntimeException) {
+            // Parcel.readException rethrows whatever the helper threw (IllegalStateException, ...).
+            Log.w(TAG, "stale helper $pid failed releaseAll; it releases again when it exits on the rejection", e)
         }
         Log.w(TAG, "stale helper $pid ($reason): $offer, app ${appBuild()}")
         return Decision.Stale(reason)
@@ -132,7 +137,11 @@ internal class HandoffAdmission(
         return Decision.Rejected(reason)
     }
 
-    /** One Binder call into a not yet trusted helper; null when it fails or refuses. */
+    /**
+     * One Binder call into a not yet trusted helper; null when it fails, refuses or throws.
+     * Parcel.readException rethrows any RuntimeException of the remote side, not only SecurityException.
+     */
+    @Suppress("TooGenericExceptionCaught") // Any RuntimeException here is the untrusted helper refusing.
     private fun <T> ask(
         what: String,
         call: () -> T,
@@ -142,8 +151,8 @@ internal class HandoffAdmission(
         } catch (e: RemoteException) {
             Log.w(TAG, "$what on the offered helper failed", e)
             null
-        } catch (e: SecurityException) {
-            Log.w(TAG, "$what on the offered helper was refused", e)
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "$what on the offered helper threw", e)
             null
         }
 

@@ -52,6 +52,8 @@ phase1-architecture §2.2 / §3.5 和 engineering-baseline §6 定了特权助�
 
    只有第 4 步不过的是**旧助手**：App 用掉它的口令，调它的 `releaseAll()`，回复 `STALE_PROTOCOL` 或 `STALE_APK`。助手收到拒绝就释放并退出，App 进入 `NeedsLaunch`。
 
+   App 对未受信助手的同步调用（`identity`、`protocolVersion`、旧助手的 `releaseAll`）捕获任意 RuntimeException，因为 `Parcel.readException` 会原样还原远端抛的异常：前两个失败按 `BINDER_ELSEWHERE` 拒绝，口令不动；旧助手释放失败仍按 `Stale` 处理并进入 `NeedsLaunch`。
+
    四步都通过后，App 先 `linkToDeath`，成功了才把"消耗口令、换发续接口令、替换连接"作为一次提交。之前任何一步失败，口令状态都不变，在用助手的续接口令也不受影响。口令在检查期间失效（过期，或被新的 `arm` 替换），`consume` 返回 null，按 `BAD_NONCE` 拒绝；旧助手分支也先检查这一点，失效就不再调它的 `releaseAll()`。
 
 4. **三种一次性口令**，都是 32 字节随机数的十六进制，比较时用常量时间：
@@ -67,6 +69,7 @@ phase1-architecture §2.2 / §3.5 和 engineering-baseline §6 定了特权助�
    - App 进程死亡（通过对 App 交来的 token 做 `linkToDeath` 得知）：进入 `Orphaned`，宽限期过后 `releaseAll`，然后进入 `Idle`。宽限期默认 10 秒，可用 `--orphan-grace-ms` 调整；
    - App 进程再起来（`ActivityManager.addOnUidImportanceListener`）：用续接口令重新交接；
    - **新会话开始前一定先释放上一会话的资源**。计时器带会话号，迟到的计时器会被忽略；
+   - `releaseAll` 逐个资源尽力释放：某个资源释放失败只记日志，留到下一次 `releaseAll` 再试，不影响其余资源，也不会挡住后面的退出；
    - App 被卸载或换了证书：释放并退出。
      - 每次交接前、App 死亡时、宽限期到期时都复核包（固定的 uid 和证书）。
      - App 进程死亡和包删除是异步的，死亡回调那一刻包可能还在；所以宽限期到期时要再查一次。

@@ -26,7 +26,11 @@ internal class PrivilegedCore(
     private val lock = Any()
     private val held = mutableListOf<HeldResource>()
 
-    /** Something the helper must undo in [releaseAll] (a display, a mute). */
+    /**
+     * Something the helper must undo in [releaseAll] (a display, a mute). [release] may throw a
+     * RuntimeException: [releaseAll] logs it, goes on with the other resources and keeps the failed
+     * one for the next [releaseAll].
+     */
     fun interface HeldResource {
         fun release()
     }
@@ -48,11 +52,24 @@ internal class PrivilegedCore(
 
     override fun identity(): IntArray = intArrayOf(Process.myUid(), Process.myPid())
 
+    /** Releases every held resource, each on its own: one failure never stops the others. Never throws. */
     override fun releaseAll() {
-        val released = synchronized(lock) { held.toList().also { held.clear() } }
-        released.forEach { it.release() }
-        Log.i(TAG, "releaseAll: released ${released.size} resource(s)")
+        val taken = synchronized(lock) { held.toList().also { held.clear() } }
+        val failed = taken.filterNot(::release)
+        synchronized(lock) { held.addAll(0, failed) }
+        Log.i(TAG, "releaseAll: released ${taken.size - failed.size} of ${taken.size} resource(s)")
     }
+
+    // TooGenericExceptionCaught: a resource may fail in any way; the others must still be released.
+    @Suppress("TooGenericExceptionCaught")
+    private fun release(resource: HeldResource): Boolean =
+        try {
+            resource.release()
+            true
+        } catch (e: RuntimeException) {
+            Log.e(TAG, "releasing $resource failed; kept for the next releaseAll", e)
+            false
+        }
 
     override fun shutdown() {
         Log.i(TAG, "shutdown requested")

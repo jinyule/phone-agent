@@ -23,6 +23,7 @@ class LifecycleDriverTest {
         val delivered = mutableListOf<String>()
         val log = mutableListOf<String>()
         var exitCode: Int? = null
+        var failRelease: RuntimeException? = null
 
         override fun deliver(nonce: String): Outcome {
             delivered += nonce
@@ -38,6 +39,7 @@ class LifecycleDriverTest {
 
         override fun releaseAll() {
             log += "releaseAll"
+            failRelease?.let { throw it }
         }
 
         override fun exit(
@@ -68,6 +70,15 @@ class LifecycleDriverTest {
         advance(0)
         assertEquals(State.Orphaned(1, "1".repeat(64)), driver.state)
         return driver
+    }
+
+    @Test
+    fun theHelperStillExitsWhenReleasingThrows() {
+        val driver = orphaned(graceMs = 10_000, checkMs = 30_000)
+        host.failRelease = IllegalStateException("display busy")
+        driver.post(Event.ShutdownRequested)
+        advance(0)
+        assertEquals(listOf("releaseAll", "exit ${HelperLifecycle.EXIT_OK}"), host.log)
     }
 
     @Test

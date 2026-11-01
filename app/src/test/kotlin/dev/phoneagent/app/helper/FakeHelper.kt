@@ -21,6 +21,7 @@ class FakeHelper(
     var failLink: Boolean = false,
     /** Runs inside [identity], while the app is admitting this helper. */
     var onIdentity: () -> Unit = {},
+    var failRelease: Exception? = null,
 ) : IPrivilegedCore.Stub() {
     val calls = mutableListOf<String>()
     private val recipients = mutableListOf<IBinder.DeathRecipient>()
@@ -58,6 +59,7 @@ class FakeHelper(
 
     override fun releaseAll() {
         calls += "releaseAll"
+        failRelease?.let { throw it }
     }
 
     override fun shutdown() {

@@ -29,7 +29,7 @@ internal class LifecycleDriver(
         /** The package is still installed with the pinned uid and certificate. */
         fun appGenuine(): Boolean
 
-        /** `releaseAll()` on the core. */
+        /** `releaseAll()` on the core. A RuntimeException is logged and does not stop the lifecycle. */
         fun releaseAll()
 
         /** Ends the process with [code]; does not return in production. */
@@ -61,6 +61,8 @@ internal class LifecycleDriver(
         effects.forEach(::run)
     }
 
+    // TooGenericExceptionCaught: releaseAll may fail in any way; the Exit after it must still run.
+    @Suppress("TooGenericExceptionCaught")
     private fun run(effect: Effect) {
         when (effect) {
             is Effect.Deliver -> {
@@ -84,7 +86,12 @@ internal class LifecycleDriver(
             }
 
             Effect.ReleaseAll -> {
-                host.releaseAll()
+                try {
+                    host.releaseAll()
+                } catch (e: RuntimeException) {
+                    // The effects after it (an Exit, a Deliver) must still run.
+                    Log.e(TAG, "releaseAll failed; carrying on with the lifecycle", e)
+                }
             }
 
             is Effect.Exit -> {
