@@ -66,6 +66,10 @@ phase1-architecture §2.2 / §3.5 和 engineering-baseline §6 定了特权助�
    - App 进程再起来（`ActivityManager.addOnUidImportanceListener`）：用续接口令重新交接；
    - **新会话开始前一定先释放上一会话的资源**。计时器带会话号，迟到的计时器会被忽略；
    - App 被卸载或换了证书：释放并退出。
+     - 每次交接前、App 死亡时、宽限期到期时都复核包（固定的 uid 和证书）。
+     - App 进程死亡和包删除是异步的，死亡回调那一刻包可能还在；所以宽限期到期时要再查一次。
+     - `Orphaned` 和 `Idle` 期间没有任何事件能发现卸载：uid 监听只报告进程出现，App 的 token 已经死了。所以这两个状态下每隔 `--package-check-ms`（默认 30 秒，1000..600000）低频复核一次。从别的状态进入这两个状态时开一条新的复核链，链号让迟到的计时器失效。
+     - 最坏退出延迟约为 max(宽限期, 复核间隔)，默认 30 秒。
 
 6. **版本错配**。
    - AIDL 的事务号全部显式写出，`protocolVersion = 1`、`identity = 2`、`releaseAll = 3`、`oneway shutdown = 4` 永久冻结。这样任何版本的 App 都能读出任何版本助手的协议号，也能让它释放并退出。
@@ -102,7 +106,10 @@ phase1-architecture §2.2 / §3.5 和 engineering-baseline §6 定了特权助�
   - `ServiceSpecificException` 不在公开 SDK 里，编译不过。
 - **App 死后立刻 `releaseAll`**。简报和 §2.2 都要求先等一段时间，所以保留宽限期。代价见"后果"。
 - **App 回来时保留旧会话的资源，交给新会话接着用**。新的 App 进程不知道旧会话建了哪些屏、静音了哪些包，容易泄漏，所以 A 段选了"先释放，再开新会话"。
-- **轮询 `/proc` 来判断 App 是否活着或已重启**。轮询有延迟，还耗电。`linkToDeath` 和 uid importance 监听都是系统主动通知。
+- **轮询 `/proc` 来判断 App 是否活着或已重启**。轮询有延迟，还耗电。`linkToDeath` 和 uid importance 监听都是系统主动通知。只有"卸载"没有可用的通知，所以只在 App 死后低频复核包，见下一条。
+- **用广播或回调监听包的卸载和替换**。
+  - `Context.registerReceiver`：shell 自建的 ActivityThread 在 AMS 里没有对应的 ProcessRecord，API 34 及以上注册会被拒绝。
+  - 隐藏的 `IPackageManager.registerPackageMonitorCallback`：API 35 起才有，覆盖不了 30–34。以后可以作为更及时的触发加上，低频复核仍然保留作为兜底。
 - **用协程 / StateFlow 管理助手状态**。`privileged` 要尽量少依赖，所以用纯状态机加 HandlerThread，也方便在 JVM 上逐个事件测试。
 - **AIDL 检查的其他做法**：
   - 和 git 基线比较：需要完整历史，fork 来的 PR 和离线环境都不稳；

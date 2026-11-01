@@ -14,9 +14,10 @@ class HelperLifecycleTest {
     private val resume1 = "b".repeat(64)
     private val resume2 = "c".repeat(64)
     private val grace = 10_000L
+    private val check = 30_000L
     private val delays = listOf(0L, 1_000L, 3_000L)
 
-    private fun lifecycle() = HelperLifecycle(launch, grace, delays)
+    private fun lifecycle() = HelperLifecycle(launch, grace, check, delays)
 
     /** Started and admitted as session 1 with [resume1]. */
     private fun attached(): HelperLifecycle =
@@ -25,11 +26,11 @@ class HelperLifecycleTest {
             handle(Event.Delivered(Outcome.Accepted(1, resume1)))
         }
 
-    /** Session 1 died and its grace expired with the app not running. */
+    /** Session 1 died (starting package check 1) and its grace expired with the app not running. */
     private fun idle(): HelperLifecycle =
         attached().apply {
             handle(Event.AppDied(1, appGenuine = true))
-            handle(Event.GraceExpired(1, appRunning = false))
+            handle(Event.GraceExpired(1, appRunning = false, appGenuine = true))
         }
 
     private val exitOk = listOf(Effect.ReleaseAll, Effect.Exit(HelperLifecycle.EXIT_OK, ""))
@@ -77,9 +78,12 @@ class HelperLifecycleTest {
     }
 
     @Test
-    fun appDeathStartsTheGraceTimer() {
+    fun appDeathStartsTheGraceTimerAndThePackageChecks() {
         val l = attached()
-        assertEquals(listOf(Effect.ScheduleGrace(1, grace)), l.handle(Event.AppDied(1, appGenuine = true)))
+        assertEquals(
+            listOf(Effect.ScheduleGrace(1, grace), Effect.SchedulePackageCheck(1, check)),
+            l.handle(Event.AppDied(1, appGenuine = true)),
+        )
         assertEquals(State.Orphaned(1, resume1), l.state)
     }
 
@@ -98,11 +102,79 @@ class HelperLifecycleTest {
     }
 
     @Test
-    fun graceExpiryReleasesAndWaits() {
+    fun graceExpiryReleasesAndWaitsWhileThePackageChecksGoOn() {
         val l = attached()
         l.handle(Event.AppDied(1, appGenuine = true))
-        assertEquals(listOf(Effect.ReleaseAll), l.handle(Event.GraceExpired(1, appRunning = false)))
+        assertEquals(listOf(Effect.ReleaseAll), l.handle(Event.GraceExpired(1, appRunning = false, appGenuine = true)))
         assertEquals(State.Idle(resume1), l.state)
+        assertEquals(listOf(Effect.SchedulePackageCheck(1, check)), l.handle(Event.PackageChecked(1, true)))
+    }
+
+    @Test
+    fun graceExpiringAfterTheAppWasUninstalledOrResignedExits() {
+        for (running in listOf(false, true)) {
+            val l = attached()
+            l.handle(Event.AppDied(1, appGenuine = true))
+            assertEquals(
+                "running=$running",
+                exitOk,
+                l.handle(Event.GraceExpired(1, appRunning = running, appGenuine = false)).withoutWhy(),
+            )
+            assertEquals(State.Exited, l.state)
+        }
+    }
+
+    @Test
+    fun aPackageCheckWhileOrphanedExitsWhenTheAppIsNoLongerGenuine() {
+        val l = attached()
+        l.handle(Event.AppDied(1, appGenuine = true))
+        assertEquals(exitOk, l.handle(Event.PackageChecked(1, appGenuine = false)).withoutWhy())
+        assertEquals(State.Exited, l.state)
+    }
+
+    @Test
+    fun aPackageCheckWhileIdleExitsWhenTheAppIsNoLongerGenuine() {
+        val l = idle()
+        assertEquals(exitOk, l.handle(Event.PackageChecked(1, appGenuine = false)).withoutWhy())
+        assertEquals(State.Exited, l.state)
+    }
+
+    @Test
+    fun aGenuinePackageCheckKeepsWaitingAndChecksAgain() {
+        val orphaned = attached().apply { handle(Event.AppDied(1, appGenuine = true)) }
+        assertEquals(listOf(Effect.SchedulePackageCheck(1, check)), orphaned.handle(Event.PackageChecked(1, true)))
+        assertEquals(State.Orphaned(1, resume1), orphaned.state)
+        val idle = idle()
+        assertEquals(listOf(Effect.SchedulePackageCheck(1, check)), idle.handle(Event.PackageChecked(1, true)))
+        assertEquals(State.Idle(resume1), idle.state)
+    }
+
+    @Test
+    fun staleAndOutOfStatePackageChecksAreIgnored() {
+        val l = idle()
+        l.handle(Event.AppStarted)
+        assertEquals("delivering", emptyList<Effect>(), l.handle(Event.PackageChecked(1, false)))
+        failEveryRetry(l)
+        assertEquals(State.Idle(resume1), l.state)
+        assertEquals(
+            "check 1 belongs to the previous wait",
+            emptyList<Effect>(),
+            l.handle(Event.PackageChecked(1, false)),
+        )
+        l.handle(Event.AppStarted)
+        l.handle(Event.Delivered(Outcome.Accepted(2, resume2)))
+        assertEquals("attached", emptyList<Effect>(), l.handle(Event.PackageChecked(2, false)))
+        assertEquals(State.Attached(2, resume2), l.state)
+        assertEquals("created", emptyList<Effect>(), lifecycle().handle(Event.PackageChecked(0, false)))
+    }
+
+    /** Fails the delivery in flight and every retry of it. */
+    private fun failEveryRetry(l: HelperLifecycle) {
+        l.handle(Event.Delivered(Outcome.Failed("busy")))
+        for (attempt in 1 until delays.size) {
+            l.handle(Event.RetryDue(attempt))
+            l.handle(Event.Delivered(Outcome.Failed("busy")))
+        }
     }
 
     @Test
@@ -111,7 +183,7 @@ class HelperLifecycleTest {
         l.handle(Event.AppDied(1, appGenuine = true))
         assertEquals(
             listOf(Effect.ReleaseAll, Effect.Deliver(resume1)),
-            l.handle(Event.GraceExpired(1, appRunning = true)),
+            l.handle(Event.GraceExpired(1, appRunning = true, appGenuine = true)),
         )
         assertEquals(State.Delivering(resume1, 0, first = false), l.state)
     }
@@ -129,7 +201,7 @@ class HelperLifecycleTest {
         l.handle(Event.AppDied(1, appGenuine = true))
         l.handle(Event.AppStarted)
         l.handle(Event.Delivered(Outcome.Accepted(2, resume2)))
-        assertEquals(emptyList<Effect>(), l.handle(Event.GraceExpired(1, appRunning = true)))
+        assertEquals(emptyList<Effect>(), l.handle(Event.GraceExpired(1, appRunning = true, appGenuine = false)))
         assertEquals(State.Attached(2, resume2), l.state)
     }
 
@@ -139,14 +211,17 @@ class HelperLifecycleTest {
         l.handle(Event.AppDied(1, appGenuine = true))
         l.handle(Event.AppStarted)
         l.handle(Event.Delivered(Outcome.Accepted(2, resume2)))
-        assertEquals(listOf(Effect.ScheduleGrace(2, grace)), l.handle(Event.AppDied(2, appGenuine = true)))
+        assertEquals(
+            listOf(Effect.ScheduleGrace(2, grace), Effect.SchedulePackageCheck(2, check)),
+            l.handle(Event.AppDied(2, appGenuine = true)),
+        )
         assertEquals(
             "session 1's timer fires while session 2 is orphaned",
             emptyList<Effect>(),
-            l.handle(Event.GraceExpired(1, appRunning = false)),
+            l.handle(Event.GraceExpired(1, appRunning = false, appGenuine = false)),
         )
         assertEquals(State.Orphaned(2, resume2), l.state)
-        assertEquals(listOf(Effect.ReleaseAll), l.handle(Event.GraceExpired(2, appRunning = false)))
+        assertEquals(listOf(Effect.ReleaseAll), l.handle(Event.GraceExpired(2, appRunning = false, appGenuine = true)))
         assertEquals(State.Idle(resume2), l.state)
     }
 
@@ -166,7 +241,11 @@ class HelperLifecycleTest {
         l.handle(Event.RetryDue(1))
         l.handle(Event.Delivered(Outcome.Failed("busy")))
         l.handle(Event.RetryDue(2))
-        assertEquals(emptyList<Effect>(), l.handle(Event.Delivered(Outcome.Failed("busy"))))
+        assertEquals(
+            "back to waiting, with a new package check",
+            listOf(Effect.SchedulePackageCheck(2, check)),
+            l.handle(Event.Delivered(Outcome.Failed("busy"))),
+        )
         assertEquals(State.Idle(resume1), l.state)
         assertEquals(listOf(Effect.Deliver(resume1)), l.handle(Event.AppStarted))
     }
@@ -191,7 +270,7 @@ class HelperLifecycleTest {
         val l = attached()
         assertEquals(emptyList<Effect>(), l.handle(Event.Delivered(Outcome.Accepted(9, resume2))))
         assertEquals(emptyList<Effect>(), l.handle(Event.RetryDue(1)))
-        assertEquals(emptyList<Effect>(), l.handle(Event.GraceExpired(1, appRunning = false)))
+        assertEquals(emptyList<Effect>(), l.handle(Event.GraceExpired(1, appRunning = false, appGenuine = false)))
         assertEquals(State.Attached(1, resume1), l.state)
     }
 
@@ -206,9 +285,10 @@ class HelperLifecycleTest {
 
     @Test
     fun configurationIsValidated() {
-        assertThrows(IllegalArgumentException::class.java) { HelperLifecycle(launch, 0, delays) }
-        assertThrows(IllegalArgumentException::class.java) { HelperLifecycle(launch, grace, emptyList()) }
-        assertThrows(IllegalArgumentException::class.java) { HelperLifecycle(launch, grace, listOf(0, -1)) }
+        assertThrows(IllegalArgumentException::class.java) { HelperLifecycle(launch, 0, check, delays) }
+        assertThrows(IllegalArgumentException::class.java) { HelperLifecycle(launch, grace, 0, delays) }
+        assertThrows(IllegalArgumentException::class.java) { HelperLifecycle(launch, grace, check, emptyList()) }
+        assertThrows(IllegalArgumentException::class.java) { HelperLifecycle(launch, grace, check, listOf(0, -1)) }
     }
 
     @Test

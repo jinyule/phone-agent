@@ -2,7 +2,8 @@
 # Starts the PhoneAgent shell-uid helper on a device over adb (USB or emulator) and waits until the
 # app has admitted it (docs/design/phase1-architecture.md §2.2).
 #
-#   scripts/start-helper.sh -s <serial> [-p <package>] [--orphan-grace-ms <ms>] [--timeout <s>]
+#   scripts/start-helper.sh -s <serial> [-p <package>] [--orphan-grace-ms <ms>] [--package-check-ms <ms>]
+#                           [--timeout <s>]
 #
 # The one-time nonce is generated here and reaches the helper only through stdin: other shell-uid
 # processes can read every command line on the device, so only the nonce's SHA-256 is passed to the
@@ -13,7 +14,7 @@
 set -euo pipefail
 
 usage() {
-  sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 die() {
@@ -24,12 +25,14 @@ die() {
 serial="${ANDROID_SERIAL:-}"
 package="dev.phoneagent"
 grace=""
+check=""
 timeout_s=20
 while [ $# -gt 0 ]; do
   case "$1" in
     -s) serial="${2:?-s needs a serial}"; shift 2 ;;
     -p) package="${2:?-p needs a package}"; shift 2 ;;
     --orphan-grace-ms) grace="${2:?--orphan-grace-ms needs a value}"; shift 2 ;;
+    --package-check-ms) check="${2:?--package-check-ms needs a value}"; shift 2 ;;
     --timeout) timeout_s="${2:?--timeout needs seconds}"; shift 2 ;;
     -h | --help) usage; exit 0 ;;
     *) die "unknown argument '$1' (see --help)" ;;
@@ -40,6 +43,7 @@ done
 [ -n "$serial" ] || die "no device: pass -s <serial> or set ANDROID_SERIAL"
 [[ "$package" =~ ^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$ ]] || die "invalid package name '$package'"
 [ -z "$grace" ] || [[ "$grace" =~ ^[0-9]+$ ]] || die "--orphan-grace-ms must be a number of milliseconds"
+[ -z "$check" ] || [[ "$check" =~ ^[0-9]+$ ]] || die "--package-check-ms must be a number of milliseconds"
 [[ "$timeout_s" =~ ^[0-9]+$ ]] || die "--timeout must be a number of seconds"
 
 adbs() { adb -s "$serial" "$@"; }
@@ -71,6 +75,7 @@ armed="$(adbs shell content call --uri "$authority" --method arm --arg "$hash" |
 before=" $(adbs shell pidof "$name" | tr -d '\r' || true) "
 extra=""
 [ -z "$grace" ] || extra=" --orphan-grace-ms=$grace"
+[ -z "$check" ] || extra="$extra --package-check-ms=$check"
 remote="read n; (echo \"\$n\" | CLASSPATH='$apk' setsid app_process /system/bin --nice-name='$name' $main_class '$package'$extra > /dev/null 2>&1 &); sleep 1"
 printf '%s\n' "$nonce" | adbs shell "$remote"
 

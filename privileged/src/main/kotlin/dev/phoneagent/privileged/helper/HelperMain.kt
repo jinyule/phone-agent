@@ -20,8 +20,14 @@ import kotlin.system.exitProcess
  * read `/proc/<pid>/cmdline`). The helper refuses to start unless `CLASSPATH` is the installed APK
  * of `<package>`, then hands its Binder to that app and keeps running after the app dies.
  *
- * Exit codes: 0 rejected / shut down / app uninstalled; 1 the first handoff never reached the app;
- * 2 bad arguments or nonce; 3 not launched from the app's installed APK; 4 framework internals missing.
+ * It releases everything and exits once the app is uninstalled or re-signed. The package is
+ * re-checked before every handoff, when the app dies, when the orphan grace ends and, while the
+ * app is dead, every `--package-check-ms` (default 30 s): an uninstall is noticed at most
+ * max(orphan grace, package check interval) later, 30 s with the defaults.
+ *
+ * Exit codes: 0 rejected / shut down / app uninstalled or re-signed; 1 the first handoff never
+ * reached the app; 2 bad arguments or nonce; 3 not launched from the app's installed APK;
+ * 4 framework internals missing.
  */
 public object HelperMain {
     private const val TAG = "PhoneAgentHelper"
@@ -60,7 +66,7 @@ public object HelperMain {
         Log.i(TAG, "starting for ${pinned.packageName} uid ${pinned.uid} versionCode ${pinned.versionCode}")
 
         val worker = HandlerThread("phoneagent-helper").apply { start() }
-        HelperRuntime(context, pinned, packages, Handler(worker.looper), nonce, parsed.orphanGraceMs).start()
+        HelperRuntime(context, pinned, packages, Handler(worker.looper), nonce, parsed).start()
         Looper.loop()
     }
 

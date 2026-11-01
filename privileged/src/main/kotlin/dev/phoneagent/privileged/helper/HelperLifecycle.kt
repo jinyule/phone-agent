@@ -9,7 +9,12 @@ package dev.phoneagent.privileged.helper
  * - when the app process dies the helper stays: after [orphanGraceMs] it releases everything
  *   and waits for the app to come back, then hands off again with the resume nonce;
  * - resources of a dead app session are always released before the next session can start,
- *   so a late timer can never release what the new session created.
+ *   so a late timer can never release what the new session created;
+ * - the app being uninstalled or re-signed makes the helper release everything and exit. It is
+ *   checked before every delivery, when the app dies, when the grace ends, and every
+ *   [packageCheckMs] while [State.Orphaned] or [State.Idle] (nothing else notices an uninstall
+ *   then). Entering those states from any other state starts a new chain of checks, which goes on
+ *   from Orphaned to Idle; a check from an older chain is ignored.
  *
  * Not thread-safe: the caller feeds events from a single thread and runs the returned effects
  * in order. `toString` of states, outcomes and effects never contains a nonce, so they can be logged.
@@ -17,10 +22,12 @@ package dev.phoneagent.privileged.helper
 internal class HelperLifecycle(
     launchNonce: String,
     private val orphanGraceMs: Long,
+    private val packageCheckMs: Long,
     private val retryDelaysMs: List<Long> = DEFAULT_RETRY_DELAYS_MS,
 ) {
     init {
         require(orphanGraceMs > 0) { "orphanGraceMs must be > 0, was $orphanGraceMs" }
+        require(packageCheckMs > 0) { "packageCheckMs must be > 0, was $packageCheckMs" }
         require(retryDelaysMs.isNotEmpty() && retryDelaysMs.all { it >= 0 }) {
             "retryDelaysMs must be non-empty and non-negative, was $retryDelaysMs"
         }
@@ -96,10 +103,17 @@ internal class HelperLifecycle(
             val appGenuine: Boolean,
         ) : Event
 
-        /** [appRunning]: a process of the app's uid exists right now. */
+        /** [appRunning]: a process of the app's uid exists right now; [appGenuine] as in [AppDied]. */
         data class GraceExpired(
             val session: Int,
             val appRunning: Boolean,
+            val appGenuine: Boolean,
+        ) : Event
+
+        /** Package check [check] ran; [appGenuine] as in [AppDied]. */
+        data class PackageChecked(
+            val check: Int,
+            val appGenuine: Boolean,
         ) : Event
 
         /** A process of the app's uid appeared. */
@@ -149,6 +163,12 @@ internal class HelperLifecycle(
             val delayMs: Long,
         ) : Effect
 
+        /** Feed [Event.PackageChecked] for [check] after [delayMs]. */
+        data class SchedulePackageCheck(
+            val check: Int,
+            val delayMs: Long,
+        ) : Effect
+
         /** `releaseAll()` on the core. */
         data object ReleaseAll : Effect
 
@@ -162,23 +182,24 @@ internal class HelperLifecycle(
     var state: State = State.Created(launchNonce)
         private set
 
+    /** Number of the live chain of package checks. */
+    private var packageCheck = 0
+
     /** Applies [event] and returns the effects to run, in order. Events that do not fit the state are ignored. */
     fun handle(event: Event): List<Effect> {
         val current = state
         if (current is State.Exited) return emptyList()
         return when (event) {
-            Event.Start -> started(current)
+            Event.Start -> if (current is State.Created) deliver(current.nonce, 0, first = true) else emptyList()
             is Event.Delivered -> delivered(current, event.outcome)
             is Event.RetryDue -> retryDue(current, event.attempt)
             is Event.AppDied -> appDied(current, event)
             is Event.GraceExpired -> graceExpired(current, event)
+            is Event.PackageChecked -> packageChecked(current, event)
             Event.AppStarted -> appStarted(current)
             Event.ShutdownRequested -> exit(EXIT_OK, "shutdown requested by the app")
         }
     }
-
-    private fun started(current: State): List<Effect> =
-        if (current is State.Created) deliver(current.nonce, 0, first = true) else emptyList()
 
     private fun delivered(
         current: State,
@@ -217,8 +238,7 @@ internal class HelperLifecycle(
             }
 
             else -> {
-                state = State.Idle(current.nonce)
-                emptyList()
+                waiting(State.Idle(current.nonce))
             }
         }
     }
@@ -243,12 +263,12 @@ internal class HelperLifecycle(
             }
 
             !event.appGenuine -> {
-                exit(EXIT_OK, "app uninstalled or no longer signed with the pinned certificate")
+                exit(EXIT_OK, UNINSTALLED)
             }
 
             else -> {
-                state = State.Orphaned(current.session, current.nonce)
-                listOf(Effect.ScheduleGrace(current.session, orphanGraceMs))
+                listOf(Effect.ScheduleGrace(current.session, orphanGraceMs)) +
+                    waiting(State.Orphaned(current.session, current.nonce))
             }
         }
 
@@ -261,6 +281,10 @@ internal class HelperLifecycle(
                 emptyList()
             }
 
+            !event.appGenuine -> {
+                exit(EXIT_OK, UNINSTALLED)
+            }
+
             event.appRunning -> {
                 listOf(Effect.ReleaseAll) + deliver(current.nonce, 0, first = false)
             }
@@ -270,6 +294,23 @@ internal class HelperLifecycle(
                 listOf(Effect.ReleaseAll)
             }
         }
+
+    private fun packageChecked(
+        current: State,
+        event: Event.PackageChecked,
+    ): List<Effect> =
+        when {
+            (current !is State.Orphaned && current !is State.Idle) || event.check != packageCheck -> emptyList()
+            !event.appGenuine -> exit(EXIT_OK, UNINSTALLED)
+            else -> listOf(Effect.SchedulePackageCheck(packageCheck, packageCheckMs))
+        }
+
+    /** Enters [next] (Orphaned or Idle) from another state, with a new chain of package checks. */
+    private fun waiting(next: State): List<Effect> {
+        state = next
+        packageCheck++
+        return listOf(Effect.SchedulePackageCheck(packageCheck, packageCheckMs))
+    }
 
     private fun appStarted(current: State): List<Effect> =
         when (current) {
@@ -301,6 +342,8 @@ internal class HelperLifecycle(
 
         /** Exit code when the first handoff never reached the app. */
         const val EXIT_UNDELIVERED: Int = 1
+
+        private const val UNINSTALLED = "app uninstalled or no longer signed with the pinned certificate"
 
         /** Attempt 0 is immediate; later entries are the waits before each retry. */
         val DEFAULT_RETRY_DELAYS_MS: List<Long> = listOf(0, 1_000, 3_000, 10_000)
