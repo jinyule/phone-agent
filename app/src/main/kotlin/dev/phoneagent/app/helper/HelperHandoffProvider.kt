@@ -1,3 +1,11 @@
+/*
+ * Portions adapted from Mika (https://github.com/wangzan101/Mika, commit 9cef375,
+ * app/src/main/java/com/wangzan101/mika/cap/phone/shell/HelperHub.kt, `HandoffProvider`).
+ * Copyright 2026 wangzan101. Licensed under the Apache License, Version 2.0.
+ *
+ * Modified by PhoneAgent contributors: added the arm and status methods; the calling uid is
+ * passed to HelperClient for every method; unknown methods are logged.
+ */
 package dev.phoneagent.app.helper
 
 import android.content.ContentProvider

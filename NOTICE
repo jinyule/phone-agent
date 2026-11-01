@@ -23,14 +23,19 @@ Mika
     app/src/main/java/com/wangzan101/mika/cap/phone/shell/HelperProcess.kt
       -> privileged/src/main/kotlin/dev/phoneagent/privileged/helper/ProviderHandoff.kt
       -> privileged/src/main/kotlin/dev/phoneagent/privileged/helper/AppProcessWatcher.kt
+      -> privileged/src/main/kotlin/dev/phoneagent/privileged/helper/HelperMain.kt
+      -> privileged/src/main/kotlin/dev/phoneagent/privileged/helper/HelperRuntime.kt
     app/src/main/java/com/wangzan101/mika/cap/phone/shell/HelperHub.kt
       -> app/src/main/kotlin/dev/phoneagent/app/helper/HandoffAdmission.kt
       -> app/src/main/kotlin/dev/phoneagent/app/helper/HelperClient.kt
+      -> app/src/main/kotlin/dev/phoneagent/app/helper/HelperHandoffProvider.kt
     app/src/main/java/com/wangzan101/mika/cap/phone/shell/ShellContext.kt
       -> privileged/src/main/kotlin/dev/phoneagent/privileged/helper/ShellContext.kt
 
-  Each adapted file keeps the original copyright header and states what
-  PhoneAgent contributors modified.
+  The Mika files carry no header of their own. Each adapted file starts with
+  a header naming the Mika file, the commit, the copyright and license of the
+  original work, and a "Modified by PhoneAgent contributors:" line saying
+  what changed.
 
 --------------------------------------------------------------------------------
 scrcpy (through Mika's ShellContext.kt)

@@ -1,3 +1,12 @@
+/*
+ * Portions adapted from Mika (https://github.com/wangzan101/Mika, commit 9cef375,
+ * app/src/main/java/com/wangzan101/mika/cap/phone/shell/HelperProcess.kt, `Helper.deliver`).
+ * Copyright 2026 wangzan101. Licensed under the Apache License, Version 2.0.
+ *
+ * Modified by PhoneAgent contributors: the provider call moved to ProviderHandoff and the extras
+ * to HandoffBundles, accepted replies carry the resume nonce, each acceptance is a numbered
+ * session, the lifecycle decisions moved to HelperLifecycle and LifecycleDriver.
+ */
 package dev.phoneagent.privileged.helper
 
 import android.content.Context

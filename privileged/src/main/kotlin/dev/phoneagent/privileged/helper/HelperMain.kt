@@ -1,3 +1,12 @@
+/*
+ * Portions adapted from Mika (https://github.com/wangzan101/Mika, commit 9cef375,
+ * app/src/main/java/com/wangzan101/mika/cap/phone/shell/HelperProcess.kt, `main`).
+ * Copyright 2026 wangzan101. Licensed under the Apache License, Version 2.0.
+ *
+ * Modified by PhoneAgent contributors: only the package is an argument (no uid or certificate),
+ * validated options, the helper pins itself to the APK on CLASSPATH, one exit code per failure,
+ * the lifecycle runs on a HandlerThread.
+ */
 package dev.phoneagent.privileged.helper
 
 import android.os.Handler
