@@ -7,6 +7,7 @@ import dev.phoneagent.core.ports.TreeQuality
 import dev.phoneagent.core.testing.Screens
 import dev.phoneagent.core.testing.Screens.box
 import dev.phoneagent.core.testing.Screens.el
+import dev.phoneagent.core.tools.Samples
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -32,6 +33,130 @@ class TreeQualityAssessorTest {
         assertEquals(TreeQuality.GOOD, assessor.assess(Screens.CHAT_ELEMENTS))
         assertEquals(TreeQuality.GOOD, assessor.assess(texts(3)))
     }
+
+    @Test
+    fun `controls named by the texts they absorb are named`() {
+        // Four unnamed buttons, each with one text child: the screen reads them as named buttons.
+        val buttons =
+            (1..4).flatMap {
+                val top = it * 100
+                listOf(
+                    el("b$it", ElementRole.BUTTON, bounds = box(0, top, 999, top + 80), states = click),
+                    el(
+                        "t$it",
+                        ElementRole.TEXT,
+                        "选项$it",
+                        box(40, top + 20, 400, top + 60),
+                    ).copy(parent = ElementRef("b$it")),
+                )
+            }
+        assertEquals(TreeQuality.GOOD, assessor.assess(buttons))
+        // A large card is not a blind area when it absorbs its texts either.
+        val card = el("c1", ElementRole.CONTAINER, bounds = box(0, 100, 999, 399), states = click)
+        val cardTexts =
+            listOf("标题", "副标题").mapIndexed { i, name ->
+                el(
+                    "k${i + 1}",
+                    ElementRole.TEXT,
+                    name,
+                    box(40, 150 + i * 60, 600, 190 + i * 60),
+                ).copy(parent = ElementRef("c1"))
+            }
+        assertEquals(TreeQuality.GOOD, assessor.assess(listOf(card) + cardTexts + texts(1)))
+        // Children that are images without names do not name their button.
+        val iconButtons =
+            (1..4).flatMap {
+                listOf(
+                    el("b$it", ElementRole.BUTTON, bounds = box(it * 200, 900, it * 200 + 150, 990), states = click),
+                    el("i$it", ElementRole.IMAGE, bounds = box(it * 200, 900, it * 200 + 150, 990))
+                        .copy(parent = ElementRef("b$it")),
+                )
+            }
+        assertEquals(TreeQuality.SPARSE, assessor.assess(texts(5) + iconButtons))
+    }
+
+    @Test
+    fun `everyday pages are good`() {
+        assertEquals(TreeQuality.GOOD, assessor.assess(Samples.longList.elements), "conversation list")
+        assertEquals(TreeQuality.GOOD, assessor.assess(Samples.chatInfo.elements), "chat info")
+        assertEquals(TreeQuality.GOOD, assessor.assess(settingsPage()), "settings")
+        assertEquals(TreeQuality.GOOD, assessor.assess(searchPage()), "search")
+    }
+
+    /** A settings page: rows are tappable containers with a title, a summary and maybe a switch. */
+    private fun settingsPage() =
+        buildList {
+            add(el("e1", ElementRole.BUTTON, "返回", box(0, 30, 80, 90), click))
+            add(el("e2", ElementRole.TEXT, "设置", box(400, 40, 600, 80)))
+            add(el("e3", ElementRole.LIST, null, box(0, 100, 999, 999), setOf(ElementState.SCROLLABLE)))
+            for (i in 1..8) {
+                val top = 100 + i * 100
+                add(
+                    el(
+                        "r$i",
+                        ElementRole.CONTAINER,
+                        null,
+                        box(0, top, 999, top + 90),
+                        click,
+                    ).copy(parent = ElementRef("e3")),
+                )
+                add(
+                    el(
+                        "n$i",
+                        ElementRole.TEXT,
+                        "设置项$i",
+                        box(40, top + 10, 600, top + 40),
+                    ).copy(parent = ElementRef("r$i")),
+                )
+                add(
+                    el(
+                        "d$i",
+                        ElementRole.TEXT,
+                        "说明$i",
+                        box(40, top + 50, 600, top + 80),
+                    ).copy(parent = ElementRef("r$i")),
+                )
+            }
+        }
+
+    /** A search page: a field with a hint, a cancel button, and result rows with absorbed texts. */
+    private fun searchPage() =
+        buildList {
+            add(
+                el("e1", ElementRole.INPUT, bounds = box(0, 30, 850, 90), states = click + ElementState.EDITABLE)
+                    .copy(hint = "搜索"),
+            )
+            add(el("e2", ElementRole.BUTTON, "取消", box(860, 30, 999, 90), click))
+            add(el("e3", ElementRole.LIST, null, box(0, 100, 999, 999), setOf(ElementState.SCROLLABLE)))
+            for (i in 1..6) {
+                val top = 100 + i * 120
+                add(
+                    el(
+                        "r$i",
+                        ElementRole.BUTTON,
+                        null,
+                        box(0, top, 999, top + 110),
+                        click,
+                    ).copy(parent = ElementRef("e3")),
+                )
+                add(
+                    el(
+                        "a$i",
+                        ElementRole.IMAGE,
+                        null,
+                        box(20, top + 10, 120, top + 100),
+                    ).copy(parent = ElementRef("r$i")),
+                )
+                add(
+                    el(
+                        "t$i",
+                        ElementRole.TEXT,
+                        "结果$i",
+                        box(140, top + 10, 900, top + 50),
+                    ).copy(parent = ElementRef("r$i")),
+                )
+            }
+        }
 
     @Test
     fun `too few named elements is sparse`() {

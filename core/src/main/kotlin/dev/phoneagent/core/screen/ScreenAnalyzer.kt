@@ -13,11 +13,18 @@ import dev.phoneagent.core.ports.UiElement
  * The screen capability's [SnapshotAnalyzer]: [ScreenFingerprint], [TreeQualityAssessor] and
  * [ScreenDiffer]. The surface and the page flags do not change the quality verdict: it is about
  * the tree alone (a FLAG_SECURE page can still have a good tree).
+ *
+ * [format] must be the config of the [ScreenFormatter] the model reads screens from: the quality
+ * verdict and the diff both follow what a page line shows (absorbed texts included).
  */
 public class ScreenAnalyzer(
-    private val quality: TreeQualityAssessor = TreeQualityAssessor(),
-    private val differ: ScreenDiffer = ScreenDiffer(),
+    format: ScreenFormatConfig = ScreenFormatConfig(),
+    quality: TreeQualityConfig = TreeQualityConfig(),
+    diff: DiffConfig = DiffConfig(),
 ) : SnapshotAnalyzer {
+    private val quality = TreeQualityAssessor(quality, format)
+    private val differ = ScreenDiffer(diff)
+
     override fun fingerprint(
         pkg: String?,
         activity: String?,

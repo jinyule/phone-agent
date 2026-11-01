@@ -14,6 +14,7 @@ import dev.phoneagent.core.ports.SnapshotDetail
 import dev.phoneagent.core.ports.TreeQuality
 import dev.phoneagent.core.screen.ScreenDiffer
 import dev.phoneagent.core.screen.ScreenFormatter
+import dev.phoneagent.core.screen.TreeQualityAssessor
 import dev.phoneagent.core.testing.FakeCatalog
 import dev.phoneagent.core.testing.FakeContext
 import dev.phoneagent.core.testing.FakeInteraction
@@ -32,6 +33,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.serializer
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 
 /**
@@ -42,6 +44,25 @@ import org.junit.jupiter.api.Test
 class PromptSurfaceTest {
     private val formatter = ScreenFormatter(lexicon = Screens.LEXICON)
     private val tools = PhaseOneTools.create(formatter).associateBy { it.def.name }
+
+    @Test
+    fun `golden screens carry the quality the assessor gives their tree`() {
+        val assessor = TreeQualityAssessor()
+        val samples =
+            listOf(
+                Screens.CHAT,
+                Samples.chatWith("s13", draft = "十点半"),
+                Samples.chatInfo,
+                Samples.longList,
+                Samples.login,
+                Samples.numberForms,
+                Samples.sparse,
+            )
+        for (sample in samples) {
+            assertEquals(assessor.assess(sample.elements), sample.quality, "${sample.id}")
+        }
+        assertEquals(TreeQuality.SPARSE, Samples.sparse.quality)
+    }
 
     @Test
     fun `system prompt`() {
@@ -318,10 +339,13 @@ internal object Samples {
                     else -> listOf(element)
                 }
             }
-        return Screens.CHAT.copy(id = SnapshotId(id), elements = elements)
+        return Screens.CHAT.copy(id = SnapshotId(id), elements = elements).assessed()
     }
 
     private val click = setOf(ElementState.CLICKABLE)
+
+    /** This snapshot with the quality the assessor gives its tree, as a real port would set it. */
+    private fun ScreenSnapshot.assessed(): ScreenSnapshot = copy(quality = TreeQualityAssessor().assess(elements))
 
     val chatInfo: ScreenSnapshot =
         snapshot(
@@ -335,7 +359,7 @@ internal object Samples {
                 el("e24", ElementRole.SWITCH, "置顶聊天", box(0, 380, 999, 460), click + ElementState.CHECKED),
                 el("e25", ElementRole.BUTTON, "清空聊天记录", box(0, 600, 999, 680), click),
             ),
-        ).copy(activity = "com.tencent.mm.ui.SingleChatInfoUI")
+        ).copy(activity = "com.tencent.mm.ui.SingleChatInfoUI").assessed()
 
     val longList: ScreenSnapshot =
         snapshot(
@@ -374,7 +398,7 @@ internal object Samples {
                     add(el("e${next++}", ElementRole.TAB, tab, box(i * 250, 900, i * 250 + 249, 999), states))
                 }
             },
-        ).copy(activity = "com.tencent.mm.ui.LauncherUI")
+        ).copy(activity = "com.tencent.mm.ui.LauncherUI").assessed()
 
     val login: ScreenSnapshot =
         snapshot(
@@ -394,7 +418,7 @@ internal object Samples {
             pkg = "com.example.wallet",
             activity = "com.example.wallet.BindCardActivity",
             flags = setOf(ScreenFlag.PAYMENT, ScreenFlag.KEYBOARD),
-        )
+        ).assessed()
 
     /** Card and id numbers in the forms apps print them; only the two order numbers stay readable. */
     val numberForms: ScreenSnapshot =
@@ -413,7 +437,7 @@ internal object Samples {
                 el("e10", ElementRole.TEXT, "运单号 6222 0212 3456 7894 已签收", box(40, 650, 960, 690)),
                 el("e11", ElementRole.TEXT, "电话 138 0013 8000 · 金额 ¥6,222.02", box(40, 700, 960, 740)),
             ),
-        ).copy(pkg = "com.example.wallet", activity = "com.example.wallet.CardsActivity")
+        ).copy(pkg = "com.example.wallet", activity = "com.example.wallet.CardsActivity").assessed()
 
     val sparse: ScreenSnapshot =
         snapshot(
@@ -426,9 +450,8 @@ internal object Samples {
         ).copy(
             pkg = "com.example.game",
             activity = "com.example.game.GameActivity",
-            quality = TreeQuality.SPARSE,
             ocr = listOf(OcrLine("开始游戏", box(400, 500, 600, 560), 0.93), OcrLine("排行榜", box(400, 620, 600, 680), 0.9)),
-        )
+        ).assessed()
 
     val apps: List<AppEntry> =
         listOf(

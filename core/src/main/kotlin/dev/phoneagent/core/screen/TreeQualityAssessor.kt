@@ -15,10 +15,15 @@ import dev.phoneagent.core.ports.UiElement
  *   accessibility) with few named elements inside.
  * - [TreeQuality.GOOD]: otherwise.
  *
+ * An element without text of its own is still named when it absorbs child texts the way the screen
+ * format does ([PageLayout]): a row with a name and a time under it reads as a named row. So
+ * [format] must be the formatter's config.
+ *
  * Judged on the tree alone, before OCR: the verdict decides whether OCR runs and a frame is attached.
  */
 public class TreeQualityAssessor(
     private val config: TreeQualityConfig = TreeQualityConfig(),
+    private val format: ScreenFormatConfig = ScreenFormatConfig(),
 ) {
     /** Quality of a tree made of [elements]. */
     public fun assess(elements: List<UiElement>): TreeQuality {
@@ -34,21 +39,23 @@ public class TreeQualityAssessor(
         elements: List<UiElement>,
         named: List<UiElement>,
     ): Boolean {
+        val layout = PageLayout(elements, format)
+        val isNamed = { element: UiElement -> element.hasText() || layout.absorbed.containsKey(element.ref) }
         val controls = elements.filter { it.isActionable() }
-        val unnamedControls = controls.count { !it.hasText() }
+        val unnamedControls = controls.count { !isNamed(it) }
         val mostlyUnnamed =
             controls.size >= config.minControlsForShare &&
                 unnamedControls >= controls.size * config.unnamedControlShare
         return named.size < config.minNamedElements ||
             mostlyUnnamed ||
-            elements.any { isBlindArea(it, named) }
+            elements.any { !isNamed(it) && isBlindArea(it, named) }
     }
 
     private fun isBlindArea(
         element: UiElement,
         named: List<UiElement>,
     ): Boolean {
-        val unnamedSurface = !element.hasText() && element.role in SURFACE_ROLES
+        val unnamedSurface = element.role in SURFACE_ROLES
         return unnamedSurface &&
             element.bounds.areaShare() >= config.blindAreaShare &&
             named.count { it !== element && element.bounds.containsCenterOf(it.bounds) } < config.namedInsideBlindArea

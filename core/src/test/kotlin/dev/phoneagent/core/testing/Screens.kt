@@ -15,6 +15,7 @@ import dev.phoneagent.core.ports.SurfaceKind
 import dev.phoneagent.core.ports.SurfaceRef
 import dev.phoneagent.core.ports.TreeQuality
 import dev.phoneagent.core.ports.UiElement
+import dev.phoneagent.core.screen.TreeQualityAssessor
 
 /** Builders for screen snapshots in tests. */
 object Screens {
@@ -90,5 +91,7 @@ object Screens {
             el("e10", ElementRole.BUTTON, "发送", box(880, 930, 980, 980), setOf(ElementState.CLICKABLE)),
         )
 
-    val CHAT = snapshot("s12", CHAT_ELEMENTS).copy(flags = setOf(ScreenFlag.KEYBOARD))
+    val CHAT =
+        snapshot("s12", CHAT_ELEMENTS)
+            .copy(flags = setOf(ScreenFlag.KEYBOARD), quality = TreeQualityAssessor().assess(CHAT_ELEMENTS))
 }
