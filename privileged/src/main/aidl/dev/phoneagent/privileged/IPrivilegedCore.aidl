@@ -11,7 +11,9 @@ import android.view.Surface;
 // - Every method has an explicit transaction id. Ids 1-4 are frozen: the same id and signature
 //   in every protocol version, so any app build can read a helper's version and identity and
 //   make it release and exit, whatever version the helper runs (engineering-baseline §6).
-// - Only the app uid the helper was started for may call; other callers get SecurityException.
+// - Every method here (transactions FIRST..LAST_CALL_TRANSACTION) accepts only the app uid the
+//   helper was started for; other callers get SecurityException. The framework's system
+//   transactions skip this guard and expose no capability; DUMP and SHELL_COMMAND are guarded too.
 // - A method the helper does not implement throws UnsupportedOperationException whose message
 //   starts with PrivilegedError.NOT_IMPLEMENTED.
 // - Any change to this file must bump PrivilegedProtocol.VERSION and append the new fingerprint

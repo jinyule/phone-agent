@@ -12,9 +12,13 @@ import dev.phoneagent.privileged.PrivilegedError
 import dev.phoneagent.privileged.PrivilegedProtocol
 
 /**
- * The helper's [IPrivilegedCore]. Only [allowedUid] (the app) may call it: the helper outlives
- * the app and its Binder could reach other processes. Capabilities that are not implemented yet
- * throw [PrivilegedError.notImplemented].
+ * The helper's [IPrivilegedCore]. Every IPrivilegedCore method (transactions
+ * FIRST_CALL_TRANSACTION..LAST_CALL_TRANSACTION) accepts only [allowedUid], the app: the helper
+ * outlives the app and its Binder could reach other processes. DUMP and SHELL_COMMAND are guarded
+ * the same way; an override of `dump` or `onShellCommand` must keep that check. The framework's
+ * other system transactions (INTERFACE; PING and the like are answered natively before Java) skip
+ * the guard and expose no capability. Capabilities that are not implemented yet throw
+ * [PrivilegedError.notImplemented].
  *
  * [onShutdown] runs on the Binder thread and must only schedule the exit.
  */
@@ -41,7 +45,7 @@ internal class PrivilegedCore(
         reply: Parcel?,
         flags: Int,
     ): Boolean {
-        if (code in FIRST_CALL_TRANSACTION..LAST_CALL_TRANSACTION) {
+        if (code in FIRST_CALL_TRANSACTION..LAST_CALL_TRANSACTION || code in GUARDED_SYSTEM_TRANSACTIONS) {
             val caller = Binder.getCallingUid()
             if (caller != allowedUid) throw SecurityException("uid $caller may not call the PhoneAgent helper")
         }
@@ -133,5 +137,11 @@ internal class PrivilegedCore(
 
     private companion object {
         const val TAG = "PhoneAgentHelper"
+
+        /** `IBinder.SHELL_COMMAND_TRANSACTION`, hidden from the SDK: `_CMD`. */
+        const val SHELL_COMMAND_TRANSACTION = ('_'.code shl 24) or ('C'.code shl 16) or ('M'.code shl 8) or 'D'.code
+
+        /** System transactions that could reach helper code if `dump` or `onShellCommand` were overridden. */
+        val GUARDED_SYSTEM_TRANSACTIONS = setOf(DUMP_TRANSACTION, SHELL_COMMAND_TRANSACTION)
     }
 }

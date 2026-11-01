@@ -303,7 +303,7 @@ interface IPrivilegedCore {
 
 接口文件是 `privileged/src/main/aidl/dev/phoneagent/privileged/IPrivilegedCore.aidl`。线上约定（WP12）：
 - **事务号显式写死，1–4 号冻结**。任何版本的 App 都能读出任何版本助手的协议号和身份，也能让它释放并退出，这是版本错配处理（engineering-baseline §6）的前提。`shutdown()` 是为此在原草图上补的。
-- 只有助手为之启动的那个 App uid 能调用，其他调用方收到 `SecurityException`。
+- 每个 IPrivilegedCore 方法（事务号 FIRST..LAST_CALL_TRANSACTION）只接受助手为之启动的那个 App uid，其他调用方收到 `SecurityException`。框架的系统事务不经过这个守卫，也不暴露任何能力；其中 `DUMP_TRANSACTION`、`SHELL_COMMAND_TRANSACTION` 也纳入守卫，`INTERFACE_TRANSACTION` 放行。以后重写 `dump` 或 `onShellCommand`，必须做同样的 uid 检查。
 - 还没实现的方法抛 `UnsupportedOperationException`，消息以 `NOT_IMPLEMENTED` 开头（`PrivilegedError.isNotImplemented` 判定），不占用各方法自己的返回值或错误码。Binder 原生就能跨进程传这个异常；`ServiceSpecificException` 不在公开 SDK 里，所以不用它。
 
 **刻意不提供**任意命令执行的接口。setup 需要的命令（授权、写无障碍列表）在助手内部写死成白名单方法。这是针对 Mika `phone_system_command` 的教训。
