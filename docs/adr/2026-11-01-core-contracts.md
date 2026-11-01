@@ -111,7 +111,7 @@ M1/M2 的主循环、OpenAI 系适配器、Anthropic 适配器、PolicyEngine、
 
 ### 9. 等待用户、工具控制信号、共用的风险词表（协调者补充要求）
 
-- **`UserInteraction`**（`core.ports`）：`ask(Question): AskResult`、`confirm(ConfirmCard): ConfirmResult`、`handOff(kind, reason): HandoffResult`。三个方法都是 suspend，由运行时实现，通过 `ToolContext.interaction` 交给工具，每次调用一个实例；运行时处理 `Verdict.Confirm` / `HandOff` 时也用它。
+- **`UserInteraction`**（`core.ports`）：`ask(Question): AskResult`、`confirm(ConfirmCard): ConfirmResult`、`handOff(kind, reason): HandoffResult`。三个方法都是 suspend，由运行时实现，通过 `ToolContext.interaction` 交给工具，每次调用一个实例。`ask` 和 `handOff` 由工具和运行时（处理 `Verdict.HandOff` 时）调用；`confirm` 只由运行时在处理 `Verdict.Confirm` 时调用，工具不调。`request_confirmation` 也走 PolicyEngine 得到 Confirm（addendum §5），确认 UI 和 `approval/*` 事件只有一条路径。
   - 每个方法有自己的结果类型，工具不会收到不可能的回复，`when` 可以穷举。
   - 用户回复：`Answered` / `Declined`、`APPROVED` / `REJECTED`、`DONE` / `DECLINED`。
   - 超过等待时限：`EXPIRED`；没人能回答（无人值守）：立即返回 `UNAVAILABLE`。
@@ -128,7 +128,7 @@ M1/M2 的主循环、OpenAI 系适配器、Anthropic 适配器、PolicyEngine、
 这些都是只给接口、实现在别处的端口。新增的类型都不进日志，所以 v1 格式不变。
 
 - **`core.ports.AppCatalog`**：`apps(): List<AppEntry>`，`AppEntry(packageName, label, launchable)` 在构造时校验包名和非空白的 label。由 app 实现，除取消外不抛异常。`ToolContext.apps` 为 `null` 表示没有这个能力，处理方式和 `screen == null` 一样。
-- **`core.ports.SnapshotAnalyzer`**：`fingerprint`、`quality`、`diff` 都是纯函数。算法只在 core（`core.screen`）里写一份，`ScreenPort` 的实现经构造参数注入。这样 Android 侧和 core 不会各算一套指纹。
+- **`core.ports.SnapshotAnalyzer`**：`fingerprint`、`quality`、`diff` 都是纯函数。`fingerprint` 也读 OCR 结果：树为空或稀疏时（游戏、画布），只看元素算出的指纹永远不变，每个动作都会被误判为 NO_CHANGE。算法只在 core（`core.screen`）里写一份，`ScreenPort` 的实现经构造参数注入。这样 Android 侧和 core 不会各算一套指纹。
 - **`core.policy.IntentResolver`**：`resolve(call, risk, screen): ActionIntent`，纯函数、不抛异常，`risk` 是下限。
   - "这次调用会干什么"也在 policy 里判定，工具少报效果绕不过去。
   - 代价是 policy 和工具各解析一遍 phase1 §5 的参数，由装配时的集成测试防止两边走样。
@@ -136,7 +136,7 @@ M1/M2 的主循环、OpenAI 系适配器、Anthropic 适配器、PolicyEngine、
   - KDoc 写明 `operatedPackages` 和 `outwardConfirmedPackages` 怎么从日志算出来；
   - `PolicyContext` 本身仍不序列化，但必须能从日志推导。
 - **`core.model.CredentialResolver` / `BlobSource`**：构造适配器时注入。`ChatModel.complete` 的签名不变，密钥和 blob 字节都不进请求以外的地方。
-- **`phone_intent` 的字段键名**：写在 phase1 §5，`LaunchTarget.SystemIntent` 的 KDoc 引用它；类型不变，仍是 `Map<String, String>`。
+- **`phone_intent` 的字段键名**：以 phase1 §5 的字段表为准（表由 WP06 维护），`LaunchTarget.SystemIntent` 的 KDoc 引用它；类型不变，仍是 `Map<String, String>`。
 
 ## Alternatives considered
 

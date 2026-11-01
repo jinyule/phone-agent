@@ -6,9 +6,10 @@ import kotlinx.serialization.Serializable
 
 /**
  * How core waits for the user (phase1 §3.2, §6, §7.3). Implemented by the task runtime, one
- * instance per tool call (prompts are bound to that call); called by tools such as `ask_user`,
- * `request_confirmation` and `hand_to_user`, and by the runtime itself for `Verdict.Confirm` and
- * `Verdict.HandOff`.
+ * instance per tool call (prompts are bound to that call). [ask] and [handOff] are called by
+ * tools (`ask_user`, `hand_to_user`) and by the runtime for `Verdict.HandOff`; [confirm] is called
+ * only by the runtime, for `Verdict.Confirm`. Tools never ask for confirmation themselves:
+ * `request_confirmation` gets its card from the policy like any other call.
  *
  * Every method suspends until the prompt is resolved and returns how it ended:
  * - the user replied: the reply (`Answered` / `Declined`, `APPROVED` / `REJECTED`, `DONE` / `DECLINED`);
@@ -28,8 +29,9 @@ public interface UserInteraction {
     public suspend fun ask(question: Question): AskResult
 
     /**
-     * Shows [card] and waits for a decision. Only [ConfirmResult.APPROVED] lets the action run,
-     * and it covers exactly [ConfirmCard.callId].
+     * Shows [card] and waits for a decision. Called only by the runtime for a `Verdict.Confirm`,
+     * never by tools. Only [ConfirmResult.APPROVED] lets the action run, and it covers exactly
+     * [ConfirmCard.callId].
      */
     public suspend fun confirm(card: ConfirmCard): ConfirmResult
 

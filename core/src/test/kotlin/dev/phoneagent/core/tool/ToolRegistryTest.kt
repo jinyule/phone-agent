@@ -10,7 +10,6 @@ import dev.phoneagent.core.ports.AppCatalog
 import dev.phoneagent.core.ports.AskResult
 import dev.phoneagent.core.ports.Clock
 import dev.phoneagent.core.ports.ConfirmCard
-import dev.phoneagent.core.ports.ConfirmReason
 import dev.phoneagent.core.ports.ConfirmResult
 import dev.phoneagent.core.ports.HandoffKind
 import dev.phoneagent.core.ports.HandoffResult
@@ -195,10 +194,6 @@ class ToolRegistryTest {
             assertNull(ctx.apps)
             assertEquals(0, ctx.clock.epochMillis())
             assertEquals(ctx.sessionId, call.sessionId)
-            assertEquals(
-                ConfirmResult.UNAVAILABLE,
-                ctx.interaction.confirm(ConfirmCard(call.id, ConfirmReason.OUTWARD, "发送")),
-            )
             assertEquals(AskResult.Unavailable, ctx.interaction.ask(Question("?")))
             assertEquals(HandoffResult.UNAVAILABLE, ctx.interaction.handOff(HandoffKind.LOGIN, "登录"))
         }

@@ -71,7 +71,10 @@ public interface ToolContext {
     /** Timestamp source. */
     public val clock: Clock
 
-    /** Asking, confirming and handing off to the user, bound to this call (see [UserInteraction]). */
+    /**
+     * Asking and handing off to the user, bound to this call (see [UserInteraction]). Tools do not
+     * call `confirm`: confirmations come from the policy and are shown by the runtime.
+     */
     public val interaction: UserInteraction
 
     /**
