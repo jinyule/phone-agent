@@ -91,7 +91,8 @@ M1/M2 的主循环、OpenAI 系适配器、Anthropic 适配器、PolicyEngine、
   - 其他顶层包：`storage`、`screen`、`tools`。
 
   能力包只引用契约包和自己，能力之间互不引用，由 app 负责组装。
-- 规则写在 `core/src/test/kotlin/dev/phoneagent/core/architecture/PackageDependencyTest.kt`，用 **Konsist** 检查 import（含通配符）和代码里的全限定类名（注释和字符串不算）。`core/src/test/resources/architecture/counterexample/` 里放了五个会被拒绝的反例：契约用了能力、契约向上引用，以及三种能力互相引用（import、全限定名、引用词表的实现）。其中 `screen/MarksRisk.kt` 演示第 9 节的词表用法：引用契约 `policy.RiskLexicon` 是允许的，引用实现 `policy.rules` 会被拒绝。
+- 规则写在 `core/src/test/kotlin/dev/phoneagent/core/architecture/PackageDependencyTest.kt`，用 **Konsist** 检查 import（含通配符），以及代码里的全限定类名和全限定函数调用。注释和字符串、字符字面量的文字不算，但字符串模板 `${…}` 里的代码照样检查（含原始字符串和模板里嵌套的字符串）。没有 package 声明的文件直接算违规。
+- `core/src/test/resources/architecture/counterexample/` 里放了九个会被拒绝的反例：契约用了能力、契约向上引用、能力互相引用（import、全限定类名、全限定函数调用、引用词表的实现）、藏在字符串模板和原始字符串模板里的引用，以及没有 package 声明的文件。两个模板反例作为生产代码能编译通过。其中 `screen/MarksRisk.kt` 演示第 9 节的词表用法：引用契约 `policy.RiskLexicon` 是允许的，引用实现 `policy.rules` 会被拒绝。
 
 ### 7. 依赖与插件位置
 
@@ -200,7 +201,7 @@ M1/M2 的主循环、OpenAI 系适配器、Anthropic 适配器、PolicyEngine、
 - 加一个字段就要升格式版本、写迁移函数、提交新版本的 fixture。这是换取"旧日志永远按原意读"的代价。
 - `SessionStore.open` 只接受当前版本的日志。旧版本日志只能经迁移用 `read` 读出，不能接着追加；需要原地升级时再加。
 - Konsist 只看源码，有两处看不到：
-  - 函数级的全限定引用（`dev.phoneagent.core.x.foo()`）；
+  - 不调用的全限定顶层属性引用（`dev.phoneagent.core.x.value`）；全限定的函数调用（`dev.phoneagent.core.x.foo()`、`….build { }`）能看到；
   - 不按目录放置的 package 声明（这类文件按 `package` 声明归类）。
 
   需要更严时，改用编译后检查或加 detekt 规则。
