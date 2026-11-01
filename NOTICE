@@ -111,6 +111,13 @@ Mika
     core/src/test/kotlin/com/wangzan101/mika/core/adb/AdbPairingTest.kt
       -> core/src/test/kotlin/dev/phoneagent/core/adb/AdbIdentityTest.kt
 
+  Parts of one Mika file adapted into the policy rules (word lists and the
+  label-matching approach), modified by PhoneAgent contributors:
+    core/src/main/kotlin/com/wangzan101/mika/core/gate/IrreversibleDetector.kt
+      -> core/src/main/kotlin/dev/phoneagent/core/policy/rules/Words.kt
+      -> core/src/main/kotlin/dev/phoneagent/core/policy/rules/Pages.kt
+      -> core/src/main/kotlin/dev/phoneagent/core/policy/rules/Amounts.kt
+
 --------------------------------------------------------------------------------
 scrcpy (through Mika's ShellContext.kt)
   Source:   https://github.com/Genymobile/scrcpy

@@ -1,0 +1,103 @@
+# Apps the agent never operates (phase1 §6, hard refusal). Read by BlockedApps at startup; a bad
+# line fails loudly. Format, one app per line:
+#
+#   <package>  <category>  <label>[|<label>...]
+#
+# category: bank | broker | payment | system. Labels are matched (normalized, whole name) against
+# `phone_launch app=<name>`; the package is matched against every intent.
+#
+# Sources: package ids as published on the apps' Google Play pages
+# (play.google.com/store/apps/details?id=<package>) or, for apps only on Chinese stores, the
+# vendor's store listing; community lists such as gkd-kit subscription docs (docs/<package>.md)
+# help cross-check. How to update: docs/design/policy-rules.md §1 (one app per PR line, with the
+# listing as the source; run :core:test, BlockedAppsTest checks the file).
+
+# --- Payment (China) ---
+com.eg.android.AlipayGphone          payment  支付宝|Alipay
+com.unionpay                         payment  云闪付|UnionPay
+com.jd.jrapp                         payment  京东金融
+com.chinatelecom.bestpayclient       payment  翼支付
+hk.alipay.wallet                     payment  AlipayHK
+
+# --- Banks (China) ---
+com.icbc                             bank     工商银行|中国工商银行|ICBC
+com.chinamworld.main                 bank     建设银行|中国建设银行|CCB
+com.android.bankabc                  bank     农业银行|中国农业银行|农行掌上银行
+com.chinamworld.bocmbci              bank     中国银行|BOC
+com.bankcomm.Bankcomm                bank     交通银行
+cmb.pb                               bank     招商银行
+com.cmbchina.ccd.pluto.cmbActivity   bank     掌上生活
+com.yitong.mbank.psbc                bank     邮储银行|中国邮政储蓄银行
+cn.com.spdb.mobilebank.per           bank     浦发银行
+com.ecitic.bank.mobile               bank     中信银行
+cn.com.cmbc.newmbank                 bank     民生银行
+com.cebbank.mobile.cemb              bank     光大银行
+com.pingan.paces.ccms                bank     平安口袋银行
+
+# --- Brokers and funds (China) ---
+com.hexin.plat.android               broker   同花顺
+com.eastmoney.android.berlin         broker   东方财富
+com.eastmoney.android.fund           broker   天天基金
+com.lphtsccft                        broker   涨乐财富通|华泰证券
+cn.futu.trader                       broker   富途牛牛|moomoo
+com.tigerbrokers.stock               broker   老虎证券|Tiger Trade
+com.xueqiu.android                   broker   雪球
+com.android.dazhihui                 broker   大智慧
+com.antfortune.wealth                broker   蚂蚁财富
+
+# --- Payment (international) ---
+com.paypal.android.p2pmobile         payment  PayPal
+com.venmo                            payment  Venmo
+com.squareup.cash                    payment  Cash App
+com.google.android.apps.walletnfcrel payment  Google Wallet
+com.google.android.apps.nbu.paisa.user payment Google Pay
+com.samsung.android.spay             payment  Samsung Wallet|Samsung Pay
+com.zellepay.zelle                   payment  Zelle
+com.revolut.revolut                  payment  Revolut
+com.transferwise.android             payment  Wise
+com.phonepe.app                      payment  PhonePe
+net.one97.paytm                      payment  Paytm
+jp.ne.paypay.android.app             payment  PayPay
+viva.republica.toss                  payment  Toss
+com.globe.gcash.android              payment  GCash
+com.myklarnamobile                   payment  Klarna
+
+# --- Banks (international) ---
+com.chase.sig.android                bank     Chase
+com.infonow.bofa                     bank     Bank of America
+com.wf.wellsfargomobile              bank     Wells Fargo
+com.citi.citimobile                  bank     Citi
+com.konylabs.capitalone              bank     Capital One
+com.americanexpress.android.acctsvcs.us bank  Amex|American Express
+uk.co.hsbc.hsbcukmobilebanking       bank     HSBC UK
+hk.com.hsbc.hsbchkmobilebanking      bank     HSBC HK
+com.barclays.android.barclaysmobilebanking bank Barclays
+com.grppl.android.shell.CMBlloydsTSB73 bank   Lloyds
+de.number26.android                  bank     N26
+co.uk.getmondo                       bank     Monzo
+com.rbc.mobile.android               bank     RBC
+com.commbank.netbank                 bank     CommBank
+
+# --- Brokers and crypto (international) ---
+com.robinhood.android                broker   Robinhood
+atws.app                             broker   IBKR
+org.dayup.stocks                     broker   Webull
+com.schwab.mobile                    broker   Schwab
+com.fidelity.android                 broker   Fidelity
+com.etrade.mobilepro.activity        broker   E*TRADE
+com.coinbase.android                 broker   Coinbase
+com.binance.dev                      broker   Binance
+
+# --- System surfaces ---
+com.android.systemui                 system   SystemUI
+com.android.packageinstaller         system   Package installer
+com.google.android.packageinstaller  system   Package installer
+com.miui.packageinstaller            system   Package installer
+com.android.permissioncontroller     system   Permission controller
+com.google.android.permissioncontroller system Permission controller
+com.miui.securitycenter              system   手机管家
+com.huawei.systemmanager             system   手机管家
+com.coloros.safecenter               system   手机管家
+com.iqoo.secure                      system   i管家
+com.vivo.permissionmanager           system   权限管理
+com.samsung.android.lool             system   Device care
