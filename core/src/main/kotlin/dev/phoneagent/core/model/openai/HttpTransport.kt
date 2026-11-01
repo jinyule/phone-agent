@@ -15,6 +15,7 @@ import okhttp3.Request
 import okhttp3.Response
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Blocking OkHttp calls behind a suspend API. Blocking reads run on [io]; results come back to the
@@ -27,28 +28,39 @@ internal class HttpTransport(
     private val client: OkHttpClient,
     private val io: CoroutineDispatcher,
 ) {
-    /** Sends [request] and passes the open response to [read]; the response is closed afterwards. */
+    /**
+     * Sends [request] and passes the open response to [read]; the response is closed afterwards.
+     * Ownership of the response cannot get lost: the I/O block stores it before returning, and
+     * unless [read] finishes normally (cancellation, including one that lands after `execute()`
+     * returned but before the caller resumed, or any failure) the call is cancelled and the stored
+     * response closed, so its connection goes back to the pool.
+     */
     suspend fun <T> send(
         request: Request,
         redactor: Redactor,
         read: suspend (HttpReply) -> T,
     ): T {
         val call = client.newCall(request)
-        val done = AtomicBoolean(false)
+        val executed = AtomicReference<Response?>()
+        val finished = AtomicBoolean(false)
         return coroutineScope {
+            // Interrupts a blocking execute() or read when the caller is cancelled meanwhile.
             val canceller =
                 launch(start = CoroutineStart.UNDISPATCHED) {
                     try {
                         awaitCancellation()
                     } finally {
-                        if (!done.get()) call.cancel()
+                        if (!finished.get()) call.cancel()
                     }
                 }
             try {
-                val response = blocking(io, redactor) { call.execute() }
-                response.use { read(HttpReply(it, io, redactor)) }
+                val response = blocking(io, redactor) { call.execute().also(executed::set) }
+                response.use { read(HttpReply(it, io, redactor)) }.also { finished.set(true) }
             } finally {
-                done.set(true)
+                if (!finished.get()) {
+                    call.cancel()
+                    executed.get()?.close()
+                }
                 canceller.cancel()
             }
         }
