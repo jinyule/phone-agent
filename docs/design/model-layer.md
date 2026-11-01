@@ -81,6 +81,20 @@ sealed interface ModelError {
 - 重试策略由各 provider 自己定义，参考 dsh 的默认值：最多 5 次，500ms–10s，带抖动，遵守 `retry-after`。每次重试都写一条 `request/retry` 日志。
 - `InvalidRequest` 和 `Auth` 不重试。
 
+**适配器的注入端口**（`core.model`，构造适配器时注入，`ChatModel.complete` 的签名不变）：
+
+```kotlin
+fun interface CredentialResolver {      // Key 存储和 ChatGPT TokenSource 实现，app 组装
+    suspend fun secret(credential: Credential, rejected: Boolean): String?   // None → null；rejected = 上一个值刚被 401 拒绝，要换新的；换不了抛 Auth / SignInExpired
+}
+fun interface BlobSource {              // 读当前会话 BlobStore 里 Part.Image 的字节
+    suspend fun bytes(ref: BlobRef): ByteArray   // 缺失或损坏抛 IOException，适配器转成 InvalidRequest
+}
+```
+
+- 密钥不进日志、异常消息和 `toString`。
+- blob 按会话存放：每个会话建一个 ChatModel，或者用会话感知的 `BlobSource`，组装时决定。
+
 ---
 
 ## 3. 各协议要点

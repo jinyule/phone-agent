@@ -16,6 +16,7 @@ import dev.phoneagent.core.ports.SurfaceKind
 import dev.phoneagent.core.ports.SurfaceRef
 import dev.phoneagent.core.ports.TreeQuality
 import dev.phoneagent.core.ports.UiElement
+import dev.phoneagent.core.tool.RiskClass
 import dev.phoneagent.core.tool.ToolCall
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -124,4 +125,31 @@ class PolicyContractsTest {
             flags = emptySet(),
             fingerprint = "fp",
         )
+
+    @Test
+    fun `an intent resolver maps a call to an intent and treats the risk class as a floor`() {
+        val resolver =
+            IntentResolver { call, risk, screen ->
+                when {
+                    risk == RiskClass.SPEND -> ActionIntent(IntentKind.SPEND, screen?.pkg)
+                    call.name == "phone_observe" -> ActionIntent(IntentKind.READ, screen?.pkg)
+                    else -> ActionIntent(IntentKind.INPUT, screen?.pkg)
+                }
+            }
+        val screen = snapshot(element("e10", "发送"))
+        val observe =
+            ToolCall(ToolCallId("c"), TaskId("t"), SessionId("s"), "phone_observe", JsonObject(emptyMap()), "看")
+        assertEquals(ActionIntent(IntentKind.READ, "com.tencent.mm"), resolver.resolve(observe, RiskClass.READ, screen))
+        assertEquals(ActionIntent(IntentKind.SPEND), resolver.resolve(observe, RiskClass.SPEND, null))
+    }
+
+    @Test
+    fun `a context may carry the approved card for the re-check, and each default can be supplied alone`() {
+        val card = ConfirmCard(ToolCallId("c"), ConfirmReason.OUTWARD, "发送", "张三", pkg = "com.tencent.mm")
+        val base = PolicyContext(TaskId("t"), SecurityLevel.STANDARD, unattended = false, screen = null)
+        assertEquals(null, base.approved)
+        val approved = PolicyContext(TaskId("t"), SecurityLevel.STANDARD, false, null, approved = card)
+        assertEquals(card, approved.approved)
+        assertEquals(emptySet<String>(), approved.operatedPackages + approved.outwardConfirmedPackages)
+    }
 }

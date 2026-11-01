@@ -6,6 +6,7 @@ import dev.phoneagent.core.ids.TaskId
 import dev.phoneagent.core.ids.ToolCallId
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.ToolDef
+import dev.phoneagent.core.ports.AppCatalog
 import dev.phoneagent.core.ports.AskResult
 import dev.phoneagent.core.ports.Clock
 import dev.phoneagent.core.ports.ConfirmCard
@@ -181,6 +182,7 @@ class ToolRegistryTest {
                     override val screen: ScreenPort? = null
                     override val clock = Clock { 0 }
                     override val interaction: UserInteraction = Unattended
+                    override val apps: AppCatalog? = null
 
                     override suspend fun storeBlob(bytes: ByteArray) = BlobRef("c".repeat(64))
                 }
@@ -190,6 +192,7 @@ class ToolRegistryTest {
             assertEquals(StepCard("phone_tap", "打开聊天", state = StepState.RUNNING), tap.presentCall(call))
             assertEquals(StepState.SUCCEEDED, tap.presentResult(call, result).state)
             assertNull(ctx.screen)
+            assertNull(ctx.apps)
             assertEquals(0, ctx.clock.epochMillis())
             assertEquals(ctx.sessionId, call.sessionId)
             assertEquals(

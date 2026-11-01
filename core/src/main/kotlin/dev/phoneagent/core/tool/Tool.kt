@@ -4,6 +4,7 @@ import dev.phoneagent.core.ids.BlobRef
 import dev.phoneagent.core.ids.SessionId
 import dev.phoneagent.core.ids.TaskId
 import dev.phoneagent.core.model.ToolDef
+import dev.phoneagent.core.ports.AppCatalog
 import dev.phoneagent.core.ports.Clock
 import dev.phoneagent.core.ports.ScreenPort
 import dev.phoneagent.core.ports.UserInteraction
@@ -72,6 +73,12 @@ public interface ToolContext {
 
     /** Asking, confirming and handing off to the user, bound to this call (see [UserInteraction]). */
     public val interaction: UserInteraction
+
+    /**
+     * Installed apps, or `null` when this capability is missing; `phone_apps` and launching by
+     * name then return an error result, as phone tools do when [screen] is `null`.
+     */
+    public val apps: AppCatalog?
 
     /** Stores [bytes] in the session's blob store (deduplicated) and returns its reference. */
     public suspend fun storeBlob(bytes: ByteArray): BlobRef

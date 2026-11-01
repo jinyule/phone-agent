@@ -161,7 +161,11 @@ public sealed interface LaunchTarget {
         }
     }
 
-    /** A whitelisted system intent; [fields] are the kind-specific arguments from the tool schema. */
+    /**
+     * A whitelisted system intent. [fields] are the kind-specific arguments; their keys and
+     * required/optional status per [kind] are fixed in phase1 §5 (`phone_intent` field keys).
+     * A missing required key yields `ActionOutcome.Status.Failed` naming the expected keys.
+     */
     @Serializable
     @SerialName("system")
     public data class SystemIntent(
@@ -197,4 +201,4 @@ public enum class SystemIntentKind {
     SETTINGS,
 }
 
-private val PACKAGE_NAME = Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")
+internal val PACKAGE_NAME: Regex = Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")

@@ -108,16 +108,26 @@ public sealed interface Verdict {
 }
 
 /**
- * Everything besides the call that the matrix depends on. Built by the runtime from the session
- * log, so it is reproducible. Not serializable on purpose: it is rebuilt, never persisted (the log
- * records the resulting `policy/verdict` with level and intent).
+ * Everything besides the call that the matrix depends on. Not serializable on purpose: it is
+ * never persisted (the log records the resulting `policy/verdict` with level and intent), but it
+ * must be derivable from the session log alone, so replay reproduces every verdict. The runtime
+ * computes it; the policy documents which fields its rules read.
+ *
+ * Re-check after approval: once the user approves a card and before the call runs, the runtime
+ * resolves and evaluates the call again on a fresh screen with [approved] set. The engine returns
+ * `Allow` only when the card it computes now matches [approved] in `callId`, `reason`, `target`,
+ * `amount` and `pkg`; otherwise it returns a new `Confirm`. So "one approval is bound to this
+ * target and amount" is also decided only here.
  *
  * @property taskId the task.
  * @property level user-selected security level.
  * @property unattended no user is watching (scheduled tasks): spending is always refused.
  * @property screen the snapshot the call was planned on, or `null` for non-screen tools.
- * @property operatedPackages apps this task has already acted in.
- * @property outwardConfirmedPackages apps where an outward action was already confirmed in this task.
+ * @property operatedPackages the `intent.pkg` of every non-READ call already executed in this task,
+ *   including the target package of `phone_launch`.
+ * @property outwardConfirmedPackages the `card.pkg` of every card in this task whose result was
+ *   `ConfirmResult.APPROVED` and whose reason was `ConfirmReason.OUTWARD`.
+ * @property approved the card the user just approved for this call, during the re-check; `null` otherwise.
  */
 public data class PolicyContext(
     val taskId: TaskId,
@@ -126,6 +136,7 @@ public data class PolicyContext(
     val screen: ScreenSnapshot?,
     val operatedPackages: Set<String> = emptySet(),
     val outwardConfirmedPackages: Set<String> = emptySet(),
+    val approved: ConfirmCard? = null,
 )
 
 /** Security levels (phase1 §6). Spending needs confirmation at every level. */

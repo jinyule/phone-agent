@@ -164,6 +164,7 @@ sealed interface ToolControl { data class EndTurn(val reason: EndReason, val sum
 interface ToolContext {                 // 每次调用一个，由运行时实现
     val taskId: TaskId; val sessionId: SessionId; val screen: ScreenPort?; val clock: Clock
     val interaction: UserInteraction    // 提问 / 确认 / 转交，见下
+    val apps: AppCatalog?               // 已安装 App（core.ports）；null = 没有这个能力，phone_apps 和按名字启动返回错误结果
     suspend fun storeBlob(bytes: ByteArray): BlobRef
 }
 interface UserInteraction {             // core.ports；运行时实现，工具和运行时自己（Confirm / HandOff 判定）调用
@@ -221,6 +222,15 @@ data class ActionOutcome(
     val after: ScreenSnapshot?,         // 动作后自动回读
     val diff: ScreenDiff?,              // 与动作前比，+/-/~
 )
+```
+
+```kotlin
+interface SnapshotAnalyzer {            // core.ports；core.screen 实现，ScreenPort 实现经构造参数注入，自己不写算法
+    fun fingerprint(pkg: String?, activity: String?, elements: List<UiElement>): String   // 同一屏内容 → 同一值
+    fun quality(elements: List<UiElement>, surface: SurfaceRef, flags: Set<ScreenFlag>): TreeQuality
+    fun diff(before: ScreenSnapshot, after: ScreenSnapshot): ScreenDiff
+}
+interface AppCatalog { suspend fun apps(): List<AppEntry> }   // AppEntry(packageName, label, launchable)；app 实现，除取消外不抛异常
 ```
 
 实现上的几条要点：
@@ -286,7 +296,21 @@ sealed interface Verdict {
 fun interface RiskLexicon {             // 共用的风险词表：屏幕格式的 ⚠ 和 PolicyEngine 都只依赖这个契约，实现在 policy 能力包
     fun activationRisk(element: UiElement, screen: ScreenSnapshot): ElementRisk?   // kind ∈ OUTWARD / SPEND / DELETE / SETTINGS
 }
+fun interface IntentResolver {          // 这次调用会干什么；纯函数、不抛异常，实现在 policy 能力包
+    fun resolve(call: ToolCall, risk: RiskClass, screen: ScreenSnapshot?): ActionIntent   // risk 是下限
+}
+data class PolicyContext(
+    val taskId: TaskId, val level: SecurityLevel, val unattended: Boolean, val screen: ScreenSnapshot?,
+    val operatedPackages: Set<String> = emptySet(),          // 本任务已执行过的非 READ 调用的 intent.pkg（含 phone_launch 的目标）
+    val outwardConfirmedPackages: Set<String> = emptySet(),  // 结果为 APPROVED、reason = OUTWARD 的卡的 pkg
+    val approved: ConfirmCard? = null,                       // 批准后复核时传入刚批准的卡
+)   // 不序列化，但必须能从 session 日志推导，回放才能得到同样的 verdict
 ```
+
+- **安全判定只在 policy**：runtime 的 policy guard 先 `resolve` 再 `evaluate`；工具少报效果也绕不过去。
+  - 声明为 SPEND 的工具一定解析成 SPEND；
+  - 写类工具的参数解析不了，或者不认识的工具名且不是 READ，都按保守处理。
+- **批准后复核**：用户批准之后、执行之前，runtime 用新的一屏再 `resolve` 和 `evaluate` 一次，传入 `approved`。只有新算出的卡与它的 callId、reason、target、amount、pkg 全部一致才 Allow，否则返回新的 Confirm。
 
 ### 3.7 任务运行时（turn/step 状态机 + 双队列 inbox，参考 dsh）
 
@@ -423,6 +447,18 @@ screen s12 · 微信 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · �
 | | `end_not_done` | `reason: impossible/blocked/user_stopped/…`, `summary` |
 
 所有工具都带 `reason` 参数。模型回复里不带工具调用，就视为最终回答。每轮只执行第一个工具调用。
+
+`phone_intent` 各 kind 的字段键名（`LaunchTarget.SystemIntent.fields`；缺必填键时返回 Failed，原因里列出期望的键）：
+
+| kind | 字段 |
+|---|---|
+| ALARM | `time`（"HH:mm"，必填）、`label`? |
+| TIMER | `seconds`（正整数，必填）、`label`? |
+| CALENDAR | `title`（必填）、`start`（"yyyy-MM-ddTHH:mm"，必填）、`end`?、`location`? |
+| SHARE | `text`（必填） |
+| DIAL | `number`（必填；只打开拨号盘，不拨出） |
+| NAVIGATE | `place`（必填） |
+| SETTINGS | `page`（必填，白名单：wifi、bluetooth、display、sound、battery、date、locale、location、storage、app_details（还要给 `package`））。无障碍、开发者选项、权限、安全类页面都不在白名单里 |
 
 ---
 

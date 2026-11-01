@@ -69,7 +69,7 @@ M1/M2 的主循环、OpenAI 系适配器、Anthropic 适配器、PolicyEngine、
 - **格式版本**：
   - 第一行文件头 `{"format":"phoneagent.session","version":N,…}`；
   - `SessionMigration(fromVersion)` 在原始 envelope JSON 上把版本 v 迁到 v+1；迁移链必须连续到当前版本；
-  - `core/src/test/resources/session-format/v1/session.jsonl` 从合入集成分支起永不改写。合入前（本 WP 内）为第 9 节的三项补充要求重新生成过一次：此前没有任何代码在测试之外写过 v1 日志。
+  - **v1 格式的发布点是 WP01 合入集成分支。** 从那之后 `core/src/test/resources/session-format/v1/session.jsonl` 永不改写。发布前（本 WP 内）为第 9 节的补充要求重新生成过一次：此前没有任何代码在测试之外写过 v1 日志。
 - **代码里写 `serializer<X>()`，不写 `X.serializer()`**：detekt 做类型解析时不跑 serialization 插件，后者在它看来是未解析的引用。
 - 不可序列化的类型（运行时对象，不进日志）：`Delta`、`Frame`、`agent` 包的类型、`PolicyContext`、`ElementRisk`。
 
@@ -123,6 +123,21 @@ M1/M2 的主循环、OpenAI 系适配器、Anthropic 适配器、PolicyEngine、
   - 实现在 policy 能力包（WP05）；屏幕格式化器（`screen` 能力包）和 PolicyEngine 都只依赖这个契约，所以 ⚠ 标记和判定用的是同一份词表。
   - ⚠ 表示"高风险，可能触发确认"。是否真的弹出确认卡，还取决于安全级别和任务历史，格式化器不知道这些。
 
+### 10. 契约补充 #1 的其余各项（协调者决定）
+
+这些都是只给接口、实现在别处的端口。新增的类型都不进日志，所以 v1 格式不变。
+
+- **`core.ports.AppCatalog`**：`apps(): List<AppEntry>`，`AppEntry(packageName, label, launchable)` 在构造时校验包名和非空白的 label。由 app 实现，除取消外不抛异常。`ToolContext.apps` 为 `null` 表示没有这个能力，处理方式和 `screen == null` 一样。
+- **`core.ports.SnapshotAnalyzer`**：`fingerprint`、`quality`、`diff` 都是纯函数。算法只在 core（`core.screen`）里写一份，`ScreenPort` 的实现经构造参数注入。这样 Android 侧和 core 不会各算一套指纹。
+- **`core.policy.IntentResolver`**：`resolve(call, risk, screen): ActionIntent`，纯函数、不抛异常，`risk` 是下限。
+  - "这次调用会干什么"也在 policy 里判定，工具少报效果绕不过去。
+  - 代价是 policy 和工具各解析一遍 phase1 §5 的参数，由装配时的集成测试防止两边走样。
+- **`PolicyContext.approved`**：批准后复核时传入刚批准的卡，"一次同意只绑定这个目标和金额"也只在 PolicyEngine 里判定。
+  - KDoc 写明 `operatedPackages` 和 `outwardConfirmedPackages` 怎么从日志算出来；
+  - `PolicyContext` 本身仍不序列化，但必须能从日志推导。
+- **`core.model.CredentialResolver` / `BlobSource`**：构造适配器时注入。`ChatModel.complete` 的签名不变，密钥和 blob 字节都不进请求以外的地方。
+- **`phone_intent` 的字段键名**：写在 phase1 §5，`LaunchTarget.SystemIntent` 的 KDoc 引用它；类型不变，仍是 `Map<String, String>`。
+
 ## Alternatives considered
 
 - **id 用裸 `String` 或 typealias**：编译器分不清 `TaskId` 和 `SessionId`，传错参数只能靠测试发现。
@@ -145,6 +160,8 @@ M1/M2 的主循环、OpenAI 系适配器、Anthropic 适配器、PolicyEngine、
 - **`ConfirmCard` 留在 `policy`，把 `UserInteraction` 放进新的 `interaction` 契约层**：要多加一层，而且 `IntentKind` 和 `Money` 仍要跟着下移。
 - **`ElementRisk` 带上"在当前级别下是否确认"**：格式化器拿不到安全级别和任务历史。要传进来，屏幕格式就得依赖 `PolicyContext`；而且同一屏的格式会随设置变化，回放和金样也要跟着分情况。
 - **v1 加了字段就升到 v2**：v1 还没有合入，也没有任何代码写过 v1 日志；升版本只会留下一个永远用不到的空迁移。
+- **给 `Tool` 加 `plan(call): PlannedEffect`，由工具自己申报效果**：要改每个工具和 fake，而且安全结论会依赖工具的申报（AGENTS.md §3.3）。所以改用 policy 里的 `IntentResolver`。
+- **`ScreenPort` 实现自带指纹和差分算法**：Android 侧和 core 会各有一套，回放和单测对不上。
 
 ## 后果
 
