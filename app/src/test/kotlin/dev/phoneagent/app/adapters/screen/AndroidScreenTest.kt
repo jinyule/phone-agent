@@ -220,6 +220,58 @@ class AndroidScreenTest {
         }
 
     @Test
+    fun elementsKeepTheirRefsFromOneScreenToTheNext() =
+        runTest {
+            show(button("OK", Rect(0, 1000, 500, 1100)), button("Cancel", Rect(500, 1000, 1000, 1100)))
+            val screen = screen()
+            val first = screen.snapshot()
+            // A banner appears on top and pushes the buttons down.
+            show(
+                button("Update available", Rect(0, 0, 1000, 100)),
+                button("OK", Rect(0, 1100, 500, 1200)),
+                button("Cancel", Rect(500, 1100, 1000, 1200)),
+            )
+
+            val second = screen.snapshot()
+
+            assertEquals(first.ref("OK"), second.ref("OK"))
+            assertEquals(first.ref("Cancel"), second.ref("Cancel"))
+            val banner = second.ref("Update available").ref
+            assertTrue("a new element gets a ref no earlier element had", first.elements.none { it.ref == banner })
+            assertEquals(
+                second.elements.size,
+                second.elements
+                    .map { it.ref }
+                    .toSet()
+                    .size,
+            )
+        }
+
+    @Test
+    fun actionsWithoutAScreenIdAreComparedWithTheLatestScreen() =
+        runTest {
+            show(button("OK", Rect(0, 1000, 500, 1100)))
+            val screen = screen()
+            screen.snapshot()
+            host.onGesture = { show(button("OK", Rect(0, 1000, 500, 1100)), button("Done", Rect(0, 1200, 500, 1300))) }
+
+            val outcome = screen.act(UiAction.Tap(Target.Point(250, 525)), on = null)
+
+            assertEquals(listOf("Done"), outcome.diff?.added?.map { it.name })
+        }
+
+    @Test
+    fun withoutAnyEarlierScreenThereIsNoDiff() =
+        runTest {
+            show(button("OK", Rect(0, 1000, 500, 1100)))
+
+            val outcome = screen().act(UiAction.Tap(Target.Point(250, 525)), on = null)
+
+            assertNull(outcome.diff)
+            assertEquals(0, analyzer.diffs)
+        }
+
+    @Test
     fun aTapWithoutVisibleChangeIsNoChange() =
         runTest {
             val ok = button("OK", Rect(0, 1000, 500, 1100))
@@ -445,6 +497,26 @@ class AndroidScreenTest {
                     .single()
                     .first.`package`,
             )
+        }
+
+    @Test
+    fun aLaunchIsComparedWithTheLatestScreen() =
+        runTest {
+            show(button("Home", Rect(0, 0, 500, 100)), pkg = "com.launcher")
+            val screen = screen()
+            screen.snapshot()
+            system.onStart = {
+                show(
+                    button("Home", Rect(0, 0, 500, 100)),
+                    button("Widget", Rect(0, 200, 500, 300)),
+                    pkg = "com.launcher",
+                )
+                StartResult.Started
+            }
+
+            val outcome = screen.launch(LaunchTarget.Link("https://example.com"))
+
+            assertEquals(listOf("Widget"), outcome.diff?.added?.map { it.name })
         }
 
     @Test

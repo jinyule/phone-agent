@@ -21,14 +21,16 @@ internal class PortParts(
 
 /**
  * One action against one fresh read ([baseline]) of the display: perform it through the fallback
- * chains, let the display settle, read it back, and judge the effect.
+ * chains, let the display settle, read it back, and judge the effect. The outcome's diff compares
+ * [compareWith] (the screen the action was planned on, else the latest one; `null` before any)
+ * with the screen after.
  */
 internal class ActionRun(
     private val parts: PortParts,
     private val host: ScreenHost,
     private val geometry: DisplayGeometry,
     private val baseline: Baseline,
-    private val planned: ScreenSnapshot?,
+    private val compareWith: ScreenSnapshot?,
 ) {
     private val displayId = parts.surface.displayId
     private val timings = parts.timings
@@ -220,7 +222,7 @@ internal class ActionRun(
     ): ActionOutcome {
         watch.awaitSettled(if (result is Actuator.Result.Done) settleMs else timings.quietMs)
         val after = parts.observer.observe(host, geometry, SnapshotDetail.BRIEF)
-        val diff = planned?.let { parts.analyzer.diff(it, after) }
+        val diff = compareWith?.let { parts.analyzer.diff(it, after) }
         return when (result) {
             is Actuator.Result.Done -> {
                 ActionOutcome(ActionOutcome.Status.Ok, baseline.effectOf(after), after, diff)

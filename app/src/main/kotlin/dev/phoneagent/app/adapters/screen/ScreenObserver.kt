@@ -16,14 +16,19 @@ internal class ScreenObserver(
     private val snapshotIds: () -> SnapshotId,
     val history: SnapshotHistory,
 ) {
-    /** Reads the display and registers the result as a new snapshot. */
+    // Highest ref number handed out by this port (RefCarrier never reuses one).
+    private var lastRef = 0
+
+    /** Reads the display and registers the result as a new snapshot; refs carry over from the latest one. */
     fun observe(
         host: ScreenHost,
         geometry: DisplayGeometry,
         detail: SnapshotDetail,
     ): ScreenSnapshot {
         val read = ScreenReader.read(host.windowsOn(surface.displayId), geometry, detail)
-        val elements = read.elements.map { it.element }
+        val carried = RefCarrier.carry(history.newest()?.elements, read.elements.map { it.element }, lastRef)
+        lastRef = carried.lastUsed
+        val elements = carried.elements
         val activity = activityOf(host, read.pkg)
         val flags = flagsOf(read)
         val snapshot =

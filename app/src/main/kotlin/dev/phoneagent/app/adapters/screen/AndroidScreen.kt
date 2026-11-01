@@ -93,13 +93,9 @@ internal class AndroidScreen(
             } else {
                 when (val resolved = Aims.resolve(targetOf(action), on, planned, baseline.read, geometry)) {
                     is Resolution.Aimed -> {
-                        ActionRun(
-                            parts,
-                            host,
-                            geometry,
-                            baseline,
-                            planned,
-                        ).perform(action, resolved.aim)
+                        // The diff is against the screen the action was planned on, else the latest one.
+                        val compareWith = planned ?: parts.observer.history.newest()
+                        ActionRun(parts, host, geometry, baseline, compareWith).perform(action, resolved.aim)
                     }
 
                     Resolution.Stale -> {
@@ -116,7 +112,7 @@ internal class AndroidScreen(
     override suspend fun launch(target: LaunchTarget): ActionOutcome =
         withContext(options.io) {
             val host = host()
-            LaunchRun(parts, host, geometry(host)).launch(target)
+            LaunchRun(parts, host, geometry(host), compareWith = parts.observer.history.newest()).launch(target)
         }
 
     override suspend fun frame(

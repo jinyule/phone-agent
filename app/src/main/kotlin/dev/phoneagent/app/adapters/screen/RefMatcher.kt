@@ -30,6 +30,10 @@ internal class SnapshotHistory(
     /** The snapshot [id], or `null` when it is unknown or was forgotten. */
     @Synchronized
     fun get(id: SnapshotId): ScreenSnapshot? = snapshots.firstOrNull { it.id == id }
+
+    /** The latest snapshot, or `null` before the first. */
+    @Synchronized
+    fun newest(): ScreenSnapshot? = snapshots.firstOrNull()
 }
 
 /**
