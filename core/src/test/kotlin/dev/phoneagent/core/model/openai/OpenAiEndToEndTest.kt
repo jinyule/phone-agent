@@ -28,9 +28,11 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
 import java.awt.Color
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.security.MessageDigest
 import java.util.HexFormat
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicInteger
 import javax.imageio.ImageIO
 import kotlin.time.Duration.Companion.minutes
 
@@ -42,14 +44,28 @@ import kotlin.time.Duration.Companion.minutes
  * - `PA_E2E_OLLAMA_BASE_URL`, `PA_E2E_OLLAMA_MODEL`: an Ollama server for the preset check.
  *
  * About five model calls per protocol and one for Ollama. A rate limit or quota error stops every
- * remaining check: nothing is retried. Each call prints one `e2e:` line for the report.
+ * remaining check: nothing is retried. Each call prints one `e2e:` line for the report. One run
+ * sends at most `PA_E2E_MAX_REQUESTS` (default 12) model requests; past that the client refuses to
+ * send, so test and save retries cannot push a run over the gateway budget.
  */
 class OpenAiEndToEndTest {
     private val env = System.getenv()
     private val credentials = Keys(env["PA_E2E_API_KEY"])
 
-    /** Production timeouts: local models may think for a long time before the first byte. */
-    private val http = HttpTimeouts().client()
+    private val budget = env["PA_E2E_MAX_REQUESTS"]?.toInt() ?: DEFAULT_BUDGET
+
+    /** Production timeouts (local models may think for a long time before the first byte), and the request budget. */
+    private val http =
+        HttpTimeouts()
+            .client()
+            .newBuilder()
+            .addInterceptor { chain ->
+                val post = chain.request().method == "POST"
+                if (post && sent.incrementAndGet() > budget) {
+                    throw IOException("e2e budget of $budget model requests used up; not sending")
+                }
+                chain.proceed(chain.request())
+            }.build()
 
     private fun profile(protocol: ModelProtocol) =
         Kit.profile(checkNotNull(env["PA_E2E_BASE_URL"]).removeSuffix("/"), protocol = protocol, credential = Kit.KEY)
@@ -264,7 +280,11 @@ class OpenAiEndToEndTest {
 
     private companion object {
         const val SIDE = 64
+        const val DEFAULT_BUDGET = 12
         val TIMEOUT = 5.minutes
+
+        /** Model requests (POSTs) sent by this run. */
+        val sent = AtomicInteger()
 
         /** Set by a rate limit or quota error; later checks are skipped. */
         @Volatile
