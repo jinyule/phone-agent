@@ -1,0 +1,13 @@
+# Rules that must keep firing on Canary.kt (one per line). Add a rule here whenever
+# docs/design/engineering-baseline.md §2 starts relying on it.
+UndocumentedPublicClass
+UndocumentedPublicFunction
+UndocumentedPublicProperty
+UnsafeCallOnNullableType
+GlobalCoroutineUsage
+SuspendFunSwallowedCancellation
+ForbiddenMethodCall
+EmptyCatchBlock
+TooGenericExceptionCaught
+SwallowedException
+ElseCaseInsteadOfExhaustiveWhen

@@ -1,0 +1,23 @@
+# Local hooks: fast locally, complete in CI (docs/design/engineering-baseline.md §4).
+# Install once per clone: `lefthook install`.
+
+pre-commit:
+  commands:
+    format:
+      glob: "*.{kt,kts}"
+      run: ./gradlew spotlessApply --offline --quiet
+      stage_fixed: true
+    whitespace:
+      run: git diff --cached --check
+    secrets:
+      run: |
+        if ! command -v gitleaks >/dev/null 2>&1; then
+          echo "gitleaks not installed; skipping (CI still scans). Install: brew install gitleaks"
+          exit 0
+        fi
+        gitleaks git --staged --redact --no-banner
+
+pre-push:
+  commands:
+    core:
+      run: ./gradlew :core:compileKotlin :core:detektMain --offline --quiet

@@ -1,0 +1,19 @@
+# Gradle / Kotlin
+.gradle/
+build/
+.kotlin/
+local.properties
+
+# IDE
+.idea/
+*.iml
+.vscode/
+captures/
+
+# OS
+.DS_Store
+
+# Signing material never enters the repository (engineering-baseline §6).
+*.jks
+*.keystore
+keystore.properties

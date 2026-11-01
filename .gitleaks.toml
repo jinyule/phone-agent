@@ -1,0 +1,6 @@
+# Secret scanning (pre-commit via lefthook, and the `static` CI job).
+# The default rules already ignore Gradle checksum files; add allowlists here only with a reason.
+title = "phone-agent"
+
+[extend]
+useDefault = true

@@ -1,0 +1,52 @@
+# Overrides on top of detekt's default config (buildUponDefaultConfig = true).
+# Each rule we rely on must also be listed in canary/expected-rules.txt; `verifyDetektCanary`
+# fails the build if it stops firing on canary/Canary.kt.
+
+comments:
+  UndocumentedPublicClass:
+    active: true
+    excludes: ['**/test/**', '**/androidTest/**', '**/app/src/**']
+  UndocumentedPublicFunction:
+    active: true
+    excludes: ['**/test/**', '**/androidTest/**', '**/app/src/**']
+  UndocumentedPublicProperty:
+    active: true
+    excludes: ['**/test/**', '**/androidTest/**', '**/app/src/**']
+
+coroutines:
+  GlobalCoroutineUsage:
+    active: true
+  SuspendFunSwallowedCancellation:
+    active: true
+
+empty-blocks:
+  EmptyCatchBlock:
+    active: true
+    # No exception name makes an empty catch acceptable: name the error and say why it is ignored.
+    allowedExceptionNameRegex: '(?!)'
+
+naming:
+  FunctionNaming:
+    ignoreAnnotated: ['Composable']
+
+potential-bugs:
+  ElseCaseInsteadOfExhaustiveWhen:
+    active: true
+
+style:
+  ForbiddenMethodCall:
+    active: true
+    includes: ['**/core/src/main/**', '**/config/detekt/canary/**']
+    methods:
+      - value: 'kotlinx.coroutines.runBlocking'
+        reason: 'core is suspend-only; blocking belongs to the caller (tests use runTest).'
+      - value: 'java.lang.Thread.sleep'
+        reason: 'Use delay() or the injected Clock.'
+      - value: 'kotlin.io.print'
+        reason: 'core has no stdout; record a session event or use the logger port.'
+      - value: 'kotlin.io.println'
+        reason: 'core has no stdout; record a session event or use the logger port.'
+  MagicNumber:
+    ignoreAnnotated: ['Composable', 'Preview']
+  UnusedPrivateFunction:
+    ignoreAnnotated: ['Preview']

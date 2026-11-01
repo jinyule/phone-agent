@@ -1,0 +1,26 @@
+# After a Gradle bump, regenerate gradle/verification-metadata.xml on the PR branch:
+#   ./gradlew --write-verification-metadata sha256 --no-configuration-cache check :app:assembleDebug :app:assembleRelease
+version: 2
+updates:
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    labels: [kind/infra]
+    groups:
+      kotlin:
+        patterns: ["org.jetbrains.kotlin*", "org.jetbrains.kotlinx*"]
+      androidx:
+        patterns: ["androidx.*"]
+      android-gradle-plugin:
+        patterns: ["com.android.tools.build*"]
+  - package-ecosystem: github-actions
+    directories: ["/", "/.github/actions/*"]
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    labels: [kind/infra]
