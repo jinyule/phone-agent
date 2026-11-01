@@ -161,6 +161,7 @@ M1/M2 的主循环、OpenAI 系适配器、Anthropic 适配器、PolicyEngine、
 - **追加与取消**（S2、S3）：等锁时可以取消，什么都不写；拿到锁以后先检查取消；开始写的记录一定写完并计入，即使调用方已被取消（方法返回记录，job 报取消，调用方以 `records()` 为准）。写入过程中的任何失败都让 store 进入失败状态。收尾代码在 `withContext(NonCancellable)` 里追加。
 - **存储的持久性**（B4、S8）：新建目录后，从最深的新目录往上逐个 fsync 父目录，直到第一个原本存在的祖先；写入失败删除临时文件。`StoragePort.openAppender` 的契约：调用方在拿到句柄前被取消时，由实现关闭句柄。
 - **工具参数的 schema 子集**（S5）：注册时只接受 `core.tool.ToolSchema` 的 KDoc 列出的子集（每个 schema 一个 `type`；object / array / string / integer / number / boolean 各自允许的关键字；计数非负、下限不高于上限、enum 非空且不重复），并递归检查每一层。WP02 的参数校验器照这个子集实现，模型看到的 schema 就都能被完整执行。`ToolRegistry` 的 `expanded` 改为 `List<ToolGroup>`，展开顺序由调用方给出。
+- **`ProviderProfile` 不泄漏密钥**（S6）：baseUrl 不能带 user info，出错信息不回显 URL；header 名里含 key、token、secret、auth、cookie 的一律拒绝（和 `WireProfile.headers` 同一条规则）；`toString` 只列 header 名。明文 http 只允许本机和局域网：loopback、私有、link-local、unique-local 地址字面量，`localhost` 和 `*.local`，只看文本、不查 DNS。没有另设"本地服务器"标记：地址本身就能判断，多一个开关就多一种配错的方式。
 - **值域校验**（S9）：turn、step、attempt ≥ 1，`request/retry.attempt` ≥ 2，延迟 ≥ 0，请求头按它产生的 `ChatRequest` 校验。坏值在解码时成为所在行的 `SessionCorruptedException`。
 
 ## Alternatives considered

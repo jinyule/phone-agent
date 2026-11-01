@@ -3,6 +3,8 @@ package dev.phoneagent.core.model
 import dev.phoneagent.core.ids.ProviderId
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import java.net.URI
+import java.net.URISyntaxException
 
 /**
  * A configured provider (model-layer §2): where to send requests, with which protocol and
@@ -11,9 +13,12 @@ import kotlinx.serialization.Serializable
  * @property id stable id, referenced by session logs.
  * @property displayName user-chosen label.
  * @property protocol wire protocol.
- * @property baseUrl `https://…` (or `http://` for local servers such as Ollama), without trailing `/`.
+ * @property baseUrl `https://host[/path]` without trailing `/`, query, fragment or user info. Plain
+ *   `http://` only for local servers such as Ollama: loopback, private, link-local and
+ *   unique-local address literals, `localhost` and `*.local` (no DNS lookup decides it).
  * @property credential how to authenticate; secrets are referenced, never stored here.
- * @property headers extra request headers; must not carry credentials.
+ * @property headers extra non-secret request headers; names that look like credentials (containing
+ *   `key`, `token`, `secret`, `auth` or `cookie`) are refused. [toString] shows names only.
  * @property reasoningField Chat Completions response field carrying reasoning (e.g. `reasoning_content`),
  *   or `null` when the provider has none or it is unknown.
  * @property echoReasoning send [reasoningField] content back in later requests.
@@ -33,14 +38,8 @@ public data class ProviderProfile(
 ) {
     init {
         require(displayName.isNotBlank()) { "Provider $id: displayName must not be blank" }
-        require(BASE_URL.matches(baseUrl)) {
-            "Provider $id: baseUrl must be http(s)://host[/path] without trailing '/'"
-        }
-        val credentialHeaders = headers.keys.filter { it.lowercase() in CREDENTIAL_HEADERS }
-        require(credentialHeaders.isEmpty()) {
-            "Provider $id: credentials go in `credential`, not headers $credentialHeaders"
-        }
-        require(headers.keys.all { HEADER_NAME.matches(it) }) { "Provider $id: invalid header name in ${headers.keys}" }
+        baseUrlProblem(baseUrl)?.let { throw IllegalArgumentException("Provider $id: $it") }
+        headerProblem(headers)?.let { throw IllegalArgumentException("Provider $id: $it") }
         require(credential !is Credential.ChatGptPlan || protocol == ModelProtocol.OPENAI_RESPONSES) {
             "Provider $id: ChatGPT plan sign-in only works with the Responses protocol"
         }
@@ -49,11 +48,34 @@ public data class ProviderProfile(
         }
         require(!echoReasoning || reasoningField != null) { "Provider $id: echoReasoning needs reasoningField" }
     }
+
+    /** Header values are left out: some providers put account identifiers there. */
+    override fun toString(): String =
+        "ProviderProfile(id=$id, displayName=$displayName, protocol=$protocol, baseUrl=$baseUrl, " +
+            "credential=$credential, headers=${headers.keys}, reasoningField=$reasoningField, " +
+            "echoReasoning=$echoReasoning, preset=$preset)"
 }
 
+/** Why [url] cannot be a base URL, or `null` when it can. Never echoes [url]: it may hold a secret. */
+private fun baseUrlProblem(url: String): String? {
+    val uri = if (BASE_URL.matches(url)) parsed(url) else null
+    return when {
+        uri == null || uri.host == null -> "baseUrl must be http(s)://host[/path] without trailing '/'"
+        uri.rawUserInfo != null -> "baseUrl must not carry user info; use `credential`"
+        uri.scheme == "http" && !isLocalHost(uri.host) -> "plain http is only for local servers"
+        else -> null
+    }
+}
+
+private fun parsed(url: String): URI? =
+    try {
+        URI(url)
+    } catch (ignored: URISyntaxException) {
+        // Its message quotes the URL; the caller reports the shape problem instead.
+        null
+    }
+
 private val BASE_URL = Regex("https?://[^\\s/?#]+(/[^\\s?#]*[^\\s?#/])?")
-private val HEADER_NAME = Regex("[A-Za-z0-9-]+")
-private val CREDENTIAL_HEADERS = setOf("authorization", "x-api-key", "api-key", "proxy-authorization", "cookie")
 
 /** How a provider authenticates (model-layer §4). Secrets live in the credential store. */
 @Serializable
