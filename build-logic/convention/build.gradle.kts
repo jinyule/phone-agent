@@ -48,5 +48,9 @@ gradlePlugin {
             id = "phoneagent.session-format"
             implementationClass = "dev.phoneagent.buildlogic.SessionFormatConventionPlugin"
         }
+        register("privilegedProtocol") {
+            id = "phoneagent.privileged.protocol"
+            implementationClass = "dev.phoneagent.buildlogic.PrivilegedProtocolConventionPlugin"
+        }
     }
 }

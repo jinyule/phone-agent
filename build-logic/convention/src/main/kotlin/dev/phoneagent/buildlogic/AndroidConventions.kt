@@ -36,13 +36,7 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
                 }
             }
             configureKotlinAndroid(explicitApi = false)
-            tasks.withType<Test>().configureEach {
-                // Robolectric (SDK 36 sandbox) reaches into FileDescriptor internals on JDK 21+.
-                jvmArgs(
-                    "--add-exports=java.base/jdk.internal.access=ALL-UNNAMED",
-                    "--enable-native-access=ALL-UNNAMED",
-                )
-            }
+            configureRobolectricJvm()
         }
 }
 
@@ -58,6 +52,7 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
                 lint.targetSdk = Sdk.TARGET
             }
             configureKotlinAndroid(explicitApi = true)
+            configureRobolectricJvm()
         }
 }
 
@@ -73,6 +68,16 @@ private fun configureAndroidCommon(android: CommonExtension) {
         error += "HardcodedText"
         // Dependency freshness is Dependabot's job; targetSdk lags compileSdk on purpose (Sdk.TARGET).
         disable += setOf("GradleDependency", "AndroidGradlePluginVersion", "NewerVersionAvailable", "OldTargetApi")
+    }
+}
+
+private fun Project.configureRobolectricJvm() {
+    tasks.withType<Test>().configureEach {
+        // Robolectric (SDK 36 sandbox) reaches into FileDescriptor internals on JDK 21+.
+        jvmArgs(
+            "--add-exports=java.base/jdk.internal.access=ALL-UNNAMED",
+            "--enable-native-access=ALL-UNNAMED",
+        )
     }
 }
 
