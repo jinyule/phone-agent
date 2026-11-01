@@ -168,6 +168,41 @@ class ProviderErrorsTest {
         assertNull(wait("no hint", "retry-after", "soon"))
     }
 
+    @ParameterizedTest(name = "429 \"{0}\" -> {1}")
+    @CsvSource(
+        delimiter = '|',
+        value = [
+            "Too many tokens per minute. Slow down.            | RATE_LIMITED",
+            "You have hit the token limit for this minute.     | RATE_LIMITED",
+            "Request too large: context length is rate limited | RATE_LIMITED",
+            "Insufficient balance, please top up               | QUOTA_EXCEEDED",
+        ],
+    )
+    fun `429 is a rate or quota limit whatever the words`(
+        message: String,
+        kind: ModelErrorKind,
+    ) {
+        assertEquals(kind, http(429, openAi(message)).kind)
+        assertEquals(kind, ProviderErrors.fromStream(ProviderError(message, "429", null, null), plan = false).kind)
+    }
+
+    @Test
+    fun `invalid waits are skipped for the next source`() {
+        fun wait(
+            message: String,
+            vararg headers: String,
+        ) = ProviderErrors.retryAfterMs(headersOf(*headers), message, Kit.NOW_MS)
+        for (bad in listOf("Infinity", "-Infinity", "1e309", "NaN", "-5", "1e30")) {
+            assertNull(wait("", "retry-after", bad), "retry-after $bad")
+            assertNull(wait("", "retry-after-ms", bad), "retry-after-ms $bad")
+        }
+        assertEquals(3000L, wait("", "retry-after-ms", "Infinity", "retry-after", "3"))
+        assertEquals(4000L, wait("try again in 4s", "retry-after-ms", "NaN", "retry-after", "-1"))
+        assertNull(wait("try again in 99999999999999999999999s"), "a wait that overflows is no wait")
+        assertEquals(86_400_000L, wait("", "retry-after", "86400"), "large valid waits pass through uncapped")
+        assertEquals(2_000_000_000_000L, wait("", "retry-after-ms", "2000000000000"))
+    }
+
     private fun httpDate(epochMs: Long): String =
         DateTimeFormatter.RFC_1123_DATE_TIME.format(Instant.ofEpochMilli(epochMs).atZone(ZoneOffset.UTC))
 

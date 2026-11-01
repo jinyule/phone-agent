@@ -92,7 +92,7 @@ internal data class ProviderError(
  * Maps provider failures to [ModelError] (model-layer §2) for both OpenAI-style protocols. Order:
  * well-known codes (`error.code` / `error.type`) first, then the HTTP status, refined by phrases
  * from the message where providers share a status for different causes (403 = bad key, unpaid
- * bill or model not enabled). Codes and phrases come from provider docs and the gateway fixtures
+ * bill or model not enabled). A 429 is only ever a rate limit or an exhausted quota. Codes and phrases come from provider docs and the gateway fixtures
  * under `core/src/test/resources/wire/`.
  */
 internal object ProviderErrors {
@@ -141,28 +141,36 @@ internal object ProviderErrors {
     }
 
     /**
-     * Server-requested delay: `retry-after-ms`, then `retry-after` (seconds or an HTTP date), then
-     * "try again in 2s" phrases in the message (OpenAI, Azure and Kimi state the wait only there).
+     * Server-requested delay: `retry-after-ms`, then `retry-after` (seconds or an HTTP date; a date
+     * in the past means no wait), then "try again in 2s" phrases in the message (OpenAI, Azure and
+     * Kimi state the wait only there). A source whose value is not a finite, non-negative wait that
+     * fits in milliseconds (`Infinity`, `1e309`, `NaN`, `-5`) is skipped for the next one; large
+     * valid waits pass through as they are (capping is the caller's policy).
      */
     fun retryAfterMs(
         headers: Headers,
         message: String,
         nowMs: Long,
-    ): Long? {
-        val millis =
-            headers["retry-after-ms"]?.trim()?.toDoubleOrNull()?.toLong()
-                ?: headers["retry-after"]?.trim()?.toDoubleOrNull()?.let { (it * MS_PER_SECOND).toLong() }
-                ?: headers.getDate("retry-after")?.let { it.time - nowMs }
-                ?: waitFromMessage(message)
-        return millis?.coerceAtLeast(0)
-    }
+    ): Long? =
+        millis(headers["retry-after-ms"], 1.0)
+            ?: millis(headers["retry-after"], MS_PER_SECOND)
+            ?: headers.getDate("retry-after")?.let { (it.time - nowMs).coerceAtLeast(0) }
+            ?: waitFromMessage(message)
 
     private fun waitFromMessage(message: String): Long? =
         WAIT_PHRASE.find(message.lowercase(Locale.ROOT))?.let { match ->
             val unit = match.groupValues[2]
-            val perUnit = if (unit.startsWith("ms") || unit.startsWith("milli")) 1.0 else MS_PER_SECOND
-            (match.groupValues[1].toDouble() * perUnit).toLong()
+            millis(match.groupValues[1], if (unit.startsWith("ms") || unit.startsWith("milli")) 1.0 else MS_PER_SECOND)
         }
+
+    /** [value] × [perUnit] in whole milliseconds; `null` unless it is a finite, non-negative wait within `Long`. */
+    private fun millis(
+        value: String?,
+        perUnit: Double,
+    ): Long? {
+        val ms = (value?.trim()?.toDoubleOrNull() ?: return null) * perUnit
+        return ms.takeIf { it.isFinite() && it >= 0 && it < Long.MAX_VALUE.toDouble() }?.toLong()
+    }
 
     private fun byCode(
         error: ProviderError,
@@ -198,12 +206,20 @@ internal object ProviderErrors {
         fun says(phrases: List<String>) = phrases.any { it in lower }
         return when {
             status == Status.UNAUTHORIZED -> ModelError.Auth(error.detail)
+
             status == Status.PAYMENT_REQUIRED || says(Phrases.QUOTA) -> ModelError.QuotaExceeded(error.detail)
-            status == Status.FORBIDDEN && plan -> ModelError.PlanNotEligible(error.detail)
-            status == Status.REQUEST_TIMEOUT -> ModelError.Network("HTTP 408: ${error.detail}")
-            status == Status.CONFLICT -> ModelError.Server(status, error.detail)
-            status == Status.TOO_LARGE || says(Phrases.CONTEXT) -> ModelError.ContextOverflow(error.detail)
+
+            // Before the context phrases: "too many tokens per minute" is a rate limit, not an overflow.
             status == Status.TOO_MANY_REQUESTS -> ModelError.RateLimited(retryAfter)
+
+            status == Status.FORBIDDEN && plan -> ModelError.PlanNotEligible(error.detail)
+
+            status == Status.REQUEST_TIMEOUT -> ModelError.Network("HTTP 408: ${error.detail}")
+
+            status == Status.CONFLICT -> ModelError.Server(status, error.detail)
+
+            status == Status.TOO_LARGE || says(Phrases.CONTEXT) -> ModelError.ContextOverflow(error.detail)
+
             else -> rejected(status, error, ::says)
         }
     }
