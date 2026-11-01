@@ -526,7 +526,7 @@ screen s12 · 微信 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · �
 | | `phone_type` | `screen`, `ref?`, `text`, `append?`, `submit?` |
 | | `phone_scroll` | `screen`, `direction`, `ref?` |
 | | `phone_swipe` | `x1,y1,x2,y2`, `durationMs` |
-| | `phone_key` | `back/enter`（后台屏模式下没有 `home`：Home 作用于整机而不是 agent 的屏，助手不注入它；主屏模式下由无障碍的 `performGlobalAction` 实现） |
+| | `phone_key` | `back/home/enter`（`home` 在主屏模式下由无障碍的 `performGlobalAction` 实现。助手不注入 HOME：它作用于整机而不是 agent 的屏。后台屏上由 ScreenPort（WP14）返回 Failed，原因"后台屏上没有桌面，请用 phone_launch 切换 App"） |
 | | `phone_launch` | `app` 或 `link`, `cold?` |
 | | `phone_intent` | `kind: alarm/timer/calendar/share/dial/navigate/settings` + 对应字段（白名单，不接受任意 Intent） |
 | 通用 | `ask_user` | `question`, `options?` |

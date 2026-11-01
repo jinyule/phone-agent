@@ -23,6 +23,7 @@ phase1-architecture §3.5 列出了 `IPrivilegedCore` 的能力面，调研报�
    - intent 里的 `FLAG_GRANT_*`（URI 授权）在启动前被清掉：助手是 shell 身份，不替任何人授予 URI 权限。
    - 只支持主用户（`userId` 必须是助手自己的用户或 `USER_CURRENT`）。分身和工作资料留到以后。
    - `injectKey` 只放行导航和编辑键（`PressKeys`）。音量、电源、Home、最近任务、助手、相机、媒体键作用于整机而不是 agent 的屏，一律拒绝。
+     `phone_key` 的 schema 仍然有 `home`（phase1 §5）：主屏模式下由无障碍的 `performGlobalAction` 实现；后台屏上由 ScreenPort（WP14）直接返回 Failed，原因"后台屏上没有桌面，请用 phone_launch 切换 App"，不调用 `injectKey`。
    - `injectStroke` 校验点数（≤1024）、时间从 0 开始且单调不减、总时长 ≤10 秒、每个点都在本屏尺寸内。
    - `grantSelf` 只接受 `WRITE_SECURE_SETTINGS`，而且写完回读 `checkPermission` 再报成功。
 
@@ -50,6 +51,7 @@ phase1-architecture §3.5 列出了 `IPrivilegedCore` 的能力面，调研报�
 ## Alternatives considered
 
 - **助手不做任何把关，全交给 PolicyEngine**（接近 Mika 的 `phone_system_command` 思路）。一个参数写错就能打扰用户；而且助手是 uid 2000，错误代价比 App 大。现在这几条都是"不越界"而不是"判断内容"，不会和 PolicyEngine 的职责重叠。
+- **从 `phone_key` 的 schema 里去掉 `home`**（B 段最初的做法）。工具清单要保持稳定；主屏模式下 `home` 由无障碍实现，是能用的。所以 schema 保留 `home`，后台屏上由 ScreenPort 给出带原因的失败，助手照样拒绝注入 HOME。
 - **助手也做 intent 白名单**（Mika 的 `ShellLinks` / `SystemIntents`）。那会出现两份规则，而设计明确要求判定点只有一个（D8）。助手只清掉 URI 授权标志这种与身份有关的东西。
 - **`moveTask` 不做归属检查**（Mika 的做法）。那样 App 一个错误的 taskId 就能把用户正在用的 App 拉进后台屏。代价是跳出回收需要 `watchMainScreen` 的窗口配合，见"后果"。
 - **用 `UiAutomation` 或无障碍手势注入**，而不是 `injectInputEvent`。无障碍手势是 WP14 的路径（`dispatchGesture` + `setDisplayId`），B 段提供的是最底层的回退；两者并存是 §3.3 "点击逐级回退"的要求。
@@ -64,6 +66,7 @@ phase1-architecture §3.5 列出了 `IPrivilegedCore` 的能力面，调研报�
 - 跳出回收依赖 App 先调 `watchMainScreen`：没开窗口时冒到主屏的任务不算 `spilled`，`moveTask` 会拒绝。§7.2 的主循环本来就在每个动作前调它，WP14 实现 ScreenPort 时要保证这一点。
 - 窗口内冒到主屏的任务都可以被挪回，包括用户在这 3 秒内自己切换到的 App。窗口短、且只有 App 显式调用才会挪，但这是一个真实的权衡；要更严格的话，需要把"是不是 agent 引起的"判定（Mika 的 `MainScreenSpill`）也做进来，那属于 WP14 的 ScreenPort。
 - 只支持主用户：分身、工作资料里的 App 现在启动不了（`StartResult.REFUSED`）。
+- WP14 的 ScreenPort 要在后台屏上把 `phone_key home` 直接变成 Failed（原因见决定 1），不能交给 `injectKey`：助手的拒绝只是一个 false，模型看不到原因。
 - 只在 API 36 模拟器上验证过。API 30–33 没有 `OWN_FOCUS`，虚拟屏会抢主屏焦点，这正是 D2 "后台屏要求 API 34+"的原因；API 34/35 的行为未实测。
 - `releaseAll` 会解除静音、释放所有屏、清掉任务归属，屏上的任务随之销毁（`DESTROY_CONTENT_ON_REMOVAL`）。三类资源分开释放，每类里的每个资源（每块屏、每个被静音的包）也单独释放：某一个抛异常只记日志，其余照常释放，失败的那个留到下一次 `releaseAll` 再试；`releaseAll` 本身不抛（与 A 段 `HeldResource` 的语义一致，代码在 `cap/Release.kt`）。单独的 `releaseDisplay` 失败时，屏也留在助手手里，由下一次 `releaseAll` 重试。App 死后的宽限期语义不变（A 段 ADR），所以 App 重启后虚拟屏上的任务不会保留。要让任务跨 App 重启存活，需要新的协议方法，见 A 段 ADR 的"后果"。
 - `probe()` 会建一块小屏并注入一次点击，大约几百毫秒；它只在 onboarding 和诊断时调用。
