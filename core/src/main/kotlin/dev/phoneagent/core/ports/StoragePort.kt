@@ -18,7 +18,8 @@ public interface StoragePort {
 
     /**
      * Replaces [path] with [bytes] atomically: readers see either the old or the new content,
-     * never a mix. The content is durable (fsync) when this returns. Parent directories are created.
+     * never a mix. The content is durable (fsync) when this returns. Missing parent directories are
+     * created, and durable too.
      */
     public suspend fun writeAtomically(
         path: StoragePath,
@@ -26,8 +27,10 @@ public interface StoragePort {
     )
 
     /**
-     * Opens [path] for appending, creating it and its parents if absent. At most one appender per
-     * path may be open at a time; the caller closes it.
+     * Opens [path] for appending, creating it and its parents if absent (durably, like
+     * [writeAtomically]). At most one appender per path may be open at a time; the caller closes
+     * it. When the caller is cancelled before it receives the handle, the implementation closes
+     * the handle: nobody else can.
      */
     public suspend fun openAppender(path: StoragePath): StorageAppender
 

@@ -3,7 +3,6 @@ package dev.phoneagent.core.storage
 import dev.phoneagent.core.ports.StorageAppender
 import dev.phoneagent.core.ports.StoragePath
 import dev.phoneagent.core.ports.StoragePort
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -67,11 +66,13 @@ public class FileStoragePort internal constructor(
      */
     override suspend fun openAppender(path: StoragePath): StorageAppender {
         val opened = AtomicReference<FileChannel>()
+        var delivered = false
         try {
             withContext(io) { opened.set(openForAppend(fileOf(path))) }
-        } catch (cancelled: CancellationException) {
-            opened.get()?.let { closeAfterFailure(it, cancelled) }
-            throw cancelled
+            delivered = true
+        } finally {
+            // Cancelled after the file was opened: the result is dropped, and nobody else has the handle.
+            if (!delivered) opened.get()?.let(::closeUndelivered)
         }
         return FileAppender(opened.get(), io)
     }
@@ -155,6 +156,18 @@ public class FileStoragePort internal constructor(
                 Files.deleteIfExists(temp)
             } catch (cleanup: IOException) {
                 failure.addSuppressed(cleanup)
+            }
+        }
+
+        /**
+         * Closes a handle that was opened for a caller who was cancelled before receiving it.
+         * A close failure is dropped: the caller already ends with its cancellation.
+         */
+        fun closeUndelivered(channel: FileChannel) {
+            try {
+                channel.close()
+            } catch (ignored: IOException) {
+                // Nobody holds the handle and nobody waits for a result to report this to.
             }
         }
 
