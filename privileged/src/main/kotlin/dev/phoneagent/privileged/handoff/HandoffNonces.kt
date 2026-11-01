@@ -13,9 +13,10 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 
 /**
- * Persisted nonce state of the app. Times are milliseconds since boot (`elapsedRealtime`),
- * so a reboot never extends a nonce: an issue time from a previous boot reads as "in the future"
- * and is rejected.
+ * Persisted nonce state of the app. Times are milliseconds since boot (`elapsedRealtime`), which
+ * restarts at 0 on every boot, so each time is stored with the boot it belongs to: a launch or armed
+ * nonce from another boot, or from an unknown boot, never matches, even when the new uptime falls
+ * back inside its TTL.
  */
 public data class NonceSlots(
     /** Given to the accepted helper for its next handoff; no expiry, rotated on every acceptance. */
@@ -24,15 +25,19 @@ public data class NonceSlots(
     val launch: String? = null,
     /** When [launch] was issued. */
     val launchAtMs: Long = 0,
+    /** Boot [launch] was issued in; null when unknown. */
+    val launchBoot: Int? = null,
     /** SHA-256 (lowercase hex) of a nonce armed from the shell for a helper started from a computer. */
     val armedHash: String? = null,
     /** When [armedHash] was armed. */
     val armedAtMs: Long = 0,
+    /** Boot [armedHash] was armed in; null when unknown. */
+    val armedBoot: Int? = null,
 ) {
     /** Says which slots are filled, never their values. */
     override fun toString(): String =
-        "NonceSlots(resume=${resume != null}, launch=${launch != null}@$launchAtMs, " +
-            "armed=${armedHash != null}@$armedAtMs)"
+        "NonceSlots(resume=${resume != null}, launch=${launch != null}@$launchAtMs/boot $launchBoot, " +
+            "armed=${armedHash != null}@$armedAtMs/boot $armedBoot)"
 }
 
 /** Durable storage for [NonceSlots]; [save] must be durable before it returns. */
@@ -69,6 +74,8 @@ public class HandoffNonces(
     private val store: NonceStore,
     /** Milliseconds since boot. */
     private val clock: () -> Long,
+    /** Identifies the current boot (`Settings.Global.BOOT_COUNT`); null when unknown. */
+    private val boot: () -> Int?,
     private val launchTtlMs: Long = DEFAULT_LAUNCH_TTL_MS,
     private val armedTtlMs: Long = DEFAULT_ARMED_TTL_MS,
     private val random: () -> String = Nonces::random,
@@ -81,7 +88,7 @@ public class HandoffNonces(
     /** Issues the nonce for a helper the app launches itself; replaces any earlier launch nonce. */
     @Synchronized
     public fun issueLaunch(): String =
-        random().also { store.save(store.load().copy(launch = it, launchAtMs = clock())) }
+        random().also { store.save(store.load().copy(launch = it, launchAtMs = clock(), launchBoot = boot())) }
 
     /**
      * Arms [sha256Hex] (the hash of a nonce chosen by the shell) for one handoff within the armed TTL.
@@ -90,7 +97,7 @@ public class HandoffNonces(
     @Synchronized
     public fun arm(sha256Hex: String?): Boolean {
         if (sha256Hex == null || !Nonces.isWellFormed(sha256Hex)) return false
-        store.save(store.load().copy(armedHash = sha256Hex, armedAtMs = clock()))
+        store.save(store.load().copy(armedHash = sha256Hex, armedAtMs = clock(), armedBoot = boot()))
         return true
     }
 
@@ -99,13 +106,33 @@ public class HandoffNonces(
     public fun match(nonce: String?): NonceSlot? {
         if (nonce == null || !Nonces.isWellFormed(nonce)) return null
         val slots = store.load()
-        val now = clock()
         return when {
-            same(nonce, slots.resume) -> NonceSlot.RESUME
-            same(nonce, slots.launch) && now - slots.launchAtMs in 0..launchTtlMs -> NonceSlot.LAUNCH
-            same(Nonces.sha256Hex(nonce), slots.armedHash) && now - slots.armedAtMs in 0..armedTtlMs -> NonceSlot.ARMED
-            else -> null
+            same(nonce, slots.resume) -> {
+                NonceSlot.RESUME
+            }
+
+            same(nonce, slots.launch) && live(slots.launchAtMs, slots.launchBoot, launchTtlMs) -> {
+                NonceSlot.LAUNCH
+            }
+
+            same(Nonces.sha256Hex(nonce), slots.armedHash) && live(slots.armedAtMs, slots.armedBoot, armedTtlMs) -> {
+                NonceSlot.ARMED
+            }
+
+            else -> {
+                null
+            }
         }
+    }
+
+    /** Issued at [atMs] of boot [atBoot], which is this boot, and no longer than [ttlMs] ago. */
+    private fun live(
+        atMs: Long,
+        atBoot: Int?,
+        ttlMs: Long,
+    ): Boolean {
+        val current = boot()
+        return current != null && atBoot == current && clock() - atMs in 0..ttlMs
     }
 
     /** Uses up [nonce]: clears the slot it matches and returns that slot, or null if it matches none. */
@@ -116,8 +143,8 @@ public class HandoffNonces(
         store.save(
             when (slot) {
                 NonceSlot.RESUME -> slots.copy(resume = null)
-                NonceSlot.LAUNCH -> slots.copy(launch = null, launchAtMs = 0)
-                NonceSlot.ARMED -> slots.copy(armedHash = null, armedAtMs = 0)
+                NonceSlot.LAUNCH -> slots.copy(launch = null, launchAtMs = 0, launchBoot = null)
+                NonceSlot.ARMED -> slots.copy(armedHash = null, armedAtMs = 0, armedBoot = null)
             },
         )
         return slot

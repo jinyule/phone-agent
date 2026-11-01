@@ -110,6 +110,7 @@ phone-agent/
   - **启动口令**：App 自己拉起助手时（WP13 的内置 ADB）由 App 生成，30 秒内有效；
   - **预约口令**：电脑侧的 `scripts/start-helper.sh` 自己生成口令，先用 `content call --method arm` 把口令的 SHA-256 交给 App（App 只接受 uid 2000 的 arm），再经 stdin 把明文交给助手，60 秒内有效；
   - **续接口令**：每次交接成功，App 都回给助手下一个口令（App 侧持久化），App 进程重启后助手用它重新交接。
+  - 启动口令和预约口令按 `elapsedRealtime` 计时，并记下签发时的开机标识（`Settings.Global.BOOT_COUNT`）；重启后旧口令一律失效，读不到开机标识时也不匹配。
 - 生命周期：
   - App 进程死后助手不退出，进入"孤儿"状态；宽限期（默认 10 秒，`--orphan-grace-ms`）过后 `releaseAll()`。
   - 助手监听 App uid 的进程状态，App 进程再起来时用续接口令重新交接。新会话开始前一定先释放上一会话的资源，所以迟到的计时器不会释放新会话建的东西。

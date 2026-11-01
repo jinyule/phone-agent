@@ -21,6 +21,7 @@ class HandoffNoncesTest {
 
     private val store = MemoryStore()
     private var now = 1_000_000L
+    private var boot: Int? = 5
     private var counter = 0
 
     /** Deterministic, well-formed nonces: n(1), n(2), ... */
@@ -29,7 +30,7 @@ class HandoffNoncesTest {
     private fun nonces(
         launchTtlMs: Long = 30_000,
         armedTtlMs: Long = 60_000,
-    ) = HandoffNonces(store, { now }, launchTtlMs, armedTtlMs) { n(++counter) }
+    ) = HandoffNonces(store, { now }, { boot }, launchTtlMs, armedTtlMs) { n(++counter) }
 
     @Test
     fun launchNonceMatchesOnlyWithinItsTtl() {
@@ -43,11 +44,44 @@ class HandoffNoncesTest {
     }
 
     @Test
-    fun issueTimeFromAnotherBootNeverMatches() {
+    fun aClockBelowTheIssueTimeNeverMatches() {
         val gate = nonces()
         val launch = gate.issueLaunch()
-        now -= 1 // elapsedRealtime restarted below the stored issue time
+        now -= 1
         assertNull(gate.match(launch))
+    }
+
+    @Test
+    fun aRebootVoidsLaunchAndArmedNoncesEvenWhenTheNewUptimeIsInsideTheirTtl() {
+        now = 1_000
+        val launch = nonces().issueLaunch()
+        val armed = n(77)
+        assertTrue(nonces().arm(Nonces.sha256Hex(armed)))
+        boot = 6
+        now = 1_001
+        val afterReboot = nonces()
+        assertNull("launch", afterReboot.match(launch))
+        assertNull("armed", afterReboot.match(armed))
+        assertNull(afterReboot.consume(launch))
+    }
+
+    @Test
+    fun anUnknownBootNeverMatchesTimedNonces() {
+        boot = null
+        val gate = nonces()
+        val launch = gate.issueLaunch()
+        val armed = n(78)
+        assertTrue(gate.arm(Nonces.sha256Hex(armed)))
+        assertNull(gate.match(launch))
+        assertNull(gate.match(armed))
+        assertEquals("the resume nonce is not timed", NonceSlot.RESUME, gate.match(gate.issueResume()))
+    }
+
+    @Test
+    fun aResumeNonceIsNotTiedToTheBoot() {
+        val resume = nonces().issueResume()
+        boot = 6
+        assertEquals(NonceSlot.RESUME, nonces().match(resume))
     }
 
     @Test
@@ -129,7 +163,7 @@ class HandoffNoncesTest {
     @Test
     fun stateSurvivesANewProcess() {
         val resume = nonces().issueResume()
-        val restarted = HandoffNonces(store, { now })
+        val restarted = HandoffNonces(store, { now }, { boot })
         assertEquals(NonceSlot.RESUME, restarted.match(resume))
     }
 

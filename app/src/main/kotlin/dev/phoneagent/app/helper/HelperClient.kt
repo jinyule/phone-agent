@@ -16,6 +16,7 @@ import android.os.Bundle
 import android.os.IBinder
 import android.os.RemoteException
 import android.os.SystemClock
+import android.provider.Settings
 import android.util.Log
 import dev.phoneagent.privileged.IPrivilegedCore
 import dev.phoneagent.privileged.handoff.AppBuild
@@ -198,7 +199,10 @@ class HelperClient internal constructor(
 
         private fun create(app: Context): HelperClient {
             val build by lazy { appBuildOf(app) }
-            return HelperClient(HandoffNonces(PrefsNonceStore(app), SystemClock::elapsedRealtime), { build })
+            return HelperClient(
+                HandoffNonces(PrefsNonceStore(app), SystemClock::elapsedRealtime, { bootCount(app) }),
+                { build },
+            )
         }
 
         private fun appBuildOf(app: Context): AppBuild {
@@ -211,6 +215,13 @@ class HelperClient internal constructor(
                     pm.getPackageInfo(app.packageName, 0)
                 }
             return AppBuild(versionCode = info.longVersionCode, apkPath = app.applicationInfo.sourceDir)
+        }
+
+        /** `Settings.Global.BOOT_COUNT`, or null (logged) when this device does not report it. */
+        private fun bootCount(app: Context): Int? {
+            val count = Settings.Global.getInt(app.contentResolver, Settings.Global.BOOT_COUNT, -1)
+            if (count < 0) Log.e(TAG, "BOOT_COUNT is unavailable; launch and armed nonces cannot match")
+            return count.takeIf { it >= 0 }
         }
 
         private fun logLaunchNeeded(state: HelperState.NeedsLaunch) {

@@ -41,7 +41,7 @@ class HelperClientTest {
     private var now = 1_000L
     private val client = newClient()
 
-    private fun newClient() = HelperClient(HandoffNonces(store, { now }), { build }) { launches += it }
+    private fun newClient() = HelperClient(HandoffNonces(store, { now }, { 7 }), { build }) { launches += it }
 
     /** Arms a fresh nonce the way `scripts/start-helper.sh` does and returns it. */
     private fun armed(): String =
