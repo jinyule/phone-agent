@@ -49,16 +49,18 @@ public class ChatCompletionsModel internal constructor(
         WireSupport.preflight(request)
         val images = if (info.capabilities.vision) ImageData.load(request, blobs) else ImageData.NONE
         val secret = env.secret(profile.credential, rejected = false)
+        val redactor = Redactor(listOfNotNull(secret))
         var current = options.get()
         while (true) {
             val body = wire.body(request, images, current)
-            when (val exchange = env.exchange(env.post(endpoint, headers, secret, body)) { read(it, onDelta) }) {
+            val post = env.post(endpoint, headers, secret, body)
+            when (val exchange = env.exchange(post, redactor) { read(it, redactor, onDelta) }) {
                 is Exchange.Done -> {
                     return exchange.value
                 }
 
                 is Exchange.Failed -> {
-                    current = without(current, exchange.failure) ?: throw env.error(exchange.failure, plan = false)
+                    current = without(current, exchange.failure) ?: throw env.error(exchange.failure, false, redactor)
                     options.set(current)
                 }
             }
@@ -67,15 +69,19 @@ public class ChatCompletionsModel internal constructor(
 
     private suspend fun read(
         reply: HttpReply,
+        redactor: Redactor,
         onDelta: (Delta) -> Unit,
     ): ChatResponse {
-        val stream = ChatCompletionsStream(profile.id, info.model, reasoningFields, env.newCallId, onDelta)
+        val stream = ChatCompletionsStream(profile.id, info.model, reasoningFields, env.newCallId, redactor, onDelta)
         try {
             reply.readEvents(stream::accept, stream::acceptJson)
             return stream.finish()
         } catch (e: IllegalArgumentException) {
             // Provider values that break neutral-type invariants (ids, counts) are protocol violations.
-            throw ModelError.BadResponse("reply violates a model invariant: ${e.message}", e)
+            throw ModelError.BadResponse(
+                redactor.text("reply violates a model invariant: ${e.message}"),
+                redactor.cause(e),
+            )
         }
     }
 

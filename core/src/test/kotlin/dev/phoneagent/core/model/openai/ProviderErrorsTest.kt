@@ -21,7 +21,7 @@ class ProviderErrorsTest {
         status: Int,
         body: String,
         plan: Boolean = false,
-    ): ModelError = ProviderErrors.fromHttp(status, none, body, plan, Kit.NOW_MS)
+    ): ModelError = ProviderErrors.fromHttp(HttpFailure(status, none, body), plan, Kit.NOW_MS, Redactor.SHAPES_ONLY)
 
     private fun openAi(
         message: String,
@@ -120,28 +120,35 @@ class ProviderErrorsTest {
 
     @Test
     fun `error bodies of every shape are read`() {
-        assertEquals("plain words", ProviderError.parse("  plain words ").message)
-        assertEquals("text error", ProviderError.parse("{\"error\":\"text error\"}").message)
-        val flat = ProviderError.parse("{\"code\":30001,\"message\":\"balance\",\"data\":null}")
+        assertEquals("plain words", ProviderError.parse("  plain words ", Redactor.SHAPES_ONLY).message)
+        assertEquals("text error", ProviderError.parse("{\"error\":\"text error\"}", Redactor.SHAPES_ONLY).message)
+        val flat = ProviderError.parse("{\"code\":30001,\"message\":\"balance\",\"data\":null}", Redactor.SHAPES_ONLY)
         assertEquals(ProviderError("balance", "30001", null, null), flat)
-        assertEquals("gone", ProviderError.parse("[{\"error\":{\"code\":404,\"message\":\"gone\"}}]").message)
-        assertEquals("d", ProviderError.parse("{\"detail\":\"d\"}").message)
-        assertEquals("t", ProviderError.parse("{\"title\":\"t\"}").message)
-        assertEquals("m", ProviderError.parse("{\"msg\":\"m\"}").message)
-        assertEquals("{\"status\":\"x\"}", ProviderError.parse("{\"status\":\"x\"}").message)
-        assertEquals("[1]", ProviderError.parse("[1]").message)
+        assertEquals(
+            "gone",
+            ProviderError.parse("[{\"error\":{\"code\":404,\"message\":\"gone\"}}]", Redactor.SHAPES_ONLY).message,
+        )
+        assertEquals("d", ProviderError.parse("{\"detail\":\"d\"}", Redactor.SHAPES_ONLY).message)
+        assertEquals("t", ProviderError.parse("{\"title\":\"t\"}", Redactor.SHAPES_ONLY).message)
+        assertEquals("m", ProviderError.parse("{\"msg\":\"m\"}", Redactor.SHAPES_ONLY).message)
+        assertEquals("{\"status\":\"x\"}", ProviderError.parse("{\"status\":\"x\"}", Redactor.SHAPES_ONLY).message)
+        assertEquals("[1]", ProviderError.parse("[1]", Redactor.SHAPES_ONLY).message)
         val routed =
             ProviderError.parse(
                 "{\"error\":{\"message\":\"Provider returned error\",\"code\":400," +
                     "\"metadata\":{\"raw\":\"tool_choice requires tools\",\"provider_name\":\"X\"}}}",
+                Redactor.SHAPES_ONLY,
             )
         assertEquals("Provider returned error: tool_choice requires tools", routed.message)
-        assertEquals(ProviderError("m", null, null, null), ProviderError.parse("{\"message\":\"m\",\"code\":null}"))
+        assertEquals(
+            ProviderError("m", null, null, null),
+            ProviderError.parse("{\"message\":\"m\",\"code\":null}", Redactor.SHAPES_ONLY),
+        )
     }
 
     @Test
     fun `empty bodies still classify by status`() {
-        assertTrue(ProviderError.parse("").message.startsWith("(empty body"))
+        assertTrue(ProviderError.parse("", Redactor.SHAPES_ONLY).message.startsWith("(empty body"))
         assertEquals(ModelErrorKind.AUTH, http(401, "").kind)
     }
 
@@ -167,9 +174,15 @@ class ProviderErrorsTest {
     @Test
     fun `429 carries the wait`() {
         val headers = headersOf("retry-after", "3")
-        val error = ProviderErrors.fromHttp(429, headers, openAi("slow down"), false, Kit.NOW_MS)
+        val error =
+            ProviderErrors.fromHttp(
+                HttpFailure(429, headers, openAi("slow down")),
+                false,
+                Kit.NOW_MS,
+                Redactor.SHAPES_ONLY,
+            )
         assertEquals(3000L, (error as ModelError.RateLimited).retryAfterMs)
-        val overloaded = ProviderErrors.fromHttp(503, headers, "", false, Kit.NOW_MS)
+        val overloaded = ProviderErrors.fromHttp(HttpFailure(503, headers, ""), false, Kit.NOW_MS, Redactor.SHAPES_ONLY)
         assertEquals(3000L, (overloaded as ModelError.Overloaded).retryAfterMs)
     }
 

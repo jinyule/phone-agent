@@ -152,16 +152,17 @@ internal class AdapterEnv(
         return builder.header("Accept", "text/event-stream")
     }
 
-    /** The [ModelError] for an HTTP failure. */
+    /** The [ModelError] for an HTTP failure; [redactor] masks what the body echoes. */
     fun error(
         failure: HttpFailure,
         plan: Boolean,
-    ): ModelError = ProviderErrors.fromHttp(failure.status, failure.headers, failure.body, plan, clock.epochMillis())
+        redactor: Redactor,
+    ): ModelError = ProviderErrors.fromHttp(failure, plan, clock.epochMillis(), redactor)
 }
 
 private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 
-/** A non-2xx answer: status, headers and (truncated) body. */
+/** A non-2xx answer: status, headers and (truncated, redacted) body. */
 internal class HttpFailure(
     val status: Int,
     val headers: Headers,
@@ -181,16 +182,20 @@ internal sealed interface Exchange<out T> {
     ) : Exchange<Nothing>
 }
 
-/** Sends [request]; reads a 2xx body with [read], or returns the failure. */
+/**
+ * Sends [request]; reads a 2xx body with [read], or returns the failure with its body masked by
+ * [redactor] (which holds every secret the call has sent so far).
+ */
 internal suspend fun <T> AdapterEnv.exchange(
     request: Request,
+    redactor: Redactor,
     read: suspend (HttpReply) -> T,
 ): Exchange<T> =
-    transport.send(request) { reply ->
+    transport.send(request, redactor) { reply ->
         if (reply.successful) {
             Exchange.Done(read(reply))
         } else {
-            Exchange.Failed(HttpFailure(reply.status, reply.headers, reply.text()))
+            Exchange.Failed(HttpFailure(reply.status, reply.headers, redactor.text(reply.text())))
         }
     }
 

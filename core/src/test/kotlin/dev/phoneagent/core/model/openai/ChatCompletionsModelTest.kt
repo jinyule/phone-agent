@@ -10,6 +10,7 @@ import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.ProviderProfile
 import dev.phoneagent.core.model.Role
 import dev.phoneagent.core.model.StopReason
+import dev.phoneagent.core.model.openai.Kit.assertBearer
 import dev.phoneagent.core.model.openai.Kit.base
 import dev.phoneagent.core.model.openai.Kit.enqueueError
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
@@ -68,7 +69,7 @@ class ChatCompletionsModelTest {
             val sent = server.next()
             assertEquals("POST", sent.method)
             assertEquals("/v1/chat/completions", sent.url.encodedPath)
-            assertEquals("Bearer ${Kit.FAKE_KEY}", sent.headers["Authorization"])
+            sent.assertBearer(Kit.FAKE_KEY)
             assertEquals("PhoneAgent", sent.headers["X-Title"])
             assertEquals("text/event-stream", sent.headers["Accept"])
             assertTrue(sent.headers["Content-Type"]!!.startsWith("application/json"))
@@ -85,10 +86,10 @@ class ChatCompletionsModelTest {
             server.enqueueSse(textReply)
             val keys = Keys(null)
             model(Kit.profile(server.base(), credential = Credential.None), keys).complete(Kit.request())
-            assertNull(server.next().headers["Authorization"])
+            server.next().assertBearer(null)
             assertEquals(listOf(Credential.None to false), keys.asked)
             model(keys = Keys("   ")).complete(Kit.request())
-            assertNull(server.next().headers["Authorization"])
+            server.next().assertBearer(null)
         }
 
     @Test

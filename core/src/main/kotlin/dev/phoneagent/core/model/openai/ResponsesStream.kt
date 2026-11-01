@@ -33,6 +33,7 @@ internal class ResponsesStream(
     private val provider: ProviderId,
     private val model: ModelId,
     private val plan: Boolean,
+    private val redactor: Redactor,
     onDelta: (Delta) -> Unit,
 ) {
     private val ledger = DeltaLedger(onDelta)
@@ -66,7 +67,7 @@ internal class ResponsesStream(
         val response = final ?: throw ModelError.Network("stream ended before response.completed")
         val output = items.ifEmpty { response.array("output")?.filterIsInstance<JsonObject>().orEmpty() }
         val reason = response.obj("incomplete_details")?.str("reason")
-        val parts = ResponsesOutput.parts(output, provider, model)
+        val parts = ResponsesOutput.parts(output, provider, model, redactor)
         val hasCalls = parts.any { it is Part.ToolCall }
         ResponsesOutput.checkRefusal(output, parts, incomplete && reason == "content_filter")
         ledger.catchUp(parts)
@@ -129,10 +130,11 @@ internal class ResponsesStream(
         try {
             Json.parseToJsonElement(data) as? JsonObject ?: throw ModelError.BadResponse("event is not a JSON object")
         } catch (e: SerializationException) {
-            throw ModelError.BadResponse("event is not JSON: ${data.take(SNIPPET)}", e)
+            throw ModelError.BadResponse("event is not JSON: ${redactor.text(data).take(SNIPPET)}", redactor.cause(e))
         }
 
-    private fun failure(error: JsonObject): ModelError = ProviderErrors.fromStream(ProviderError.of(error), plan)
+    private fun failure(error: JsonObject): ModelError =
+        ProviderErrors.fromStream(ProviderError.of(error, redactor), plan)
 
     /** Shows a reasoning fragment; each summary or reasoning-text part is a section of its own, after a blank line. */
     private fun reasoning(
@@ -182,12 +184,13 @@ internal object ResponsesOutput {
         output: List<JsonObject>,
         provider: ProviderId,
         model: ModelId,
+        redactor: Redactor,
     ): List<Part> =
         output.mapNotNull { item ->
             when (item.str("type")) {
                 "reasoning" -> Part.Reasoning(provider, model, ReasoningKind.RESPONSES_ENCRYPTED, item, summary(item))
                 "message" -> text(item)?.let(Part::Text)
-                "function_call" -> call(item)
+                "function_call" -> call(item, redactor)
                 else -> null
             }
         }
@@ -252,14 +255,20 @@ internal object ResponsesOutput {
             ?.joinToString("")
             ?.takeIf { it.isNotEmpty() }
 
-    private fun call(item: JsonObject): Part.ToolCall {
+    private fun call(
+        item: JsonObject,
+        redactor: Redactor,
+    ): Part.ToolCall {
         val id = item.str("call_id")
         val name = item.str("name")
-        if (id == null || name == null) throw ModelError.BadResponse("function_call without call_id or name: $item")
+        if (id == null || name == null) {
+            val shown = redactor.text(item.toString()).take(SNIPPET)
+            throw ModelError.BadResponse("function_call without call_id or name: $shown")
+        }
         return try {
             Part.ToolCall(ToolCallId(id), name, item.str("arguments")?.ifEmpty { null } ?: "{}")
         } catch (e: IllegalArgumentException) {
-            throw ModelError.BadResponse("unusable call_id '${id.take(SNIPPET)}'", e)
+            throw ModelError.BadResponse("unusable call_id '${redactor.text(id).take(SNIPPET)}'", redactor.cause(e))
         }
     }
 

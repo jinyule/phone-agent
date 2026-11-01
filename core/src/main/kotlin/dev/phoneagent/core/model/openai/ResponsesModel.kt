@@ -43,12 +43,15 @@ public class ResponsesModel internal constructor(
         WireSupport.preflight(request)
         val images = if (info.capabilities.vision) ImageData.load(request, blobs) else ImageData.NONE
         var secret = env.secret(profile.credential, rejected = false)
+        // Every secret sent so far: after a refresh the rejected token may still be echoed.
+        var redactor = Redactor(listOfNotNull(secret))
         var include = includeReasoning.get()
         var refreshed = false
         while (true) {
             val built = wire.body(request, images, include)
             val body = if (plan) PlanMode.enforce(built) else built
-            val exchange = env.exchange(env.post(endpoint, headers, secret, body)) { read(it, onDelta) }
+            val post = env.post(endpoint, headers, secret, body)
+            val exchange = env.exchange(post, redactor) { read(it, redactor, onDelta) }
             if (exchange is Exchange.Done) return exchange.value
             val failure = (exchange as Exchange.Failed).failure
             when {
@@ -59,15 +62,16 @@ public class ResponsesModel internal constructor(
                 failure.status == Status.UNAUTHORIZED && plan -> {
                     refreshed = true
                     secret = env.secret(profile.credential, rejected = true)
+                    redactor = redactor.with(secret)
                 }
 
-                include && rejectsInclude(failure) -> {
+                include && rejectsInclude(failure, redactor) -> {
                     include = false
                     includeReasoning.set(false)
                 }
 
                 else -> {
-                    throw env.error(failure, plan)
+                    throw env.error(failure, plan, redactor)
                 }
             }
         }
@@ -75,21 +79,28 @@ public class ResponsesModel internal constructor(
 
     private suspend fun read(
         reply: HttpReply,
+        redactor: Redactor,
         onDelta: (Delta) -> Unit,
     ): ChatResponse {
-        val stream = ResponsesStream(profile.id, info.model, plan, onDelta)
+        val stream = ResponsesStream(profile.id, info.model, plan, redactor, onDelta)
         try {
             reply.readEvents(stream::accept, stream::acceptJson)
             return stream.finish()
         } catch (e: IllegalArgumentException) {
             // Provider values that break neutral-type invariants (ids, counts) are protocol violations.
-            throw ModelError.BadResponse("reply violates a model invariant: ${e.message}", e)
+            throw ModelError.BadResponse(
+                redactor.text("reply violates a model invariant: ${e.message}"),
+                redactor.cause(e),
+            )
         }
     }
 
-    private fun rejectsInclude(failure: HttpFailure): Boolean {
+    private fun rejectsInclude(
+        failure: HttpFailure,
+        redactor: Redactor,
+    ): Boolean {
         if (failure.status != Status.BAD_REQUEST) return false
-        val error = ProviderError.parse(failure.body)
+        val error = ProviderError.parse(failure.body, redactor)
         val message = error.message.lowercase(Locale.ROOT)
         return error.param == "include" || "encrypted_content" in message || "include" == error.code
     }

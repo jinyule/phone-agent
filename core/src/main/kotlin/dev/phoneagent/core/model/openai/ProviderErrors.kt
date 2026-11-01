@@ -30,23 +30,37 @@ internal data class ProviderError(
     companion object {
         private const val DETAIL_LIMIT = 500
 
-        /** Parses an error body; anything that is not a JSON error object becomes its own message. */
-        fun parse(body: String): ProviderError {
+        /**
+         * Parses an error body; anything that is not a JSON error object becomes its own message.
+         * Credentials in the body are masked with [redactor] before anything is read from it.
+         */
+        fun parse(
+            body: String,
+            redactor: Redactor,
+        ): ProviderError {
+            val clean = redactor.text(body)
             val root =
                 try {
-                    Json.parseToJsonElement(body)
+                    Json.parseToJsonElement(clean)
                 } catch (notJson: SerializationException) {
                     // HTML pages, plain-text proxies: the text itself is the best message we have.
-                    val text = body.trim().ifEmpty { "(empty body: ${notJson::class.simpleName})" }
+                    val text = clean.trim().ifEmpty { "(empty body: ${notJson::class.simpleName})" }
                     return ProviderError(text, null, null, null)
                 }
             // Gemini's compatibility layer wraps the error object in an array.
             val obj = (if (root is JsonArray) root.firstOrNull() else root) as? JsonObject
-            return obj?.let(::of) ?: ProviderError(body.trim(), null, null, null)
+            return obj?.let { of(it, redactor) } ?: ProviderError(clean.trim(), null, null, null)
         }
 
-        /** Reads `{"error": {...}}`, `{"error": "text"}` and flat `{"message" | "detail" | "msg", "code"}` bodies. */
-        fun of(root: JsonObject): ProviderError {
+        /**
+         * Reads `{"error": {...}}`, `{"error": "text"}` and flat `{"message" | "detail" | "msg", "code"}`
+         * bodies. The message and `param` are masked with [redactor] (JSON escapes can hide a secret
+         * from a scan of the raw text); codes are kept as sent.
+         */
+        fun of(
+            root: JsonObject,
+            redactor: Redactor,
+        ): ProviderError {
             val error = root["error"]
             val inner = error as? JsonObject ?: root
             val message =
@@ -59,10 +73,10 @@ internal data class ProviderError(
             // OpenRouter puts the upstream's words under metadata.raw; they explain "Provider returned error".
             val raw = (inner["metadata"] as? JsonObject)?.text("raw")
             return ProviderError(
-                message = if (raw == null) message else "$message: $raw",
+                message = redactor.text(if (raw == null) message else "$message: $raw"),
                 code = inner.scalar("code"),
                 type = inner.text("type"),
-                param = inner.text("param"),
+                param = inner.text("param")?.let(redactor::text),
             )
         }
 
@@ -82,23 +96,26 @@ internal data class ProviderError(
  * under `core/src/test/resources/wire/`.
  */
 internal object ProviderErrors {
-    /** The error for an HTTP failure. [plan] = ChatGPT plan sign-in (403 means the plan cannot use this). */
+    /**
+     * The error for an HTTP failure. [plan] = ChatGPT plan sign-in (403 means the plan cannot use
+     * this); [redactor] masks the credentials the body may echo.
+     */
     fun fromHttp(
-        status: Int,
-        headers: Headers,
-        body: String,
+        failure: HttpFailure,
         plan: Boolean,
         nowMs: Long,
+        redactor: Redactor,
     ): ModelError {
-        val error = ProviderError.parse(body)
-        val retryAfter = retryAfterMs(headers, error.message, nowMs)
-        return byCode(error, retryAfter) ?: fromStatus(status, error, plan, retryAfter)
+        val error = ProviderError.parse(failure.body, redactor)
+        val retryAfter = retryAfterMs(failure.headers, error.message, nowMs)
+        return byCode(error, retryAfter) ?: fromStatus(failure.status, error, plan, retryAfter)
     }
 
     /**
-     * The error for a failure reported inside a 200 stream (`error` chunk, `response.failed`).
-     * There is no HTTP status, so numeric codes in the 4xx/5xx range stand in for one and
-     * unrecognized failures count as a server error (500), which the caller may retry.
+     * The error for a failure reported inside a 200 stream (`error` chunk, `response.failed`), as
+     * read with the stream's redactor ([ProviderError.of]). There is no HTTP status, so numeric
+     * codes in the 4xx/5xx range stand in for one and unrecognized failures count as a server
+     * error (500), which the caller may retry.
      */
     fun fromStream(
         error: ProviderError,

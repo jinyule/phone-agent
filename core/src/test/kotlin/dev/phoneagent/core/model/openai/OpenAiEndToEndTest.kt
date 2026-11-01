@@ -65,6 +65,12 @@ class OpenAiEndToEndTest {
             },
         )
 
+    /** [text] without the API key, for anything printed or put in an assertion message. */
+    private fun redact(text: String): String =
+        Redactor(listOfNotNull(env["PA_E2E_API_KEY"]?.takeIf { it.isNotBlank() })).text(text)
+
+    private fun report(line: String) = println(redact(line))
+
     private val capabilities = ModelCapabilities(tools = true, vision = true, contextTokens = 128_000)
 
     private suspend fun call(
@@ -76,7 +82,7 @@ class OpenAiEndToEndTest {
         val deltas = Deltas()
         try {
             val reply = model.complete(request, deltas)
-            println(
+            report(
                 "e2e: $label model=${model.info.model} stop=${reply.stopReason} usage=${reply.usage} " +
                     "calls=${reply.toolCalls.size}",
             )
@@ -87,7 +93,7 @@ class OpenAiEndToEndTest {
             )
             return reply to deltas
         } catch (e: ModelError) {
-            println("e2e: $label model=${model.info.model} error=${e.kind} ${e.message}")
+            report("e2e: $label model=${model.info.model} error=${e.kind} ${e.message}")
             if (e is ModelError.RateLimited || e is ModelError.QuotaExceeded) stopped = true
             throw e
         }
@@ -165,7 +171,7 @@ class OpenAiEndToEndTest {
                     .joinToString()
                     .lowercase(Locale.ROOT)
                     .contains(name),
-                reply.toString(),
+                redact(reply.toString()),
             )
         }
 
@@ -179,10 +185,10 @@ class OpenAiEndToEndTest {
                         http,
                     ).probe()
                     .testAndSave(profile(protocol), model(protocol), capabilities)
-            println("e2e: $protocol test-and-save model=${model(protocol)} result=$result")
+            report("e2e: $protocol test-and-save model=${model(protocol)} result=$result")
             val limited = setOf(ModelErrorKind.RATE_LIMITED, ModelErrorKind.QUOTA_EXCEEDED)
             if (result is ProbeResult.Failed && result.kind in limited) stopped = true
-            assertTrue(result is ProbeResult.Passed, result.toString())
+            assertTrue(result is ProbeResult.Passed, redact(result.toString()))
         }
 
     @Test
@@ -235,8 +241,8 @@ class OpenAiEndToEndTest {
                         http,
                     ).probe()
                     .testAndSave(profile, model, capabilities.copy(vision = false))
-            println("e2e: ollama test-and-save model=$model result=$result")
-            assertTrue(result is ProbeResult.Passed, result.toString())
+            report("e2e: ollama test-and-save model=$model result=$result")
+            assertTrue(result is ProbeResult.Passed, redact(result.toString()))
             assertEquals(true, (result as ProbeResult.Passed).candidateListed)
         }
 

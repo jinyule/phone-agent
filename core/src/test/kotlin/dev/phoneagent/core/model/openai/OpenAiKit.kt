@@ -199,6 +199,17 @@ internal object Kit {
     fun MockWebServer.next(): RecordedRequest =
         checkNotNull(takeRequest(TAKE_TIMEOUT_S, TimeUnit.SECONDS)) { "no request" }
 
+    /**
+     * Checks that the request carries `Bearer [secret]` (or no `Authorization` header for `null`).
+     * Failures never print header values, so credentials stay out of test output.
+     */
+    fun RecordedRequest.assertBearer(secret: String?) {
+        val header = headers["Authorization"]
+        val matches = if (secret == null) header == null else header == "Bearer $secret"
+        org.junit.jupiter.api.Assertions
+            .assertTrue(matches, "Authorization header is not the expected one (values are not shown)")
+    }
+
     fun RecordedRequest.json(): JsonObject = Json.parseToJsonElement(checkNotNull(body).utf8()) as JsonObject
 
     private const val BLOB_REF_LENGTH = 64

@@ -7,6 +7,7 @@ import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.ReasoningKind
 import dev.phoneagent.core.model.StopReason
+import dev.phoneagent.core.model.openai.Kit.assertBearer
 import dev.phoneagent.core.model.openai.Kit.base
 import dev.phoneagent.core.model.openai.Kit.enqueueError
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
@@ -50,7 +51,7 @@ class ResponsesModelTest {
             assertEquals(listOf(Part.Text("Hi")), reply.parts)
             val sent = server.next()
             assertEquals("/v1/responses", sent.url.encodedPath)
-            assertEquals("Bearer ${Kit.FAKE_KEY}", sent.headers["Authorization"])
+            sent.assertBearer(Kit.FAKE_KEY)
             val body = sent.json()
             assertEquals(JsonPrimitive(false), body["store"])
             assertEquals(JsonPrimitive(true), body["stream"])
@@ -67,9 +68,9 @@ class ResponsesModelTest {
             val keys = Keys("plan-token-old", "plan-token-new")
             model(Kit.PLAN, keys).complete(Kit.request(maxOutputTokens = 100))
             assertEquals(listOf(Kit.PLAN to false, Kit.PLAN to true), keys.asked)
-            assertEquals("Bearer plan-token-old", server.next().headers["Authorization"])
+            server.next().assertBearer("plan-token-old")
             val retried = server.next()
-            assertEquals("Bearer plan-token-new", retried.headers["Authorization"])
+            retried.assertBearer("plan-token-new")
             assertFalse("max_output_tokens" in retried.json(), "plan requests drop fields the channel refuses")
         }
 

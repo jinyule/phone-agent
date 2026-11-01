@@ -53,7 +53,8 @@ public class ProviderProbe internal constructor(
         val url = "${profile.baseUrl}/models".toHttpUrl()
         val headers = profile.httpHeaders()
         val secret = env.secret(profile.credential, rejected = false)
-        val exchange = env.exchange(env.get(url, headers, secret)) { it.text(LISTING_LIMIT) }
+        val redactor = Redactor(listOfNotNull(secret))
+        val exchange = env.exchange(env.get(url, headers, secret), redactor) { it.text(LISTING_LIMIT) }
         val body =
             when (exchange) {
                 is Exchange.Done -> {
@@ -62,10 +63,10 @@ public class ProviderProbe internal constructor(
 
                 is Exchange.Failed -> {
                     if (exchange.failure.status in NO_LISTING) return null
-                    throw env.error(exchange.failure, plan = false)
+                    throw env.error(exchange.failure, plan = false, redactor)
                 }
             }
-        return parseListing(body)
+        return parseListing(body, redactor)
     }
 
     /**
@@ -83,7 +84,7 @@ public class ProviderProbe internal constructor(
             try {
                 listModels(profile)
             } catch (e: ModelError) {
-                return ProbeResult.Failed(ProbeStep.LIST_MODELS, e.kind, e.message.orEmpty())
+                return ProbeResult.Failed(ProbeStep.LIST_MODELS, e.kind, masked(e.message.orEmpty()))
             }
         return trial(profile, candidate, capabilities, token, models)
     }
@@ -100,20 +101,26 @@ public class ProviderProbe internal constructor(
             try {
                 model.complete(trialRequest(token))
             } catch (e: ModelError) {
-                return ProbeResult.Failed(ProbeStep.TOOL_CALL, e.kind, e.message.orEmpty())
+                return ProbeResult.Failed(ProbeStep.TOOL_CALL, e.kind, masked(e.message.orEmpty()))
             }
         val problem = checkTrialCall(reply, token)
         val verified = capabilities.copy(tools = true, verified = capabilities.verified + VerifiedCapability.TOOL_CALL)
-        return problem?.let { ProbeResult.Failed(ProbeStep.TOOL_CALL, null, it) }
+        return problem?.let { ProbeResult.Failed(ProbeStep.TOOL_CALL, null, masked(it)) }
             ?: ProbeResult.Passed(models, verified, models?.any { it.id == candidate })
     }
 
-    private fun parseListing(body: String): List<ListedModel> {
+    private fun parseListing(
+        body: String,
+        redactor: Redactor,
+    ): List<ListedModel> {
         val root =
             try {
                 Json.parseToJsonElement(body) as? JsonObject
             } catch (e: SerializationException) {
-                throw ModelError.BadResponse("model list is not JSON: ${body.take(SNIPPET)}", e)
+                throw ModelError.BadResponse(
+                    "model list is not JSON: ${redactor.text(body).take(SNIPPET)}",
+                    redactor.cause(e),
+                )
             }
         val entries =
             root?.array("data") ?: root?.array("models") ?: throw ModelError.BadResponse("model list has no data array")
@@ -181,6 +188,13 @@ public class ProviderProbe internal constructor(
 }
 
 private val NO_LISTING = setOf(404, 405, 501)
+
+/**
+ * Probe messages quote model output and errors; errors are already masked with the request's
+ * secrets, so a second pass for credential-shaped text is all that is left.
+ */
+private fun masked(message: String): String = Redactor.SHAPES_ONLY.text(message)
+
 private val TRIAL_SCHEMA: JsonObject =
     buildJsonObject {
         put("type", "object")

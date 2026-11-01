@@ -4,6 +4,7 @@ import dev.phoneagent.core.ids.ModelId
 import dev.phoneagent.core.model.ModelError
 import dev.phoneagent.core.model.ModelErrorKind
 import dev.phoneagent.core.model.VerifiedCapability
+import dev.phoneagent.core.model.openai.Kit.assertBearer
 import dev.phoneagent.core.model.openai.Kit.base
 import dev.phoneagent.core.model.openai.Kit.enqueueError
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
@@ -68,7 +69,7 @@ class ProviderProbeTest {
             val sent = server.next()
             assertEquals("GET", sent.method)
             assertEquals("/v1/models", sent.url.encodedPath)
-            assertEquals("Bearer ${Kit.FAKE_KEY}", sent.headers["Authorization"])
+            sent.assertBearer(Kit.FAKE_KEY)
             server.enqueue(MockResponse.Builder().body("""{"models":[{"id":"m"}]}""").build())
             assertEquals(listOf(ListedModel(ModelId("m"))), probe.listModels(profile))
         }

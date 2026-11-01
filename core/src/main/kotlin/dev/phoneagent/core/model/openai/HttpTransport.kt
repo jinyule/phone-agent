@@ -19,8 +19,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 /**
  * Blocking OkHttp calls behind a suspend API. Blocking reads run on [io]; results come back to the
  * calling coroutine, so stream handlers (and `onDelta`) run there. Cancelling the caller cancels
- * the HTTP call, which aborts a read in progress. Transport failures become [ModelError.Network];
- * `CancellationException` always wins over the `IOException` a cancelled call produces.
+ * the HTTP call, which aborts a read in progress. Transport failures become [ModelError.Network]
+ * (their text masked by the request's [Redactor]); `CancellationException` always wins over the
+ * `IOException` a cancelled call produces.
  */
 internal class HttpTransport(
     private val client: OkHttpClient,
@@ -29,6 +30,7 @@ internal class HttpTransport(
     /** Sends [request] and passes the open response to [read]; the response is closed afterwards. */
     suspend fun <T> send(
         request: Request,
+        redactor: Redactor,
         read: suspend (HttpReply) -> T,
     ): T {
         val call = client.newCall(request)
@@ -43,8 +45,8 @@ internal class HttpTransport(
                     }
                 }
             try {
-                val response = blocking(io) { call.execute() }
-                response.use { read(HttpReply(it, io)) }
+                val response = blocking(io, redactor) { call.execute() }
+                response.use { read(HttpReply(it, io, redactor)) }
             } finally {
                 done.set(true)
                 canceller.cancel()
@@ -57,6 +59,7 @@ internal class HttpTransport(
 internal class HttpReply(
     private val response: Response,
     private val io: CoroutineDispatcher,
+    private val redactor: Redactor,
 ) {
     val status: Int get() = response.code
     val headers: Headers get() = response.headers
@@ -64,7 +67,7 @@ internal class HttpReply(
 
     /** Up to [limit] bytes of the body as UTF-8 text (error bodies; HTML pages can be large). */
     suspend fun text(limit: Long = ERROR_BODY_LIMIT): String =
-        blocking(io) {
+        blocking(io, redactor) {
             val source = response.body.source()
             source.request(limit)
             source.buffer.readUtf8(minOf(limit, source.buffer.size))
@@ -75,7 +78,7 @@ internal class HttpReply(
      * line already buffered. `null` at the end of the body.
      */
     suspend fun lines(): List<String>? =
-        blocking(io) {
+        blocking(io, redactor) {
             val source = response.body.source()
             val first = source.readUtf8Line()
             first?.let {
@@ -124,15 +127,16 @@ internal class HttpReply(
 /**
  * Runs blocking I/O on [io]. An `IOException` becomes [ModelError.Network], unless the caller was
  * cancelled meanwhile (the cancelled call is what failed the read), in which case cancellation
- * propagates.
+ * propagates. Exception text can quote the server (status lines), so it is masked with [redactor].
  */
 private suspend fun <T> blocking(
     io: CoroutineDispatcher,
+    redactor: Redactor,
     block: () -> T,
 ): T =
     try {
         withContext(io) { block() }
     } catch (e: IOException) {
         currentCoroutineContext().ensureActive()
-        throw ModelError.Network("${e::class.simpleName}: ${e.message}", e)
+        throw ModelError.Network(redactor.text("${e::class.simpleName}: ${e.message}"), redactor.cause(e))
     }

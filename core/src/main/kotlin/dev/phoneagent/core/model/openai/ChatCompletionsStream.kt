@@ -37,18 +37,20 @@ import kotlinx.serialization.json.put
  * ([DeltaLedger.catchUp]).
  *
  * @param reasoningFields delta fields that carry reasoning, in priority order; the first one seen wins.
+ * @param redactor masks credentials in provider text that goes into errors.
  */
 internal class ChatCompletionsStream(
     private val provider: ProviderId,
     private val model: ModelId,
     private val reasoningFields: List<String>,
     private val newCallId: () -> String,
+    private val redactor: Redactor,
     onDelta: (Delta) -> Unit,
 ) {
     private val ledger = DeltaLedger(onDelta)
     private val text = StreamedText(ledger)
     private val refusal = StringBuilder()
-    private val calls = ToolCallAssembler(newCallId, ledger)
+    private val calls = ToolCallAssembler(newCallId, ledger, redactor)
     private var usage: Usage? = null
     private var finishReason: String? = null
     private var done = false
@@ -106,7 +108,7 @@ internal class ChatCompletionsStream(
         try {
             Json.parseToJsonElement(data) as? JsonObject ?: throw ModelError.BadResponse("chunk is not a JSON object")
         } catch (e: SerializationException) {
-            throw ModelError.BadResponse("chunk is not JSON: ${data.take(SNIPPET)}", e)
+            throw ModelError.BadResponse("chunk is not JSON: ${redactor.text(data).take(SNIPPET)}", redactor.cause(e))
         }
 
     private fun chunk(
@@ -115,7 +117,7 @@ internal class ChatCompletionsStream(
     ) {
         val error = root["error"]
         if (error != null && error !is JsonNull) {
-            throw ProviderErrors.fromStream(ProviderError.of(root), plan = false)
+            throw ProviderErrors.fromStream(ProviderError.of(root, redactor), plan = false)
         }
         chunks++
         responseId = responseId ?: root.str("id")?.takeIf { it.isNotEmpty() }
@@ -257,6 +259,7 @@ internal class StreamedText(
 internal class ToolCallAssembler(
     private val newCallId: () -> String,
     private val ledger: DeltaLedger,
+    private val redactor: Redactor,
 ) {
     private class Slot(
         val index: Int?,
@@ -291,13 +294,16 @@ internal class ToolCallAssembler(
     fun parts(): List<Part.ToolCall> =
         slots.map { slot ->
             if (slot.name.isEmpty()) {
-                throw ModelError.BadResponse("tool call ${slot.id ?: "#${slot.index}"} has no name")
+                throw ModelError.BadResponse(redactor.text("tool call ${slot.id ?: "#${slot.index}"} has no name"))
             }
             val id = slot.id ?: newCallId()
             try {
                 Part.ToolCall(ToolCallId(id), slot.name.toString(), slot.args.toString().ifEmpty { "{}" })
             } catch (e: IllegalArgumentException) {
-                throw ModelError.BadResponse("unusable tool call id '${id.take(ID_SNIPPET)}'", e)
+                throw ModelError.BadResponse(
+                    "unusable tool call id '${redactor.text(id).take(ID_SNIPPET)}'",
+                    redactor.cause(e),
+                )
             }
         }
 
