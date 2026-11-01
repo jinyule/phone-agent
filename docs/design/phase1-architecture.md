@@ -308,10 +308,26 @@ interface IPrivilegedCore {
 - **事务号显式写死，1–4 号冻结**。任何版本的 App 都能读出任何版本助手的协议号和身份，也能让它释放并退出，这是版本错配处理（engineering-baseline §6）的前提。`shutdown()` 是为此在原草图上补的。
 - 每个 IPrivilegedCore 方法（事务号 FIRST..LAST_CALL_TRANSACTION）只接受助手为之启动的那个 App uid，其他调用方收到 `SecurityException`。框架的系统事务不经过这个守卫，也不暴露任何能力；其中 `DUMP_TRANSACTION`、`SHELL_COMMAND_TRANSACTION` 也纳入守卫，`INTERFACE_TRANSACTION` 放行。以后重写 `dump` 或 `onShellCommand`，必须做同样的 uid 检查。
 - 还没实现的方法抛 `UnsupportedOperationException`，消息以 `NOT_IMPLEMENTED` 开头（`PrivilegedError.isNotImplemented` 判定），不占用各方法自己的返回值或错误码。Binder 原生就能跨进程传这个异常；`ServiceSpecificException` 不在公开 SDK 里，所以不用它。
+- 返回值是常量，不是裸数字（`dev.phoneagent.privileged.CapabilityContract.kt`）：
+  - `startActivity` → `StartResult`：0 已启动、1 用户正在主屏用它、2 没有页面能接、3 出错、4 冷启动被降级（它在别处还有任务）、5 被 agent 的另一块屏占用、6 助手拒绝（不是它的屏、别的用户、intent 不合规）；
+  - `createDisplay` → 非负是 displayId，`DisplayResult.REFUSED`(-2) 是参数不合规，`DisplayResult.FAILED`(-1) 是系统拒绝；
+  - `grantSelf` → `GrantResult`：0 已授予、1 不在白名单、2 失败；
+  - `probe` → `ProbeKeys`：`steps`/`results` 两个平行数组，每项是 `ok` 或失败原因，外加 `ok` 总判定；
+  - `mainArrivals` → `ArrivalKeys`：任务、包名、页面、用户、时间、来自哪块屏、是否同一任务、是否普通页面、此刻在哪块屏（Bundle 里没有对象列表，所以用平行数组）。
 
-**刻意不提供**任意命令执行的接口。setup 需要的命令（授权、写无障碍列表）在助手内部写死成白名单方法。这是针对 Mika `phone_system_command` 的教训。
+**助手自己保证的几条**（无论 App 传什么，WP12 B 段）：
+- 只往自己建的屏启动、注入；主屏和别人的屏一律拒绝。
+- 用户在主屏**可见**地用着的 App 不启动（`StartResult.IN_USE_ON_MAIN`）；看不清任务列表时也不启动。
+- 冷启动只在"这个 App 的任务全在这块屏上"时才 force-stop，否则降级为普通启动并返回 `COLD_IGNORED`。
+- `moveTask` 只认 agent 自己启动的任务，以及盯主屏期间冒上来的任务（跳出回收）；用户自己的任务不会被拉进后台屏。
+- `injectKey` 只放行导航和编辑键；音量、电源、Home、最近任务、助手、相机、媒体键作用于整机，一律拒绝。
+- `injectStroke` 校验点数、时间单调、总时长和坐标是否在本屏内。
+- `grantSelf` 只接受 `WRITE_SECURE_SETTINGS`，写完回读确认。
+- 隐藏接口全部反射调用，缺失时报出具体原因（logcat + `probe()`），不静默失败；`moveRootTaskToDisplay`、`startActivityAsUser` 有 `am` 命令兜底。
 
-虚拟屏的建屏参数（flags、`setDisplayImePolicy`）、跳出回收、接管流程，按调研报告 §2.4 的配方实现。
+**刻意不提供**任意命令执行的接口。setup 需要的命令（授权、写无障碍列表）在助手内部写死成白名单方法，程序名也有白名单（`am`/`pm`/`appops`/`input`），参数由助手自己拼。这是针对 Mika `phone_system_command` 的教训。
+
+虚拟屏的建屏参数（flags、`setDisplayImePolicy`）、跳出回收、接管流程，按调研报告 §2.4 的配方实现：flags 按 API 递增（33+ 加 TRUSTED / OWN_DISPLAY_GROUP / ALWAYS_UNLOCKED / TOUCH_FEEDBACK_DISABLED，34+ 加 OWN_FOCUS / STEAL_TOP_FOCUS_DISABLED），建屏后把 IME 策略设成 LOCAL 并回读。
 
 ### 3.6 安全引擎
 
@@ -509,7 +525,7 @@ screen s12 · 微信 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · �
 | | `phone_type` | `screen`, `ref?`, `text`, `append?`, `submit?` |
 | | `phone_scroll` | `screen`, `direction`, `ref?` |
 | | `phone_swipe` | `x1,y1,x2,y2`, `durationMs` |
-| | `phone_key` | `back/home/enter` |
+| | `phone_key` | `back/enter`（后台屏模式下没有 `home`：Home 作用于整机而不是 agent 的屏，助手不注入它；主屏模式下由无障碍的 `performGlobalAction` 实现） |
 | | `phone_launch` | `app` 或 `link`, `cold?` |
 | | `phone_intent` | `kind: alarm/timer/calendar/share/dial/navigate/settings` + 对应字段（白名单，不接受任意 Intent） |
 | 通用 | `ask_user` | `question`, `options?` |

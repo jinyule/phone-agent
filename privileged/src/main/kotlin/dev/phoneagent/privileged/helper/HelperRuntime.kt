@@ -15,6 +15,10 @@ import android.os.IBinder
 import android.os.Process
 import android.os.RemoteException
 import android.util.Log
+import dev.phoneagent.privileged.cap.AndroidCapabilities
+import dev.phoneagent.privileged.cap.Capabilities
+import dev.phoneagent.privileged.cap.CapabilityUnavailable
+import dev.phoneagent.privileged.cap.NoCapabilities
 import dev.phoneagent.privileged.handoff.HandoffBundles
 import dev.phoneagent.privileged.handoff.HandoffContract
 import dev.phoneagent.privileged.handoff.HelperOffer
@@ -34,7 +38,8 @@ internal class HelperRuntime(
     launchNonce: String,
     args: HelperArgs,
 ) : LifecycleDriver.Host {
-    private val core = PrivilegedCore(pinned.uid) { driver.post(Event.ShutdownRequested) }
+    private val capabilities = capabilitiesFor(context, pinned)
+    private val core = PrivilegedCore(pinned.uid, capabilities) { driver.post(Event.ShutdownRequested) }
     private val driver =
         LifecycleDriver(HelperLifecycle(launchNonce, args.orphanGraceMs, args.packageCheckMs), handler, this)
     private val handoff = ProviderHandoff(HandoffContract.authority(pinned.packageName), pinned.packageName, pinned.uid)
@@ -104,5 +109,20 @@ internal class HelperRuntime(
 
     private companion object {
         const val TAG = "PhoneAgentHelper"
+
+        /**
+         * The capabilities of this device, or [NoCapabilities] when the framework internals the
+         * helper needs are missing: the handoff still works, and `probe()` reports the reason.
+         */
+        fun capabilitiesFor(
+            context: Context,
+            pinned: PinnedApp,
+        ): Capabilities =
+            try {
+                AndroidCapabilities.create(context, pinned.packageName, pinned.uid)
+            } catch (e: CapabilityUnavailable) {
+                Log.e(TAG, "the privileged capabilities are unavailable on this device", e)
+                NoCapabilities(e.message.orEmpty())
+            }
     }
 }

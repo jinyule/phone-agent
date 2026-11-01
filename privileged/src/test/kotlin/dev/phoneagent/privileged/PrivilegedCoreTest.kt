@@ -1,12 +1,17 @@
 package dev.phoneagent.privileged
 
+import android.content.Intent
 import android.os.IBinder
 import android.os.Parcel
 import android.os.Process
+import dev.phoneagent.privileged.cap.FakeCapabilities
+import dev.phoneagent.privileged.cap.GrantSpec
+import dev.phoneagent.privileged.cap.NoCapabilities
 import dev.phoneagent.privileged.helper.PrivilegedCore
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -17,8 +22,10 @@ import org.robolectric.shadows.ShadowBinder
 @RunWith(RobolectricTestRunner::class)
 class PrivilegedCoreTest {
     private val appUid = 10_214
+    private val writeSecureSettings = GrantSpec.WRITE_SECURE_SETTINGS
     private var shutdowns = 0
-    private val core = PrivilegedCore(appUid) { shutdowns++ }
+    private val caps = FakeCapabilities()
+    private val core = PrivilegedCore(appUid, caps) { shutdowns++ }
 
     @After
     fun resetCaller() {
@@ -108,31 +115,10 @@ class PrivilegedCoreTest {
     }
 
     @Test
-    fun releaseAllUndoesEachHeldResourceOnce() {
-        var released = 0
-        core.hold { released++ }
-        core.hold { released++ }
+    fun releaseAllIsHandedToTheCapabilities() {
         core.releaseAll()
         core.releaseAll()
-        assertEquals(2, released)
-    }
-
-    @Test
-    fun releaseAllGoesOnPastAFailureAndKeepsTheFailedResourceForTheNextCall() {
-        val released = mutableListOf<String>()
-        var displayFails = true
-        core.hold {
-            check(!displayFails) { "display busy" }
-            released += "display"
-        }
-        core.hold { released += "mute" }
-        core.releaseAll()
-        assertEquals("the failure does not stop the other release", listOf("mute"), released)
-        displayFails = false
-        core.releaseAll()
-        assertEquals(listOf("mute", "display"), released)
-        core.releaseAll()
-        assertEquals("released ones are gone", listOf("mute", "display"), released)
+        assertEquals(2, caps.releases)
     }
 
     @Test
@@ -142,25 +128,56 @@ class PrivilegedCoreTest {
     }
 
     @Test
-    fun capabilitiesAreExplicitlyNotImplemented() {
-        val calls: List<() -> Any?> =
+    fun everyCapabilityIsDelegatedWithItsArguments() {
+        val intent = Intent("android.settings.SETTINGS")
+        assertEquals(caps.displayIdResult, core.createDisplay(null, 1080, 2340, 440))
+        core.releaseDisplay(2)
+        assertEquals(caps.startResult, core.startActivity(2, intent, 0, true))
+        assertEquals(caps.topTaskResult, core.topTask(2))
+        assertEquals(caps.moveResult, core.moveTask(1, 2))
+        assertEquals(caps.topTaskResult, core.watchMainScreen(3_000))
+        assertSame(caps.arrivalsResult, core.mainArrivals(99))
+        assertEquals(caps.strokeResult, core.injectStroke(2, intArrayOf(1), intArrayOf(2), longArrayOf(0)))
+        assertEquals(caps.keyResult, core.injectKey(2, 4))
+        assertEquals(caps.muteResult, core.setAudioMuted("com.example", true))
+        assertEquals(caps.grantResult, core.grantSelf(writeSecureSettings))
+        assertSame(caps.probeResult, core.probe())
+        assertEquals(
             listOf(
-                { core.probe() },
-                { core.createDisplay(null, 1080, 2340, 440) },
-                { core.releaseDisplay(2) },
-                { core.startActivity(2, null, 0, false) },
-                { core.topTask(2) },
-                { core.moveTask(1, 2) },
-                { core.watchMainScreen(3_000) },
-                { core.mainArrivals(0) },
-                { core.injectStroke(2, intArrayOf(1), intArrayOf(1), longArrayOf(0)) },
-                { core.injectKey(2, 4) },
-                { core.setAudioMuted("com.example", true) },
-                { core.grantSelf("android.permission.WRITE_SECURE_SETTINGS") },
-            )
-        calls.forEach { call ->
+                "createDisplay(true, 1080, 2340, 440)",
+                "releaseDisplay(2)",
+                "startActivity(2, android.settings.SETTINGS, 0, true)",
+                "topTask(2)",
+                "moveTask(1, 2)",
+                "watchMainScreen(3000)",
+                "mainArrivals(99)",
+                "injectStroke(2, [1], [2], [0])",
+                "injectKey(2, 4)",
+                "setAudioMuted(com.example, true)",
+                "grantSelf($writeSecureSettings)",
+                "probe()",
+            ),
+            caps.calls,
+        )
+    }
+
+    @Test
+    fun aHelperWithoutCapabilitiesReportsFailureInsteadOfPretending() {
+        val none = PrivilegedCore(appUid, NoCapabilities("no ActivityTaskManager")) { shutdowns++ }
+        assertEquals(DisplayResult.FAILED, none.createDisplay(null, 1080, 2340, 440))
+        assertEquals(StartResult.ERROR, none.startActivity(2, Intent(), 0, false))
+        assertEquals(-1, none.topTask(2))
+        assertEquals(-1, none.watchMainScreen(1_000))
+        assertEquals(false, none.moveTask(1, 2))
+        assertEquals(false, none.injectKey(2, 4))
+        assertEquals(false, none.injectStroke(2, intArrayOf(1, 1), intArrayOf(1, 1), longArrayOf(0, 1)))
+        assertEquals(false, none.setAudioMuted("com.example", true))
+        assertEquals(GrantResult.FAILED, none.grantSelf(writeSecureSettings))
+        listOf<() -> Any?>({ none.probe() }, { none.mainArrivals(0) }).forEach { call ->
             val error = assertThrows(UnsupportedOperationException::class.java) { call() }
             assertTrue(error.message, PrivilegedError.isNotImplemented(error))
+            val message = error.message.orEmpty()
+            assertTrue("the reason is reported: $message", message.contains("ActivityTaskManager"))
         }
     }
 

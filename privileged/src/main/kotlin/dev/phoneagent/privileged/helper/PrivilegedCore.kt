@@ -8,8 +8,8 @@ import android.os.Process
 import android.util.Log
 import android.view.Surface
 import dev.phoneagent.privileged.IPrivilegedCore
-import dev.phoneagent.privileged.PrivilegedError
 import dev.phoneagent.privileged.PrivilegedProtocol
+import dev.phoneagent.privileged.cap.Capabilities
 
 /**
  * The helper's [IPrivilegedCore]. Every IPrivilegedCore method (transactions
@@ -17,28 +17,17 @@ import dev.phoneagent.privileged.PrivilegedProtocol
  * outlives the app and its Binder could reach other processes. DUMP and SHELL_COMMAND are guarded
  * the same way; an override of `dump` or `onShellCommand` must keep that check. The framework's
  * other system transactions (INTERFACE; PING and the like are answered natively before Java) skip
- * the guard and expose no capability. Capabilities that are not implemented yet throw
- * [PrivilegedError.notImplemented].
+ * the guard and expose no capability. Everything beyond the frozen handoff methods is delegated to
+ * [capabilities], which also decides what `releaseAll` has to undo.
  *
  * [onShutdown] runs on the Binder thread and must only schedule the exit.
  */
-@Suppress("TooManyFunctions") // One override per IPrivilegedCore method.
+@Suppress("TooManyFunctions") // One override per IPrivilegedCore method; each is a one-line delegation.
 internal class PrivilegedCore(
     private val allowedUid: Int,
+    private val capabilities: Capabilities,
     private val onShutdown: () -> Unit,
 ) : IPrivilegedCore.Stub() {
-    private val lock = Any()
-    private val held = mutableListOf<HeldResource>()
-
-    /**
-     * Something the helper must undo in [releaseAll] (a display, a mute). [release] may throw a
-     * RuntimeException: [releaseAll] logs it, goes on with the other resources and keeps the failed
-     * one for the next [releaseAll].
-     */
-    fun interface HeldResource {
-        fun release()
-    }
-
     override fun onTransact(
         code: Int,
         data: Parcel,
@@ -56,84 +45,62 @@ internal class PrivilegedCore(
 
     override fun identity(): IntArray = intArrayOf(Process.myUid(), Process.myPid())
 
-    /** Releases every held resource, each on its own: one failure never stops the others. Never throws. */
     override fun releaseAll() {
-        val taken = synchronized(lock) { held.toList().also { held.clear() } }
-        val failed = taken.filterNot(::release)
-        synchronized(lock) { held.addAll(0, failed) }
-        Log.i(TAG, "releaseAll: released ${taken.size - failed.size} of ${taken.size} resource(s)")
+        Log.i(TAG, "releaseAll: released ${capabilities.releaseAll()}")
     }
-
-    // TooGenericExceptionCaught: a resource may fail in any way; the others must still be released.
-    @Suppress("TooGenericExceptionCaught")
-    private fun release(resource: HeldResource): Boolean =
-        try {
-            resource.release()
-            true
-        } catch (e: RuntimeException) {
-            Log.e(TAG, "releasing $resource failed; kept for the next releaseAll", e)
-            false
-        }
 
     override fun shutdown() {
         Log.i(TAG, "shutdown requested")
         onShutdown()
     }
 
-    /** Registers [resource] to be undone by the next [releaseAll]. */
-    fun hold(resource: HeldResource) {
-        synchronized(lock) { held += resource }
-    }
-
-    override fun probe(): Bundle = notImplemented("probe")
+    override fun probe(): Bundle = capabilities.probe()
 
     override fun createDisplay(
         s: Surface?,
         w: Int,
         h: Int,
         dpi: Int,
-    ): Int = notImplemented("createDisplay")
+    ): Int = capabilities.displays.createDisplay(s, w, h, dpi)
 
-    override fun releaseDisplay(displayId: Int): Unit = notImplemented("releaseDisplay")
+    override fun releaseDisplay(displayId: Int): Unit = capabilities.displays.releaseDisplay(displayId)
 
     override fun startActivity(
         displayId: Int,
         intent: Intent?,
         userId: Int,
         cold: Boolean,
-    ): Int = notImplemented("startActivity")
+    ): Int = capabilities.tasks.startActivity(displayId, intent, userId, cold)
 
-    override fun topTask(displayId: Int): Int = notImplemented("topTask")
+    override fun topTask(displayId: Int): Int = capabilities.tasks.topTask(displayId)
 
     override fun moveTask(
         taskId: Int,
         displayId: Int,
-    ): Boolean = notImplemented("moveTask")
+    ): Boolean = capabilities.tasks.moveTask(taskId, displayId)
 
-    override fun watchMainScreen(windowMs: Int): Int = notImplemented("watchMainScreen")
+    override fun watchMainScreen(windowMs: Int): Int = capabilities.tasks.watchMainScreen(windowMs)
 
-    override fun mainArrivals(sinceUptimeMs: Long): Bundle = notImplemented("mainArrivals")
+    override fun mainArrivals(sinceUptimeMs: Long): Bundle = capabilities.tasks.mainArrivals(sinceUptimeMs)
 
     override fun injectStroke(
         displayId: Int,
         xs: IntArray?,
         ys: IntArray?,
         t: LongArray?,
-    ): Boolean = notImplemented("injectStroke")
+    ): Boolean = capabilities.input.injectStroke(displayId, xs, ys, t)
 
     override fun injectKey(
         displayId: Int,
         keyCode: Int,
-    ): Boolean = notImplemented("injectKey")
+    ): Boolean = capabilities.input.injectKey(displayId, keyCode)
 
     override fun setAudioMuted(
         pkg: String?,
         muted: Boolean,
-    ): Boolean = notImplemented("setAudioMuted")
+    ): Boolean = capabilities.system.setAudioMuted(pkg, muted)
 
-    override fun grantSelf(permission: String?): Int = notImplemented("grantSelf")
-
-    private fun notImplemented(method: String): Nothing = throw PrivilegedError.notImplemented(method)
+    override fun grantSelf(permission: String?): Int = capabilities.system.grantSelf(permission)
 
     private companion object {
         const val TAG = "PhoneAgentHelper"
