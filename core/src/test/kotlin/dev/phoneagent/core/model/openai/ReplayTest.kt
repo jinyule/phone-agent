@@ -126,23 +126,23 @@ class ReplayTest {
         deltas: Deltas,
     ) {
         val text = response.parts.filterIsInstance<Part.Text>().joinToString("") { it.text }
-        val leaked = response.providerMetadata?.get(RECOVERED_TOOL_CALLS) != null
-        if (!leaked) assertEquals(text, deltas.text, "text deltas add up to the text")
+        assertEquals(text, deltas.text, "text deltas add up to the text")
         val reasoning =
             response.parts
                 .filterIsInstance<Part.Reasoning>()
                 .mapNotNull { it.summary }
                 .joinToString("\n\n")
         assertEquals(reasoning, deltas.reasoning, "reasoning deltas add up to the reasoning")
-        val announced = deltas.started.map { it.id }
-        val native = response.toolCalls.filter { it.id in announced }
-        assertEquals(announced, native.map { it.id }, "calls are announced in order")
-        for (call in native) {
-            val args = deltas.args(call.id)
-            assertEquals(call.argsJson, args.ifEmpty { "{}" }, "argument deltas of ${call.id} add up")
+        assertEquals(
+            response.toolCalls.map { it.id },
+            deltas.started.map { it.id },
+            "every call is announced once, in order",
+        )
+        for (call in response.toolCalls) {
+            assertEquals(call.argsJson, deltas.args(call.id), "argument deltas of ${call.id} add up")
             assertEquals(call.name, deltas.started.first { it.id == call.id }.name)
         }
-        if (!leaked) assertEquals(response.toolCalls.size, announced.size, "every call was announced")
+        assertEquals(null, response.providerMetadata?.get(PREVIEW_DIVERGED), "the fixtures are consistent")
     }
 
     companion object {

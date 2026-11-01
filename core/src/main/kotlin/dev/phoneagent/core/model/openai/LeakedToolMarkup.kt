@@ -111,14 +111,16 @@ internal object LeakedToolMarkup {
 
     /**
      * How much of a streamed [text] may be shown now: everything before the first possible markup
-     * tag, and before a trailing `<` that could still become one. The final reply is scanned in
-     * full; this only keeps half-received markup off the screen.
+     * tag, and before a trailing `<` or `</` that could still become one, so no split of the stream
+     * shows the start of markup [recover] later removes.
      */
     fun previewEnd(text: String): Int {
         val start = MARKUP_START.find(text)?.range?.first
         val lt = text.lastIndexOf('<')
         val tail = if (lt >= 0 && text.indexOf('>', lt) < 0) text.substring(lt + 1) else null
-        val pending = tail != null && (tail.isEmpty() || PARTIAL_TAIL.matches(tail) || TOOL_CALL_TAG.startsWith(tail))
+        val pending =
+            tail != null &&
+                (tail.isEmpty() || tail == "/" || PARTIAL_TAIL.matches(tail) || TOOL_CALL_TAG.startsWith(tail))
         return start ?: if (pending) lt else text.length
     }
 

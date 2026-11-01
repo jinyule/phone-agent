@@ -148,6 +148,7 @@ class LeakedToolMarkupTest {
         assertEquals(6, LeakedToolMarkup.previewEnd("Hello <"))
         assertEquals(6, LeakedToolMarkup.previewEnd("Hello <tool_"))
         assertEquals(6, LeakedToolMarkup.previewEnd("Hello <｜DS"))
+        assertEquals(6, LeakedToolMarkup.previewEnd("Hello </"))
         // Ordinary comparisons are not markup.
         assertEquals(9, LeakedToolMarkup.previewEnd("a<b and c"))
         assertEquals(11, LeakedToolMarkup.previewEnd("a <b> and c"))

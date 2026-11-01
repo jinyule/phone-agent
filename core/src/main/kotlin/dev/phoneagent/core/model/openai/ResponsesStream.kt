@@ -18,12 +18,16 @@ import dev.phoneagent.core.model.openai.WireSupport.str
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 
 /**
- * Assembles one Responses reply from its event stream (model-layer §3.2). Text, reasoning-summary
- * and argument deltas go to `onDelta` (what they missed is shown at the end, [DeltaLedger.catchUp]);
+ * Assembles one Responses reply from its event stream (model-layer §3.2). Text, reasoning and
+ * argument deltas go to `onDelta` (what they missed is shown at the end, [DeltaLedger.catchUp]).
+ * Reasoning comes as summaries or as raw reasoning text; the first of the two seen is the one
+ * shown, both as deltas and as the reasoning parts' summaries, so the two never mix;
  * the parts come from the finished output items (`response.output_item.done`, else
  * `response.completed.response.output`). Only
  * `response.completed` or `response.incomplete` complete a stream: a body that ends before them
@@ -38,6 +42,7 @@ internal class ResponsesStream(
 ) {
     private val ledger = DeltaLedger(onDelta)
     private var reasoningSection: String? = null
+    private var reasoningChannel: String? = null
     private val items = mutableListOf<JsonObject>()
     private val callIdsByItem = mutableMapOf<String, String>()
     private var final: JsonObject? = null
@@ -67,10 +72,11 @@ internal class ResponsesStream(
         val response = final ?: throw ModelError.Network("stream ended before response.completed")
         val output = items.ifEmpty { response.array("output")?.filterIsInstance<JsonObject>().orEmpty() }
         val reason = response.obj("incomplete_details")?.str("reason")
-        val parts = ResponsesOutput.parts(output, provider, model, redactor)
+        val rawFirst = reasoningChannel == RAW_REASONING_DELTA
+        val parts = ResponsesOutput.parts(output, provider, model, redactor, rawFirst)
         val hasCalls = parts.any { it is Part.ToolCall }
         ResponsesOutput.checkRefusal(output, parts, incomplete && reason == "content_filter")
-        ledger.catchUp(parts)
+        val diverged = ledger.catchUp(parts)
         val stop =
             when {
                 incomplete && reason == "max_output_tokens" -> StopReason.MAX_TOKENS
@@ -78,7 +84,8 @@ internal class ResponsesStream(
                 incomplete -> StopReason.OTHER
                 else -> StopReason.END_TURN
             }
-        return ChatResponse(parts, stop, ResponsesOutput.usage(response), ResponsesOutput.metadata(response, reason))
+        val meta = ResponsesOutput.metadata(response, reason, diverged)
+        return ChatResponse(parts, stop, ResponsesOutput.usage(response), meta)
     }
 
     /** Display deltas; `false` when [type] is not one. */
@@ -89,7 +96,7 @@ internal class ResponsesStream(
         val text = root.str("delta")?.takeIf { it.isNotEmpty() }
         when (type) {
             "response.output_text.delta" -> text?.let(ledger::text)
-            in REASONING_DELTAS -> text?.let { reasoning(root, it) }
+            SUMMARY_DELTA, RAW_REASONING_DELTA -> text?.let { reasoning(type, root, it) }
             "response.output_item.added" -> root.obj("item")?.let(::started)
             "response.function_call_arguments.delta" -> arguments(root.str("item_id"), text)
             else -> return false
@@ -136,11 +143,17 @@ internal class ResponsesStream(
     private fun failure(error: JsonObject): ModelError =
         ProviderErrors.fromStream(ProviderError.of(error, redactor), plan)
 
-    /** Shows a reasoning fragment; each summary or reasoning-text part is a section of its own, after a blank line. */
+    /**
+     * Shows a reasoning fragment of the first channel ([type]) seen; each summary or reasoning-text
+     * part is a section of its own, after a blank line.
+     */
     private fun reasoning(
+        type: String,
         root: JsonObject,
         fragment: String,
     ) {
+        if (reasoningChannel == null) reasoningChannel = type
+        if (type != reasoningChannel) return
         val section = "${root.str("item_id")}/${root.int("summary_index") ?: root.int("content_index")}"
         if (section != reasoningSection && ledger.hasReasoning) ledger.reasoning(TEXT_SEPARATOR)
         reasoningSection = section
@@ -169,7 +182,8 @@ internal class ResponsesStream(
     }
 }
 
-private val REASONING_DELTAS = setOf("response.reasoning_summary_text.delta", "response.reasoning_text.delta")
+private const val SUMMARY_DELTA = "response.reasoning_summary_text.delta"
+private const val RAW_REASONING_DELTA = "response.reasoning_text.delta"
 
 /** Pure readers of a finished Responses `output` and `response` object. */
 internal object ResponsesOutput {
@@ -179,19 +193,33 @@ internal object ResponsesOutput {
      * The parts of [output], in order: `reasoning` items verbatim (with their summary for the UI),
      * one text part per `message`, `function_call`s. Hosted tool items are never requested and
      * anything else is not model-visible content, so both are skipped.
+     *
+     * @param rawFirst show a reasoning item's raw reasoning text rather than its summary when it has both.
      */
     fun parts(
         output: List<JsonObject>,
         provider: ProviderId,
         model: ModelId,
         redactor: Redactor,
+        rawFirst: Boolean,
     ): List<Part> =
         output.mapNotNull { item ->
             when (item.str("type")) {
-                "reasoning" -> Part.Reasoning(provider, model, ReasoningKind.RESPONSES_ENCRYPTED, item, summary(item))
-                "message" -> text(item)?.let(Part::Text)
-                "function_call" -> call(item, redactor)
-                else -> null
+                "reasoning" -> {
+                    Part.Reasoning(provider, model, ReasoningKind.RESPONSES_ENCRYPTED, item, summary(item, rawFirst))
+                }
+
+                "message" -> {
+                    text(item)?.let(Part::Text)
+                }
+
+                "function_call" -> {
+                    call(item, redactor)
+                }
+
+                else -> {
+                    null
+                }
             }
         }
 
@@ -220,10 +248,11 @@ internal object ResponsesOutput {
         }
     }
 
-    /** Response id, reported model, status and incomplete reason, for the log. */
+    /** Response id, reported model, status, incomplete reason and contradicted delta channels, for the log. */
     fun metadata(
         response: JsonObject,
         incompleteReason: String?,
+        diverged: List<String>,
     ): JsonObject? {
         val meta =
             buildJsonObject {
@@ -231,12 +260,21 @@ internal object ResponsesOutput {
                 response.str("model")?.let { put("model", it) }
                 response.str("status")?.let { put("status", it) }
                 incompleteReason?.let { put("incomplete_reason", it) }
+                if (diverged.isNotEmpty()) putJsonArray(PREVIEW_DIVERGED) { diverged.forEach { add(it) } }
             }
         return meta.takeIf { it.isNotEmpty() }
     }
 
-    /** The readable summary of a reasoning item; models that return raw reasoning text instead show that. */
-    private fun summary(item: JsonObject): String? = texts(item, "summary") ?: texts(item, "content")
+    /** A reasoning item's readable text: its summary or its raw reasoning text ([rawFirst] picks between both). */
+    private fun summary(
+        item: JsonObject,
+        rawFirst: Boolean,
+    ): String? =
+        if (rawFirst) {
+            texts(item, "content") ?: texts(item, "summary")
+        } else {
+            texts(item, "summary") ?: texts(item, "content")
+        }
 
     private fun texts(
         item: JsonObject,

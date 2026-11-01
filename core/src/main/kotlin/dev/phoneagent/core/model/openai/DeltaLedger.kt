@@ -8,9 +8,11 @@ import dev.phoneagent.core.model.openai.WireSupport.TEXT_SEPARATOR
 /**
  * What one reply has shown through `onDelta`, so the end of the stream can show what the deltas
  * missed: servers that send only a final object, text the markup preview held back, calls
- * recovered from leaked markup. After [catchUp] the text, reasoning and argument deltas add up to
- * the reply's text, reasoning summaries (blank-line separated) and call arguments, wherever the
- * reply extends what was shown; every call has been announced once.
+ * recovered from leaked markup. The adapters only show what the reply will keep, so after
+ * [catchUp] the text, reasoning and argument deltas add up to the reply's text, reasoning
+ * summaries (blank-line separated) and call arguments, and every call has been announced once.
+ * Only a provider whose final output contradicts its own deltas breaks that; deltas cannot be
+ * taken back, so [catchUp] reports it and the reply records it under [PREVIEW_DIVERGED].
  */
 internal class DeltaLedger(
     private val onDelta: (Delta) -> Unit,
@@ -55,19 +57,34 @@ internal class DeltaLedger(
         onDelta(Delta.ToolCallArgs(id, fragment))
     }
 
-    /** Shows whatever of [parts] the deltas have not shown yet (see the class contract). */
-    fun catchUp(parts: List<Part>) {
-        remainder(text, parts.filterIsInstance<Part.Text>().joinToString("") { it.text })?.let(::text)
+    /**
+     * Shows whatever of [parts] the deltas have not shown yet (see the class contract). Returns the
+     * channels (`text`, `reasoning`, `args`) where [parts] do not extend what was shown, in that
+     * order; empty when the deltas add up.
+     */
+    fun catchUp(parts: List<Part>): List<String> {
+        val diverged = mutableListOf<String>()
+        if (!extend(text, parts.filterIsInstance<Part.Text>().joinToString("") { it.text }, ::text)) diverged += "text"
         val summaries = parts.filterIsInstance<Part.Reasoning>().mapNotNull { it.summary }
-        remainder(reasoning, summaries.joinToString(TEXT_SEPARATOR))?.let(::reasoning)
+        if (!extend(reasoning, summaries.joinToString(TEXT_SEPARATOR), ::reasoning)) diverged += "reasoning"
         for (call in parts.filterIsInstance<Part.ToolCall>()) {
             started(call.id, call.name)
-            remainder(checkNotNull(args[call.id]), call.argsJson)?.let { args(call.id, it) }
+            if (!extend(checkNotNull(args[call.id]), call.argsJson) { args(call.id, it) }) diverged += "args"
         }
+        return diverged.distinct()
     }
 
-    private fun remainder(
+    /** Shows the rest of [full] when it extends [shown]; `false` when it does not. */
+    private fun extend(
         shown: CharSequence,
         full: String,
-    ): String? = if (full.length > shown.length && full.startsWith(shown)) full.substring(shown.length) else null
+        show: (String) -> Unit,
+    ): Boolean {
+        val extends = full.startsWith(shown)
+        if (extends && full.length > shown.length) show(full.substring(shown.length))
+        return extends
+    }
 }
+
+/** `providerMetadata` key listing the delta channels the final reply contradicts ([DeltaLedger.catchUp]). */
+internal const val PREVIEW_DIVERGED = "preview_diverged"

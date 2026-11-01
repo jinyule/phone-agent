@@ -94,8 +94,8 @@ internal class ChatCompletionsStream(
                 if (answer.isNotEmpty()) add(Part.Text(answer))
                 addAll(toolCalls)
             }
-        ledger.catchUp(parts)
-        val meta = metadata(responseId, reportedModel, reason, recovered.map { it.id })
+        val diverged = ledger.catchUp(parts)
+        val meta = metadata(responseId, reportedModel, reason, recovered.map { it.id }, diverged)
         return ChatResponse(parts, stopReason(reason, toolCalls.isNotEmpty()), usage, meta)
     }
 
@@ -190,6 +190,7 @@ internal class ChatCompletionsStream(
             model: String?,
             finishReason: String?,
             recovered: List<ToolCallId>,
+            diverged: List<String>,
         ): JsonObject? {
             val meta =
                 buildJsonObject {
@@ -199,6 +200,7 @@ internal class ChatCompletionsStream(
                     if (recovered.isNotEmpty()) {
                         putJsonArray(RECOVERED_TOOL_CALLS) { recovered.forEach { add(it.value) } }
                     }
+                    if (diverged.isNotEmpty()) putJsonArray(PREVIEW_DIVERGED) { diverged.forEach { add(it) } }
                 }
             return meta.takeIf { it.isNotEmpty() }
         }
@@ -223,8 +225,9 @@ internal const val RECOVERED_TOOL_CALLS = "recovered_tool_calls"
 
 /**
  * Answer and reasoning text of one streamed reply. With [holdBack], answer deltas stop short of
- * anything that may be leaked tool markup ([LeakedToolMarkup.previewEnd]); reasoning keeps the
- * first field it came in.
+ * anything that may be leaked tool markup ([LeakedToolMarkup.previewEnd]) and of trailing
+ * whitespace, which a recovered call drops; so they never show text the reply takes back.
+ * Reasoning keeps the first field it came in.
  */
 internal class StreamedText(
     private val ledger: DeltaLedger,
@@ -239,7 +242,10 @@ internal class StreamedText(
     fun appendAnswer(fragment: String) {
         if (fragment.isEmpty()) return
         answer.append(fragment)
-        val end = (if (holdBack) LeakedToolMarkup.previewEnd(answer.toString()) else answer.length).coerceAtLeast(shown)
+        var end = if (holdBack) LeakedToolMarkup.previewEnd(answer.toString()) else answer.length
+        if (holdBack) {
+            while (end > shown && answer[end - 1].isWhitespace()) end--
+        }
         if (end > shown) {
             ledger.text(answer.substring(shown, end))
             shown = end
