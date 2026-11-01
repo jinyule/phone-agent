@@ -183,6 +183,7 @@ data class WireProfile(
   - 发不发 `include`（`WireOptions.responses`）也只在"测试并保存"时协商：只认结构化的 `error.param == "include"`（这个词太常见，不看消息；`input[n].encrypted_content` 之类的错误不算）。运行时拒绝 `include` 的 400 是 `InvalidRequest(param = "include")`，和其他 400 一样交给上层。
   - 套餐模式遇到 401，向 `CredentialResolver` 要一次新令牌（`rejected = true`）后重发；再次 401 报 `SignInExpired`。
   - `response.completed` 和 `response.incomplete` 都算流的正常结束，在它们之前断流报 `Network`。
+  - 回复的内容按 `output_index` 排序：流里 `response.output_item.done` 收到的条目和最终 `response.output` 里的条目按位置合并，只在一边出现的条目也保留；同一位置的两个版本在适配器读取的字段上（类型、id、call_id、名字、参数、文字、加密推理）不一致时报 `BadResponse`。
   - 带图片的 `function_call_output`，`output` 用 `input_text` / `input_image` 数组。
 
 ### 3.3 Anthropic Messages

@@ -17,6 +17,8 @@ import dev.phoneagent.core.model.openai.WireSupport.obj
 import dev.phoneagent.core.model.openai.WireSupport.str
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
@@ -28,8 +30,8 @@ import kotlinx.serialization.json.putJsonArray
  * argument deltas go to `onDelta` (what they missed is shown at the end, [DeltaLedger.catchUp]).
  * Reasoning comes as summaries or as raw reasoning text; the first of the two seen is the one
  * shown, both as deltas and as the reasoning parts' summaries, so the two never mix;
- * the parts come from the finished output items (`response.output_item.done`, else
- * `response.completed.response.output`). Only
+ * the parts come from the output items in `output_index` order, finished on the stream
+ * (`response.output_item.done`) or listed in the final `response.output` ([OutputItems]). Only
  * `response.completed` or `response.incomplete` complete a stream: a body that ends before them
  * was cut ([ModelError.Network]). `response.failed` and `error` events become [ModelError]s.
  */
@@ -43,7 +45,7 @@ internal class ResponsesStream(
     private val ledger = DeltaLedger(onDelta)
     private var reasoningSection: String? = null
     private var reasoningChannel: String? = null
-    private val items = mutableListOf<JsonObject>()
+    private val items = OutputItems()
     private val callIdsByItem = mutableMapOf<String, String>()
     private var final: JsonObject? = null
     private var incomplete = false
@@ -70,7 +72,7 @@ internal class ResponsesStream(
     /** The reply; throws [ModelError] for cut streams, refusals and malformed replies. */
     fun finish(): ChatResponse {
         val response = final ?: throw ModelError.Network("stream ended before response.completed")
-        val output = items.ifEmpty { response.array("output")?.filterIsInstance<JsonObject>().orEmpty() }
+        val output = items.merged(response.array("output")?.filterIsInstance<JsonObject>().orEmpty())
         val reason = response.obj("incomplete_details")?.str("reason")
         val rawFirst = reasoningChannel == RAW_REASONING_DELTA
         val parts = ResponsesOutput.parts(output, provider, model, redactor, rawFirst)
@@ -111,7 +113,7 @@ internal class ResponsesStream(
     ) {
         when (type) {
             "response.output_item.done" -> {
-                root.obj("item")?.let { items += it }
+                root.obj("item")?.let { items.done(root.int("output_index"), it) }
             }
 
             "response.completed" -> {
@@ -179,6 +181,65 @@ internal class ResponsesStream(
 
     private companion object {
         const val SNIPPET = 200
+    }
+}
+
+/**
+ * The output items of one reply by `output_index` (model-layer §3.2): those the stream finished,
+ * then the final `response.output` (by position) merged in, so items only one of them has are
+ * kept. An item without an index takes the next position. Two versions of one item must agree on
+ * what the adapter reads from it (type, ids, name, arguments, texts, encrypted content); a
+ * contradiction is [ModelError.BadResponse].
+ */
+internal class OutputItems {
+    private val byIndex = sortedMapOf<Int, JsonObject>()
+    private var next = 0
+
+    /** Records an item from `response.output_item.done`. */
+    fun done(
+        index: Int?,
+        item: JsonObject,
+    ) = put(index ?: next, item)
+
+    /** All items in index order, with [final] (the response's `output`) merged in. */
+    fun merged(final: List<JsonObject>): List<JsonObject> {
+        final.forEachIndexed(::put)
+        return byIndex.values.toList()
+    }
+
+    private fun put(
+        index: Int,
+        item: JsonObject,
+    ) {
+        val known = byIndex[index]
+        byIndex[index] = if (known == null) item else agreed(index, known, item)
+        next = maxOf(next, index + 1)
+    }
+
+    /** [known] and [other] as one item ([known] wins on keys the adapter does not read). */
+    private fun agreed(
+        index: Int,
+        known: JsonObject,
+        other: JsonObject,
+    ): JsonObject {
+        val a = visible(known)
+        val b = visible(other)
+        val clash = a.keys.firstOrNull { key -> a[key] != null && b[key] != null && a[key] != b[key] }
+        if (clash != null) throw ModelError.BadResponse("output item $index has two different '$clash' values")
+        return JsonObject(other + known)
+    }
+
+    private companion object {
+        val READ = listOf("type", "id", "call_id", "name", "arguments", "encrypted_content")
+
+        /** What the adapter reads from an item; `null` values are absent. */
+        fun visible(item: JsonObject): Map<String, JsonElement?> =
+            READ.associateWith { item[it] } +
+                mapOf("content" to texts(item["content"]), "summary" to texts(item["summary"]))
+
+        /** The `text` members of a content or summary array. */
+        fun texts(parts: JsonElement?): JsonElement? =
+            (parts as? JsonArray)?.let { array -> JsonArray(array.mapNotNull { (it as? JsonObject)?.get("text") }) }
     }
 }
 
