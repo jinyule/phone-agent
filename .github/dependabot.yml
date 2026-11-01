@@ -1,5 +1,5 @@
 # After a Gradle bump, regenerate gradle/verification-metadata.xml on the PR branch:
-#   ./gradlew --write-verification-metadata sha256 --no-configuration-cache check :app:assembleDebug :app:assembleRelease
+#   ./gradlew -g "$(mktemp -d)" --write-verification-metadata sha256 --no-configuration-cache check :app:assembleDebug :app:assembleRelease
 version: 2
 updates:
   - package-ecosystem: gradle
