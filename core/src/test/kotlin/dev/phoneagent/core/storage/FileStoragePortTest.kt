@@ -21,14 +21,19 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.Timeout
 import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.io.TempDir
 import java.io.IOException
 import java.nio.channels.FileChannel
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.TimeUnit
 import kotlin.coroutines.CoroutineContext
+import kotlin.time.Duration.Companion.seconds
 
+/** Bounded like `SessionStoreTest`: a mutation that blocks a wait fails the test instead of hanging. */
+@Timeout(value = 30, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
 class FileStoragePortTest {
     @TempDir
     lateinit var root: Path
@@ -187,7 +192,7 @@ class FileStoragePortTest {
 
     @Test
     fun `a caller cancelled before the appender is handed over does not leak the handle`() =
-        runTest {
+        runTest(timeout = 10.seconds) {
             val io = QueueDispatcher()
             val ops = RecordingOps()
             val storage = FileStoragePort(root, io, ops)
@@ -232,7 +237,7 @@ class FileStoragePortTest {
 
     @Test
     fun `a close failure of an undelivered handle does not replace the cancellation`() =
-        runTest {
+        runTest(timeout = 10.seconds) {
             val io = QueueDispatcher()
             val ops = RecordingOps().apply { failClose = true }
             val storage = FileStoragePort(root, io, ops)
@@ -245,7 +250,7 @@ class FileStoragePortTest {
 
     @Test
     fun `a session create cancelled while its appender opens leaves no handle open`() =
-        runTest {
+        runTest(timeout = 10.seconds) {
             val io = QueueDispatcher()
             val ops = RecordingOps()
             val files = SessionFiles(FileStoragePort(root, io, ops), StoragePath("sessions/s1"))
@@ -259,11 +264,15 @@ class FileStoragePortTest {
                         Clock { 0 },
                     )
                 }
-            while (true) {
-                io.runAll()
-                if (ops.opened.isNotEmpty()) break
+            // Bounded: run the I/O and test dispatchers until the appender is opened, and stop right
+            // there, before the caller resumes with it.
+            var rounds = 0
+            io.runAll()
+            while (ops.opened.isEmpty() && rounds++ < MAX_ROUNDS) {
                 testScheduler.runCurrent()
+                io.runAll()
             }
+            assertEquals(1, ops.opened.size, "the appender was opened within $MAX_ROUNDS rounds")
             create.cancel()
             assertThrows<CancellationException> { create.await() }
             assertFalse(ops.opened.single().isOpen)
@@ -294,4 +303,9 @@ class FileStoragePortTest {
             )
             assertTrue(Files.isRegularFile(root.resolve("sessions/s1/session.jsonl")))
         }
+
+    private companion object {
+        /** Dispatcher rounds a create needs to reach the open; far more than the few it takes. */
+        const val MAX_ROUNDS = 100
+    }
 }

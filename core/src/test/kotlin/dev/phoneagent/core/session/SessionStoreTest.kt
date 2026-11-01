@@ -19,9 +19,18 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.Timeout
 import org.junit.jupiter.api.assertThrows
 import java.io.FileNotFoundException
+import java.util.concurrent.TimeUnit
+import kotlin.time.Duration.Companion.seconds
 
+/**
+ * Every test is bounded: a broken lock or a non-cancellable wait (e.g. a mutation of [SessionStore])
+ * must fail the test, not hang the build. The JUnit timeout runs the test on its own thread, so it
+ * also ends waits inside `NonCancellable` that the `runTest` timeout cannot cancel.
+ */
+@Timeout(value = 30, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
 class SessionStoreTest {
     private val storage = InMemoryStoragePort()
     private val files = SessionFiles(storage, StoragePath("sessions/session-1"))
@@ -204,7 +213,7 @@ class SessionStoreTest {
 
     @Test
     fun `an append that was started completes even if the caller is cancelled`() =
-        runTest {
+        runTest(timeout = CANCELLATION_TIMEOUT) {
             val store = newStore()
             val entered = CompletableDeferred<Unit>()
             val release = CompletableDeferred<Unit>()
@@ -225,7 +234,7 @@ class SessionStoreTest {
 
     @Test
     fun `an append cancelled while it waits for the lock writes nothing`() =
-        runTest {
+        runTest(timeout = CANCELLATION_TIMEOUT) {
             val store = newStore()
             val entered = CompletableDeferred<Unit>()
             val release = CompletableDeferred<Unit>()
@@ -252,7 +261,7 @@ class SessionStoreTest {
 
     @Test
     fun `an append from an already cancelled coroutine writes nothing`() =
-        runTest {
+        runTest(timeout = CANCELLATION_TIMEOUT) {
             val store = newStore()
             val before = store.records()
             val append =
@@ -267,7 +276,7 @@ class SessionStoreTest {
 
     @Test
     fun `cleanup code appends from a cancelled coroutine inside NonCancellable`() =
-        runTest {
+        runTest(timeout = CANCELLATION_TIMEOUT) {
             val store = newStore()
             val job =
                 launch(start = CoroutineStart.UNDISPATCHED) {
@@ -284,7 +293,7 @@ class SessionStoreTest {
 
     @Test
     fun `a write cancelled midway commits and returns the record while the job reports cancellation`() =
-        runTest {
+        runTest(timeout = CANCELLATION_TIMEOUT) {
             val store = newStore()
             val entered = CompletableDeferred<Unit>()
             val release = CompletableDeferred<Unit>()
@@ -357,6 +366,11 @@ class SessionStoreTest {
             SessionStore.open(recordingFiles, clock).store.close()
             assertEquals("openAppender", calls.last())
         }
+
+    private companion object {
+        /** Wall-clock bound of the cancellation tests (their waits use barriers, never real time). */
+        val CANCELLATION_TIMEOUT = 10.seconds
+    }
 
     private object Identity : SessionMigration {
         override val fromVersion = 1
