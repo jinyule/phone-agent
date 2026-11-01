@@ -246,6 +246,6 @@ core/src/test/resources/sessions/<scenario>/
 | Kover | ✅ 每类行覆盖 ≥ 90%；`critical` 变体校验 policy/agent 分支覆盖 100%；`@ExcludeFromCoverage` 的 reason 由测试检查 | `CoverageConventionPlugin.kt` |
 | 依赖可复现 | ✅ 校验文件 + 禁止动态版本 | `gradle/verification-metadata.xml` |
 | lefthook、gitleaks、.editorconfig、.gitattributes | ✅ | 仓库根目录 |
-| CI：`ci.yml` + `all-checks-passed`、Dependabot、PR 模板 | ✅（actionlint 通过；**还没在 GitHub 上跑过**） | `.github/` |
+| CI：`ci.yml` + `all-checks-passed`、Dependabot、PR 模板 | ✅ 2026-11-01 在 GitHub 上首次跑通（前两次失败暴露了校验文件的冷缓存和 aapt2 平台问题，见 ADR）；main 已设为必须通过 `all-checks-passed` | `.github/` |
 | AGENTS.md + 技能 | ✅ `pre-push-checks`、`code-review` | `.agents/skills/` |
 | 推迟 | `add-tool`、`record-session` 两个技能（对应的工具注册和回放设施在 M1 落地，先写会误导代理）；Compose 字面量规则与包依赖测试（M1）；`release.yml`（M2 前）；`eval/` 模块（M1） | — |
