@@ -1,40 +1,40 @@
 package dev.phoneagent.core.testing
 
-import org.junit.jupiter.api.Assertions.fail
-import java.io.File
+import org.junit.jupiter.api.Assertions.assertEquals
+import java.nio.file.Files
+import java.nio.file.Path
 
 /**
  * Golden files of the model-visible surface (engineering-baseline §3.1 L3), compared byte for byte.
  *
- * On a mismatch the actual text is written under `build/prompt-surface-actual/` and the test
- * fails with the path: review the diff, then copy it over the expected file. Setting the
- * environment variable `PA_UPDATE_GOLDEN=1` rewrites the expected files instead (review the
- * resulting git diff before committing). Every file ends with exactly one newline.
+ * A golden file holds the text followed by one newline (the file convention; nothing of the text
+ * itself is trimmed, so a text that ends in a newline is stored with two). Tests only compare: on a
+ * mismatch, or when the golden is missing, the actual file content is written to
+ * `build/prompt-surface-actual/<path>` and the test fails. Accepting it is a separate, explicit
+ * step after a test run: review the diff, then copy it over, e.g.
+ * `cp -R core/build/prompt-surface-actual/. core/src/test/resources/prompt-surface/`.
  */
 object Golden {
     private const val EXPECTED = "src/test/resources/prompt-surface"
-    private const val ACTUAL = "build/prompt-surface-actual"
+    private val actualRoot: Path = Path.of("build/prompt-surface-actual")
 
+    /** Compares [text] with the golden at [path]; a mismatch leaves the actual file under [actualDir]. */
     fun assertMatches(
         path: String,
         text: String,
+        actualDir: Path = actualRoot,
     ) {
-        val actual = text.trimEnd('\n') + "\n"
-        val expectedFile = File(EXPECTED, path)
-        if (System.getenv("PA_UPDATE_GOLDEN") == "1") {
-            expectedFile.parentFile.mkdirs()
-            expectedFile.writeText(actual)
+        val actual = text + "\n"
+        val expectedFile = Path.of(EXPECTED, path)
+        val expected = if (Files.exists(expectedFile)) Files.readString(expectedFile) else null
+        val kept = actualDir.resolve(path)
+        if (expected == actual) {
+            Files.deleteIfExists(kept)
             return
         }
-        val expected = if (expectedFile.exists()) expectedFile.readText() else null
-        if (expected != actual) {
-            val actualFile = File(ACTUAL, path)
-            actualFile.parentFile.mkdirs()
-            actualFile.writeText(actual)
-            fail<Unit>(
-                "Golden file $EXPECTED/$path differs (or is missing). Actual text: ${actualFile.absolutePath}. " +
-                    "Review it and copy it over the expected file, or rerun with PA_UPDATE_GOLDEN=1.",
-            )
-        }
+        Files.createDirectories(kept.parent)
+        Files.writeString(kept, actual)
+        val what = if (expected == null) "is missing" else "differs"
+        assertEquals(expected, actual, "golden $EXPECTED/$path $what; the actual file is $kept (review, then copy)")
     }
 }
