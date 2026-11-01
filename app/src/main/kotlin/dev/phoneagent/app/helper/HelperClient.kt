@@ -31,7 +31,12 @@ import java.util.concurrent.CopyOnWriteArrayList
  * [HelperHandoffProvider] (checks in [HandoffAdmission]), holds the verified Binder and follows
  * its death. An admitted helper replaces the previous one, which is told to shut down.
  *
- * Thread-safe. Listeners run on the thread that caused the change, outside the internal lock.
+ * Thread-safe. State changes are queued under the internal lock, in the order they happen, and
+ * delivered outside it, one at a time: by the thread that caused the change, or by the thread that
+ * is already delivering. So listeners see every change once and in order, and the last state they
+ * received is [state]. `onLaunchNeeded` runs after the listeners, and only if that NeedsLaunch is
+ * still the current state (a helper admitted meanwhile makes the request moot). A listener that
+ * throws stops this round; the remaining changes go out with the next one.
  */
 class HelperClient internal constructor(
     private val nonces: HandoffNonces,
@@ -46,6 +51,12 @@ class HelperClient internal constructor(
     private val listeners = CopyOnWriteArrayList<(HelperState) -> Unit>()
     private var connection: Connection? = null
 
+    /** Changes not delivered yet, oldest first; guarded by [lock]. */
+    private val undelivered = ArrayDeque<HelperState>()
+
+    /** Some thread is delivering [undelivered]; guarded by [lock]. */
+    private var delivering = false
+
     /** Current state; changes are also delivered to [addListener] listeners. */
     @Volatile
     var state: HelperState = HelperState.NotConnected
@@ -59,12 +70,6 @@ class HelperClient internal constructor(
         val core: IPrivilegedCore,
         val pid: Int,
         val death: IBinder.DeathRecipient,
-    )
-
-    /** A provider reply plus the state change to publish once the lock is released. */
-    private class Reply(
-        val bundle: Bundle,
-        val changed: HelperState? = null,
     )
 
     /** Calls [listener] on every state change until the returned handle is closed. */
@@ -85,13 +90,13 @@ class HelperClient internal constructor(
         val reply =
             synchronized(lock) {
                 when (val decision = admission.decide(extras, callingUid, callingPid)) {
-                    is HandoffAdmission.Decision.Rejected -> Reply(HandoffBundles.rejected(decision.reason))
+                    is HandoffAdmission.Decision.Rejected -> HandoffBundles.rejected(decision.reason)
                     is HandoffAdmission.Decision.Stale -> stale(decision.reason, callingPid)
                     is HandoffAdmission.Decision.Admitted -> connect(decision, callingPid)
                 }
             }
-        reply.changed?.let(::publish)
-        return reply.bundle
+        deliverChanges()
+        return reply
     }
 
     /** `arm` from the shell: [sha256Hex] commits to the nonce a computer-side script will send. */
@@ -124,50 +129,47 @@ class HelperClient internal constructor(
     private fun stale(
         reason: HandoffReject,
         pid: Int,
-    ): Reply {
-        val rejected = HandoffBundles.rejected(reason)
-        if (connection != null) return Reply(rejected)
-        val needs = HelperState.NeedsLaunch(HelperState.LaunchReason.Stale(reason), pid)
-        state = needs
-        return Reply(rejected, needs)
+    ): Bundle {
+        if (connection == null) change(HelperState.NeedsLaunch(HelperState.LaunchReason.Stale(reason), pid))
+        return HandoffBundles.rejected(reason)
     }
 
     private fun connect(
         admitted: HandoffAdmission.Decision.Admitted,
         pid: Int,
-    ): Reply {
+    ): Bundle {
         val binder = admitted.binder
         val death = IBinder.DeathRecipient { onHelperDied(binder) }
         try {
             binder.linkToDeath(death, 0)
         } catch (e: RemoteException) {
             Log.w(TAG, "helper $pid died during the handoff", e)
-            return Reply(HandoffBundles.rejected(HandoffReject.BINDER_ELSEWHERE))
+            return HandoffBundles.rejected(HandoffReject.BINDER_ELSEWHERE)
         }
         val nextNonce = admission.commit(admitted)
         return if (nextNonce != null) {
             connection?.takeIf { it.core.asBinder() !== binder }?.let(::retire)
             connection = Connection(admitted.core, pid, death)
-            val connected = HelperState.Connected(admitted.core, pid)
-            state = connected
+            change(HelperState.Connected(admitted.core, pid))
             Log.i(TAG, "helper pid $pid admitted")
-            Reply(HandoffBundles.accepted(nextNonce, token), connected)
+            HandoffBundles.accepted(nextNonce, token)
         } else {
             binder.unlinkToDeath(death, 0)
             Log.w(TAG, "helper $pid: its nonce expired or was replaced during the handoff")
-            Reply(HandoffBundles.rejected(HandoffReject.BAD_NONCE))
+            HandoffBundles.rejected(HandoffReject.BAD_NONCE)
         }
     }
 
     private fun onHelperDied(binder: IBinder) {
-        val needs =
+        val pid =
             synchronized(lock) {
                 val current = connection?.takeIf { it.core.asBinder() === binder } ?: return
                 connection = null
-                HelperState.NeedsLaunch(HelperState.LaunchReason.HelperDied, current.pid).also { state = it }
+                change(HelperState.NeedsLaunch(HelperState.LaunchReason.HelperDied, current.pid))
+                current.pid
             }
-        Log.w(TAG, "helper pid ${needs.lastPid} died")
-        publish(needs)
+        Log.w(TAG, "helper pid $pid died")
+        deliverChanges()
     }
 
     /** A newer helper was admitted: stop following the old one and tell it to release and exit. */
@@ -180,9 +182,38 @@ class HelperClient internal constructor(
         }
     }
 
-    private fun publish(changed: HelperState) {
-        listeners.forEach { it(changed) }
-        if (changed is HelperState.NeedsLaunch) onLaunchNeeded(changed)
+    /** Sets [state] and queues the change for [deliverChanges]. Hold [lock]. */
+    private fun change(next: HelperState) {
+        state = next
+        undelivered.addLast(next)
+    }
+
+    /** Delivers queued changes in order, unless another thread already is. Do not hold [lock]. */
+    private fun deliverChanges() {
+        synchronized(lock) {
+            if (delivering) return
+            delivering = true
+        }
+        var drained = false
+        try {
+            while (!drained) {
+                // Seeing the queue empty and giving up the delivery is one step: a change queued
+                // right after it is delivered by the thread that queued it.
+                val next =
+                    synchronized(lock) {
+                        undelivered.removeFirstOrNull().also {
+                            drained = it == null
+                            if (drained) delivering = false
+                        }
+                    }
+                if (next != null) {
+                    listeners.forEach { it(next) }
+                    if (next is HelperState.NeedsLaunch && state === next) onLaunchNeeded(next)
+                }
+            }
+        } finally {
+            if (!drained) synchronized(lock) { delivering = false }
+        }
     }
 
     companion object {

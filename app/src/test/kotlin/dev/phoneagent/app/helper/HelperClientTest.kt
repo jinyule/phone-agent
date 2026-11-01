@@ -20,6 +20,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
 
 @RunWith(RobolectricTestRunner::class)
 class HelperClientTest {
@@ -330,6 +334,60 @@ class HelperClientTest {
         assertEquals(listOf("identity", "protocolVersion"), old.calls)
         assertEquals(HelperState.NotConnected, client.state)
         assertEquals(emptyList<HelperState.NeedsLaunch>(), launches)
+    }
+
+    /** Bounds a barrier wait so a broken test fails instead of hanging; it never paces the test. */
+    private fun CountDownLatch.awaitBounded() = assertTrue("barrier timed out", await(10, TimeUnit.SECONDS))
+
+    @Test
+    fun listenersEndOnTheCurrentStateWhenADeathRacesTheAdmission() {
+        val helper = FakeHelper()
+        val inFirstListener = CountDownLatch(1)
+        val resume = CountDownLatch(1)
+        client.addListener { changed ->
+            if (changed is HelperState.Connected && inFirstListener.count > 0) {
+                inFirstListener.countDown()
+                resume.awaitBounded()
+            }
+        }
+        val seen = CopyOnWriteArrayList<HelperState>()
+        client.addListener { seen += it }
+        val nonce = armed()
+
+        val admitting = thread { client.offer(extras(helper, nonce), shell, pid) }
+        inFirstListener.awaitBounded()
+        helper.die()
+        resume.countDown()
+        admitting.join()
+
+        val needs = HelperState.NeedsLaunch(HelperState.LaunchReason.HelperDied, pid)
+        assertEquals(needs, client.state)
+        assertEquals(listOf(HelperState.Connected(helper, pid), needs), seen.toList())
+        assertEquals(listOf(needs), launches)
+    }
+
+    @Test
+    fun aLaunchRequestOvertakenByANewHelperIsDropped() {
+        val first = FakeHelper()
+        client.offer(extras(first, armed()), shell, pid).accepted()
+        val inListener = CountDownLatch(1)
+        val resume = CountDownLatch(1)
+        client.addListener { changed ->
+            if (changed is HelperState.NeedsLaunch) {
+                inListener.countDown()
+                resume.awaitBounded()
+            }
+        }
+
+        val dying = thread { first.die() }
+        inListener.awaitBounded()
+        val second = FakeHelper(reportedIdentity = intArrayOf(shell, pid + 1))
+        client.offer(extras(second, armed()) { copy(reportedPid = pid + 1) }, shell, pid + 1).accepted()
+        resume.countDown()
+        dying.join()
+
+        assertEquals(HelperState.Connected(second, pid + 1), client.state)
+        assertEquals("the helper is back before the launch request was delivered", emptyList<Any>(), launches)
     }
 
     @Test
