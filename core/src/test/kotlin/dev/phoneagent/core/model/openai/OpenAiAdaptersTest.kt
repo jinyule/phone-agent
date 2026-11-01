@@ -6,6 +6,7 @@ import dev.phoneagent.core.model.openai.Kit.enqueueSse
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.MockWebServer
 import mockwebserver3.junit5.StartStop
+import okhttp3.Headers.Companion.headersOf
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -88,5 +89,25 @@ class OpenAiAdaptersTest {
             listOf(1, 2, 3),
             listOf(client.connectTimeoutMillis, client.readTimeoutMillis, client.writeTimeoutMillis),
         )
+        val resends = listOf(client.retryOnConnectionFailure, client.followRedirects, client.followSslRedirects)
+        assertEquals(listOf(false, false, false), resends, "OkHttp never resends on its own")
+        assertTrue(RetryAfterStash in client.networkInterceptors)
+    }
+
+    @Test
+    fun `retry-after is stashed from OkHttp and restored for the mapper`() {
+        val sent = headersOf("Retry-After", "0", "Retry-After", "1", "X-Other", "y")
+        val stashed =
+            sent
+                .newBuilder()
+                .removeAll(
+                    "Retry-After",
+                ).add(RetryAfterStash.NAME, "0")
+                .add(RetryAfterStash.NAME, "1")
+                .build()
+        assertEquals(listOf("0", "1"), RetryAfterStash.restore(stashed).values("Retry-After"))
+        assertEquals(null, RetryAfterStash.restore(stashed)[RetryAfterStash.NAME])
+        val plain = headersOf("X-Other", "y")
+        assertTrue(RetryAfterStash.restore(plain) === plain, "headers without a stash are returned as they are")
     }
 }

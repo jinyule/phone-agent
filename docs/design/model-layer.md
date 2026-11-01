@@ -80,6 +80,7 @@ sealed interface ModelError {
 
 - 重试策略由各 provider 自己定义，参考 dsh 的默认值：最多 5 次，500ms–10s，带抖动，遵守 `retry-after`。每次重试都写一条 `request/retry` 日志。
 - `InvalidRequest` 和 `Auth` 不重试。
+- 每次 attempt 只发一个 HTTP 请求，重试只在 `requestError` 里发生、逐次记日志：OpenAI 适配器的 HTTP 客户端关掉了 OkHttp 的连接失败重试、重定向跟随（307/308 会重发 POST），也拦下了它对 `503` + `Retry-After: 0` 的自动重发。重定向报 `BadResponse`，提示把 base URL 改成最终地址。
 
 **适配器的注入端口**（`core.model`，构造适配器时注入，`ChatModel.complete` 的签名不变）：
 

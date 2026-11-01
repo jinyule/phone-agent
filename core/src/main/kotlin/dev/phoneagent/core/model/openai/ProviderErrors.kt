@@ -106,6 +106,13 @@ internal object ProviderErrors {
         nowMs: Long,
         redactor: Redactor,
     ): ModelError {
+        if (failure.status in Status.REDIRECTS) {
+            // Redirects are not followed (one request per attempt); the address needs fixing.
+            val target = failure.headers["Location"]?.let(redactor::text) ?: "an unnamed address"
+            return ModelError.BadResponse(
+                "HTTP ${failure.status} redirect to $target: use the final address as the base URL",
+            )
+        }
         val error = ProviderError.parse(failure.body, redactor)
         val retryAfter = retryAfterMs(failure.headers, error.message, nowMs)
         return byCode(error, retryAfter) ?: fromStatus(failure.status, error, plan, retryAfter)
@@ -255,6 +262,7 @@ internal object Status {
     const val INTERNAL_ERROR = 500
     const val UNAVAILABLE = 503
     const val OVERLOADED = 529
+    val REDIRECTS = 300..399
     val CLIENT_ERRORS = 400..499
     val SERVER_ERRORS = 500..599
 }

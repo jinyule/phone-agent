@@ -114,7 +114,7 @@ internal object Kit {
     @Suppress("InjectDispatcher") // Real sockets: the I/O dispatcher is what production uses.
     fun adapters(
         credentials: CredentialResolver = Keys(),
-        client: OkHttpClient = OkHttpClient(),
+        client: OkHttpClient = HttpTimeouts().client(),
     ): OpenAiAdapters = OpenAiAdapters(client, credentials, { NOW_MS }, Dispatchers.IO, ids())
 
     fun clock(): Clock = Clock { NOW_MS }

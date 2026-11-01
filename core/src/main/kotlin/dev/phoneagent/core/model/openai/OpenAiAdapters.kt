@@ -99,12 +99,22 @@ public data class HttpTimeouts(
         require(connectMs > 0 && readMs > 0 && writeMs > 0) { "HTTP timeouts must be > 0 ms: $this" }
     }
 
+    /**
+     * The adapters' client. Every `complete()` attempt is one HTTP request: the caller retries
+     * (`requestError`) and logs each attempt, so OkHttp's own resends are off — connection-failure
+     * retries, redirects (a 307/308 would resend the POST) and the 503 `Retry-After: 0` follow-up
+     * ([RetryAfterStash]).
+     */
     internal fun client(): OkHttpClient =
         OkHttpClient
             .Builder()
             .connectTimeout(connectMs, TimeUnit.MILLISECONDS)
             .readTimeout(readMs, TimeUnit.MILLISECONDS)
             .writeTimeout(writeMs, TimeUnit.MILLISECONDS)
+            .retryOnConnectionFailure(false)
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .addNetworkInterceptor(RetryAfterStash)
             .build()
 }
 

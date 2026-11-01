@@ -56,7 +56,7 @@ class ChatCompletionsModelTest {
         keys: Keys = Keys(),
         vision: Boolean = false,
         blobs: BlobSource = Kit.blobs(),
-        client: OkHttpClient = OkHttpClient(),
+        client: OkHttpClient = HttpTimeouts().client(),
     ): ChatModel = Kit.adapters(keys, client).model(profile, Kit.MODEL, Kit.capabilities(vision = vision), blobs)
 
     @Test
@@ -319,7 +319,12 @@ class ChatCompletionsModelTest {
                 object : EventListener() {
                     override fun canceled(call: Call) = canceled.countDown()
                 }
-            val client = OkHttpClient.Builder().eventListener(listener).build()
+            val client =
+                HttpTimeouts()
+                    .client()
+                    .newBuilder()
+                    .eventListener(listener)
+                    .build()
             val firstDelta = CompletableDeferred<Unit>()
             try {
                 val job = launch { model(client = client).complete(Kit.request()) { firstDelta.complete(Unit) } }

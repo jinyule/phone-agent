@@ -10,6 +10,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.Headers
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -74,7 +75,7 @@ internal class HttpReply(
     private val redactor: Redactor,
 ) {
     val status: Int get() = response.code
-    val headers: Headers get() = response.headers
+    val headers: Headers get() = RetryAfterStash.restore(response.headers)
     val successful: Boolean get() = response.isSuccessful
 
     /** Up to [limit] bytes of the body as UTF-8 text (error bodies; HTML pages can be large). */
@@ -133,6 +134,39 @@ internal class HttpReply(
     private companion object {
         const val ERROR_BODY_LIMIT = 64L * 1024
         const val NEWLINE = '\n'.code.toByte()
+    }
+}
+
+/**
+ * Keeps OkHttp from resending a 503 on its own: its follow-up logic retries a 503 whose
+ * `Retry-After` is 0 whatever the client's retry settings say. As a network interceptor it moves
+ * the header under [NAME] before that logic sees the response; [HttpReply.headers] moves it back,
+ * so error mapping reads `Retry-After` as the server sent it.
+ */
+internal object RetryAfterStash : Interceptor {
+    const val NAME: String = "PhoneAgent-Retry-After"
+    private const val RETRY_AFTER = "Retry-After"
+
+    override fun intercept(chain: Interceptor.Chain): Response {
+        val response = chain.proceed(chain.request())
+        return if (response.header(RETRY_AFTER) == null) {
+            response
+        } else {
+            response.newBuilder().headers(moved(response.headers, RETRY_AFTER, NAME)).build()
+        }
+    }
+
+    /** [headers] with the stashed value back under `Retry-After`. */
+    fun restore(headers: Headers): Headers = if (headers[NAME] == null) headers else moved(headers, NAME, RETRY_AFTER)
+
+    private fun moved(
+        headers: Headers,
+        from: String,
+        to: String,
+    ): Headers {
+        val builder = headers.newBuilder().removeAll(from)
+        headers.values(from).forEach { builder.add(to, it) }
+        return builder.build()
     }
 }
 
