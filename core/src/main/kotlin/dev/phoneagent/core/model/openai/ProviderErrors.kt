@@ -92,8 +92,8 @@ internal data class ProviderError(
  * Maps provider failures to [ModelError] (model-layer §2) for both OpenAI-style protocols. Order:
  * well-known codes (`error.code` / `error.type`) first, then the HTTP status, refined by phrases
  * from the message where providers share a status for different causes (403 = bad key, unpaid
- * bill or model not enabled). A 429 is only ever a rate limit or an exhausted quota. Codes and phrases come from provider docs and the gateway fixtures
- * under `core/src/test/resources/wire/`.
+ * bill or model not enabled). A 429 is only ever a rate limit or an exhausted quota. Codes and
+ * phrases come from provider docs and the gateway fixtures under `core/src/test/resources/wire/`.
  */
 internal object ProviderErrors {
     /**
