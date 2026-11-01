@@ -6,6 +6,7 @@ android {
     namespace = "dev.phoneagent.app"
     defaultConfig {
         applicationId = "dev.phoneagent"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 }
 
@@ -32,4 +33,11 @@ dependencies {
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.androidx.test.ext.junit)
     testImplementation(libs.androidx.compose.ui.test.junit4)
+    testImplementation(libs.kotlinx.coroutines.test)
+
+    // On-device checks of the accessibility ScreenPort (run with `am instrument`, see AndroidScreenDeviceTest).
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.core)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.junit4)
 }

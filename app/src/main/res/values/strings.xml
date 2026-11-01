@@ -2,4 +2,6 @@
 <resources>
     <string name="app_name">PhoneAgent</string>
     <string name="placeholder_status">Engineering baseline (M0). Nothing to run yet.</string>
+    <string name="accessibility_service_label">PhoneAgent screen control</string>
+    <string name="accessibility_service_description">Lets PhoneAgent read the screen and tap, type and scroll for the tasks you give it. It acts only while a task runs.</string>
 </resources>

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  AgentAccessibilityService (phase1 §2.2, §3.3): reads window trees on every display, performs
+  display-targeted gestures and screenshots. flagInputMethodEditor gives the service its own input
+  connection (API 33+), the second text-entry fallback. Event types are the ones that signal a
+  visible change; awaitChange waits on them.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeWindowsChanged|typeViewScrolled|typeViewTextChanged|typeViewTextSelectionChanged|typeViewClicked|typeViewFocused|typeViewSelected"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagRetrieveInteractiveWindows|flagReportViewIds|flagIncludeNotImportantViews|flagInputMethodEditor"
+    android:canPerformGestures="true"
+    android:canRetrieveWindowContent="true"
+    android:canTakeScreenshot="true"
+    android:description="@string/accessibility_service_description"
+    android:notificationTimeout="50" />
