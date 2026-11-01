@@ -29,6 +29,7 @@ lefthook install                      # 每个 clone 装一次本地钩子
 - JDK 由 `gradle/gradle-daemon-jvm.properties` 固定为 Temurin 25，缺了 Gradle 会自动下载；字节码目标是 17。
 - **改了依赖**，要重新生成校验文件，并和依赖改动一起提交。必须用全新的 Gradle 目录（`-g`）：热缓存和冷缓存解析出的元数据（`.pom` 还是 `.module`）可能不同，只用本机缓存生成会漏掉 CI 需要的条目：
   `./gradlew -g "$(mktemp -d)" --write-verification-metadata sha256 --no-configuration-cache check :app:assembleDebug :app:assembleRelease`
+  升级 AGP 后，还要手动补上 `aapt2` 另外两个平台（linux / osx / windows 中本机以外的）jar 的 SHA-256：aapt2 按宿主系统解析，本机只会生成自己平台那一条。
 
 ## 3. 架构铁律
 

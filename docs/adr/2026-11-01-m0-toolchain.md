@@ -41,5 +41,6 @@ M0 要在写第一行业务代码之前把门禁搭好（`docs/design/engineerin
   - 版本固定；正式版发布后升级，并重新跑 canary。
 - **改依赖的成本**：每次改依赖都要重新生成校验文件，Dependabot 的 PR 需要人在分支上补一次（命令写在 `AGENTS.md` §2 和 `.github/dependabot.yml`）。
 - **校验文件要在冷缓存下生成**：第一次 CI 就因此失败过。本机缓存里已有的组件按 `.pom` 解析，CI 冷缓存按 `.module` 解析，校验文件里缺了后者。所以生成命令固定加 `-g "$(mktemp -d)"`，一次大约 3–4 分钟。
+- **aapt2 按宿主系统解析**：校验文件里要有 linux、osx、windows 三个 jar 的条目，本机只会生成自己平台那一条，第二次 CI 就因此失败过。手动补另外两条时，先核对下载文件的 SHA-1 和 Google Maven 公布的 `.sha1` 一致。
 - **已知缺口**：Robolectric 的 android-all jar 由 Robolectric 自己从 Maven Central 下载，不经过 Gradle，所以不受校验文件保护。它只用于测试，不进 APK。
 - **何时重新评估**：detekt 2.0 正式版发布时；M1 评估完 Android 17 的行为变更时；AGP 或 Robolectric 修复上面两个兼容性问题时（届时删掉对应的补丁）。
