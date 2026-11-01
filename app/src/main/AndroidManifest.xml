@@ -14,28 +14,15 @@
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
 
     <!--
-      Package visibility for AndroidScreen: launch intents of installed apps, and the system
-      packages that host pickers (ScreenFlag.SYSTEM_PICKER).
+      Package visibility: phone_apps lists every app of the user and AndroidScreen names the
+      foreground package and activity, including picker and permission screens of system
+      packages. <queries> would hide apps without a launcher entry and the activities of packages
+      that no declared intent matches. PhoneAgent is sideloaded, so Play's restriction on this
+      permission does not apply.
     -->
-    <queries>
-        <intent>
-            <action android:name="android.intent.action.MAIN" />
-            <category android:name="android.intent.category.LAUNCHER" />
-        </intent>
-        <intent>
-            <action android:name="android.content.pm.action.REQUEST_PERMISSIONS" />
-        </intent>
-        <intent>
-            <action android:name="android.intent.action.CHOOSER" />
-        </intent>
-        <intent>
-            <action android:name="android.intent.action.OPEN_DOCUMENT" />
-            <data android:mimeType="*/*" />
-        </intent>
-        <intent>
-            <action android:name="android.provider.action.PICK_IMAGES" />
-        </intent>
-    </queries>
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
 
     <!-- Session logs, screenshots and credentials never leave the device (phase1-architecture §3.9). -->
     <application
