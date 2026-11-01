@@ -149,6 +149,13 @@ data class WireProfile(
 - **推理内容**：字段名和"要不要回传"各家不同（`reasoning_content` 等）。在 `ProviderProfile.reasoningField` 和 `ProviderProfile.echoReasoning` 里按服务商配置，由能力探测确认；**探测不了的标"未验证"**。写请求头时这两项冻结进 `wire`（§2"线路快照"）。
 - **工具调用漏成文字**：有的模型会把工具调用写成正文里的标记（DeepSeek DSML、`<tool_call>` 等），参考 Mika 的 `LeakedToolMarkup`，识别出来按工具调用处理。
 - **缓存**：靠服务端隐式前缀缓存，所以历史要尽量只追加；命中情况从 usage 里读。
+- **实现约定**（`core.model.openai`，WP03）：
+  - `ToolResult.isError` 在 OpenAI 两种协议里都没有对应字段，失败只靠结果文字说明。
+  - `tool` 消息只能带文字：结果里的图片在全部 `tool` 消息之后用一条 user 消息补上（每组以 "Images from tool call <id>:" 开头）；只有图片的结果，`tool` 消息写占位文字。不支持看图的模型，图片一律换成固定占位文字，保证前缀稳定。
+  - 可选字段协商：服务商用 400 点名拒绝 `parallel_tool_calls` 或 `stream_options` 时，去掉该字段重发一次，并在这个模型实例的生命周期内不再发送。这不改变模型可见内容，所以不算重试；其他重试都归 `requestError`。
+  - 漏成文字的工具调用，ID 由适配器生成；流式预览会扣住可能是标记的文字，流结束时用 `DeltaLedger` 把预览漏掉的内容补发，保证增量拼起来和最终回复一致。
+  - 发送前校验对话：每个工具调用都必须有结果，不能有孤立的结果；服务端上下文编辑只支持 Anthropic。不满足时直接报 `InvalidRequest`，不发请求。
+  - 预设的已知差异写在 `ProviderPresets` 里，每条注明 VERIFIED / DOCUMENTED / UNVERIFIED。
 
 ### 3.2 OpenAI Responses
 
@@ -168,6 +175,12 @@ data class WireProfile(
 | 流 | 必须把流读到 `response.completed` |
 
   适配器在套餐模式下**校验并剔除**不允许的字段；单测里要有"会被拒绝的反例"。
+
+- **实现约定**（WP03）：
+  - 模型拒绝 `include`（400 点名 `include` 或 `encrypted_content`，常见于不带推理的模型）时，去掉 `include` 重发一次，并在实例生命周期内不再发送。
+  - 套餐模式遇到 401，向 `CredentialResolver` 要一次新令牌（`rejected = true`）后重发；再次 401 报 `SignInExpired`。
+  - `response.completed` 和 `response.incomplete` 都算流的正常结束，在它们之前断流报 `Network`。
+  - 带图片的 `function_call_output`，`output` 用 `input_text` / `input_image` 数组。
 
 ### 3.3 Anthropic Messages
 

@@ -1,0 +1,37 @@
+{
+  "source": "constructed from reports: DeepSeek writes DSML tool markup into the answer text",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "text",
+          "text": "I will check."
+        },
+        {
+          "type": "tool_call",
+          "id": "call_gen_1",
+          "name": "get_weather",
+          "argsJson": "{\"city\":\"Paris\",\"days\":3}"
+        }
+      ],
+      "stopReason": "TOOL_USE",
+      "providerMetadata": {
+        "id": "chatcmpl-test",
+        "model": "test-model",
+        "finish_reason": "stop",
+        "leaked_tool_calls": 1
+      }
+    },
+    "deltas": {
+      "text": "I will check.\n\n",
+      "reasoning": "",
+      "calls": [
+        {
+          "id": "call_gen_1",
+          "name": "get_weather",
+          "args": "{\"city\":\"Paris\",\"days\":3}"
+        }
+      ]
+    }
+  }
+}

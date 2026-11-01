@@ -1,0 +1,24 @@
+{
+  "source": "constructed: BOM, CRLF line endings and keep-alive comment lines between events",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "text",
+          "text": "Hello there."
+        }
+      ],
+      "stopReason": "END_TURN",
+      "providerMetadata": {
+        "id": "chatcmpl-test",
+        "model": "test-model",
+        "finish_reason": "stop"
+      }
+    },
+    "deltas": {
+      "text": "Hello there.",
+      "reasoning": "",
+      "calls": []
+    }
+  }
+}

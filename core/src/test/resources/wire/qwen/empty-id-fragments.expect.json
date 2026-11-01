@@ -1,0 +1,47 @@
+{
+  "source": "constructed from docs: help.aliyun.com model-studio function calling (continuation fragments carry id \"\")",
+  "reasoningField": "reasoning_content",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "reasoning",
+          "provider": "test",
+          "model": "test-model",
+          "kind": "CHAT_REASONING_FIELD",
+          "opaque": {
+            "reasoning_content": "Call the tool."
+          },
+          "summary": "Call the tool."
+        },
+        {
+          "type": "tool_call",
+          "id": "call_qw1",
+          "name": "get_weather",
+          "argsJson": "{\"city\": \"Paris\"}"
+        }
+      ],
+      "stopReason": "TOOL_USE",
+      "usage": {
+        "inputTokens": 300,
+        "outputTokens": 25
+      },
+      "providerMetadata": {
+        "id": "chatcmpl-test",
+        "model": "qwen-plus",
+        "finish_reason": "tool_calls"
+      }
+    },
+    "deltas": {
+      "text": "",
+      "reasoning": "Call the tool.",
+      "calls": [
+        {
+          "id": "call_qw1",
+          "name": "get_weather",
+          "args": "{\"city\": \"Paris\"}"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "source": "constructed from docs: volcengine.com/docs/82379 streaming reasoning_content and include_usage chunk",
+  "reasoningField": "reasoning_content",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "reasoning",
+          "provider": "test",
+          "model": "test-model",
+          "kind": "CHAT_REASONING_FIELD",
+          "opaque": {
+            "reasoning_content": "Check weather."
+          },
+          "summary": "Check weather."
+        },
+        {
+          "type": "tool_call",
+          "id": "call_ark1",
+          "name": "get_weather",
+          "argsJson": "{\"city\":\"Paris\"}"
+        }
+      ],
+      "stopReason": "TOOL_USE",
+      "usage": {
+        "inputTokens": 150,
+        "outputTokens": 40,
+        "reasoningTokens": 10
+      },
+      "providerMetadata": {
+        "id": "chatcmpl-test",
+        "model": "doubao-seed-1-6",
+        "finish_reason": "tool_calls"
+      }
+    },
+    "deltas": {
+      "text": "",
+      "reasoning": "Check weather.",
+      "calls": [
+        {
+          "id": "call_ark1",
+          "name": "get_weather",
+          "args": "{\"city\":\"Paris\"}"
+        }
+      ]
+    }
+  }
+}

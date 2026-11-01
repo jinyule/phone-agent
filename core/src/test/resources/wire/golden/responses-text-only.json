@@ -1,0 +1,94 @@
+{
+  "model": "test-model",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Open settings."
+        },
+        {
+          "type": "input_text",
+          "text": "[image omitted: this model cannot see images]"
+        }
+      ]
+    },
+    {
+      "id": "rs_1",
+      "type": "reasoning",
+      "summary": [],
+      "encrypted_content": "gAAAA-test-encrypted"
+    },
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "Tapping the gear."
+        }
+      ]
+    },
+    {
+      "type": "function_call",
+      "call_id": "call_1",
+      "name": "tap",
+      "arguments": "{\"x\":1,\"y\":2}"
+    },
+    {
+      "type": "function_call",
+      "call_id": "call_2",
+      "name": "get_weather",
+      "arguments": "not json, kept verbatim"
+    },
+    {
+      "type": "function_call_output",
+      "call_id": "call_1",
+      "output": "Tapped.\n\n[image omitted: this model cannot see images]"
+    },
+    {
+      "type": "function_call_output",
+      "call_id": "call_2",
+      "output": "error: unknown city"
+    },
+    {
+      "type": "function_call",
+      "call_id": "call_3",
+      "name": "tap",
+      "arguments": "{}"
+    },
+    {
+      "type": "function_call_output",
+      "call_id": "call_3",
+      "output": "[image omitted: this model cannot see images]"
+    },
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "Settings are open."
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Thanks."
+        },
+        {
+          "type": "input_text",
+          "text": "Now Wi-Fi."
+        }
+      ]
+    }
+  ],
+  "store": false,
+  "stream": true
+}

@@ -1,0 +1,24 @@
+{
+  "source": "constructed: unknown finish_reason and no [DONE] (finish_reason completes the stream)",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "text",
+          "text": "done"
+        }
+      ],
+      "stopReason": "END_TURN",
+      "providerMetadata": {
+        "id": "chatcmpl-test",
+        "model": "test-model",
+        "finish_reason": "eos"
+      }
+    },
+    "deltas": {
+      "text": "done",
+      "reasoning": "",
+      "calls": []
+    }
+  }
+}

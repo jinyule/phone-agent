@@ -1,0 +1,9 @@
+{
+  "source": "constructed from docs: vLLM reports a mid-stream failure as a bare error chunk",
+  "expect": {
+    "error": {
+      "kind": "SERVER",
+      "message": "server error 500: CUDA out of memory"
+    }
+  }
+}

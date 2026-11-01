@@ -1,0 +1,14 @@
+data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1793500000,"model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}],"usage":null}
+
+data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1793500000,"model":"test-model","choices":[{"index":0,"delta":{"content":"No u"},"finish_reason":null}],"usage":null}
+
+data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1793500000,"model":"test-model","choices":[{"index":0,"delta":{"content":"sage"},"finish_reason":null}],"usage":null}
+
+data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1793500000,"model":"test-model","choices":[{"index":0,"delta":{"content":" her"},"finish_reason":null}],"usage":null}
+
+data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1793500000,"model":"test-model","choices":[{"index":0,"delta":{"content":"e."},"finish_reason":null}],"usage":null}
+
+data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1793500000,"model":"test-model","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":null}
+
+data: [DONE]
+

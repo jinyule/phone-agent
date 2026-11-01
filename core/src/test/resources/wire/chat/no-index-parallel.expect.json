@@ -1,0 +1,47 @@
+{
+  "source": "constructed from docs: Gemini OpenAI compatibility sends whole calls without index in one chunk",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "tool_call",
+          "id": "function-call-1",
+          "name": "get_weather",
+          "argsJson": "{\"city\":\"Paris\"}"
+        },
+        {
+          "type": "tool_call",
+          "id": "function-call-2",
+          "name": "get_weather",
+          "argsJson": "{\"city\":\"Tokyo\"}"
+        }
+      ],
+      "stopReason": "TOOL_USE",
+      "usage": {
+        "inputTokens": 90,
+        "outputTokens": 30
+      },
+      "providerMetadata": {
+        "id": "gen",
+        "model": "gemini-compat",
+        "finish_reason": "tool_calls"
+      }
+    },
+    "deltas": {
+      "text": "",
+      "reasoning": "",
+      "calls": [
+        {
+          "id": "function-call-1",
+          "name": "get_weather",
+          "args": "{\"city\":\"Paris\"}"
+        },
+        {
+          "id": "function-call-2",
+          "name": "get_weather",
+          "args": "{\"city\":\"Tokyo\"}"
+        }
+      ]
+    }
+  }
+}

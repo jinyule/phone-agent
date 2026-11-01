@@ -1,0 +1,49 @@
+{
+  "source": "constructed from docs: api-docs.deepseek.com thinking mode + tool calls (reasoning_content, prompt_cache_hit_tokens, usage on the finish chunk)",
+  "reasoningField": "reasoning_content",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "reasoning",
+          "provider": "test",
+          "model": "test-model",
+          "kind": "CHAT_REASONING_FIELD",
+          "opaque": {
+            "reasoning_content": "The user wants the weather in Paris."
+          },
+          "summary": "The user wants the weather in Paris."
+        },
+        {
+          "type": "tool_call",
+          "id": "call_00_ds",
+          "name": "get_weather",
+          "argsJson": "{\"city\": \"Paris\", \"reason\": \"check the weather\"}"
+        }
+      ],
+      "stopReason": "TOOL_USE",
+      "usage": {
+        "inputTokens": 400,
+        "outputTokens": 60,
+        "cacheReadTokens": 384,
+        "reasoningTokens": 20
+      },
+      "providerMetadata": {
+        "id": "chatcmpl-test",
+        "model": "deepseek-flash",
+        "finish_reason": "tool_calls"
+      }
+    },
+    "deltas": {
+      "text": "",
+      "reasoning": "The user wants the weather in Paris.",
+      "calls": [
+        {
+          "id": "call_00_ds",
+          "name": "get_weather",
+          "args": "{\"city\": \"Paris\", \"reason\": \"check the weather\"}"
+        }
+      ]
+    }
+  }
+}

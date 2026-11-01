@@ -1,0 +1,7 @@
+event: message
+data: {"id":"m","choices":[{"index":0,
+data: "delta":{"content":"split"},"finish_reason":null}]}
+
+data: {"id":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data:[DONE]

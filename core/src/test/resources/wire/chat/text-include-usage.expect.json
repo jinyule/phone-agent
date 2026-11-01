@@ -1,0 +1,30 @@
+{
+  "source": "constructed from docs: OpenAI streaming with stream_options.include_usage (usage in a final chunk with empty choices)",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "text",
+          "text": "Paris is sunny today."
+        }
+      ],
+      "stopReason": "END_TURN",
+      "usage": {
+        "inputTokens": 120,
+        "outputTokens": 30,
+        "cacheReadTokens": 64,
+        "reasoningTokens": 12
+      },
+      "providerMetadata": {
+        "id": "chatcmpl-test",
+        "model": "test-model",
+        "finish_reason": "stop"
+      }
+    },
+    "deltas": {
+      "text": "Paris is sunny today.",
+      "reasoning": "",
+      "calls": []
+    }
+  }
+}

@@ -1,0 +1,10 @@
+data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1793500000,"model":"Qwen/Qwen3-8B","choices":[{"index":0,"delta":{"content":"Paris ","reasoning_content":null,"role":"assistant"},"finish_reason":null}],"usage":{"prompt_tokens":40,"completion_tokens":2,"total_tokens":42},"system_fingerprint":""}
+
+data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1793500000,"model":"Qwen/Qwen3-8B","choices":[{"index":0,"delta":{"content":"is ","reasoning_content":null,"role":"assistant"},"finish_reason":null}],"usage":{"prompt_tokens":40,"completion_tokens":4,"total_tokens":44},"system_fingerprint":""}
+
+data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1793500000,"model":"Qwen/Qwen3-8B","choices":[{"index":0,"delta":{"content":"sunny.","reasoning_content":null,"role":"assistant"},"finish_reason":null}],"usage":{"prompt_tokens":40,"completion_tokens":6,"total_tokens":46},"system_fingerprint":""}
+
+data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1793500000,"model":"Qwen/Qwen3-8B","choices":[{"index":0,"delta":{"content":"","reasoning_content":null},"finish_reason":"stop"}],"usage":{"prompt_tokens":40,"completion_tokens":7,"total_tokens":47},"system_fingerprint":""}
+
+data: [DONE]
+

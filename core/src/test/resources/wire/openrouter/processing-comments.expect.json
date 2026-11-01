@@ -1,0 +1,39 @@
+{
+  "source": "constructed from docs: openrouter.ai/docs streaming comments and the reasoning field",
+  "reasoningField": "reasoning",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "reasoning",
+          "provider": "test",
+          "model": "test-model",
+          "kind": "CHAT_REASONING_FIELD",
+          "opaque": {
+            "reasoning": "Thinking done."
+          },
+          "summary": "Thinking done."
+        },
+        {
+          "type": "text",
+          "text": "Paris."
+        }
+      ],
+      "stopReason": "END_TURN",
+      "usage": {
+        "inputTokens": 12,
+        "outputTokens": 9
+      },
+      "providerMetadata": {
+        "id": "chatcmpl-test",
+        "model": "deepseek/deepseek-r1",
+        "finish_reason": "stop"
+      }
+    },
+    "deltas": {
+      "text": "Paris.",
+      "reasoning": "Thinking done.",
+      "calls": []
+    }
+  }
+}

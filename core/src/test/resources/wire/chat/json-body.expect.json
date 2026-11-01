@@ -1,0 +1,48 @@
+{
+  "source": "constructed: server ignoring stream:true and answering one JSON completion (empty arguments become {})",
+  "contentType": "application/json",
+  "reasoningField": "reasoning_content",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "reasoning",
+          "provider": "test",
+          "model": "test-model",
+          "kind": "CHAT_REASONING_FIELD",
+          "opaque": {
+            "reasoning_content": "Need the tool."
+          },
+          "summary": "Need the tool."
+        },
+        {
+          "type": "tool_call",
+          "id": "call_json",
+          "name": "get_weather",
+          "argsJson": "{}"
+        }
+      ],
+      "stopReason": "TOOL_USE",
+      "usage": {
+        "inputTokens": 50,
+        "outputTokens": 9
+      },
+      "providerMetadata": {
+        "id": "chatcmpl-json",
+        "model": "local-model",
+        "finish_reason": "tool_calls"
+      }
+    },
+    "deltas": {
+      "text": "",
+      "reasoning": "Need the tool.",
+      "calls": [
+        {
+          "id": "call_json",
+          "name": "get_weather",
+          "args": "{}"
+        }
+      ]
+    }
+  }
+}

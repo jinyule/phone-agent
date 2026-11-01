@@ -1,0 +1,9 @@
+{
+  "source": "constructed from docs: docs.bigmodel.cn finish_reason network_error (inference failure)",
+  "expect": {
+    "error": {
+      "kind": "SERVER",
+      "message": "server error 500: stream ended with finish_reason=network_error"
+    }
+  }
+}

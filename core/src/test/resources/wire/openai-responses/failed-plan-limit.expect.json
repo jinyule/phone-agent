@@ -1,0 +1,11 @@
+{
+  "source": "constructed from Mika (unverified): ChatGPT plan usage limit reported by response.failed",
+  "protocol": "responses",
+  "plan": true,
+  "expect": {
+    "error": {
+      "kind": "QUOTA_EXCEEDED",
+      "message": "quota exceeded: You have reached your usage limit."
+    }
+  }
+}

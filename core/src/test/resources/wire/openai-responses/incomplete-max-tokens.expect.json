@@ -1,0 +1,30 @@
+{
+  "source": "constructed from docs: response.incomplete with incomplete_details.reason max_output_tokens",
+  "protocol": "responses",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "text",
+          "text": "Paris is"
+        }
+      ],
+      "stopReason": "MAX_TOKENS",
+      "usage": {
+        "inputTokens": 10,
+        "outputTokens": 2
+      },
+      "providerMetadata": {
+        "id": "resp_test",
+        "model": "gpt-test",
+        "status": "incomplete",
+        "incomplete_reason": "max_output_tokens"
+      }
+    },
+    "deltas": {
+      "text": "Paris is",
+      "reasoning": "",
+      "calls": []
+    }
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "source": "constructed from docs: Responses reasoning item with encrypted_content (include) followed by a function_call",
+  "protocol": "responses",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "reasoning",
+          "provider": "test",
+          "model": "test-model",
+          "kind": "RESPONSES_ENCRYPTED",
+          "opaque": {
+            "id": "rs_1",
+            "type": "reasoning",
+            "summary": [
+              {
+                "type": "summary_text",
+                "text": "Need the weather tool."
+              }
+            ],
+            "encrypted_content": "gAAAA-test-encrypted-blob=="
+          },
+          "summary": "Need the weather tool."
+        },
+        {
+          "type": "tool_call",
+          "id": "call_resp1",
+          "name": "get_weather",
+          "argsJson": "{\"city\": \"Paris\", \"reason\": \"check the weather\"}"
+        }
+      ],
+      "stopReason": "TOOL_USE",
+      "usage": {
+        "inputTokens": 500,
+        "outputTokens": 80,
+        "cacheReadTokens": 384,
+        "reasoningTokens": 48
+      },
+      "providerMetadata": {
+        "id": "resp_test",
+        "model": "gpt-test",
+        "status": "completed"
+      }
+    },
+    "deltas": {
+      "text": "",
+      "reasoning": "Need the weather tool.",
+      "calls": [
+        {
+          "id": "call_resp1",
+          "name": "get_weather",
+          "args": "{\"city\": \"Paris\", \"reason\": \"check the weather\"}"
+        }
+      ]
+    }
+  }
+}

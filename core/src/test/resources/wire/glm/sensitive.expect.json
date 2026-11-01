@@ -1,0 +1,9 @@
+{
+  "source": "constructed from docs: docs.bigmodel.cn finish_reason sensitive (output blocked)",
+  "expect": {
+    "error": {
+      "kind": "REFUSAL",
+      "message": "model refused (sensitive)"
+    }
+  }
+}

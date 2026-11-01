@@ -1,0 +1,29 @@
+{
+  "source": "constructed from docs: docs.siliconflow.cn cumulative usage on every chunk, null reasoning_content placeholders",
+  "reasoningField": "reasoning_content",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "text",
+          "text": "Paris is sunny."
+        }
+      ],
+      "stopReason": "END_TURN",
+      "usage": {
+        "inputTokens": 40,
+        "outputTokens": 7
+      },
+      "providerMetadata": {
+        "id": "chatcmpl-test",
+        "model": "Qwen/Qwen3-8B",
+        "finish_reason": "stop"
+      }
+    },
+    "deltas": {
+      "text": "Paris is sunny.",
+      "reasoning": "",
+      "calls": []
+    }
+  }
+}

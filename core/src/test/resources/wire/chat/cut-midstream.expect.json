@@ -1,0 +1,9 @@
+{
+  "source": "constructed: connection closed mid-answer (no finish_reason, no [DONE])",
+  "expect": {
+    "error": {
+      "kind": "NETWORK",
+      "message": "network: stream ended before [DONE] or a finish_reason"
+    }
+  }
+}

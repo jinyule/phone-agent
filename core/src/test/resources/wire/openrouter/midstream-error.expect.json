@@ -1,0 +1,9 @@
+{
+  "source": "constructed from docs: openrouter.ai/docs/api-reference/streaming mid-stream error chunk",
+  "expect": {
+    "error": {
+      "kind": "SERVER",
+      "message": "server error 500: Provider disconnected unexpectedly"
+    }
+  }
+}

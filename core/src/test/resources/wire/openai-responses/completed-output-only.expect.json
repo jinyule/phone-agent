@@ -1,0 +1,29 @@
+{
+  "source": "constructed: gateway sending no output_item.done events, only the final output",
+  "protocol": "responses",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "text",
+          "text": "Paris is sunny."
+        }
+      ],
+      "stopReason": "END_TURN",
+      "usage": {
+        "inputTokens": 10,
+        "outputTokens": 4
+      },
+      "providerMetadata": {
+        "id": "resp_test",
+        "model": "gpt-test",
+        "status": "completed"
+      }
+    },
+    "deltas": {
+      "text": "Paris is sunny.",
+      "reasoning": "",
+      "calls": []
+    }
+  }
+}

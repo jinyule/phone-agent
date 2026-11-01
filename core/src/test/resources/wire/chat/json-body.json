@@ -1,0 +1,32 @@
+{
+  "id": "chatcmpl-json",
+  "object": "chat.completion",
+  "created": 1793500000,
+  "model": "local-model",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "reasoning_content": "Need the tool.",
+        "tool_calls": [
+          {
+            "id": "call_json",
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "arguments": ""
+            }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 50,
+    "completion_tokens": 9,
+    "total_tokens": 59
+  }
+}

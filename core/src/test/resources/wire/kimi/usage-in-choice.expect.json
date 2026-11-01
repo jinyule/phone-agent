@@ -1,0 +1,48 @@
+{
+  "source": "constructed from docs: platform.moonshot.cn streaming usage inside the final choice, cached_tokens at the top of usage",
+  "reasoningField": "reasoning_content",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "reasoning",
+          "provider": "test",
+          "model": "test-model",
+          "kind": "CHAT_REASONING_FIELD",
+          "opaque": {
+            "reasoning_content": "The user wants the weather."
+          },
+          "summary": "The user wants the weather."
+        },
+        {
+          "type": "tool_call",
+          "id": "functions.get_weather:0",
+          "name": "get_weather",
+          "argsJson": "{\"city\": \"Paris\", \"reason\": \"check the weather\"}"
+        }
+      ],
+      "stopReason": "TOOL_USE",
+      "usage": {
+        "inputTokens": 400,
+        "outputTokens": 80,
+        "cacheReadTokens": 256
+      },
+      "providerMetadata": {
+        "id": "chatcmpl-test",
+        "model": "kimi-k2-thinking",
+        "finish_reason": "tool_calls"
+      }
+    },
+    "deltas": {
+      "text": "",
+      "reasoning": "The user wants the weather.",
+      "calls": [
+        {
+          "id": "functions.get_weather:0",
+          "name": "get_weather",
+          "args": "{\"city\": \"Paris\", \"reason\": \"check the weather\"}"
+        }
+      ]
+    }
+  }
+}

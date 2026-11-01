@@ -1,0 +1,157 @@
+{
+  "model": "test-model",
+  "instructions": "You operate a phone.\n\nBe careful.",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Open settings."
+        },
+        {
+          "type": "input_image",
+          "image_url": "data:image/png;base64,U0NSRUVO",
+          "detail": "auto"
+        }
+      ]
+    },
+    {
+      "id": "rs_1",
+      "type": "reasoning",
+      "summary": [],
+      "encrypted_content": "gAAAA-test-encrypted"
+    },
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "Tapping the gear."
+        }
+      ]
+    },
+    {
+      "type": "function_call",
+      "call_id": "call_1",
+      "name": "tap",
+      "arguments": "{\"x\":1,\"y\":2}"
+    },
+    {
+      "type": "function_call",
+      "call_id": "call_2",
+      "name": "get_weather",
+      "arguments": "not json, kept verbatim"
+    },
+    {
+      "type": "function_call_output",
+      "call_id": "call_1",
+      "output": [
+        {
+          "type": "input_text",
+          "text": "Tapped."
+        },
+        {
+          "type": "input_image",
+          "image_url": "data:image/jpeg;base64,U0hPVA==",
+          "detail": "auto"
+        }
+      ]
+    },
+    {
+      "type": "function_call_output",
+      "call_id": "call_2",
+      "output": "error: unknown city"
+    },
+    {
+      "type": "function_call",
+      "call_id": "call_3",
+      "name": "tap",
+      "arguments": "{}"
+    },
+    {
+      "type": "function_call_output",
+      "call_id": "call_3",
+      "output": [
+        {
+          "type": "input_image",
+          "image_url": "data:image/jpeg;base64,U0hPVA==",
+          "detail": "auto"
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "Settings are open."
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Thanks."
+        },
+        {
+          "type": "input_text",
+          "text": "Now Wi-Fi."
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "name": "get_weather",
+      "description": "Current weather of a city.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "city": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "city"
+        ]
+      },
+      "strict": false
+    },
+    {
+      "type": "function",
+      "name": "tap",
+      "description": "Taps a point.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "city": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "city"
+        ]
+      },
+      "strict": false
+    }
+  ],
+  "tool_choice": "auto",
+  "parallel_tool_calls": false,
+  "store": false,
+  "stream": true,
+  "include": [
+    "reasoning.encrypted_content"
+  ],
+  "reasoning": {
+    "effort": "high"
+  },
+  "max_output_tokens": 2048
+}

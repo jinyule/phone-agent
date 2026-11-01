@@ -1,0 +1,24 @@
+{
+  "source": "constructed: gateways that send usage:null in every chunk and never a usage chunk",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "text",
+          "text": "No usage here."
+        }
+      ],
+      "stopReason": "END_TURN",
+      "providerMetadata": {
+        "id": "chatcmpl-test",
+        "model": "test-model",
+        "finish_reason": "stop"
+      }
+    },
+    "deltas": {
+      "text": "No usage here.",
+      "reasoning": "",
+      "calls": []
+    }
+  }
+}

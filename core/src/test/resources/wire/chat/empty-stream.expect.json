@@ -1,0 +1,9 @@
+{
+  "source": "constructed: a stream with no completion chunk at all",
+  "expect": {
+    "error": {
+      "kind": "BAD_RESPONSE",
+      "message": "bad response: stream carried no completion chunks"
+    }
+  }
+}

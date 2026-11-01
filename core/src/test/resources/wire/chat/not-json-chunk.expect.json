@@ -1,0 +1,9 @@
+{
+  "source": "constructed: proxy injecting non-JSON into the event stream",
+  "expect": {
+    "error": {
+      "kind": "BAD_RESPONSE",
+      "message": "bad response: chunk is not a JSON object"
+    }
+  }
+}

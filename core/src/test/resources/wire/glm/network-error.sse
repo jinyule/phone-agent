@@ -1,0 +1,6 @@
+data: {"id":"glm","created":1793500000,"model":"glm-4.6","choices":[{"index":0,"delta":{"role":"assistant","content":"Par"}}]}
+
+data: {"id":"glm","created":1793500000,"model":"glm-4.6","choices":[{"index":0,"finish_reason":"network_error","delta":{"role":"assistant","content":""}}]}
+
+data: [DONE]
+
