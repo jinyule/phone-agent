@@ -8,6 +8,9 @@ package dev.phoneagent.core.tools
  *   the tree is poor. When `false`, no frame is ever attached and the result says so.
  * @property stableQuietMs `phone_wait condition=stable`: the screen counts as settled after this
  *   long without a change.
+ * @property waitReadIntervalMs `phone_wait`: appear/disappear read the screen once per this
+ *   interval (a change is seen within one interval, a busy screen costs no more reads); after a
+ *   change, stable looks again no sooner than this.
  * @property observeTimeoutMs `phone_observe` (tree, OCR and frame).
  * @property appsTimeoutMs `phone_apps`.
  * @property waitTimeoutMs `phone_wait`; must exceed the longest wait the schema allows plus a snapshot.
@@ -20,6 +23,7 @@ package dev.phoneagent.core.tools
 public data class ToolsConfig(
     val vision: Boolean = true,
     val stableQuietMs: Long = 800,
+    val waitReadIntervalMs: Long = 250,
     val observeTimeoutMs: Long = 20_000,
     val appsTimeoutMs: Long = 10_000,
     val waitTimeoutMs: Long = PhoneWaitTool.MAX_WAIT_MS + WAIT_MARGIN_MS,
@@ -32,6 +36,9 @@ public data class ToolsConfig(
     init {
         require(stableQuietMs in MIN_QUIET_MS..PhoneWaitTool.MAX_WAIT_MS) {
             "stableQuietMs must be in $MIN_QUIET_MS..${PhoneWaitTool.MAX_WAIT_MS}, got $stableQuietMs"
+        }
+        require(waitReadIntervalMs in MIN_READ_INTERVAL_MS..MAX_READ_INTERVAL_MS) {
+            "waitReadIntervalMs must be in $MIN_READ_INTERVAL_MS..$MAX_READ_INTERVAL_MS, got $waitReadIntervalMs"
         }
         require(waitTimeoutMs > PhoneWaitTool.MAX_WAIT_MS) {
             "waitTimeoutMs must exceed the longest wait (${PhoneWaitTool.MAX_WAIT_MS} ms), got $waitTimeoutMs"
@@ -51,6 +58,8 @@ public data class ToolsConfig(
 
     private companion object {
         const val MIN_QUIET_MS = 100L
+        const val MIN_READ_INTERVAL_MS = 50L
+        const val MAX_READ_INTERVAL_MS = 2_000L
 
         /** Room after the longest wait for the final snapshot. */
         const val WAIT_MARGIN_MS = 15_000L

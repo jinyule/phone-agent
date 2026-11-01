@@ -18,7 +18,7 @@ public object PhaseOneTools {
         return listOf(
             PhoneObserveTool(presenter, config.vision, config.observeTimeoutMs),
             PhoneAppsTool(presenter, config.appsTimeoutMs),
-            PhoneWaitTool(presenter, config.stableQuietMs, config.waitTimeoutMs),
+            PhoneWaitTool(presenter, config.stableQuietMs, config.waitReadIntervalMs, config.waitTimeoutMs),
             PhoneTapTool(presenter, config.actionTimeoutMs),
             PhoneTypeTool(presenter, config.typeTimeoutMs),
             PhoneScrollTool(presenter, config.actionTimeoutMs),

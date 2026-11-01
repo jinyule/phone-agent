@@ -11,19 +11,33 @@ import dev.phoneagent.core.tool.ToolContext
 import dev.phoneagent.core.tool.ToolGroup
 import dev.phoneagent.core.tool.ToolResult
 import dev.phoneagent.core.tool.ToolStatus
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
 /**
- * `phone_wait(condition, text?, timeoutMs?)` (phase1 §5): waits, event-driven, until [text]
- * appears or disappears, or until the screen is quiet for [stableQuietMs]. Waits use coroutine
- * time and [ScreenPort.awaitChange], never polling sleeps. Ends with the page as it is then;
- * an unmet condition is an error result so the model notices.
+ * `phone_wait(condition, text?, timeoutMs?)` (phase1 §5): waits until a text appears or
+ * disappears, or until the screen is quiet for [stableQuietMs]. Ends with the page as it is then;
+ * an unmet condition is an error result so the model notices. All waiting is coroutine time
+ * (`delay`, `withTimeoutOrNull`), so it is cancellable and testable in virtual time.
+ *
+ * - **appear / disappear**: read, check, and if not yet, read again one [readIntervalMs] later,
+ *   until the deadline. Reads, not change events, decide: [ScreenPort.awaitChange] only reports
+ *   changes after it is called, so a change between a read and the call would be lost, while the
+ *   next read always sees it; and a screen that changes every frame still costs one read per
+ *   interval. At the deadline the last page is checked once more, so a condition that came true
+ *   in the meantime is reported as met.
+ * - **stable**: [ScreenPort.awaitChange] until a quiet period of [stableQuietMs]; each look after
+ *   a change takes at least [readIntervalMs], so a port that reports changes without suspending
+ *   cannot spin the loop or hold off cancellation.
  */
 internal class PhoneWaitTool(
     private val presenter: ScreenPresenter,
     private val stableQuietMs: Long,
+    private val readIntervalMs: Long,
     override val timeoutMs: Long,
 ) : PhaseOneTool(
         name = "phone_wait",
@@ -81,7 +95,9 @@ internal class PhoneWaitTool(
         wait: Wait,
     ): Pair<Boolean, ScreenSnapshot> {
         val met = withTimeoutOrNull(wait.timeoutMs) { untilMet(screen, wait) }
-        return if (met != null) true to met else false to screen.snapshot()
+        if (met != null) return true to met
+        val last = screen.snapshot()
+        return (wait.condition != Condition.STABLE && matches(last, wait)) to last
     }
 
     private suspend fun untilMet(
@@ -90,17 +106,31 @@ internal class PhoneWaitTool(
     ): ScreenSnapshot {
         if (wait.condition == Condition.STABLE) {
             do {
-                val changed = screen.awaitChange(stableQuietMs)
+                val changed = changedWithin(screen)
             } while (changed)
             return screen.snapshot()
         }
         var snapshot = screen.snapshot()
-        while (shows(snapshot, wait.needle) != (wait.condition == Condition.APPEAR)) {
-            screen.awaitChange(wait.timeoutMs)
+        while (!matches(snapshot, wait)) {
+            delay(readIntervalMs)
             snapshot = screen.snapshot()
         }
         return snapshot
     }
+
+    /** Whether the screen changed within [stableQuietMs]; after a change, returns no sooner than [readIntervalMs]. */
+    private suspend fun changedWithin(screen: ScreenPort): Boolean =
+        coroutineScope {
+            val floor = launch { delay(readIntervalMs) }
+            val changed = screen.awaitChange(stableQuietMs)
+            if (changed) floor.join() else floor.cancel()
+            changed
+        }
+
+    private fun matches(
+        snapshot: ScreenSnapshot,
+        wait: Wait,
+    ): Boolean = shows(snapshot, wait.needle) == (wait.condition == Condition.APPEAR)
 
     private fun report(
         wait: Wait,

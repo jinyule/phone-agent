@@ -24,17 +24,26 @@ import dev.phoneagent.core.tool.ToolResult
 import dev.phoneagent.core.tool.ToolStatus
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.currentTime
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ObserveAndWaitTest {
     private val formatter = ScreenFormatter(lexicon = Screens.LEXICON)
+
+    private companion object {
+        /** The default read interval of phone_wait (ToolsConfig.waitReadIntervalMs). */
+        const val READ_INTERVAL_MS = 250L
+    }
 
     private fun tools(config: ToolsConfig = ToolsConfig()) =
         PhaseOneTools.create(formatter, config).associateBy {
@@ -222,6 +231,110 @@ class ObserveAndWaitTest {
                 assertTrue(still.text().startsWith("等了 1 秒，「加载中」还在。"))
             }
 
+        /** A screen whose page is [first] for the first [reads] reads and [then] after; it never reports a change. */
+        private fun silent(
+            first: ScreenSnapshot,
+            then: ScreenSnapshot,
+            reads: Int,
+        ) = FakeScreen().apply {
+            var count = 0
+            onSnapshot = { if (count++ < reads) first else then }
+            onAwaitChange = { timeout ->
+                delay(timeout)
+                false
+            }
+        }
+
+        @Test
+        fun `a change between the first read and the wait is seen within one read interval`() =
+            runTest {
+                // The page finished loading right after the first read; the port reports no later change.
+                val result =
+                    wait("""{"condition":"appear","text":"已完成","timeoutMs":5000}""", silent(loading, loaded, 1))
+                assertEquals(ToolStatus.OK, result.status, result.text())
+                assertTrue(currentTime <= READ_INTERVAL_MS, "found at $currentTime ms")
+                assertTrue(result.text().startsWith("等到了：「已完成」出现了。\nscreen s21"), result.text())
+            }
+
+        @Test
+        fun `a condition that holds at the deadline is met`() =
+            runTest {
+                val screen =
+                    FakeScreen().apply {
+                        onSnapshot = { if (currentTime >= 2_000) loaded else loading }
+                        onAwaitChange = { timeout ->
+                            delay(timeout)
+                            false
+                        }
+                    }
+                val appeared = wait("""{"condition":"appear","text":"已完成","timeoutMs":2000}""", screen)
+                assertEquals(ToolStatus.OK, appeared.status, appeared.text())
+                assertEquals("true", appeared.detail("met"))
+                assertTrue(appeared.text().startsWith("等到了：「已完成」出现了。"), appeared.text())
+                val gone = wait("""{"condition":"disappear","text":"加载中","timeoutMs":2000}""", screen)
+                assertEquals(ToolStatus.OK, gone.status, gone.text())
+                assertTrue(gone.text().startsWith("等到了：「加载中」消失了。"), gone.text())
+            }
+
+        @Test
+        fun `disappear sees a change before the wait too`() =
+            runTest {
+                val result =
+                    wait("""{"condition":"disappear","text":"加载中","timeoutMs":5000}""", silent(loading, loaded, 1))
+                assertEquals(ToolStatus.OK, result.status, result.text())
+                assertTrue(currentTime <= READ_INTERVAL_MS, "found at $currentTime ms")
+            }
+
+        @Test
+        fun `a port that reports changes at once neither spins the loop nor blocks cancellation`() =
+            runTest {
+                var awaits = 0
+                var reads = 0
+                val screen =
+                    FakeScreen(loading).apply {
+                        onSnapshot = {
+                            reads++
+                            loading
+                        }
+                        onAwaitChange = {
+                            // Returns without suspending; gives up after 200 calls so a spinning loop ends.
+                            if (++awaits > 200) delay(Long.MAX_VALUE)
+                            true
+                        }
+                    }
+                for (args in listOf("""{"condition":"appear","text":"已完成"}""", """{"condition":"stable"}""")) {
+                    awaits = 0
+                    reads = 0
+                    val job = launch { wait(args, screen) }
+                    advanceTimeBy(1_000)
+                    val bound = (1_000 / READ_INTERVAL_MS + 2).toInt()
+                    assertTrue(awaits <= bound && reads <= bound, "$args: $awaits waits, $reads reads in 1 s")
+                    job.cancel()
+                    runCurrent()
+                    assertTrue(job.isCancelled && job.isCompleted, "$args: cancelled at once")
+                }
+            }
+
+        @Test
+        fun `changes every 16 ms do not make every change a read`() =
+            runTest {
+                var reads = 0
+                val screen =
+                    FakeScreen(loading).apply {
+                        onSnapshot = {
+                            reads++
+                            loading
+                        }
+                        onAwaitChange = {
+                            delay(16)
+                            true
+                        }
+                    }
+                val result = wait("""{"condition":"appear","text":"已完成","timeoutMs":10000}""", screen)
+                assertEquals(ToolStatus.ERROR, result.status)
+                assertTrue(reads <= 10_000 / READ_INTERVAL_MS + 2, "$reads reads in 10 s")
+            }
+
         @Test
         fun `stable waits for a quiet period without changes`() =
             runTest {
@@ -240,7 +353,8 @@ class ObserveAndWaitTest {
                     }
                 val result = wait("""{"condition":"stable"}""", screen)
                 assertTrue(result.text().startsWith("画面已经稳定。"))
-                assertEquals(300 + 800, currentTime)
+                // Each look after a change takes at least one read interval, then 800 ms of quiet.
+                assertEquals(3 * READ_INTERVAL_MS + 800, currentTime)
             }
 
         @Test
@@ -289,6 +403,13 @@ class ObserveAndWaitTest {
                 val gone = FakeScreen().apply { unavailable = ScreenUnavailableException("屏幕没了") }
                 assertTrue(wait("""{"condition":"stable"}""", gone).text().startsWith("屏幕暂时用不了（屏幕没了）"))
             }
+
+        @Test
+        fun `the read interval is a validated setting`() {
+            assertEquals(READ_INTERVAL_MS, ToolsConfig().waitReadIntervalMs)
+            assertThrows<IllegalArgumentException> { ToolsConfig(waitReadIntervalMs = 49) }
+            assertThrows<IllegalArgumentException> { ToolsConfig(waitReadIntervalMs = 2_001) }
+        }
 
         @Test
         fun `the timeout leaves room for the longest wait`() {

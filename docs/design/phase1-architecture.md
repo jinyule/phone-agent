@@ -573,6 +573,8 @@ screen s12 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · 坐标 0–
 
 所有工具都带 `reason` 参数。模型回复里不带工具调用，就视为最终回答。每轮只执行第一个工具调用。
 
+`phone_wait` 的等法（不依赖 `ScreenPort.awaitChange` 报告调用之前的变化）：appear / disappear 每隔 `ToolsConfig.waitReadIntervalMs`（默认 250ms）读一屏判断一次，变化最迟一个间隔内被发现，画面一直在动也只按间隔读；截止时用最后一屏再判断一次，条件那时已经成立就算等到了。stable 用 `awaitChange` 等一段 `stableQuietMs` 的安静期，每次看到变化后至少隔一个读屏间隔再看，端口不挂起也不会空转。全部用协程时间，可取消。
+
 `phone_intent` 各 kind 的字段键名以下表为准（`LaunchTarget.SystemIntent.fields` 用这些键；工具在边界校验，WP05 解析、WP07 实现都用同一套键）：
 
 | kind | 字段 |
