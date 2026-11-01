@@ -24,6 +24,8 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 
 /**
  * Neutral request → wire JSON goldens (`wire/golden/`). One conversation exercises every mapping
@@ -243,20 +245,41 @@ class WireGoldenTest {
         val roles = (enforced["input"] as JsonArray).mapNotNull { (it as? JsonObject)?.get("role") }
         assertEquals(listOf(JsonPrimitive("developer"), JsonPrimitive("user")), roles)
 
-        for (type in listOf(
-            "web_search",
-            "file_search",
-            "computer_use_preview",
-            "code_interpreter",
-            "image_generation",
-        )) {
-            val hosted = JsonObject(body + ("tools" to JsonArray(listOf(buildJsonObject { put("type", type) }))))
-            val error = assertThrows<ModelError.InvalidRequest> { PlanMode.enforce(hosted) }
-            assertEquals("tools", error.param)
-        }
         val untyped = JsonObject(body + ("tools" to JsonArray(listOf(JsonPrimitive("x")))))
         assertThrows<ModelError.InvalidRequest> { PlanMode.enforce(untyped) }
         val noInput = PlanMode.enforce(buildJsonObject { put("model", "m") })
         assertEquals(setOf("model", "store", "stream"), noInput.keys)
+    }
+
+    private fun withTool(type: String) =
+        buildJsonObject {
+            put("model", "m")
+            putJsonArray("tools") {
+                add(
+                    buildJsonObject {
+                        put("type", type)
+                        put("name", "t")
+                    },
+                )
+            }
+        }
+
+    /** Only listed tool types pass: anything the plan channel does not run is refused, known or new. */
+    @ParameterizedTest
+    @ValueSource(
+        strings = [
+            "web_search", "web_search_preview", "file_search", "computer_use_preview", "code_interpreter",
+            "image_generation", "mcp", "tool_search", "local_shell", "shell", "apply_patch", "a_future_hosted_tool",
+        ],
+    )
+    fun `plan mode refuses every tool type but function and custom`(type: String) {
+        val error = assertThrows<ModelError.InvalidRequest> { PlanMode.enforce(withTool(type)) }
+        assertEquals("tools", error.param)
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["function", "custom"])
+    fun `plan mode keeps function and custom tools`(type: String) {
+        assertEquals(withTool(type)["tools"], PlanMode.enforce(withTool(type))["tools"])
     }
 }
