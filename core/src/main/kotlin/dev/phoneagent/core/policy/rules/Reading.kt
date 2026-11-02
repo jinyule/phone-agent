@@ -40,9 +40,10 @@ internal class Reading(
 
     /**
      * Whether [screen] is within the limits of [tuning] (policy-rules.md §8): no more elements
-     * and OCR lines, characters of text and levels of tree than allowed, and no cycle. Every step
-     * of reading a screen within them takes time in proportion to it; a screen beyond them is not
-     * read at all, and what depends on it is treated as unknown.
+     * and OCR lines, characters of text and levels of tree than allowed, and no cycle. Reading a
+     * screen within them looks its elements up in [ScreenIndex] rather than comparing them in pairs
+     * or walking ancestors again, so the limits bound its cost; a screen beyond them is not read
+     * at all, and what depends on it is treated as unknown.
      */
     fun readable(screen: ScreenSnapshot): Boolean {
         if (screen.elements.size + screen.ocr.orEmpty().size > tuning.maxElements) return false
