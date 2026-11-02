@@ -1,5 +1,6 @@
 package dev.phoneagent.core.screen
 
+import dev.phoneagent.core.ids.SnapshotId
 import dev.phoneagent.core.ports.ElementRef
 import dev.phoneagent.core.ports.ElementRole
 import dev.phoneagent.core.ports.ElementState
@@ -22,7 +23,12 @@ class ScreenDifferTest {
     @Test
     fun `same content is no change`() {
         assertTrue(differ.diff(before, before).isEmpty)
-        // Parents that change nothing on the page change nothing in the diff.
+        assertTrue(differ.diff(before, before.copy(id = SnapshotId("s13"))).isEmpty)
+    }
+
+    @Test
+    fun `a parent change is a change even when the line reads the same`() {
+        // The messages leave the list e5: same text, but the ref is now somewhere else in the tree.
         val listless =
             before.copy(
                 elements =
@@ -36,13 +42,36 @@ class ScreenDifferTest {
                         }
                     },
             )
-        assertTrue(differ.diff(before, listless).isEmpty)
+        val diff = differ.diff(before, listless)
+        assertEquals(listOf("e6", "e7"), diff.changed.map { it.ref.value })
+        assertTrue(diff.added.isEmpty() && diff.removed.isEmpty())
+        val box1 = el("e1", ElementRole.CONTAINER, null, box(0, 0, 999, 499))
+        val box2 = el("e2", ElementRole.CONTAINER, null, box(0, 500, 999, 999))
+        val ok = el("e3", ElementRole.BUTTON, "好", box(400, 450, 600, 550), setOf(ElementState.CLICKABLE))
+        val moved =
+            differ.diff(
+                snapshot("s1", listOf(box1, box2, ok.under("e1"))),
+                snapshot("s2", listOf(box1, box2, ok.under("e2"))),
+            )
+        assertEquals(ScreenDiff(changed = listOf(ok.under("e2"))), moved)
     }
 
     @Test
     fun `a new parent that changes what a row absorbs changes the row`() {
         // e4 ("更多") stops being part of the button e3 and gets a line of its own.
-        val reparented = before.copy(elements = before.elements.map { it.copy(parent = null) })
+        val reparented =
+            before.copy(
+                elements =
+                    before.elements.map {
+                        if (it.ref.value ==
+                            "e4"
+                        ) {
+                            it.copy(parent = null)
+                        } else {
+                            it
+                        }
+                    },
+            )
         val diff = differ.diff(before, reparented)
         assertEquals(listOf("e3"), diff.changed.map { it.ref.value })
         assertEquals(listOf("e4"), diff.added.map { it.ref.value })
@@ -50,21 +79,38 @@ class ScreenDifferTest {
     }
 
     @Test
-    fun `a renumbered element is changed, because the model holds its old ref`() {
-        // The new message shifts the refs of everything after it, as a surface without stable refs would.
-        val shifted =
-            before.elements.map { element ->
-                val n =
-                    element.ref.value
-                        .drop(1)
-                        .toInt()
-                if (n >= 8) element.copy(ref = ElementRef("e${n + 1}")) else element
-            } + el("e8", ElementRole.TEXT, "我：十点半", box(600, 400, 960, 460)).under("e5")
-        val diff = differ.diff(before, before.copy(elements = shifted))
-        assertEquals(listOf("e10", "e11", "e8"), (diff.changed + diff.added).map { it.ref.value })
-        assertEquals(listOf("e8"), diff.added.map { it.ref.value })
-        // e9 is not on the new page at all: the model must drop it.
+    fun `a ref that changes is one element removed and another added`() {
+        // The port gave the field a new ref (it could not tell it is the same field): e9 is void.
+        val renumbered = before.elements.map { if (it.ref.value == "e9") it.copy(ref = ElementRef("e12")) else it }
+        val diff = differ.diff(before, before.copy(elements = renumbered))
         assertEquals(listOf(ElementRef("e9")), diff.removed)
+        assertEquals(listOf("e12"), diff.added.map { it.ref.value })
+        assertTrue(diff.changed.isEmpty())
+        // An equal element under a new ref is not taken for the old one.
+        val like = el("e1", ElementRole.BUTTON, "赞", box(800, 100, 900, 150), setOf(ElementState.CLICKABLE))
+        val replaced = like.copy(ref = ElementRef("e9"))
+        assertEquals(
+            ScreenDiff(added = listOf(replaced), removed = listOf(ElementRef("e1"))),
+            differ.diff(snapshot("s1", listOf(like)), snapshot("s2", listOf(replaced))),
+        )
+    }
+
+    @Test
+    fun `a row that goes away leaves the equal rows after it paired with themselves`() {
+        // Alice's row e2 goes away; Bob's row keeps e4 and moves up into its place.
+        val list = el("e1", ElementRole.LIST, "会话", box(0, 100, 999, 900), setOf(ElementState.SCROLLABLE))
+        val click = setOf(ElementState.CLICKABLE)
+        val alice = el("e2", ElementRole.BUTTON, null, box(0, 100, 999, 199), click).under("e1")
+        val aliceText = el("e3", ElementRole.TEXT, "Alice", box(20, 120, 400, 180)).under("e2")
+        val bob = el("e4", ElementRole.BUTTON, null, box(0, 200, 999, 299), click).under("e1")
+        val bobText = el("e5", ElementRole.TEXT, "Bob", box(20, 220, 400, 280)).under("e4")
+        val bobUp = bob.copy(bounds = box(0, 100, 999, 199))
+        val diff =
+            differ.diff(
+                snapshot("s1", listOf(list, alice, aliceText, bob, bobText)),
+                snapshot("s2", listOf(list, bobUp, bobText.copy(bounds = box(20, 120, 400, 180)))),
+            )
+        assertEquals(ScreenDiff(removed = listOf(ElementRef("e2")), changed = listOf(bobUp)), diff)
     }
 
     @Test
@@ -84,7 +130,7 @@ class ScreenDifferTest {
     }
 
     @Test
-    fun `an editable field keeps its identity while its text changes, a text does not`() {
+    fun `the same ref is the same element, whatever it reads now`() {
         val field = el("e1", ElementRole.INPUT, "搜索", states = setOf(ElementState.EDITABLE)).copy(value = "a")
         val label = el("e2", ElementRole.TEXT, "3 条新消息")
         val diff =
@@ -92,10 +138,8 @@ class ScreenDifferTest {
                 snapshot("s1", listOf(field, label)),
                 snapshot("s2", listOf(field.copy(value = "ab"), label.copy(name = "4 条新消息"))),
             )
-        assertEquals(listOf("e1"), diff.changed.map { it.ref.value })
-        // The renamed text is a new element under the same ref: listed as added, not as gone.
-        assertEquals(listOf("e2"), diff.added.map { it.ref.value })
-        assertTrue(diff.removed.isEmpty())
+        assertEquals(listOf("e1", "e2"), diff.changed.map { it.ref.value })
+        assertTrue(diff.added.isEmpty() && diff.removed.isEmpty())
     }
 
     @Test
@@ -134,17 +178,30 @@ class ScreenDifferTest {
     }
 
     @Test
-    fun `equal elements pair by ref first, then in reading order`() {
+    fun `equal elements pair only by ref`() {
         val like = {
             ref: String,
             top: Int,
             ->
             el(ref, ElementRole.BUTTON, "赞", box(800, top, 900, top + 10)).copy(resourceId = "like")
         }
-        val old = snapshot("s1", listOf(like("e1", 100), like("e2", 200), like("e3", 300)))
-        val now = snapshot("s2", listOf(like("e1", 100), like("e2", 200)))
-        assertEquals(ScreenDiff(removed = listOf(ElementRef("e3"))), differ.diff(old, now))
-        // Same ref pairs first: a new equal button above e1 is the added one, e1 moved and changed.
+        val three = snapshot("s1", listOf(like("e1", 100), like("e2", 200), like("e3", 300)))
+        // The last one goes away.
+        assertEquals(
+            ScreenDiff(removed = listOf(ElementRef("e3"))),
+            differ.diff(three, snapshot("s2", listOf(like("e1", 100), like("e2", 200)))),
+        )
+        // The middle one goes away and the last moves up into its place.
+        assertEquals(
+            ScreenDiff(removed = listOf(ElementRef("e2")), changed = listOf(like("e3", 200))),
+            differ.diff(three, snapshot("s2", listOf(like("e1", 100), like("e3", 200)))),
+        )
+        // The first one goes away; the others stay where they were.
+        assertEquals(
+            ScreenDiff(removed = listOf(ElementRef("e1"))),
+            differ.diff(three, snapshot("s2", listOf(like("e2", 200), like("e3", 300)))),
+        )
+        // A new equal button above e1 is the added one; e1 moved and changed.
         val inserted = snapshot("s3", listOf(like("e7", 50), like("e1", 150)))
         val diff = differ.diff(snapshot("s1", listOf(like("e1", 100))), inserted)
         assertEquals(listOf("e7"), diff.added.map { it.ref.value })

@@ -26,7 +26,11 @@ public interface SnapshotAnalyzer {
         flags: Set<ScreenFlag>,
     ): TreeQuality
 
-    /** What changed from [before] to [after]. */
+    /**
+     * What changed from [before] to [after]. Both come from the same [ScreenPort], so an equal ref
+     * is the same element: elements are paired only by ref. A port that cannot tell an element is
+     * the same gives it a new ref, and the diff then has the old ref removed and the new one added.
+     */
     public fun diff(
         before: ScreenSnapshot,
         after: ScreenSnapshot,

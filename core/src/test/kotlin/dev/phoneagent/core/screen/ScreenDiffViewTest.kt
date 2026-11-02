@@ -87,7 +87,18 @@ class ScreenDiffViewTest {
     }
 
     @Test
-    fun `equal elements pair by ref first, so the one that went away is the one listed`() {
+    fun `a row that goes away is listed, the equal row moving into its place is changed`() {
+        val alice = el("e11", ElementRole.BUTTON, null, box(0, 400, 999, 499), click).under("e5")
+        val aliceText = el("e12", ElementRole.TEXT, "Alice", box(20, 420, 400, 480)).under("e11")
+        val bob = el("e13", ElementRole.BUTTON, null, box(0, 500, 999, 599), click).under("e5")
+        val bobText = el("e14", ElementRole.TEXT, "Bob", box(20, 520, 400, 580)).under("e13")
+        val bobUp = listOf(bob.copy(bounds = box(0, 400, 999, 499)), bobText.copy(bounds = box(20, 420, 400, 480)))
+        val text = shown(page("s1", alice, aliceText, bob, bobText), page("s2", *bobUp.toTypedArray()))
+        assertEquals(listOf("~ @e13 按钮 \"Bob\" (499,449)", "- @e11"), body(text), text)
+    }
+
+    @Test
+    fun `equal elements pair only by ref, so the one that went away is the one listed`() {
         val likes = (1..3).map { el("e2$it", ElementRole.BUTTON, "赞", box(800, it * 100, 900, it * 100 + 50), click) }
         val all = page("s1", *likes.toTypedArray())
         assertEquals(listOf("- @e21"), body(shown(all, page("s2", likes[1], likes[2]))))

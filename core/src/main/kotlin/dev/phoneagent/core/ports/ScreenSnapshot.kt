@@ -291,12 +291,16 @@ public enum class ScreenFlag {
  * OCR lines. Applying it to what the model saw of the earlier snapshot gives what it would see of
  * the later one: an element in none of the lists still shows the same line under the same ref.
  *
- * @property added printed elements of the later snapshot that are new (`+`), as they are now.
+ * Both snapshots come from the same [ScreenPort], so an equal ref is the same element; elements
+ * are paired only by ref, and a ref that changes is one element removed and one added.
+ *
+ * @property added printed elements whose ref the earlier snapshot did not show (`+`), as they are now.
  * @property removed refs the earlier snapshot showed that the later one no longer shows: the
- *   element went away, was hidden or absorbed, or its ref went to an element that is not shown
- *   (`-`). A ref of [added] or [changed] is never in it.
- * @property changed printed elements that are still there but read differently (text, absorbed
- *   texts, value, hint, states, ref, printed coordinates), as they are now (`~`).
+ *   element went away, was hidden or absorbed, got a new ref, or its ref went to an element that
+ *   is not shown (`-`). A ref of [added] or [changed] is never in it.
+ * @property changed printed elements shown under the same ref in both snapshots that read
+ *   differently (text, absorbed texts, value, hint, states, printed coordinates) or moved to
+ *   another parent, as they are now (`~`).
  * @property ocrAdded OCR lines of the later snapshot whose text or place is new.
  * @property ocrRemoved OCR lines of the earlier snapshot that are gone; a line that moved is in both lists.
  */

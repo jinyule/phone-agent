@@ -549,7 +549,8 @@ class ScreenFormatterTest {
 
         @Test
         fun `a removed ref that the new screen prints again is listed under its new line, not as gone`() {
-            // e6 disappeared and the surface gave its ref to the new message.
+            // e6 disappeared and the surface gave its ref to the new message: the ref is shown in both
+            // snapshots, so its new line is a change.
             val reused = el("e6", ElementRole.TEXT, "我：十点半", box(600, 400, 960, 460)).under("e5")
             val now =
                 before.copy(
@@ -565,7 +566,7 @@ class ScreenFormatterTest {
                 after(ActionOutcome(Status.Ok, Effect.CHANGED, now, diff.copy(removed = listOf(ElementRef("e6"))))),
             )
             assertEquals(
-                listOf("screen s13 · 与 s12 相比的变化（其余不变）", "状态：键盘已弹出", "+ @e6 \"我：十点半\""),
+                listOf("screen s13 · 与 s12 相比的变化（其余不变）", "状态：键盘已弹出", "~ @e6 \"我：十点半\""),
                 after(ActionOutcome(Status.Ok, Effect.CHANGED, now, diff)).lines(),
             )
         }

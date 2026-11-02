@@ -13,24 +13,25 @@ import kotlin.math.abs
  * [ScreenFormatter] prints them ([PageLayout] with the same [format], whole texts as at `full`).
  * Pure.
  *
- * - A printed element of [after] is unchanged when [before] printed the same line under the same
- *   ref (so ref, text, absorbed texts, value, hint, states and, for actionable elements, the
- *   printed center are all the same) and, for an element whose line has no coordinates, its center
- *   moved by at most [DiffConfig.moveTolerance]. Any other printed element is *changed* (`~`) when
- *   it pairs with a printed element of [before] by identity, else *added* (`+`).
- * - *Removed* (`-`) are the refs [before] printed that [after] does not print at all, whatever
- *   happened to the element: gone, hidden, absorbed into a row, or its ref given to an element
- *   that is not printed. A ref printed again is not removed: its new line is listed instead.
+ * Precondition: both snapshots come from the same [dev.phoneagent.core.ports.ScreenPort], so an
+ * equal ref is the same element (the port keeps the ref of an element it can tell is the same and
+ * gives one it cannot tell a new ref). Elements are paired only by ref, never by equal names or
+ * reading order.
+ *
+ * - A ref printed in both snapshots is unchanged when its line reads the same (text, absorbed
+ *   texts, value, hint, states and, for actionable elements, the printed center), its parent is
+ *   the same and, for a line without coordinates, its center moved by at most
+ *   [DiffConfig.moveTolerance]; otherwise it is *changed* (`~`).
+ * - A ref printed only in [after] is *added* (`+`), also when the element was there before but
+ *   not printed (absorbed, hidden): the model has not seen that ref.
+ * - A ref printed only in [before] is *removed* (`-`), whatever happened to the element: gone,
+ *   hidden, absorbed into a row, given a new ref, or its ref now names an element that is not
+ *   printed. So a ref that changes is one element removed and one added.
  * - OCR lines are compared as printed (masked text and center): lines of [after] not in [before]
  *   are added, lines of [before] not in [after] removed; a moved line is in both.
  *
- * Identity is window, role, resource id and name, plus the hint of an editable field (so a field
- * keeps its identity while its text changes). Within one identity, elements with the same ref are
- * paired first and the rest in reading order, so deleting the first of three equal buttons pairs
- * the other two with themselves.
- *
- * So an element in no list still shows the same line under the same ref; a surface that renumbers
- * refs between snapshots makes most lines change, and the formatter then sends the full page.
+ * So an element in no list still shows the same line under the same ref, and every ref the model
+ * holds is either still as it saw it, listed with its new line, or listed as void.
  */
 public class ScreenDiffer(
     private val config: DiffConfig = DiffConfig(),
@@ -45,16 +46,14 @@ public class ScreenDiffer(
     ): ScreenDiff {
         val was = printed(before)
         val now = printed(after)
-        val paired = pairedRefs(was.values.map { it.element }, now.values.map { it.element })
         val added = mutableListOf<UiElement>()
         val changed = mutableListOf<UiElement>()
         for ((ref, line) in now) {
             val old = was[ref]
-            val same = old != null && old.text == line.text && !movedUnseen(old, line)
-            when {
-                same -> Unit
-                ref in paired -> changed += line.element
-                else -> added += line.element
+            if (old == null) {
+                added += line.element
+            } else if (differs(old, line)) {
+                changed += line.element
             }
         }
         val removed = was.keys.filter { it !in now }
@@ -86,6 +85,12 @@ public class ScreenDiffer(
         return out
     }
 
+    /** Whether the element under one ref reads differently, has another parent, or moved unseen. */
+    private fun differs(
+        was: Printed,
+        now: Printed,
+    ): Boolean = was.text != now.text || was.element.parent != now.element.parent || movedUnseen(was, now)
+
     /** Whether an element whose line shows no coordinates moved beyond the tolerance. */
     private fun movedUnseen(
         was: Printed,
@@ -96,36 +101,6 @@ public class ScreenDiffer(
         val new = now.element.bounds.center()
         return abs(old.x - new.x) > config.moveTolerance || abs(old.y - new.y) > config.moveTolerance
     }
-
-    /**
-     * Refs of [now] that pair with an element of [was] by identity: same ref first, then the rest
-     * of each identity in reading order.
-     */
-    private fun pairedRefs(
-        was: List<UiElement>,
-        now: List<UiElement>,
-    ): Set<ElementRef> {
-        val paired = HashSet<ElementRef>()
-        val wasByIdentity = was.groupBy(::identity)
-        for ((key, group) in now.groupBy(::identity)) {
-            val candidates = wasByIdentity[key].orEmpty()
-            val sameRef = group.filter { element -> candidates.any { it.ref == element.ref } }
-            paired += sameRef.map { it.ref }
-            val leftNow = group - sameRef.toSet()
-            val leftWas = candidates.filter { candidate -> sameRef.none { it.ref == candidate.ref } }
-            paired += leftNow.take(leftWas.size).map { it.ref }
-        }
-        return paired
-    }
-
-    private fun identity(element: UiElement): List<Any?> =
-        listOf(
-            element.window,
-            element.role,
-            element.resourceId,
-            element.name,
-            if (element.isEditable()) element.hint else null,
-        )
 
     /** OCR lines of [snapshot] as printed (masked text and center), with the line itself. */
     private fun ocrLines(snapshot: ScreenSnapshot): List<Pair<String, OcrLine>> =
