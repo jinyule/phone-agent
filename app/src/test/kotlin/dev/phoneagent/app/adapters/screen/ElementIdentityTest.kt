@@ -70,6 +70,38 @@ class ElementIdentityTest {
     }
 
     @Test
+    fun aListInsideARowAddsOnlyItsOwnLabelToTheRow() {
+        // Device run r1: a page (a list) holding an app bar and a scrolling list; the scrolling
+        // list's row must not change when its rows scroll.
+        val page = add(null, screen, list = true)
+        add("Search", Bounds(0, 0, 999, 99), parent = page)
+        val content = add("Settings", Bounds(0, 100, 999, 999), parent = page, role = ElementRole.LIST, list = true)
+        val ada = row(content, 100, "Ada")
+        row(content, 200, "Bob")
+
+        val identities = Identities.of(nodes)
+
+        assertEquals(listOf("Settings"), identities[content].row)
+        assertEquals("the inner rows keep their own", listOf("Ada"), identities[ada + 1].row)
+    }
+
+    @Test
+    fun aRowHoldingAListCountsTheListsLabelButNotItsItems() {
+        val list = add(null, screen, list = true)
+        val ada = add(null, Bounds(0, 100, 999, 299), parent = list)
+        add("Ada", Bounds(0, 100, 999, 149), parent = ada, role = ElementRole.TEXT)
+        val photos = add("Photos", Bounds(0, 150, 999, 299), parent = ada, role = ElementRole.LIST, list = true)
+        val first = row(photos, 150, "Beach")
+        row(photos, 200, "Snow")
+        add("Like", Bounds(0, 250, 999, 299), parent = ada, role = ElementRole.BUTTON)
+
+        val identities = Identities.of(nodes)
+
+        assertEquals(listOf("Ada", "Photos", "Like"), identities[ada].row)
+        assertEquals(listOf("Beach"), identities[first + 1].row)
+    }
+
+    @Test
     fun aSingleSmallerChildIsTheOnlyRow() {
         val list = add(null, screen, list = true)
         val only = row(list, 100, "Ada", "Like")

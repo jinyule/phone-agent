@@ -10,7 +10,8 @@ import dev.phoneagent.core.ports.ElementRole
  * [row] tells apart the controls every row of a list has ("Like", "Reply", a checkbox): it is the
  * first labels of the innermost list item around the element, the item included (e.g. `[Bob,
  * Like]`). Labels are the nodes' own text or description, so a row's container counts even when
- * it is unnamed and dropped from BRIEF. `null` outside lists.
+ * it is unnamed and dropped from BRIEF. A list inside the item adds its own label only: its rows
+ * scroll, and the item (a page holding a scrolling list) stays the same. `null` outside lists.
  *
  * Used by [RefCarrier] for both carrying refs to the next screen and finding a planned element
  * again before an action ([RefMatcher]); there is no second notion of identity.
@@ -61,7 +62,7 @@ internal object Identities {
         }
         val signatures = HashMap<Int, List<String>>()
         return nodes.mapIndexed { i, facts ->
-            val row = itemAround[i]?.let { item -> signatures.getOrPut(item) { signature(nodes, item, end[item]) } }
+            val row = itemAround[i]?.let { item -> signatures.getOrPut(item) { signature(nodes, item, end) } }
             ElementIdentity(facts.window, facts.role, facts.resourceId, facts.name, row)
         }
     }
@@ -100,14 +101,18 @@ internal object Identities {
         return end
     }
 
+    /** The first labels of [item]'s subtree; a list's subtree adds the list's own label only. */
     private fun signature(
         nodes: List<Facts>,
         item: Int,
-        end: Int,
-    ): List<String> =
-        (item until end)
-            .asSequence()
-            .mapNotNull { nodes[it].label?.take(LABEL_CHARS) }
-            .take(ROW_LABELS)
-            .toList()
+        end: IntArray,
+    ): List<String> {
+        val labels = ArrayList<String>(ROW_LABELS)
+        var i = item
+        while (i < end[item] && labels.size < ROW_LABELS) {
+            nodes[i].label?.let { labels += it.take(LABEL_CHARS) }
+            i = if (nodes[i].list) end[i] else i + 1
+        }
+        return labels
+    }
 }
