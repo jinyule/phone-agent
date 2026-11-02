@@ -7,6 +7,8 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.assertTimeoutPreemptively
 import java.time.Duration
+import java.util.Locale
+import java.util.Random
 
 class SensitiveNumbersTest {
     private fun mask(text: String) = SensitiveNumbers.mask(text)
@@ -24,6 +26,41 @@ class SensitiveNumbersTest {
         assertEquals("第 3 「银行卡 尾号7894」", mask("第 3 6222 0212 3456 7894"))
         assertEquals("「银行卡 尾号7894」 「银行卡 尾号1111」", mask("6222021234567894 4111111111111111"))
         assertEquals("「银行卡 尾号7894」 12", mask("6222 0212 3456 7894 12"))
+        // Neighbours of three or more digits that make a valid card with the first groups of the
+        // real one: both are masked as one, so no part of the card is left readable.
+        for (neighbour in listOf("105", "1004", "10005", "100004")) {
+            assertEquals("第 「银行卡 尾号7894」", mask("第 $neighbour 6222 0212 3456 7894"), neighbour)
+            assertEquals("第 「银行卡 尾号7894」 号", mask("第 $neighbour\n    6222 0212 3456 7894 号"), neighbour)
+        }
+        assertEquals("「银行卡 尾号7894」 105 号", mask("6222 0212 3456 7894 105 号"))
+    }
+
+    @Test
+    fun `no number before a card in the same run leaves part of the card readable`() {
+        val leaks =
+            GAPS_BEFORE_CARD.flatMap { gap ->
+                (100..999).map { "$it$gap$CARD_GROUPED" }.filterNot(::coversCard)
+            }
+        assertEquals(emptyList<String>(), leaks.map(::shown))
+    }
+
+    @Test
+    fun `a phone number on the line before a card leaves no part of the card readable`() {
+        val random = Random(SEED)
+        val texts =
+            (1..PHONE_SAMPLES).flatMap {
+                val phone = "1" + (3 + random.nextInt(7)) + (1..9).joinToString("") { "${random.nextInt(10)}" }
+                val written =
+                    if (random.nextBoolean()) {
+                        phone
+                    } else {
+                        "${phone.take(
+                            3,
+                        )} ${phone.substring(3, 7)} ${phone.drop(7)}"
+                    }
+                GAPS_BEFORE_CARD.map { gap -> "联系人 张三\n$written$gap$CARD_GROUPED" }
+            }
+        assertEquals(emptyList<String>(), texts.filterNot(::coversCard).map(::shown))
     }
 
     @Test
@@ -101,13 +138,41 @@ class SensitiveNumbersTest {
         assertEquals("身份证 「身份证 尾号002X」", mask("身份证 110105\u00A019491231\u00A0002X"))
         assertEquals("身份证「身份证 尾号002X」", mask("身份证１１０１０５１９４９１２３１００２Ｘ"))
         assertEquals("「身份证 尾号1100」 「银行卡 尾号7894」", mask("320102 19880815 1100 6222 0212 3456 7894"))
+        // Its last 15 digits alone are a valid card ending in the same place: the id, the longer one, names the span.
+        assertEquals("身份证 「身份证 尾号0054」", mask("身份证 110 105194912310054"))
     }
 
     @Test
-    fun `numbers of separate fields are never joined into one`() {
+    fun `a field word keeps numbers apart, while numbers that only whitespace separates may be masked together`() {
         // Concatenated, these would be a valid card (6222021234567894) or id (11010519491231002X).
         assertEquals("电话 6222021 金额 234567894", mask("电话 6222021 金额 234567894"))
         assertEquals("区号 110105，生日 19491231，尾号 002X", mask("区号 110105，生日 19491231，尾号 002X"))
+        // The price of reading a number wrapped over lines as one: two fields with only whitespace
+        // between them read as one run, and a valid card in it is masked with both.
+        assertEquals("「银行卡 尾号1001」", mask("13800138000\n\n    1001"))
+        assertEquals("电话 13800138000\n\n金额 1001", mask("电话 13800138000\n\n金额 1001"))
+        assertEquals(TWO_PHONES_MASKED, mask("138 0013 8000\n130 0222 0546"))
+        assertEquals("电话 138 0013 8000\n电话 130 0222 0546", mask("电话 138 0013 8000\n电话 130 0222 0546"))
+    }
+
+    @Test
+    fun `an order label exempts the number right after it across a gap of any length`() {
+        val gap = " ".repeat(LONG_GAP)
+        assertEquals("订单号：${gap}6222021234567894", mask("订单号：${gap}6222021234567894"))
+        assertEquals(
+            "Tracking number:\n\n${gap}6222 0212 3456 7894",
+            mask("Tracking number:\n\n${gap}6222 0212 3456 7894"),
+        )
+        assertEquals("订单号 # ：6222021234567894", mask("订单号 # ：6222021234567894"))
+        assertEquals("订单号＃６２２２０２１２３４５６７８９４", mask("订单号＃６２２２０２１２３４５６７８９４"))
+        // Only the number right after the label: the next one in the run is masked.
+        assertEquals(
+            "订单号：${gap}6222021234567894 「银行卡 尾号1111」",
+            mask("订单号：${gap}6222021234567894 4111111111111111"),
+        )
+        // The longest label, glued to a letter before it, is no label.
+        assertEquals("Xtracking number 「银行卡 尾号7894」", mask("Xtracking number 6222021234567894"))
+        assertEquals("$gap「银行卡 尾号7894」", mask("${gap}6222021234567894"))
     }
 
     @Test
@@ -202,7 +267,43 @@ class SensitiveNumbersTest {
         assertEquals("1 ".repeat(SHORT_GROUPS) + "「银行卡 尾号7894」", masked)
     }
 
+    @Test
+    fun `many valid cards in one text cost time linear in its length`() {
+        // Not a timing threshold: a quadratic scan takes minutes on this input (about 6 s already
+        // for 4 000 cards, four times that per doubling), a linear one a fraction of a second. The
+        // bound only tells the two apart, with room for a slow machine.
+        val text = "4111111111111111 ".repeat(MANY_CARDS)
+        val masked = assertTimeoutPreemptively(Duration.ofSeconds(MANY_CARDS_SECONDS)) { mask(text) }
+        assertEquals("「银行卡 尾号1111」 ".repeat(MANY_CARDS), masked)
+    }
+
+    /** Whether masking [text], which ends in [CARD_GROUPED], leaves the card wholly inside the last masked span. */
+    private fun coversCard(text: String): Boolean {
+        val masked = mask(text)
+        val kept = masked.removeSuffix(CARD_MASKED)
+        return masked.endsWith(CARD_MASKED) && text.startsWith(kept) && kept.length <= text.length - CARD_GROUPED.length
+    }
+
+    private fun shown(text: String): String =
+        text
+            .map { if (it.isLetterOrDigit() || it == ' ') "$it" else "\\u%04X".format(Locale.ROOT, it.code) }
+            .joinToString("") + " -> " + mask(text)
+
     private companion object {
+        const val CARD_GROUPED = "6222 0212 3456 7894"
+        const val CARD_MASKED = "「银行卡 尾号7894」"
+
+        /** Two mobile numbers on consecutive lines, masked with each other as a card. */
+        const val TWO_PHONES_MASKED = "138 「银行卡 尾号0222」 0546"
+
+        /** Gaps between a number and the card after it in one run. */
+        val GAPS_BEFORE_CARD = listOf(" ", "\n", "   ", "\n    ", "\r\n    ", "\u0085", "\n\n  ")
+        const val SEED = 20_261_102L
+        const val PHONE_SAMPLES = 1000
+        const val LONG_GAP = 100
+        const val MANY_CARDS = 40_000
+        const val MANY_CARDS_SECONDS = 60L
+
         /** The 25 characters of Unicode White_Space. */
         val UNICODE_SPACES =
             ('\u0009'..'\u000D') + ' ' + '\u0085' + '\u00A0' + '\u1680' + ('\u2000'..'\u200A') +

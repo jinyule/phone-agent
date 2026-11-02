@@ -8,7 +8,7 @@ package dev.phoneagent.core.screen
  */
 internal object NumberRuns {
     /** [text] as the scanner reads it, one char for one, so a range in it is a range of [text]. */
-    fun plain(text: String): String = text.map(::plainChar).joinToString("")
+    fun plain(text: String): String = String(CharArray(text.length) { plainChar(text[it]) })
 
     /**
      * The digit runs of [plain] (a [NumberRuns.plain] copy), each as its groups in order: digit

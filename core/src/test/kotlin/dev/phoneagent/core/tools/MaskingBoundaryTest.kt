@@ -107,44 +107,49 @@ class MaskingBoundaryTest {
     @Test
     fun `numbers grouped by space runs, U+0085, zero-width marks or minus signs are masked at every exit`() =
         runTest {
-            val exits = mutableListOf<Pair<String, String>>()
-            for (raw in GROUPED) {
-                val shown =
-                    raw
-                        .map {
-                            if (it.isDigit()) {
-                                "$it"
-                            } else {
-                                "\\u%04X".format(
-                                    Locale.ROOT,
-                                    it.code,
-                                )
-                            }
-                        }.joinToString("")
-                val failed =
-                    FakeScreen().apply {
-                        onAct =
-                            { _, _ -> ActionOutcome(Status.Failed("卡号 $raw"), Effect.UNKNOWN, after) }
-                    }
-                exits += "failure $shown" to tap(failed).text()
-                val refused =
-                    FakeScreen().apply { onAct = { _, _ -> ActionOutcome(Status.Refused("卡号 $raw"), Effect.UNKNOWN) } }
-                exits += "refusal $shown" to tap(refused).text()
-                val lost = FakeScreen().apply { unavailable = ScreenUnavailableException("lost 卡号 $raw", null) }
-                exits += "exception $shown" to tap(lost).text()
-                val typed = call("phone_type", """{"screen":"s12","ref":"e9","text":"x"}""", reason = "输入卡号 $raw")
-                exits += "summary $shown" to tools.getValue("phone_type").presentCall(typed).summary
-                val card = Screens.snapshot("s1", listOf(Screens.el("e1", ElementRole.TEXT, "卡号 $raw")))
-                exits += "screen $shown" to formatter.page(card, SnapshotDetail.FULL)
+            assertAll(GROUPED.flatMap { raw -> exits("卡号 $raw") }.map(::assertCardMasked))
+        }
+
+    @Test
+    fun `a number in the gap before a card does not shift the mask off the card at any exit`() =
+        runTest {
+            assertAll(NEIGHBOURED.flatMap { raw -> exits(raw) }.map(::assertCardMasked))
+        }
+
+    /** [deviceText] through the five exits: failure, refusal, exception, step-card summary, FULL screen. */
+    private suspend fun exits(deviceText: String): List<Pair<String, String>> {
+        val shown = deviceText.map { if (it.isLetterOrDigit()) "$it" else "\\u%04X".format(Locale.ROOT, it.code) }
+        val label = shown.joinToString("")
+        val failed =
+            FakeScreen().apply {
+                onAct = { _, _ -> ActionOutcome(Status.Failed(deviceText), Effect.UNKNOWN, after) }
             }
-            assertAll(
-                exits.map { (exit, text) ->
-                    {
-                        assertFalse(text.contains("6222") || text.contains("3456"), "$exit: $text")
-                        assertTrue(text.contains("「银行卡 尾号7894」"), "$exit: $text")
-                    }
-                },
-            )
+        val refused =
+            FakeScreen().apply {
+                onAct = {
+                    _,
+                    _,
+                    ->
+                    ActionOutcome(Status.Refused(deviceText), Effect.UNKNOWN)
+                }
+            }
+        val lost = FakeScreen().apply { unavailable = ScreenUnavailableException("lost $deviceText", null) }
+        val typed = call("phone_type", """{"screen":"s12","ref":"e9","text":"x"}""", reason = "输入 $deviceText")
+        val card = Screens.snapshot("s1", listOf(Screens.el("e1", ElementRole.TEXT, deviceText)))
+        return listOf(
+            "failure $label" to tap(failed).text(),
+            "refusal $label" to tap(refused).text(),
+            "exception $label" to tap(lost).text(),
+            "summary $label" to tools.getValue("phone_type").presentCall(typed).summary,
+            "screen $label" to formatter.page(card, SnapshotDetail.FULL),
+        )
+    }
+
+    private fun assertCardMasked(exit: Pair<String, String>): () -> Unit =
+        {
+            val (name, text) = exit
+            assertFalse(listOf("6222", "0212", "3456").any(text::contains), "$name: $text")
+            assertTrue(text.contains("「银行卡 尾号7894」"), "$name: $text")
         }
 
     private companion object {
@@ -159,6 +164,13 @@ class MaskingBoundaryTest {
                 "6222\u200B0212\u200B3456\u200B7894",
                 "6222\u22120212\u22123456\u22127894",
                 "6222\uFE630212\uFE633456\uFE637894",
+            )
+
+        /** A number in the run before the card that makes a valid card with its first groups. */
+        val NEIGHBOURED =
+            listOf(
+                "联系人 张三\n138 7586 0589\n    6222 0212 3456 7894",
+                "105   6222 0212 3456 7894",
             )
     }
 }
