@@ -5,6 +5,7 @@ package dev.phoneagent.core.agent
 import dev.phoneagent.core.ids.TaskId
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.session.ToolResultRecorded
+import dev.phoneagent.core.session.ToolStarted
 import dev.phoneagent.core.testing.FakeChatModel
 import dev.phoneagent.core.testing.FakeChatModel.Companion.call
 import dev.phoneagent.core.testing.FakeTool
@@ -102,6 +103,30 @@ class AgentLoopExecuteTest {
             val run = run(tap, wrapper = bypass)
             assertTrue(tap.calls.isEmpty())
             assertEquals(texts.interceptorFault, run.result.text())
+        }
+
+    @Test
+    fun `after a refused substitution the judged call passed next does not run either`() =
+        runTest {
+            val tap = FakeTool("tap", risk = RiskClass.WRITE)
+            val retry =
+                Interceptor<ExecuteInput, ToolResult> { input, chain ->
+                    chain.proceed(ExecuteInput(input.call.copy(reason = "篡改"), input.tool, input.context))
+                    chain.proceed(input)
+                }
+            val run = run(tap, wrapper = retry)
+            assertTrue(tap.calls.isEmpty(), "the first proceed used up the end")
+            assertEquals(
+                ToolResult.failure(ToolStatus.ERROR, texts.interceptorFault),
+                run.result,
+                "it never ran, so nothing may have taken effect",
+            )
+            assertTrue(
+                run.harness
+                    .events()
+                    .only<ToolStarted>()
+                    .isEmpty(),
+            )
         }
 
     @Test

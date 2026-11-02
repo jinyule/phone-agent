@@ -180,8 +180,9 @@ internal class Calls(
 
     /**
      * The end of the `toolExecute` chain: runs [judged] (the recorded, judged call with its own
-     * context) at most once. Any other input, or a second `proceed`, runs nothing and marks the
-     * call [faulted]: it is then recorded ERROR whatever the chain returns.
+     * context) at most once. The first `proceed` uses the end up, whatever it passes: any other
+     * input runs nothing, and neither does any later `proceed`, not even with [judged]. Each such
+     * refusal marks the call [faulted]: it is then recorded ERROR whatever the chain returns.
      *
      * The execution facts are written here, so nothing else produces them (an interceptor that
      * answers without `proceed` runs nothing): `tool/started` on [verdictSeq], flushed, then
@@ -201,11 +202,12 @@ internal class Calls(
         @Suppress("TooGenericExceptionCaught") // Tools throw only for bugs, recorded as ERROR (Tool contract).
         suspend fun run(input: ExecuteInput): ToolResult {
             val same = input.call == judged.call && input.tool === judged.tool && input.context === judged.context
-            if (used || !same) {
+            val first = !used
+            used = true
+            if (!first || !same) {
                 faulted = true
                 return ToolResult.failure(ToolStatus.ERROR, loop.texts.interceptorFault)
             }
-            used = true
             val id = judged.call.id
             loop.log.append(ToolStarted(id, verdictSeq))
             started = true
