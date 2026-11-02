@@ -32,18 +32,21 @@ internal class CapabilityUnavailable(
  * reports the wrong package for the shell uid, so the display would not belong to us.
  */
 @SuppressLint("PrivateApi")
-internal class SystemBridge(
+internal open class SystemBridge(
     private val context: Context,
 ) {
-    /** `IActivityTaskManager`: tasks, cross-display starts, the task-stack listener. */
-    val activityTaskManager: Any by lazy {
+    /**
+     * `IActivityTaskManager`: tasks, cross-display starts, the task-stack listener. Open, like
+     * [windowManager], so a test can stand in an object with the same method names.
+     */
+    open val activityTaskManager: Any by lazy {
         reflect("IActivityTaskManager") {
             Class.forName("android.app.ActivityTaskManager").getMethod("getService").invoke(null)
         }
     }
 
     /** `IWindowManager`: the display IME policy. */
-    val windowManager: Any by lazy {
+    open val windowManager: Any by lazy {
         reflect("IWindowManager") {
             Class.forName("android.view.WindowManagerGlobal").getMethod("getWindowManagerService").invoke(null)
         }

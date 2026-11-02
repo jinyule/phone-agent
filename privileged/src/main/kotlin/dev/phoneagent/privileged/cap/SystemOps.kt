@@ -26,10 +26,12 @@ import java.io.File
  */
 internal class SystemOps(
     private val context: Context,
-    private val appPackage: String,
-    private val appUser: Int,
-    stateDir: File = File("/data/local/tmp"),
+    app: ServedApp,
+    private val commands: CommandRunner,
+    stateDir: File,
 ) {
+    private val appPackage = app.packageName
+    private val appUser = app.user
     private val lock = Any()
     private val ledger = AudioMuteLedger(MuteFile(File(stateDir, "phoneagent_audio_mute_$appUser")))
 
@@ -81,8 +83,7 @@ internal class SystemOps(
         verb: String,
         pkg: String,
         mode: String? = null,
-    ): CommandResult =
-        ShellCommands.run(listOf("appops", verb, "--user", "$appUser", pkg, PLAY_AUDIO) + listOfNotNull(mode))
+    ): CommandResult = commands.run(listOf("appops", verb, "--user", "$appUser", pkg, PLAY_AUDIO) + listOfNotNull(mode))
 
     /**
      * Grants [permission] to the app the helper serves; see [GrantSpec] for what is allowed.
@@ -98,7 +99,7 @@ internal class SystemOps(
 
     private fun grant(permission: String): Int {
         if (!holds(permission)) {
-            ShellCommands.run("pm", "grant", "--user", "$appUser", appPackage, permission)
+            commands.run("pm", "grant", "--user", "$appUser", appPackage, permission)
         }
         return if (holds(permission)) {
             Log.i(TAG, "$appPackage holds $permission")

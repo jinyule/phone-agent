@@ -19,6 +19,7 @@ import java.lang.reflect.Field
  */
 internal class TaskTable(
     private val bridge: SystemBridge,
+    private val commands: CommandRunner = ShellCommands.runner,
 ) {
     private val fields by lazy { TaskFields(bridge.taskInfo) }
 
@@ -59,7 +60,7 @@ internal class TaskTable(
             true
         } catch (e: CapabilityUnavailable) {
             Log.w(TAG, "moveRootTaskToDisplay unavailable, falling back to am", e)
-            ShellCommands.run("am", "display", "move-stack", "$taskId", "$displayId").ok
+            commands.run("am", "display", "move-stack", "$taskId", "$displayId").ok
         }
     }
 

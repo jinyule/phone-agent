@@ -28,14 +28,16 @@ import dev.phoneagent.privileged.StartResult
  * PolicyEngine (phase1-architecture §6); the helper is not a second policy.
  */
 internal class Launcher(
-    bridge: SystemBridge,
+    platform: Platform,
     private val context: Context,
+    app: ServedApp,
     private val displays: VirtualDisplays,
     private val tasks: TaskTable,
     private val ownership: TaskOwnership,
-    private val myUser: Int,
 ) {
-    private val starter = ActivityStarter(bridge)
+    private val myUser = app.user
+    private val commands = platform.commands
+    private val starter = ActivityStarter(platform.bridge, commands)
 
     /** Starts [intent] on [displayId]; see [StartResult]. */
     fun start(
@@ -172,7 +174,7 @@ internal class Launcher(
             Log.i(TAG, "cold start of $target downgraded: it has tasks outside display $displayId")
             return false
         }
-        return ShellCommands.run("am", "force-stop", "--user", "$myUser", target).ok
+        return commands.run("am", "force-stop", "--user", "$myUser", target).ok
     }
 
     private companion object {
@@ -190,6 +192,7 @@ internal class Launcher(
  */
 private class ActivityStarter(
     private val bridge: SystemBridge,
+    private val commands: CommandRunner,
 ) {
     /** Starts [intent] on [displayId]; false when every path failed. */
     fun start(
@@ -230,7 +233,7 @@ private class ActivityStarter(
         intent: Intent,
     ): Boolean {
         val target = intent.component?.flattenToShortString() ?: return amStartAction(displayId, intent)
-        return ShellCommands.run("am", "start", "--display", "$displayId", "-n", target).ok
+        return commands.run("am", "start", "--display", "$displayId", "-n", target).ok
     }
 
     private fun amStartAction(
@@ -245,7 +248,7 @@ private class ActivityStarter(
                 intent.type?.let { addAll(listOf("-t", it)) }
                 intent.`package`?.let { addAll(listOf("-p", it)) }
             }
-        return ShellCommands.run(arguments).ok
+        return commands.run(arguments).ok
     }
 
     private companion object {

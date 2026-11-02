@@ -21,6 +21,13 @@ internal data class CommandResult(
     val ok: Boolean get() = code == 0
 }
 
+/** Runs one of the [ShellCommands] programs; replaced in tests by one that records the command. */
+internal fun interface CommandRunner {
+    fun run(command: List<String>): CommandResult
+
+    fun run(vararg command: String): CommandResult = run(command.toList())
+}
+
 /**
  * The fixed set of platform commands the helper runs itself, with arguments it builds.
  *
@@ -37,6 +44,9 @@ internal object ShellCommands {
     private const val TIMEOUT_S = 10L
     private const val OUTPUT_MAX = 16 * 1024
     private const val READER_JOIN_MS = 1_000L
+
+    /** [run] as a [CommandRunner]. */
+    val runner: CommandRunner = CommandRunner { run(it) }
 
     /**
      * Runs [command] (program first). Throws [IllegalArgumentException] when the program is not in

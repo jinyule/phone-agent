@@ -10,6 +10,7 @@ import dev.phoneagent.privileged.DisplayResult
 import dev.phoneagent.privileged.GrantResult
 import dev.phoneagent.privileged.PrivilegedError
 import dev.phoneagent.privileged.StartResult
+import java.io.File
 
 /** Virtual displays the agent works on. */
 internal interface DisplayCaps {
@@ -89,6 +90,28 @@ internal interface Capabilities {
     fun releaseAll(): String
 }
 
+/** The app the helper serves: its package and uid. */
+internal data class ServedApp(
+    val packageName: String,
+    val uid: Int,
+) {
+    /** The Android user the app runs as. */
+    val user: Int get() = uid / PER_USER_RANGE
+
+    private companion object {
+        const val PER_USER_RANGE = 100_000
+    }
+}
+
+/** What the capabilities reach outside this process; a test replaces each part. */
+internal class Platform(
+    val bridge: SystemBridge,
+    val sdkInt: Int = Build.VERSION.SDK_INT,
+    val commands: CommandRunner = ShellCommands.runner,
+    /** Where state that must outlive the helper is kept; the shell user can write here. */
+    val stateDir: File = File("/data/local/tmp"),
+)
+
 /**
  * The capabilities as implemented on this device. Built once at startup; everything hidden is
  * reached through [SystemBridge], and a missing entry point is reported (logcat, [probe]) rather
@@ -96,19 +119,17 @@ internal interface Capabilities {
  */
 internal class AndroidCapabilities(
     context: Context,
-    appPackage: String,
-    appUid: Int,
-    bridge: SystemBridge = SystemBridge(context),
-    sdkInt: Int = Build.VERSION.SDK_INT,
+    app: ServedApp,
+    platform: Platform = Platform(SystemBridge(context)),
 ) : Capabilities {
-    private val appUser = appUid / PER_USER_RANGE
-    private val virtualDisplays = VirtualDisplays(bridge, sdkInt)
-    private val taskTable = TaskTable(bridge)
+    private val bridge = platform.bridge
+    private val virtualDisplays = VirtualDisplays(bridge, platform.sdkInt)
+    private val taskTable = TaskTable(bridge, platform.commands)
     private val ownership = TaskOwnership()
     private val injector = InputInjector(bridge, virtualDisplays)
-    private val launcher = Launcher(bridge, context, virtualDisplays, taskTable, ownership, appUser)
+    private val launcher = Launcher(platform, context, app, virtualDisplays, taskTable, ownership)
     private val watch = MainScreenWatch(bridge, taskTable)
-    private val ops = SystemOps(context, appPackage, appUser)
+    private val ops = SystemOps(context, app, platform.commands, platform.stateDir)
     private val prober = Prober(virtualDisplays, taskTable, injector, watch)
 
     override val displays: DisplayCaps =
@@ -224,9 +245,8 @@ internal class AndroidCapabilities(
             context: Context,
             appPackage: String,
             appUid: Int,
-        ): AndroidCapabilities = AndroidCapabilities(context, appPackage, appUid).apply { ops.recoverMutes() }
-
-        private const val PER_USER_RANGE = 100_000
+        ): AndroidCapabilities =
+            AndroidCapabilities(context, ServedApp(appPackage, appUid)).apply { ops.recoverMutes() }
     }
 }
 
