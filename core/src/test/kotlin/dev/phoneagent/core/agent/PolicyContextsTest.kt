@@ -248,4 +248,31 @@ class PolicyContextsTest {
         assertEquals(false, screenLostAfterHandoff(seen, c1))
         assertEquals("s2", latestSnapshot(seen + log(answered("c1")))?.id?.value)
     }
+
+    @Test
+    fun `a handoff that never ended hides earlier screens from its start`() {
+        val c1 = ToolCallId("c1")
+        val asked = PromptId("prompt-3")
+        val cut =
+            log(
+                TaskStarted(SecurityLevel.STANDARD, false),
+                ScreenObserved(ToolCallId("c0"), snapshotOf("s1")),
+                answered("c0"),
+                HandoffStarted(asked, HandoffKind.LOGIN, "log in", c1),
+            )
+        assertNull(latestSnapshot(cut + log(answered("c1"))), "stopped, timed out or broken: s1 is hidden")
+        assertEquals(true, screenLostAfterHandoff(cut, c1))
+
+        val later = cut + log(answered("c1"), ScreenObserved(ToolCallId("c2"), snapshotOf("s3")), answered("c2"))
+        assertEquals("s3", latestSnapshot(later)?.id?.value, "a screen recorded after it counts again")
+        assertEquals(true, screenLostAfterHandoff(later, c1), "c2's screen is not c1's")
+        assertEquals(false, screenLostAfterHandoff(cut + log(ScreenObserved(c1, snapshotOf("s2"))), c1))
+
+        val during = cut + log(ScreenObserved(ToolCallId("c2"), snapshotOf("s3")), answered("c2"))
+        assertEquals("s3", latestSnapshot(during)?.id?.value)
+        assertNull(
+            latestSnapshot(during + log(HandoffEnded(asked, HandoffResult.DONE))),
+            "handoff/end hides the screens recorded while handed over too",
+        )
+    }
 }

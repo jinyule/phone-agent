@@ -45,7 +45,9 @@ internal class Repair(
  * - every tool call of a reply without a `tool/result` gets one, decided by the log alone. With a
  *   `tool/started` it may have run: `CANCELLED` when stopped, else `OUTCOME_UNKNOWN`, both telling
  *   the model to observe first. Without one it never ran: `CANCELLED` when stopped, else
- *   `NOT_STARTED`. The result's source is the call's `tool/call`, else the reply;
+ *   `NOT_STARTED`. A call that handed off with no screen recorded after ([screenLostAfterHandoff])
+ *   also gets [LoopTexts.screenUnknown]. The result's source is the call's `tool/call`, else the
+ *   reply;
  * - an open step gets `step/end` (`CANCELLED` when stopped, else `FAILED`);
  * - an open turn gets `turn/end` (`STOPPED` when stopped, else `FAILED`) with [detail].
  *
@@ -71,7 +73,8 @@ internal fun repairOf(
         val calls = (record.event as? AssistantMessage)?.parts.orEmpty().filterIsInstance<Part.ToolCall>()
         for (call in calls.filter { it.id !in answered }) {
             val callSeq = dispatched[call.id]
-            val result = missingResult(cause, call.id in started, texts)
+            val missing = missingResult(cause, call.id in started, texts)
+            val result = if (screenLostAfterHandoff(records, call.id)) missing.noted(texts.screenUnknown) else missing
             repairs += Repair(ToolResultRecorded(call.id, call.name, result), listOf(callSeq ?: record.seq))
         }
     }

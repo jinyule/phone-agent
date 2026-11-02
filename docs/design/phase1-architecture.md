@@ -489,7 +489,7 @@ fun interface Chain<I, O> { suspend fun proceed(input: I): O }   // 不调用 pr
 **`requestError` 默认行为**（`RetryInterceptor`）：可重试的错误每个 step 最多重试 5 次；服务端给了 retry-after 就按它等，否则从 500 ms 指数退避到 10 s，一半固定一半随机。retry-after 超过 `maxRetryAfterMs`（默认 60 s，构造时校验）**不重试**，直接按不可重试失败，不会把等待缩短到上限。重试前的等待可以被 steer 打断。
 
 **`toolPreExecute` 与 PolicyEngine**：
-- 拦截器链先跑。PolicyEngine 再用 `IntentResolver` 解析调用，在 `ctx.screen` 上判定。`ctx.screen` 从日志推导：**已经有 `tool/result` 的调用所记录的最近一屏**（包括 runtime 记在那个调用名下的屏：批准后复核读的屏 S'，以及接管结束后读的屏，§7.3）；还没有结果的调用记的屏、不属于任何调用的屏都不算。`handoff/end` 之前的屏都不算：接管后读不到屏，就是 `screen = null`。
+- 拦截器链先跑。PolicyEngine 再用 `IntentResolver` 解析调用，在 `ctx.screen` 上判定。`ctx.screen` 从日志推导：**已经有 `tool/result` 的调用所记录的最近一屏**（包括 runtime 记在那个调用名下的屏：批准后复核读的屏 S'，以及接管结束后读的屏，§7.3）；还没有结果的调用记的屏、不属于任何调用的屏都不算。从 `handoff/started` 起，之前的屏都不算，`handoff/end` 再把接管期间记的屏也作废；接管不论怎样结束（正常结束、被停止、超时、意外异常、进程被杀后修复），之后还没读到屏，就是 `screen = null`，交给 PolicyEngine 处理。
   - 这一屏可能比模型看到的更新：调用的结果不一定把它记录的屏展示给模型（比如动作之后回读的屏）。这样取是有意的：用更新的屏，最坏是带 ref 的调用多一次 stale 拒绝（快照 id 对不上）；如果严格按"模型看到的屏"判，坐标点击会在过期的屏上解析，可能放行一次在当前屏上本该确认的点击。
 - 链和策略的结论取更严的（Refuse > HandOff > Confirm > Allow，平手取策略的）。每个判定都写 `policy/verdict`。
 - Refuse：原因作为结果返回给模型。HandOff：转交给用户。Confirm：显示确认卡。
@@ -738,7 +738,7 @@ TaskRuntime 循环（每个 step，对应 §3.8 的拦截点）：
 
 1. 遇到 `hand_to_user`、PolicyEngine 判为转交、或检测到防截屏页时触发；
 2. 用 `moveTask` 把任务挪到主屏，同时发通知和悬浮胶囊，提示"请处理：登录 / 验证码 / 付款"；
-3. 用户点"处理好了"后，把任务挪回后台屏，并告诉模型"用户已处理，请核实结果"。每次接管结束（不论结局，也不论是 PolicyEngine 判的转交还是工具自己发起的）、下一次模型请求之前，runtime 都重新读屏（等待上限同复核，`LoopConfig.recheckScreenTimeoutMs`），记成这个调用名下的 `screen/snapshot`，之后的调用就在这一屏上判定。读不到时不报错：`handoff/end` 之前的屏一律不再算数，之后的调用以 `screen = null` 判定（§3.8），这个调用的结果末尾加上"读不到屏，先 phone_observe"；
+3. 用户点"处理好了"后，把任务挪回后台屏，并告诉模型"用户已处理，请核实结果"。每次接管结束（不论结局，也不论是 PolicyEngine 判的转交还是工具自己发起的）、下一次模型请求之前，runtime 都重新读屏（等待上限同复核，`LoopConfig.recheckScreenTimeoutMs`），记成这个调用名下的 `screen/snapshot`，之后的调用就在这一屏上判定。读不到时不报错：接管开始之前的屏一律不再算数，之后的调用以 `screen = null` 判定（§3.8），这个调用的结果末尾加上"读不到屏，先 phone_observe"（`LoopTexts.screenUnknown`）。接管没有正常结束时同样如此：停止、超出工具预算、意外异常都没有 `handoff/end`，也来不及读屏，旧屏从 `handoff/started` 起就已作废；补结果的两条路径（正常派发和 `repairOf`）都给这个调用加上同一句提示；
 4. 同一时间只交一个 App 给用户，多个任务排队。
 
 ---

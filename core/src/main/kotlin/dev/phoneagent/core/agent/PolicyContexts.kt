@@ -32,8 +32,9 @@ import dev.phoneagent.core.tool.ToolStatus
  * observation, the screen read back after an action or launch, or the runtime's own read for that
  * call: the re-check after its approval, the look after its handoff). Snapshots of a call still
  * running, and any without a call, do not count. `null` before any screen counts, and after a
- * handoff whose screen could not be read: a `handoff/end` hides every screen before it, since the
- * user may have changed what is shown.
+ * handoff until a screen is recorded after it: from its `handoff/started` on, whether it ends
+ * normally, is stopped, times out or breaks, every screen before it is hidden, since the user may
+ * have changed what is shown; a `handoff/end` hides those recorded during the handoff too.
  *
  * This screen can be newer than the one the model saw: a call's result need not show the screen it
  * recorded (an action's read-back, for one). That is deliberate. Judging on the newer screen costs
@@ -47,7 +48,11 @@ internal fun latestSnapshot(records: List<SessionRecord>): ScreenSnapshot? {
     return (seen as? Seen.Screen)?.snapshot
 }
 
-/** Whether [callId] handed off and no screen was recorded for it after its last handoff ended. */
+/**
+ * Whether [callId] handed off and no screen was recorded for it after its last handoff began or
+ * ended; a handoff that never ended (stopped, timed out, broken, cut by the process's death)
+ * counts as lost too.
+ */
 internal fun screenLostAfterHandoff(
     records: List<SessionRecord>,
     callId: ToolCallId,
@@ -60,9 +65,11 @@ internal fun screenLostAfterHandoff(
     val last =
         records.lastOrNull { record ->
             val event = record.event
-            (event is HandoffEnded && event.promptId in handoffs) || seenSnapshot(event, setOf(callId)) is Seen.Screen
+            (event is HandoffStarted && event.promptId in handoffs) ||
+                (event is HandoffEnded && event.promptId in handoffs) ||
+                seenSnapshot(event, setOf(callId)) is Seen.Screen
         }
-    return last?.event is HandoffEnded
+    return last != null && seenSnapshot(last.event, setOf(callId)) !is Seen.Screen
 }
 
 private sealed interface Seen {
@@ -94,7 +101,7 @@ private fun seenSnapshot(
                 ?.let(Seen::Screen)
         }
 
-        event is HandoffEnded -> {
+        event is HandoffStarted || event is HandoffEnded -> {
             Seen.Hidden
         }
 

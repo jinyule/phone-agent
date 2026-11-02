@@ -100,8 +100,11 @@ public data class LoopTexts(
     val handoffUnavailable: String = "未完成：这一步需要用户来做，但现在没有人能接手。",
     /** Moving the task to the user failed. */
     val handoffFailed: String = "未完成：把这一步交给用户时出错了。",
-    /** Appended, on a line of its own, to a handed-off call's result when no screen could be read after it. */
-    val screenUnknown: String = "交接结束后没能读到屏幕：请先调用 phone_observe。",
+    /**
+     * Appended, on a line of its own, to a handed-off call's result when no screen was read after
+     * the handoff (it ended unreadable, or was stopped, timed out or broken).
+     */
+    val screenUnknown: String = "交接之后还没有读到屏幕：请先调用 phone_observe。",
     /** The tool did not finish in time. */
     val timeout: String = "工具没有在限定时间内完成，已被取消。",
     /** Appended to [timeout] and [stoppedWhileRunning] for calls that may change the phone. */

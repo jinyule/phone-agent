@@ -321,8 +321,12 @@ class AgentLoopExecutionFactsTest {
                     .single { it.callId == ToolCallId("c1") }
                     .result
             assertEquals(
-                ToolResult.failure(ToolStatus.CANCELLED, "${texts.stoppedWhileRunning}${texts.mayHaveTakenEffect}"),
+                ToolResult.failure(
+                    ToolStatus.CANCELLED,
+                    "${texts.stoppedWhileRunning}${texts.mayHaveTakenEffect}\n${texts.screenUnknown}",
+                ),
                 result,
+                "stopped while handed over: no screen after the handoff either",
             )
         }
 }
