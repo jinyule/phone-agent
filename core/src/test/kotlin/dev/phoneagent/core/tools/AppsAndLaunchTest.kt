@@ -188,7 +188,7 @@ class AppsAndLaunchTest {
             runTest {
                 val screen = FakeScreen()
                 val opened = launch("""{"link":"https://example.com/a?card=6222021234567894"}""", screen)
-                assertTrue(opened.text().startsWith("已打开链接 https://example.com/a?card=「银行卡 尾号7894」"), opened.text())
+                assertTrue(opened.text().startsWith("已打开链接 https://example.com/a?card=「疑似银行卡 尾号7894」"), opened.text())
                 launch("""{"link":"market://details?id=com.tencent.mm"}""", screen)
                 assertEquals(
                     listOf(

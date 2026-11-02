@@ -15,24 +15,25 @@ class SensitiveNumbersTest {
 
     @Test
     fun `masks Luhn-valid card numbers, grouped or not, keeping the last four digits`() {
-        assertEquals("卡号「银行卡 尾号7894」", mask("卡号6222021234567894"))
-        assertEquals("卡号 「银行卡 尾号7894」 已绑定", mask("卡号 6222 0212 3456 7894 已绑定"))
-        assertEquals("「银行卡 尾号7894」", mask("6222-0212-3456-7894"))
-        assertEquals("19 位：「银行卡 尾号5677」", mask("19 位：6217000010012345677"))
+        assertEquals("卡号「疑似银行卡 尾号7894」", mask("卡号6222021234567894"))
+        assertEquals("卡号 「疑似银行卡 尾号7894」 已绑定", mask("卡号 6222 0212 3456 7894 已绑定"))
+        assertEquals("「疑似银行卡 尾号7894」", mask("6222-0212-3456-7894"))
+        assertEquals("19 位：「疑似银行卡 尾号5677」", mask("19 位：6217000010012345677"))
     }
 
     @Test
     fun `finds cards next to other numbers in the same digit run`() {
-        assertEquals("第 3 「银行卡 尾号7894」", mask("第 3 6222 0212 3456 7894"))
-        assertEquals("「银行卡 尾号7894」 「银行卡 尾号1111」", mask("6222021234567894 4111111111111111"))
-        assertEquals("「银行卡 尾号7894」 12", mask("6222 0212 3456 7894 12"))
+        assertEquals("第 3 「疑似银行卡 尾号7894」", mask("第 3 6222 0212 3456 7894"))
+        assertEquals("「疑似银行卡 尾号7894」 「疑似银行卡 尾号1111」", mask("6222021234567894 4111111111111111"))
+        assertEquals("「疑似银行卡 尾号7894」 12", mask("6222 0212 3456 7894 12"))
         // Neighbours of three or more digits that make a valid card with the first groups of the
-        // real one: both are masked as one, so no part of the card is left readable.
+        // real one: both are masked as one span, so no part of the card is left readable. Two
+        // numbers joined name no kind.
         for (neighbour in listOf("105", "1004", "10005", "100004")) {
-            assertEquals("第 「银行卡 尾号7894」", mask("第 $neighbour 6222 0212 3456 7894"), neighbour)
-            assertEquals("第 「银行卡 尾号7894」 号", mask("第 $neighbour\n    6222 0212 3456 7894 号"), neighbour)
+            assertEquals("第 $NEUTRAL", mask("第 $neighbour 6222 0212 3456 7894"), neighbour)
+            assertEquals("第 $NEUTRAL 号", mask("第 $neighbour\n    6222 0212 3456 7894 号"), neighbour)
         }
-        assertEquals("「银行卡 尾号7894」 105 号", mask("6222 0212 3456 7894 105 号"))
+        assertEquals("「疑似银行卡 尾号7894」 105 号", mask("6222 0212 3456 7894 105 号"))
     }
 
     @Test
@@ -91,13 +92,13 @@ class SensitiveNumbersTest {
         assertEquals("Order No. 6222021234567894", mask("Order No. 6222021234567894"))
         assertEquals("tracking number: 6222021234567894", mask("tracking number: 6222021234567894"))
         // A label earlier in the text, not right before the number, exempts nothing, card word or not.
-        assertEquals("订单已发货 「银行卡 尾号7894」", mask("订单已发货 6222021234567894"))
-        assertEquals("Order shipped, 「银行卡 尾号7894」", mask("Order shipped, 6222021234567894"))
+        assertEquals("订单已发货 「疑似银行卡 尾号7894」", mask("订单已发货 6222021234567894"))
+        assertEquals("Order shipped, 「疑似银行卡 尾号7894」", mask("Order shipped, 6222021234567894"))
     }
 
     @Test
     fun `card words win over an order label, and a label that is not adjacent exempts nothing`() {
-        val card = "「银行卡 尾号7894」"
+        val card = "「疑似银行卡 尾号7894」"
         assertEquals("订单支付 银行卡 $card", mask("订单支付 银行卡 6222021234567894"))
         assertEquals("订单使用的银行卡 $card", mask("订单使用的银行卡 6222021234567894"))
         assertEquals("银行卡编号 $card", mask("银行卡编号 6222021234567894"))
@@ -109,7 +110,7 @@ class SensitiveNumbersTest {
         assertEquals("编号 $card", mask("编号 6222021234567894"))
         assertEquals("Recorder $card", mask("Recorder 6222021234567894"))
         assertEquals(
-            "card on file for your order: 「银行卡 尾号1111」",
+            "card on file for your order: 「疑似银行卡 尾号1111」",
             mask("card on file for your order: 4111 1111 1111 1111"),
         )
     }
@@ -118,12 +119,12 @@ class SensitiveNumbersTest {
     fun `masks cards grouped by Unicode spaces or written in fullwidth digits, in place`() {
         for (space in listOf("\u00A0", "\u2009", "\u202F", "\u3000")) {
             val text = "卡号 6222${space}0212${space}3456${space}7894"
-            assertEquals("卡号 「银行卡 尾号7894」", mask(text), "U+" + space[0].code.toString(HEX))
+            assertEquals("卡号 「疑似银行卡 尾号7894」", mask(text), "U+" + space[0].code.toString(HEX))
         }
-        assertEquals("卡号 「银行卡 尾号7894」", mask("卡号 ６２２２０２１２３４５６７８９４"))
-        assertEquals("卡号 「银行卡 尾号7894」", mask("卡号 ６２２２　０２１２　３４５６　７８９４"))
+        assertEquals("卡号 「疑似银行卡 尾号7894」", mask("卡号 ６２２２０２１２３４５６７８９４"))
+        assertEquals("卡号 「疑似银行卡 尾号7894」", mask("卡号 ６２２２　０２１２　３４５６　７８９４"))
         assertEquals(
-            "卡号\u00A0「银行卡 尾号7894」\u3000已绑定",
+            "卡号\u00A0「疑似银行卡 尾号7894」\u3000已绑定",
             mask("卡号\u00A06222\u00A00212\u00A03456\u00A07894\u3000已绑定"),
             "the text around the number is kept as it was",
         )
@@ -133,13 +134,13 @@ class SensitiveNumbersTest {
 
     @Test
     fun `masks resident ids grouped or in fullwidth digits`() {
-        assertEquals("身份证 「身份证 尾号002X」", mask("身份证 110105 19491231 002X"))
-        assertEquals("身份证 「身份证 尾号002X」", mask("身份证 1101 0519 4912 3100 2X"))
-        assertEquals("身份证 「身份证 尾号002X」", mask("身份证 110105\u00A019491231\u00A0002X"))
-        assertEquals("身份证「身份证 尾号002X」", mask("身份证１１０１０５１９４９１２３１００２Ｘ"))
-        assertEquals("「身份证 尾号1100」 「银行卡 尾号7894」", mask("320102 19880815 1100 6222 0212 3456 7894"))
+        assertEquals("身份证 「疑似身份证 尾号002X」", mask("身份证 110105 19491231 002X"))
+        assertEquals("身份证 「疑似身份证 尾号002X」", mask("身份证 1101 0519 4912 3100 2X"))
+        assertEquals("身份证 「疑似身份证 尾号002X」", mask("身份证 110105\u00A019491231\u00A0002X"))
+        assertEquals("身份证「疑似身份证 尾号002X」", mask("身份证１１０１０５１９４９１２３１００２Ｘ"))
+        assertEquals("「疑似身份证 尾号1100」 「疑似银行卡 尾号7894」", mask("320102 19880815 1100 6222 0212 3456 7894"))
         // Its last 15 digits alone are a valid card ending in the same place: the id, the longer one, names the span.
-        assertEquals("身份证 「身份证 尾号0054」", mask("身份证 110 105194912310054"))
+        assertEquals("身份证 「疑似身份证 尾号0054」", mask("身份证 110 105194912310054"))
     }
 
     @Test
@@ -149,10 +150,27 @@ class SensitiveNumbersTest {
         assertEquals("区号 110105，生日 19491231，尾号 002X", mask("区号 110105，生日 19491231，尾号 002X"))
         // The price of reading a number wrapped over lines as one: two fields with only whitespace
         // between them read as one run, and a valid card in it is masked with both.
-        assertEquals("「银行卡 尾号1001」", mask("13800138000\n\n    1001"))
+        assertEquals(NEUTRAL, mask("13800138000\n\n    1001"))
         assertEquals("电话 13800138000\n\n金额 1001", mask("电话 13800138000\n\n金额 1001"))
         assertEquals(TWO_PHONES_MASKED, mask("138 0013 8000\n130 0222 0546"))
         assertEquals("电话 138 0013 8000\n电话 130 0222 0546", mask("电话 138 0013 8000\n电话 130 0222 0546"))
+    }
+
+    @Test
+    fun `a label names a kind and a tail only for one number on one line`() {
+        // One number on one line: its kind, as a guess, and its tail.
+        assertEquals("卡号 「疑似银行卡 尾号7894」", mask("卡号 6222 0212 3456 7894"))
+        assertEquals("身份证 「疑似身份证 尾号002X」", mask("身份证 110105 19491231 002X"))
+        assertEquals("「疑似银行卡 尾号7894」，「疑似银行卡 尾号1111」", mask("6222021234567894，4111111111111111"))
+        // Across a line break: the lines may be different fields, e.g. two phone numbers whose
+        // groups happen to make one valid card, with the "tail" from the middle of the second.
+        assertEquals("138 $NEUTRAL 0546", mask("138 0013 8000\n130 0222 0546"))
+        assertEquals(NEUTRAL, mask("6222\n0212 3456 7894"))
+        assertEquals("身份证 $NEUTRAL", mask("身份证 110105\u2028 19491231 002X"))
+        // Several numbers joined, on one line or two: one label must not read as one card.
+        assertEquals(NEUTRAL, mask("8686 7755 3960 0040 3064 3457 1231 4471"))
+        assertEquals(NEUTRAL, mask("8686 7755 3960 0040\n3064 3457 1231 4471"))
+        assertEquals("第 $NEUTRAL", mask("第 105 6222 0212 3456 7894"))
     }
 
     @Test
@@ -167,19 +185,19 @@ class SensitiveNumbersTest {
         assertEquals("订单号＃６２２２０２１２３４５６７８９４", mask("订单号＃６２２２０２１２３４５６７８９４"))
         // Only the number right after the label: the next one in the run is masked.
         assertEquals(
-            "订单号：${gap}6222021234567894 「银行卡 尾号1111」",
+            "订单号：${gap}6222021234567894 「疑似银行卡 尾号1111」",
             mask("订单号：${gap}6222021234567894 4111111111111111"),
         )
         // The longest label, glued to a letter before it, is no label.
-        assertEquals("Xtracking number 「银行卡 尾号7894」", mask("Xtracking number 6222021234567894"))
-        assertEquals("$gap「银行卡 尾号7894」", mask("${gap}6222021234567894"))
+        assertEquals("Xtracking number 「疑似银行卡 尾号7894」", mask("Xtracking number 6222021234567894"))
+        assertEquals("$gap「疑似银行卡 尾号7894」", mask("${gap}6222021234567894"))
     }
 
     @Test
     fun `masks resident ids with a valid check character and birth date`() {
-        assertEquals("身份证「身份证 尾号002X」", mask("身份证11010519491231002X"))
-        assertEquals("「身份证 尾号002X」", mask("11010519491231002x"))
-        assertEquals("「身份证 尾号1100」", mask("320102198808151100"))
+        assertEquals("身份证「疑似身份证 尾号002X」", mask("身份证11010519491231002X"))
+        assertEquals("「疑似身份证 尾号002X」", mask("11010519491231002x"))
+        assertEquals("「疑似身份证 尾号1100」", mask("320102198808151100"))
     }
 
     @Test
@@ -208,13 +226,13 @@ class SensitiveNumbersTest {
     fun `every Unicode space, U+0085 included, separates digit groups`() {
         for (space in UNICODE_SPACES) {
             val text = "卡号 6222${space}0212${space}3456${space}7894"
-            assertEquals("卡号 「银行卡 尾号7894」", mask(text), "U+" + space.code.toString(HEX))
+            val label = if (space in LINE_BREAKS) NEUTRAL else "「疑似银行卡 尾号7894」"
+            assertEquals("卡号 $label", mask(text), "U+" + space.code.toString(HEX))
         }
     }
 
     @Test
     fun `a gap of any length made of spaces and at most two dashes separates digit groups`() {
-        val card = "卡号 「银行卡 尾号7894」"
         val gaps =
             listOf(
                 "   ",
@@ -231,21 +249,23 @@ class SensitiveNumbersTest {
             )
         for (gap in gaps) {
             val text = "卡号 6222${gap}0212${gap}3456${gap}7894"
-            assertEquals(card, mask(text), gap.map { "U+" + it.code.toString(HEX) }.toString())
+            val label = if (gap.any { it in LINE_BREAKS }) NEUTRAL else "「疑似银行卡 尾号7894」"
+            assertEquals("卡号 $label", mask(text), gap.map { "U+" + it.code.toString(HEX) }.toString())
         }
-        // A number wrapped onto indented lines, and a column layout of one number.
-        assertEquals("尾 「银行卡 尾号7894」 尾", mask("尾 6222\r\n            0212\r\n            3456\r\n            7894 尾"))
-        assertEquals("「银行卡 尾号7894」", mask("6222 0212         3456 7894"))
-        assertEquals("身份证 「身份证 尾号002X」", mask("身份证 110105\n\n    19491231\n\n    002X"))
+        // A number wrapped onto indented lines (masked, with no kind: the lines might be two
+        // fields), and a column layout of one number.
+        assertEquals("尾 $NEUTRAL 尾", mask("尾 6222\r\n            0212\r\n            3456\r\n            7894 尾"))
+        assertEquals("「疑似银行卡 尾号7894」", mask("6222 0212         3456 7894"))
+        assertEquals("身份证 $NEUTRAL", mask("身份证 110105\n\n    19491231\n\n    002X"))
     }
 
     @Test
     fun `minus signs and zero-width marks between groups count as separators`() {
         for (mark in listOf("\u2212", "\uFE63", "\u200B", "\u200C", "\u200D", "\u2060", "\uFEFF")) {
             val text = "卡号 6222${mark}0212${mark}3456${mark}7894"
-            assertEquals("卡号 「银行卡 尾号7894」", mask(text), "U+" + mark[0].code.toString(HEX))
+            assertEquals("卡号 「疑似银行卡 尾号7894」", mask(text), "U+" + mark[0].code.toString(HEX))
         }
-        assertEquals("身份证 「身份证 尾号002X」", mask("身份证 110105\u221219491231\u2212002X"))
+        assertEquals("身份证 「疑似身份证 尾号002X」", mask("身份证 110105\u221219491231\u2212002X"))
     }
 
     @Test
@@ -264,7 +284,7 @@ class SensitiveNumbersTest {
         // Gaps of any length make long runs; each start is tried only as far as a card can reach.
         val text = "1 ".repeat(SHORT_GROUPS) + "6222 0212 3456 7894"
         val masked = assertTimeoutPreemptively(Duration.ofSeconds(SCAN_SECONDS)) { mask(text) }
-        assertEquals("1 ".repeat(SHORT_GROUPS) + "「银行卡 尾号7894」", masked)
+        assertEquals("1 ".repeat(SHORT_GROUPS) + "「疑似银行卡 尾号7894」", masked)
     }
 
     @Test
@@ -275,7 +295,7 @@ class SensitiveNumbersTest {
         // room for a slow machine. The cards do not overlap: the merging is timed below.
         val text = "4111111111111111 ".repeat(MANY_CARDS)
         val masked = assertTimeoutPreemptively(Duration.ofSeconds(SLOW_BOUND_SECONDS)) { mask(text) }
-        assertEquals("「银行卡 尾号1111」 ".repeat(MANY_CARDS), masked)
+        assertEquals("「疑似银行卡 尾号1111」 ".repeat(MANY_CARDS), masked)
     }
 
     @Test
@@ -286,14 +306,15 @@ class SensitiveNumbersTest {
         // times that per doubling, so minutes here. Again the bound only tells the two apart.
         val text = "000 ".repeat(CHAIN_GROUPS)
         val masked = assertTimeoutPreemptively(Duration.ofSeconds(SLOW_BOUND_SECONDS)) { mask(text) }
-        assertEquals("「银行卡 尾号0000」 ", masked)
+        assertEquals("$NEUTRAL ", masked)
     }
 
     /** Whether masking [text], which ends in [CARD_GROUPED], leaves the card wholly inside the last masked span. */
     private fun coversCard(text: String): Boolean {
         val masked = mask(text)
-        val kept = masked.removeSuffix(CARD_MASKED)
-        return masked.endsWith(CARD_MASKED) && text.startsWith(kept) && kept.length <= text.length - CARD_GROUPED.length
+        val label = listOf(CARD_MASKED, NEUTRAL).firstOrNull(masked::endsWith) ?: return false
+        val kept = masked.removeSuffix(label)
+        return text.startsWith(kept) && kept.length <= text.length - CARD_GROUPED.length
     }
 
     private fun shown(text: String): String =
@@ -303,10 +324,16 @@ class SensitiveNumbersTest {
 
     private companion object {
         const val CARD_GROUPED = "6222 0212 3456 7894"
-        const val CARD_MASKED = "「银行卡 尾号7894」"
+        const val CARD_MASKED = "「疑似银行卡 尾号7894」"
+
+        /** The label of a span that joins several numbers or crosses a line. */
+        const val NEUTRAL = "「已隐藏的号码」"
+
+        /** The line breaks among the Unicode spaces: a span across one gets [NEUTRAL]. */
+        const val LINE_BREAKS = "\n\u000B\u000C\r\u0085\u2028\u2029"
 
         /** Two mobile numbers on consecutive lines, masked with each other as a card. */
-        const val TWO_PHONES_MASKED = "138 「银行卡 尾号0222」 0546"
+        const val TWO_PHONES_MASKED = "138 $NEUTRAL 0546"
 
         /** Gaps between a number and the card after it in one run. */
         val GAPS_BEFORE_CARD = listOf(" ", "\n", "   ", "\n    ", "\r\n    ", "\u0085", "\n\n  ")

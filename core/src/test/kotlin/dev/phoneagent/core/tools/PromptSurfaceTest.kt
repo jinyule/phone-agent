@@ -113,6 +113,14 @@ class PromptSurfaceTest {
     }
 
     @Test
+    fun `screens - numbers joined across fields are masked without a kind`() {
+        Golden.assertMatches(
+            "screens/masked-joined-numbers.expected.txt",
+            formatter.page(Samples.joinedNumbers, SnapshotDetail.FULL),
+        )
+    }
+
+    @Test
     fun `screens - sparse tree with OCR`() {
         Golden.assertMatches(
             "screens/sparse-with-ocr.expected.txt",
@@ -576,6 +584,20 @@ internal object Samples {
                 el("e15", ElementRole.TEXT, "信用卡 4111\uFE631111\uFE631111\uFE631111", box(40, 900, 960, 940)),
             ),
         ).copy(pkg = "com.example.wallet", activity = "com.example.wallet.CardsActivity").assessed()
+
+    /** Numbers only whitespace separates: two phones on two lines, two cards, a neighbour; with controls. */
+    val joinedNumbers: ScreenSnapshot =
+        snapshot(
+            "s32",
+            listOf(
+                el("e1", ElementRole.TEXT, "联系人 张三\n138 0013 8000\n130 0222 0546", box(40, 200, 960, 280)),
+                el("e2", ElementRole.TEXT, "电话 138 0013 8000\n电话 130 0222 0546", box(40, 300, 960, 380)),
+                el("e3", ElementRole.TEXT, "8686 7755 3960 0040\n3064 3457 1231 4471", box(40, 400, 960, 480)),
+                el("e4", ElementRole.TEXT, "第 105 6222 0212 3456 7894", box(40, 500, 960, 540)),
+                el("e5", ElementRole.TEXT, "卡号 6222 0212 3456 7894", box(40, 550, 960, 590)),
+                el("e6", ElementRole.TEXT, "身份证 110105 19491231 002X", box(40, 600, 960, 640)),
+            ),
+        ).copy(pkg = "com.example.contacts", activity = "com.example.contacts.DetailActivity").assessed()
 
     val sparse: ScreenSnapshot =
         snapshot(

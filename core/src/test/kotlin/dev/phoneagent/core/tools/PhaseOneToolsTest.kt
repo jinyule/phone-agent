@@ -138,7 +138,7 @@ class PhaseOneToolsTest {
             StepCard(
                 "phone_type",
                 "填卡号",
-                listOf(StepDetail("screen", "s12"), StepDetail("ref", "e9"), StepDetail("text", "卡号 「银行卡 尾号7894」")),
+                listOf(StepDetail("screen", "s12"), StepDetail("ref", "e9"), StepDetail("text", "卡号 「疑似银行卡 尾号7894」")),
             ),
             tap.presentCall(typed),
         )

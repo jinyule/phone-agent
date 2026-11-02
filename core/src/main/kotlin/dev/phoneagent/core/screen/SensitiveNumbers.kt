@@ -25,8 +25,10 @@ import java.time.YearMonth
  *   over lines. A phone number on one line and a number on the next (`13800138000⏎⏎    1001`)
  *   read as one run, and a card or id that some of their groups make is masked, with the parts of
  *   both fields it covers. This errs on the private side, and it is common: two mobile numbers
- *   written 3-4-4 on consecutive lines are masked as a card about a third of the time. Fields with
- *   a field word between them (`电话 …⏎金额 …`) are never joined.
+ *   written 3-4-4 on consecutive lines are masked about a third of the time, and two cards with
+ *   only whitespace between them may be masked as one span. The labels below therefore name a kind
+ *   only where it can hold. Fields with a field word between them (`电话 …⏎金额 …`) are never
+ *   joined.
  * - **What is masked**: a card is 15–19 digits passing Luhn, in one group or in groups of at least
  *   three digits; an id is 17 digits plus a check character (`0`–`9` or `X`) with a valid region,
  *   birth date and ISO 7064 MOD 11-2 check, in one group or in groups of at least two characters
@@ -39,9 +41,15 @@ import java.time.YearMonth
  *   `Order No. …`) is left alone, unless a card word (银行卡, 卡号, 储蓄卡, 信用卡, 借记卡, 账号,
  *   card, …) is near the number: card words always win.
  *
- * A masked span is replaced as a whole, in place, keeping its last four characters:
- * `「银行卡 尾号7890」`, `「身份证 尾号123X」` (the kind of the longest number that ends it); everything
- * around it is kept as it was. Linear in the text. Pure and thread-safe.
+ * A masked span is replaced as a whole, in place; everything around it is kept as it was. Its
+ * label is a guess from the number's shape, and says so:
+ * - one number on one line: its kind, marked as suspected, and its last four characters,
+ *   `「疑似银行卡 尾号7890」`, `「疑似身份证 尾号123X」`;
+ * - a span that joins several numbers or crosses a line break: `「已隐藏的号码」`, no kind and no
+ *   tail, since those could come from fields that are no card or id at all (two phone numbers on
+ *   two lines) or hide one of two cards.
+ *
+ * Linear in the text. Pure and thread-safe.
  */
 public object SensitiveNumbers {
     /** [text] with every recognized card and id number replaced by its masked form; the rest is unchanged. */
@@ -52,7 +60,7 @@ public object SensitiveNumbers {
         val out = StringBuilder()
         var copied = 0
         for (run in NumberRuns.of(plain)) {
-            for ((range, masked) in numbersIn(plain, run)) {
+            for ((range, masked) in numbersIn(text, plain, run)) {
                 out.append(text, copied, range.first).append(masked)
                 copied = range.last + 1
             }
@@ -81,35 +89,67 @@ public object SensitiveNumbers {
     }
 
     /**
-     * The numbers to mask in [groups] (one run of [plain]), in order, as (range, masked form). Every
-     * group is tried as the start of a number, longest group sequence first, so a number next to
-     * another one ("第 3 6222 …") is still found. Numbers that overlap are masked as one span, so a
-     * number found from an earlier start never leaves the end of a later one readable
-     * ("105   6222 0212 3456 7894"); the span is masked as the number that ends last, the longest
-     * one when several end together. A later number never ends inside an earlier one: the earlier
-     * one would need a group on each side of it, and no card or id is that long.
+     * The spans to mask in [groups] (one run of [plain], a copy of [text]), in order, as (range,
+     * label). Every group is tried as the start of a number, longest group sequence first, so a
+     * number next to another one ("第 3 6222 …") is still found. Numbers that overlap are masked
+     * as one span, so a number found from an earlier start never leaves the end of a later one
+     * readable ("105   6222 0212 3456 7894"). A later number never ends inside an earlier one: the
+     * earlier one would need a group on each side of it, and no card or id is that long. So a span
+     * is one number (when later ones end with it, the longest) or several joined.
      */
     private fun numbersIn(
+        text: String,
         plain: String,
         groups: List<IntRange>,
     ): List<Pair<IntRange, String>> {
         val found = mutableListOf<Pair<IntRange, String>>()
-        var spanFirst = 0
-        var spanLast = -1
-        var spanMasked = ""
+        var span: Span? = null
         for (first in groups.indices) {
             val (last, masked) = longestNumberFrom(plain, groups, first) ?: continue
-            if (first > spanLast) {
-                if (spanLast >= 0) found += (groups[spanFirst].first..groups[spanLast].last) to spanMasked
-                spanFirst = first
-            }
-            if (last > spanLast) {
-                spanLast = last
-                spanMasked = masked
-            }
+            val open = span
+            span =
+                when {
+                    open == null || first > open.last -> {
+                        if (open != null) found += open.shown(text, groups)
+                        Span(first, last, masked, joined = false)
+                    }
+
+                    last > open.last -> {
+                        Span(open.first, last, masked, joined = true)
+                    }
+
+                    else -> {
+                        open
+                    }
+                }
         }
-        if (spanLast >= 0) found += (groups[spanFirst].first..groups[spanLast].last) to spanMasked
+        if (span != null) found += span.shown(text, groups)
         return found
+    }
+
+    /**
+     * A span being built: its first and last group, the form of the number that ends it, and
+     * whether it joins several numbers. Extending it costs the same however long it is.
+     */
+    private class Span(
+        val first: Int,
+        val last: Int,
+        val masked: String,
+        val joined: Boolean,
+    ) {
+        /**
+         * The span's range of [text] and its label: the number's own form when it is one number on
+         * one line, else [NEUTRAL], since a kind and tail taken from joined or wrapped digits may
+         * belong to no real number.
+         */
+        fun shown(
+            text: String,
+            groups: List<IntRange>,
+        ): Pair<IntRange, String> {
+            val range = groups[first].first..groups[last].last
+            val neutral = joined || range.any { text[it] in LINE_BREAKS }
+            return range to if (neutral) NEUTRAL else masked
+        }
     }
 
     /** The last group and masked form of the longest number starting at group [first], or `null`. */
@@ -150,14 +190,14 @@ public object SensitiveNumbers {
         val chars = groups.joinToString("") { plain.substring(it) }
         val minGroup = groups.minOf { it.count() }
         val id = chars.length == ID_LENGTH && (groups.size == 1 || minGroup >= MIN_ID_GROUP) && isResidentIdValid(chars)
-        if (id) return "「身份证 尾号${chars.takeLast(KEPT)}」"
+        if (id) return "「疑似身份证 尾号${chars.takeLast(KEPT)}」"
         val card =
             chars.length in MIN_CARD_DIGITS..MAX_CARD_DIGITS &&
                 chars.all { it in '0'..'9' } &&
                 (groups.size == 1 || minGroup >= MIN_CARD_GROUP) &&
                 isLuhnValid(chars)
         val span = groups.first().first..groups.last().last
-        return if (card && !isLabeledNotACard(plain, span)) "「银行卡 尾号${chars.takeLast(KEPT)}」" else null
+        return if (card && !isLabeledNotACard(plain, span)) "「疑似银行卡 尾号${chars.takeLast(KEPT)}」" else null
     }
 
     /** Whether the number at [span] directly follows an order-like label and no card word is near it. */
@@ -219,6 +259,12 @@ public object SensitiveNumbers {
     private const val KEPT = 4
     private const val CARD_WORD_BEFORE = 32
     private const val CARD_WORD_AFTER = 12
+
+    /** The label of a span that joins several numbers or crosses a line: no kind, no tail. */
+    private const val NEUTRAL = "「已隐藏的号码」"
+
+    /** Line breaks among the separators: a span across one is labelled [NEUTRAL]. */
+    private const val LINE_BREAKS = "\n\u000B\u000C\r\u0085\u2028\u2029"
 
     /** What may stand between an order label and its number (on the plain copy: any space is ` `). */
     private const val LABEL_SEPARATORS = " :：#"

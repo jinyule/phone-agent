@@ -81,7 +81,7 @@ class ScreenComponentsTest {
         assertEquals(ScreenFingerprint.of("p", "a", rows, null), strict.analyzer.fingerprint("p", "a", rows, null))
         val pay = snapshot("s3", listOf(el("e1", ElementRole.BUTTON, "支付", box(40, 880, 960, 960), click)))
         assertTrue(strict.presenter.page(pay, SnapshotDetail.BRIEF).contains("@e1 ⚠ 按钮 \"支付\""))
-        assertEquals("「银行卡 尾号7894」", strict.presenter.mask("6222021234567894"))
+        assertEquals("「疑似银行卡 尾号7894」", strict.presenter.mask("6222021234567894"))
         val sparse = pay.copy(quality = TreeQuality.SPARSE)
         val blind = ScreenComponents(lexicon = Screens.LEXICON, vision = false)
         assertTrue(strict.presenter.page(sparse, SnapshotDetail.BRIEF).contains("截图"))

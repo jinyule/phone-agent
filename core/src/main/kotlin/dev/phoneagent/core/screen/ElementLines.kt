@@ -66,8 +66,11 @@ internal class ElementLines(
                 ?.let { append(" \"").append(it).append('"') }
         }
 
-    /** [text] as shown inside quotes: one line, masked, no ASCII quotes, clipped at `brief`. */
-    fun clean(text: String): String = clip(SensitiveNumbers.mask(oneLine(text)).replace('"', '＂'), labelMax)
+    /**
+     * [text] as shown inside quotes: masked while its line breaks are still there (so a span across
+     * lines gets the neutral label), then one line, no ASCII quotes, clipped at `brief`.
+     */
+    fun clean(text: String): String = clip(oneLine(SensitiveNumbers.mask(text)).replace('"', '＂'), labelMax)
 
     private fun label(
         element: UiElement,

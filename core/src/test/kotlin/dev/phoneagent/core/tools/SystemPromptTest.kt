@@ -33,4 +33,11 @@ class SystemPromptTest {
         assertFalse(format.contains("没带画面时先 phone_observe"), format)
         assertTrue(format.contains("屏幕动作之后没有读到新屏、又要依据当前画面继续操作时，先 phone_observe"), format)
     }
+
+    @Test
+    fun `the screen format says masking labels are guesses`() {
+        val format = SystemPrompt.SCREEN_FORMAT.text
+        assertTrue(format.contains("「疑似银行卡 尾号1234」「疑似身份证 尾号123X」「已隐藏的号码」是打了码的号码"), format)
+        assertTrue(format.contains("类型和尾号不一定准，一个标签也可能盖住了几个号码"), format)
+    }
 }

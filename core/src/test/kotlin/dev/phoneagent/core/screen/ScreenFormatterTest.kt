@@ -170,7 +170,7 @@ class ScreenFormatterTest {
                     el("e3", ElementRole.TEXT, long),
                 )
             assertEquals("@e1 \"第一行 第二行 ＂引用＂\"", lines[0])
-            assertEquals("@e2 \"卡号 「银行卡 尾号7894」\"", lines[1])
+            assertEquals("@e2 \"卡号 「疑似银行卡 尾号7894」\"", lines[1])
             assertEquals("@e3 \"" + long.take(59) + "…\"", lines[2])
         }
 
@@ -203,9 +203,9 @@ class ScreenFormatterTest {
                     el("e2", ElementRole.TEXT, "持卡人\u3000张三\u00A0 身份证\u3000110105\u300019491231\u3000002X"),
                     el("e3", ElementRole.TEXT, "订单使用的银行卡 6222021234567894"),
                 )
-            assertEquals("@e1 \"卡号 「银行卡 尾号7894」\"", lines[0])
-            assertEquals("@e2 \"持卡人 张三 身份证 「身份证 尾号002X」\"", lines[1])
-            assertEquals("@e3 \"订单使用的银行卡 「银行卡 尾号7894」\"", lines[2])
+            assertEquals("@e1 \"卡号 「疑似银行卡 尾号7894」\"", lines[0])
+            assertEquals("@e2 \"持卡人 张三 身份证 「疑似身份证 尾号002X」\"", lines[1])
+            assertEquals("@e3 \"订单使用的银行卡 「疑似银行卡 尾号7894」\"", lines[2])
         }
 
         @Test
@@ -654,7 +654,7 @@ class ScreenFormatterTest {
 
     @Test
     fun `masks with the shared number masking`() {
-        assertEquals("「银行卡 尾号7894」", formatter.mask("6222021234567894"))
+        assertEquals("「疑似银行卡 尾号7894」", formatter.mask("6222021234567894"))
     }
 
     @Test

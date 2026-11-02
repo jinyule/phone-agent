@@ -39,7 +39,7 @@ class MaskingBoundaryTest {
 
     private fun assertMasked(text: String) {
         assertFalse(text.contains(CARD), text)
-        assertTrue(text.contains("「银行卡 尾号7894」"), text)
+        assertTrue(text.contains("「疑似银行卡 尾号7894」"), text)
     }
 
     @Test
@@ -107,13 +107,19 @@ class MaskingBoundaryTest {
     @Test
     fun `numbers grouped by space runs, U+0085, zero-width marks or minus signs are masked at every exit`() =
         runTest {
-            assertAll(GROUPED.flatMap { raw -> exits("卡号 $raw") }.map(::assertCardMasked))
+            assertAll(
+                GROUPED.flatMap { raw ->
+                    val label = if (raw.any { it in LINE_BREAKS }) NEUTRAL else CARD_LABEL
+                    exits("卡号 $raw").map { assertCardMasked(it, label) }
+                },
+            )
         }
 
     @Test
     fun `a number in the gap before a card does not shift the mask off the card at any exit`() =
         runTest {
-            assertAll(NEIGHBOURED.flatMap { raw -> exits(raw) }.map(::assertCardMasked))
+            // The neighbour and the card are masked as one span, which names no kind.
+            assertAll(NEIGHBOURED.flatMap { raw -> exits(raw) }.map { assertCardMasked(it, NEUTRAL) })
         }
 
     /** [deviceText] through the five exits: failure, refusal, exception, step-card summary, FULL screen. */
@@ -145,15 +151,21 @@ class MaskingBoundaryTest {
         )
     }
 
-    private fun assertCardMasked(exit: Pair<String, String>): () -> Unit =
+    private fun assertCardMasked(
+        exit: Pair<String, String>,
+        label: String,
+    ): () -> Unit =
         {
             val (name, text) = exit
             assertFalse(listOf("6222", "0212", "3456").any(text::contains), "$name: $text")
-            assertTrue(text.contains("「银行卡 尾号7894」"), "$name: $text")
+            assertTrue(text.contains(label), "$name: $text")
         }
 
     private companion object {
         const val CARD = "6222021234567894"
+        const val CARD_LABEL = "「疑似银行卡 尾号7894」"
+        const val NEUTRAL = "「已隐藏的号码」"
+        const val LINE_BREAKS = "\n\u000B\u000C\r\u0085\u2028\u2029"
 
         /** Groupings the device may send verbatim (no line folding happens before masking). */
         val GROUPED =
