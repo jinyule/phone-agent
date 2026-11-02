@@ -162,7 +162,20 @@ class AndroidScreenDeviceTest {
             val vanished = vanishedRefs(dragged.after!!, scrolled.after!!)
             log("refs of rows scrolled away: ${vanished.map { it.value }}")
             assertTrue("some named row scrolled away", vanished.isNotEmpty())
-            assertTrue("no ref of a row scrolled away is reused", scrolled.after!!.elements.none { it.ref in vanished })
+            // A row still partly in view keeps its ref (its identity holds its clipped labels), though
+            // the name it borrows from visible text is gone; any other ref of a vanished name is void.
+            val reused =
+                scrolled.after!!.elements.filter { it.ref in vanished }.map { now ->
+                    dragged.after!!.elements.single { it.ref == now.ref } to now
+                }
+            log("refs kept by rows still partly in view: ${reused.map { (was, now) -> "$was -> $now" }}")
+            val height = { it: UiElement -> it.bounds.bottom - it.bounds.top }
+            assertTrue(
+                "no ref of a row scrolled away is reused: $reused",
+                reused.all { (was, now) ->
+                    now.role == was.role && now.parent == was.parent && now.name == null && height(now) < height(was)
+                },
+            )
             assertTrue("the bars are not part of the screen", scrolled.after!!.elements.none { it.window in bars })
 
             // The row planned on the screen before scrolling has moved: refused without touching the device.
@@ -199,10 +212,13 @@ class AndroidScreenDeviceTest {
             assertEquals(ActionOutcome.Status.Ok, appended.status)
             assertEquals("wifi hotspot", appended.after!!.find { it.role == ElementRole.INPUT }.value)
 
+            // Typing shows results as it goes; what tells a submitted search is the keyboard going away.
+            assertTrue("keyboard shown before submitting", ScreenFlag.KEYBOARD in appended.after!!.flags)
             val submitted = screen.act(UiAction.Type(null, "battery", submit = true), on = null)
             log("type 'battery' and submit: ${submitted.describe()}")
             assertEquals(ActionOutcome.Status.Ok, submitted.status)
             assertEquals("battery", submitted.after!!.find { it.role == ElementRole.INPUT }.value)
+            assertTrue("submitting hid the keyboard", keyboardGoesAway(submitted.after!!))
 
             // Submitting hid the keyboard, and a field without it has no editor action: tap it first.
             val searchField = submitted.after!!.find { it.role == ElementRole.INPUT }
@@ -212,13 +228,29 @@ class AndroidScreenDeviceTest {
             val retyped = screen.act(UiAction.Type(null, "display"), on = null)
             log("type 'display' into the focused field: ${retyped.describe()}")
             assertEquals(ActionOutcome.Status.Ok, retyped.status)
-            // An explicit ENTER; Ok means the editor action was sent (the search then hides the keyboard).
+            assertTrue("keyboard shown before ENTER", ScreenFlag.KEYBOARD in retyped.after!!.flags)
             val entered = screen.act(UiAction.Key(SystemKey.ENTER), on = null)
             log("ENTER: ${entered.describe()}")
             assertEquals(ActionOutcome.Status.Ok, entered.status)
             assertEquals("display", entered.after!!.find { it.role == ElementRole.INPUT }.value)
+            assertTrue("ENTER submitted the search and hid the keyboard", keyboardGoesAway(entered.after!!))
             screen.act(UiAction.Key(SystemKey.BACK), on = null)
         }
+
+    /**
+     * Whether the keyboard is gone from [after] or goes within [CHANGE_TIMEOUT_MS], reading again
+     * on each change (it may hide once the outcome has settled).
+     */
+    private suspend fun keyboardGoesAway(after: ScreenSnapshot): Boolean {
+        var flags = after.flags
+        val deadline = System.nanoTime() + CHANGE_TIMEOUT_MS * NANOS_PER_MS
+        while (ScreenFlag.KEYBOARD in flags && System.nanoTime() < deadline) {
+            val changed = screen.awaitChange(CHANGE_TIMEOUT_MS)
+            flags = screen.snapshot().flags
+            log("  waiting for the keyboard to go: changed=$changed flags=$flags")
+        }
+        return ScreenFlag.KEYBOARD !in flags
+    }
 
     @Test
     fun theInputConnectionLevelTypesWithoutSetText() =
