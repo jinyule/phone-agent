@@ -36,7 +36,10 @@ internal class Prompts(
     private val lock = Mutex()
     private val pending = AtomicReference<Pending<*>?>(null)
 
-    /** The [UserInteraction] of [callId]; time waiting inside it is excluded from [wait]'s timeout. */
+    /**
+     * The [UserInteraction] of [callId]; time waiting inside it is excluded from [wait]'s timeout.
+     * The gate confirms through it; a tool only ever gets its `forTools()` view.
+     */
     fun interaction(
         callId: ToolCallId,
         wait: UserWait,

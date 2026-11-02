@@ -7,7 +7,8 @@ import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.ports.AppCatalog
 import dev.phoneagent.core.ports.Clock
 import dev.phoneagent.core.ports.ScreenPort
-import dev.phoneagent.core.ports.UserInteraction
+import dev.phoneagent.core.ports.ToolInteraction
+import dev.phoneagent.core.ports.forTools
 import dev.phoneagent.core.session.InboxEntry
 import dev.phoneagent.core.session.InboxEntryKind
 import dev.phoneagent.core.session.InboxQueue
@@ -157,7 +158,7 @@ internal class Calls(
     ): ToolResult {
         if (tool.risk != RiskClass.READ) loop.log.flush()
         val budget = TimeoutBudget(tool.timeoutMs, loop.setup.timeSource)
-        val judged = ExecuteInput(call, tool, CallContext(call, prompts.interaction(call.id, budget)))
+        val judged = ExecuteInput(call, tool, CallContext(call, prompts.interaction(call.id, budget).forTools()))
         val end = ExecutionEnd(state, judged)
         val chain = interceptors.toolExecute.chain(end::run)
         val result = budget.run { chain.proceed(judged) }
@@ -214,9 +215,10 @@ internal class Calls(
             RecordingScreen(port, call.id, blobs) { event -> loop.log.append(event) }
         }
 
+    /** A call's own context: its tool may ask and hand off, never confirm (cards come from the policy only). */
     private inner class CallContext(
         call: ToolCall,
-        override val interaction: UserInteraction,
+        override val interaction: ToolInteraction,
     ) : ToolContext {
         override val taskId: TaskId get() = loop.setup.taskId
         override val sessionId: SessionId get() = loop.sessionId

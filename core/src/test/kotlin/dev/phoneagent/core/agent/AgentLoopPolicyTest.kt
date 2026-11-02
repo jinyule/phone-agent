@@ -340,13 +340,14 @@ class AgentLoopPolicyTest {
         }
 
     @Test
-    fun `an unattended task gets no answers and never waits`() =
+    fun `an unattended task gets no answers and never waits, and a tool cannot reach confirm`() =
         runTest {
             val results = mutableListOf<Any>()
             val tool =
                 FakeTool("ask") { _, ctx ->
                     results += ctx.interaction.ask(Question("?"))
-                    results += (ctx.interaction as UserInteraction).confirm(sendCard)
+                    // Confirmation cards come from the policy only: not even a cast reaches confirm.
+                    results += (ctx.interaction as? UserInteraction)?.confirm(sendCard) ?: "no confirm"
                     results += ctx.interaction.handOff(HandoffKind.CAPTCHA, "solve it")
                     ToolResult.ok("ok")
                 }
@@ -360,7 +361,7 @@ class AgentLoopPolicyTest {
             val loop = harness.start()
             loop.followup(text("go"))
             loop.awaitPhase(Phase.Done)
-            assertEquals(listOf(AskResult.Unavailable, ConfirmResult.UNAVAILABLE, HandoffResult.UNAVAILABLE), results)
+            assertEquals(listOf(AskResult.Unavailable, "no confirm", HandoffResult.UNAVAILABLE), results)
             assertEquals(0L, currentTimeOf(this))
         }
 
