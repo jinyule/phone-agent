@@ -63,11 +63,24 @@
 - **R8**：`spike-rules.pro` 里只有一条 `-dontwarn com.google.auto.value.AutoValue`。这一条是 AGP 在 sdk 变体报缺失类时生成的（`missing_rules.txt`）；none 和 direct 用同一份规则文件构建，它们不引用 AutoValue，这一条对它们不起作用。spike 构建的 `lintVital` 没有报错。
 - **minSdk 30**：静态扫描 dex 中引用的 API 级别。高于 30 的只有一处：`okio.Buffer$inputStream$1.transferTo`（API 33），它是对 `InputStream.transferTo` 的覆写，在 API 30 上不会被调用到。direct 和 sdk 都有这一处，因为都依赖 okio。
   - **没有在设备或模拟器上运行**（WP04 不允许碰 adb 设备）。"能运行"的结论只来自 API 级别扫描和 lintVital。
-- **行为**（对照 SDK 3.3.0 源码确认）：
-  - SDK 内部的 OkHttp 客户端不暴露关闭重定向和认证 follow-up 的开关；
-  - 默认会重试，`maxRetries(0)` 可以关掉；
-  - 每个请求都附加 `X-Stainless-*` 平台头（OS、架构、运行时版本）；
-  - 请求体由 SDK 的 builder 生成，beta 字段要通过 `putAdditionalProperty` 塞进去；
+- **行为**（对照 SDK 3.3.0 源码和 OkHttp 5.5.1 的字节码确认，2026-11-02 r1 改正）：
+  - 重试：默认 `maxRetries` 是 2（`ClientOptions`），`maxRetries(0)` 可以关掉；SDK 的 OkHttp 客户端本来就关了 `retryOnConnectionFailure`。
+  - 重定向：可以关，按请求设 `RequestOptions.builder().followRedirects(false)`（`RequestOptions.kt`；client-okhttp 的 `OkHttpClient.newCall` 据此设置 OkHttp）。
+  - 认证 follow-up：SDK 不给 OkHttp 设 authenticator，只在配置了代理认证时设 `proxyAuthenticator`，所以 401 不会被自动重发。
+  - **关不掉的一项**：OkHttp 的 `RetryAndFollowUpInterceptor` 遇到 `503` 加 `Retry-After: 0` 会自己再发一次，不看 `retryOnConnectionFailure`。SDK 依赖 OkHttp 4.12.0，本项目解析到 5.5.1；5.5.1 的 `followUpRequest` 里，408 分支检查这个开关，503 分支不检查。
+    - 我们的客户端用网络拦截器 `RetryAfterStash` 挡住它，`OneRequestPerAttemptTest` 的 "503 with retry-after 0 is not resent" 固定了这一点。
+    - SDK 3.3.0 的 client-okhttp 自己构造 `okhttp3.OkHttpClient`。它的 Builder 只有超时、代理、连接池、TLS 这几类设置，不能加 OkHttp 拦截器，也不能传入自己的 `OkHttpClient`。
+    - SDK 自己的 `Interceptor` 包在 SDK 的 `HttpClient` 外面，看到的已经是 OkHttp 重发之后的响应。
+    - 要挡住这次重发，只能自己实现 SDK 的 `HttpClient` 接口，也就是自己写传输层（见 Alternatives 第二条）。
+  - 每个请求默认带 `X-Stainless-*` 平台头（OS、架构、运行时版本）。它们在 `ClientOptions` 里写死，用户的 header 只能覆盖同名的值。
+  - beta 字段：3.3.0 的 beta `MessageCreateParams` 已经给本适配器发的字段都建了类型，用不着 `putAdditionalProperty`。这些字段是：
+    - `fallbacksDefault()`；
+    - adaptive `thinking` 的 `display` 和 `block_binding`（`BetaThinkingBlockBinding`）；
+    - `contextManagement`（含 `BetaCompact20260112Edit`）和 `outputConfig`；
+    - 工具上的 `strict`、`eager_input_streaming`；
+    - 回传用的 `BetaCompactionBlockParam`、`BetaFallbackBlockParam`。
+
+    只有 3.3.0 之后新出、SDK 还没建模的字段，才要通过 `putAdditionalProperty`（body 的 additional properties）塞进去。
   - 序列化走 Jackson 加 jackson-module-kotlin，运行时要用 `kotlin.reflect`。thinking 块要原样存进 kotlinx 的 `JsonElement`（日志的类型）、再原样回传，每轮都得在 Jackson 的 `JsonValue` 和 kotlinx 的 `JsonElement` 之间来回转换。
 
 ## 决定
@@ -84,6 +97,8 @@
   - `Retry-After` 只接受有限、非负的值。
   - 取消时取消 Call，并释放响应和连接。
   - 服务端回显的内容一律用含本次密钥的 redactor 处理：错误体、流内 error 事件、协议违例的描述，以及成功回复 `providerMetadata` 里的每个字符串。
+  - 错误体先脱敏再截断：多读"最长密钥减 1"个字节，正文没读完时去掉末尾可能是密钥开头的部分，再按字符截断。做法和 WP03 的 `maskedText` 相同。
+  - 回复内容里的密钥（正文、参数、要原样回传的块、拒答 category）按 model-layer §2 处理。
 - **请求**：`POST {baseUrl}/v1/messages`，请求头如下：
   - `anthropic-version`：默认 `2026-10-21`；
   - `anthropic-beta`：用逗号拼接；
@@ -101,12 +116,20 @@
     - `prefix_mismatch_behavior:"drop_block"`；
     - 对 Opus 5.5 和 Sonnet 5.5 开服务端降级 `fallbacks:"default"`。Haiku 5.5 没有降级。
   - 网关不发 Claude API 专有的 beta，因为网关可能拒收。
+  - 端点、模型、设置三者的兼容性在 `snapshot` 统一校验。不兼容就报 `InvalidRequest(param = "settings.…")`，发送阶段不静默删字段。不兼容指两种情况：网关上开了降级或 `prefixMismatch`；没有降级的模型（Haiku 5.5，以及预设不认识的模型）开了降级。
+  - 一份档案服务多个模型时，先用 `AnthropicSettings.effectiveFor(profile, model)` 按模型算出有效设置，快照记下的就是实际发出的设置。
 - **流式解析**（`MessagesStream`）：
-  - 内容块原样拼装。
-  - delta 加起来是最终回复的前缀；工具调用在名字完整后只通告一次。
-  - 中途降级时，被放弃那次尝试的思考块和工具调用不进回复，`providerMetadata` 里记下 `fallback_discarded` 和 `preview_diverged`。
+  - 内容块原样拼装。块一个接一个来，`index` 必须比之前的都大；同一条回复里 `tool_use` 和 `server_tool_use` 的 id 不能重复。违反就报 `BadResponse`，不靠排序或去重掩盖。
+  - 正文增量拼起来和最终正文完全一致。推理、调用通告和参数的预览只在服务端降级时可能和最终回复不一致，这时 `preview_diverged` 记下通道。工具调用在名字完整后只通告一次。
+  - 中途降级时，最后一个 `fallback` 块之前的 thinking、redacted_thinking、tool_use 和未知内部块都不进回复。
+    - `providerMetadata.fallback_discarded` 只记下是哪几个块：序号、类型，调用的 id 和名字。不记内容，和下一轮要回传的内容分开，字符串照样脱敏。
+    - `requested_model` 和 `served_model` 分开记。`served_model` 依次取：最后一个 fallback 块的 `to.model`；`usage.iterations` 里最后一个 `fallback_message`；`message_start` 的 model。
+  - **未知块类型**：不发 delta，先缓存，到组装时按最后一个 `fallback` 块决定。
+    - 在它之前的，属于被放弃的尝试，按资料省略。
+    - 在它之后的，或者整条回复根本没有 `fallback` 块，报 `BadResponse`。
+  - 保留下来的 thinking 必须有非空的 signature，redacted_thinking 必须有 `data`，否则报 `BadResponse`；被放弃的块不回传。
   - 终止事件缺失或无效时报 `BadResponse`；在 `message_stop` 之前断流报 `Network`。
-  - `refusal` 抛出 `ModelError.Refusal(category)`。
+  - `refusal` 抛出 `ModelError.Refusal(category)`，category 先脱敏。
 - **工具参数**：保留原始 `input_json_delta` 文本，适配器不解析。按 schema 校验放在边界，即构造工具调用的地方（WP02 的 `ToolCall` 契约）。适配器报告 `MAX_TOKENS` 或 `Refusal`，主循环据此不执行工具。
 - **错误映射**：
   - 先看 `error.type`，再看状态码；429 先于一切短语判断。
@@ -120,15 +143,15 @@ SDK 的源码和 claude-api 文档只作为线路格式的参考（字段名、b
 - **用官方 SDK（spike 结论之前的计划）**。技术上过关：R8 只差一条 `-dontwarn`，API 级别没问题。但有这些代价：
   - 体积：APK 多约 2.6 MiB，方法多约 1.6 万个，方法总数是 none 基线的 3.7 倍。对一个侧载分发、面向普通用户的应用，这个增量换来的只是一个协议的客户端。
   - 运行时反射：jackson-module-kotlin 带进 `kotlin.reflect`，单这一项就有 4.6k 个方法。
-  - 行为控制：要满足"每次尝试一个请求"，就得绕过 SDK 自带的 OkHttp 客户端，因为它关不掉重定向和认证 follow-up。
+  - 行为控制：重定向和自动重试都能关，但 OkHttp 对 `503` 加 `Retry-After: 0` 的自动重发，在 SDK 自带的客户端上挡不住（见"行为"一条）。要满足"每次尝试一个请求"，还是得自己实现 `HttpClient`。
   - 两种 JSON 类型：thinking、redacted_thinking、compaction 块要原样进日志、原样回传，每轮都要在 Jackson 的 `JsonValue` 和 kotlinx 的 `JsonElement` 之间转换，"逐字节一致"要靠两套序列化的行为一致来保证。
-  - 头和请求体：`X-Stainless-*` 头要去掉；请求体要逐字节可控，用 SDK 的 builder 加 additional properties 做金样，比直接构造 JSON 更绕。
+  - 头和请求体：`X-Stainless-*` 头默认就带。请求体要逐字节可控，可 SDK 的 builder 要经过 Jackson 序列化，拿它做金样比直接构造 JSON 更绕。
 - **只用 SDK 的模型类和 accumulator，传输自己做**（用 `anthropic-java-core` 加自定义 `HttpClient`）。体积大头正好在 `com.anthropic.models`、Jackson 和 `kotlin.reflect`，所以这样省不下多少。另外两套 JSON 栈（Jackson 和 kotlinx.serialization）会并存。
 - **和 OpenAI 系适配器共用 `HttpTransport`、`Sse`、`Redactor`**。现行规则是 capability 包之间不能互相引用。所以先复制一份，在 KDoc 里注明"keep them in step"。把它们提成契约层的公共包，需要另一个 WP 先改依赖规则。
 
 ## 后果
 
-- **线路格式归我们维护**。API 新增字段、beta 或事件类型时要手动跟进：改映射时同时改金样；不兼容的改动要升 `MAPPING_VERSION`。未知事件类型会被忽略；未知块类型和 delta 类型会被拒收（`BadResponse`），所以一旦服务端启用新的块类型，用户会马上看到失败，而不是数据被静默丢掉。
+- **线路格式归我们维护**。API 新增字段、beta 或事件类型时要手动跟进：改映射时同时改金样；不兼容的改动要升 `MAPPING_VERSION`。未知事件类型会被忽略。未知块类型只在降级前被省略，那是被放弃的尝试里的内部块，资料要求不回传。其他位置的未知块和未知 delta 类型一样会被拒收（`BadResponse`），所以一旦服务端启用新的块类型，用户会马上看到失败，而不是数据被静默丢掉。
 - **以下行为只有按文档和 SDK 类型构造的 SSE fixture 覆盖，没经过真实 Claude 验证**（fixture 的 `: source:` 注释写明了这一点），拿到测试账号后要用真实流重录：
   - thinking 签名回传；
   - 缓存命中；

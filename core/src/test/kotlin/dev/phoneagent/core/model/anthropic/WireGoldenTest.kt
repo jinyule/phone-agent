@@ -141,7 +141,7 @@ class WireGoldenTest {
         )
 
     @Test
-    fun `cut-off tool arguments are echoed as an empty object`() =
+    fun `cut-off tool arguments are echoed as an empty object by intent of mapping 1`() =
         golden(
             "cut-arguments",
             Kit.request(

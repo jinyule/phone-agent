@@ -119,6 +119,11 @@ fun interface BlobSource {              // 读当前会话 BlobStore 里 Part.Im
   - **服务端写的诊断字段**（错误正文、拒答 category、metadata）：本次密钥的原样和标准转义形式改写成 `***`，其余说明保留；宽松解码改动了文字、解码以后才现形的本次密钥或者 `sk-`、JWT 形状，整段换成固定说明（`Redactor.WITHHELD`），不留半截；没有可解码的转义时，形状在原文上打码，`Bearer` 字样只打码后面的 token，都不触发整段替换。OpenAI 适配器的具体顺序见上面"诊断不引用原文"第二类。
 - **流式增量**：`Delta.Text` 依次拼起来一定是最终正文的前缀；推理和工具调用的预览不作保证，服务端降级时可能不出现在最终回复里，界面以最终的 `ChatResponse` 为准重新渲染。
 - blob 按会话存放：每个会话建一个 ChatModel，或者用会话感知的 `BlobSource`，组装时决定。
+- **回复内容里的密钥**（Anthropic 适配器）：我们从不把密钥放进上下文，所以模型输出里出现本次请求的密钥，本身就说明出了问题。
+  - 正文和工具参数里的密钥换成 `***`。流式时每个块保留一个尾部窗口，只扣住"可能是密钥开头"的那一小段，所以拆在几个片段里的密钥也认得出来。增量拼起来和最终回复一致，展示的就是打码后的文字。参数还认密钥在 JSON 字符串里的转义写法。
+  - thinking、redacted_thinking 和 compaction 块要原样回传，改一个字签名就失效，没法打码。所以只要其中任何字段（包括 `signature`）出现本次请求的密钥，**整条回复就拒绝**，报固定文字的 `BadResponse`，宁可失败也不落盘。被放弃的尝试里的块也算。推理预览在密钥完整之前就扣住，不会先漏出去。
+  - 拒答的 `category` 和错误消息一样脱敏。
+  - 这里只认本次请求的密钥。`sk-…`、JWT 这类形状只在诊断文字里兜底，不改回复内容。
 
 **线路快照**（`core.model.WireProfile`，随 `ChatRequest.wire` 传给适配器，冻结在 `request/header` 和 `side/request` 里）：
 
@@ -218,7 +223,7 @@ data class WireProfile(
 ### 3.3 Anthropic Messages
 
 - **实现方式**：用 OkHttp 直接实现 Messages 线路格式（`core.model.anthropic`），**不引入官方 SDK**。提供 baseUrl 的服务商（Anthropic 兼容端点）通过 base URL 覆盖接入。
-  - 依据是 M1 的 Android spike（ADR `2026-11-01-anthropic-adapter`）：SDK 3.3.0 能过 R8 和 API 30 检查，但让 APK 多出约 2.6 MiB、方法数多出约 1.6 万；而且它内置的 HTTP 客户端关不掉 follow-up，满足不了"每次尝试只发一个请求"。
+  - 依据是 M1 的 Android spike（ADR `2026-11-01-anthropic-adapter`）：SDK 3.3.0 能过 R8 和 API 30 检查，但让 APK 多出约 2.6 MiB、方法数多出约 1.6 万。它的重定向和自动重试都能关，但自带的 OkHttp 客户端挡不住 OkHttp 对 `503` 加 `Retry-After: 0` 的自动重发，满足不了"每次尝试只发一个请求"。
   - SDK 源码和 claude-api 文档只拿来核对字段名、beta 名和事件类型。
 - **线路设置**：只从请求的 `wire` 快照读取，映射版本 1。
   - `options` 只认这八个名字：`anthropic.version`、`anthropic.auth`、`anthropic.thinking`、`anthropic.thinking_display`、`anthropic.prefix_mismatch`、`anthropic.fallbacks`、`anthropic.eager_input_streaming`、`anthropic.strict_tools`。
@@ -226,6 +231,8 @@ data class WireProfile(
   - beta 按需拼进 `anthropic-beta`。
   - 推荐设置：所有端点都开 adaptive thinking、`display:"summarized"` 和 `eager_input_streaming`；官方端点（`https://api.anthropic.com`）上再加 `drop_block` 和服务端降级（只对有降级的模型）。网关不发 Claude API 专有的 beta。
   - 快照由纯函数 `AnthropicWire.snapshot(profile, model, capabilities, reasoning)` 生成，同样的输入得到同样的快照；`complete()` 不生成快照。
+  - 端点、模型、设置三者的兼容性在生成快照时统一校验，发送阶段不静默删掉记下的字段。不兼容就报 `InvalidRequest(param = "settings.serverFallback")` 或 `settings.prefixMismatch`。不兼容指两种情况：网关上开了 Claude API 专有的降级或 `prefixMismatch`；没有服务端降级的模型（Haiku 5.5，以及预设不认识的模型）开了降级，Haiku 5.5 上 `fallbacks` 本身就是 400。
+  - 一份档案服务多个模型时，保存的设置先经 `AnthropicSettings.effectiveFor(profile, model)` 按模型算出有效设置，再生成快照，记下的就是实际发出的设置。
   - 带工具时固定发 `disable_parallel_tool_use:true`。这是映射版本 1 的规则，不读 `parallelToolCalls`。
 - **传输**：和 OpenAI 适配器一致。
   - 每次 attempt 只发一个请求：关掉连接失败重试和重定向跟随。
@@ -233,13 +240,15 @@ data class WireProfile(
   - SSE 认 LF、CRLF 和单独的 CR。
   - `Retry-After` 只接受有限、非负的值。
   - 取消时释放响应和连接。
-  - 回显的密钥在错误和成功回复的 `providerMetadata` 里都打码。
+  - 回显的密钥在错误和成功回复的 `providerMetadata` 里都打码。错误体先脱敏、再截断，做法和 OpenAI 适配器相同（§2）。
+  - 回复内容里的密钥：正文和参数里的打码，要原样回传的块里的整条拒绝，拒答 `category` 也脱敏（§2"回复内容里的密钥"）。
 - **默认模型**：主模型 `claude-opus-5-5`，可选 `claude-sonnet-5-5`；轻量模型 `claude-haiku-5-5`；看图模型默认用主模型。模型清单以服务端 `/v1/models` 返回的为准，本地只做初值。
 - **思考**：
   - Opus 5.5 的思考始终开启：不发 `thinking`，或者发 `{type:"adaptive"}`。**`budget_tokens` 和 `disabled` 都会被拒（400）**。
   - 思考深度用 `output_config.effort` 控制。**Opus 5.5 的默认值是 `medium`**，所以按用途显式设置：主模型做 GUI 任务时建议从 `high` 起调，轻量判断用 `low`。
   - 要给用户看思考进度时，设 `display:"summarized"`。
 - **思考块的回传**：thinking、redacted_thinking 和 compaction 块（包括 signature）原样保存、原样回传。**换了模型也不在客户端删**：API 会自己略过当前模型读不了的块；客户端删掉的话，换回原模型时这些推理就永久丢了，从中间删块还会让后面的块报 `predecessor_missing`，compaction 块装着压缩后的历史，删掉就丢了历史。这也是铁律 7（历史只追加）。
+  - 保留下来的 thinking 块必须带非空的 signature，redacted_thinking 必须带 `data`，否则整条回复报 `BadResponse`，截断的回复也一样。没有签名的块回传时会被拒，所以不能当成完整的 `Reasoning` 记下来。
 - **preserved thinking（关键约束）**：思考块的签名绑定在它之前的整段对话前缀上（system + tools + 之前的所有消息）。
   - **改写、删除或重排更早的轮次，都会让之后所有的思考块失效**；2026-08-31 之后注册的账号会直接收到 400。
   - 对我们的影响和对策见 §5。
@@ -249,6 +258,9 @@ data class WireProfile(
   - 工具 schema 可以加 `strict:true`。
   - 流式时给客户端工具加 `eager_input_streaming:true`，**拿到的参数先按 schema 校验再执行**；在执行任何工具之前，先检查 `stop_reason` 是不是 `max_tokens` 或 `refusal`。
     - 校验在边界做：构造工具调用的地方（`ToolCall` 契约）。适配器只保留原始参数文本，不解析。
+    - 回传时，参数文本不是 JSON 对象（被截断或无效的流式参数）的调用，在映射版本 1 下 `input` 发 `{}`。
+      - 日志里的 `argsJson` 保留原文，`{}` 只出现在线路映射里，所以不破坏"模型可见 ⟺ 已记录"。
+      - 不造 `{"_raw": …}` 这类字段，免得模型模仿着用。
     - `max_tokens` 和 `model_context_window_exceeded` 报成 `StopReason.MAX_TOKENS`，`refusal` 报成 `ModelError.Refusal`。主循环据此不执行工具。
 - **缓存**：最多 4 个 `cache_control` 断点。建议放在：工具清单末尾、system 末尾、历史里最后一个稳定点。用 `usage.cache_read_input_tokens` 验证是否命中，结果进 Token 统计。
 - **输出与采样**：
@@ -258,6 +270,10 @@ data class WireProfile(
 - **拒答**：处理 `stop_reason:"refusal"` 和 `stop_details.category`。
   - 在 Anthropic 官方端点上**默认开启服务端降级**：beta `server-side-fallback-2026-07-01`，`fallbacks:"default"`。Sonnet 5.5 只支持 `"default"` 形式，而且只在 Claude API 上可用。
   - 设置页要告诉用户这个开关已经开着，并允许关闭。
+  - 中途降级时，最后一个 `fallback` 块之前的 thinking、redacted_thinking、tool_use 和未知内部块不回传。`providerMetadata.fallback_discarded` 只记是哪几个块（序号、类型、调用 id 和名字），不记内容。
+  - `requested_model` 和 `served_model` 分开记。`served_model` 依次取：最后一个 fallback 块的 `to.model`；`usage.iterations` 里最后一个 `fallback_message`；`message_start` 的 model。
+  - 正文增量拼起来始终和最终正文一致。推理、调用通告和参数的预览只在降级时可能不一致，这时 `preview_diverged` 记下通道，界面以最终回复为准重新渲染。
+  - 未知块类型在最后一个 `fallback` 块之前的省略；在它之后的，或者没有降级时出现的，报 `BadResponse`。
 - **图片**：用 base64 发送（字节稳定，签名校验认的是字节）。截图长边 ≤1280，JPEG。
 
 ---

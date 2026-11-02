@@ -168,7 +168,7 @@ class MessagesWireTest {
     }
 
     @Test
-    fun `tool_use input is the parsed arguments, or an empty object`() {
+    fun `tool_use input is the parsed arguments, or by intent an empty object, never a made-up field`() {
         assertEquals(buildJsonObject { put("a", 1) }, MessagesWire.argumentsObject("""{"a":1}"""))
         assertEquals(JsonObject(emptyMap()), MessagesWire.argumentsObject("""{"a":"""))
         assertEquals(JsonObject(emptyMap()), MessagesWire.argumentsObject("[1]"))

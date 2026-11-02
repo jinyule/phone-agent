@@ -33,10 +33,11 @@ import java.util.Base64
  *   when the snapshot asks; with tools, `tool_choice: {type: auto, disable_parallel_tool_use: true}`.
  * - **Messages**: USER parts become `text` / `image` blocks (base64, or [IMAGE_OMITTED] for a
  *   model without vision); ASSISTANT parts become `text`, `tool_use` (`input` = the arguments
- *   when they parse as a JSON object, else `{}`) and, only for this provider and model, the
- *   stored Anthropic block of a [Part.Reasoning] verbatim; TOOL parts become `tool_result`
- *   blocks (`is_error` only when true). Empty text is skipped and messages left empty are
- *   omitted. Consecutive messages with the same wire role are merged, `tool_result` blocks first.
+ *   when they parse as a JSON object, else `{}` by intent: [argumentsObject]) and, only for this
+ *   provider and model, the stored Anthropic block of a [Part.Reasoning] verbatim; TOOL parts
+ *   become `tool_result` blocks (`is_error` only when true). Empty text is skipped and messages
+ *   left empty are omitted. Consecutive messages with the same wire role are merged,
+ *   `tool_result` blocks first.
  * - **Cache** (`cache_control: {type: ephemeral}`, [dev.phoneagent.core.model.CacheLayout]): on
  *   the last tool, the last system block, and the last block that can carry one in each of the
  *   last `recentMessages` wire messages (thinking blocks cannot).
@@ -182,7 +183,13 @@ internal class MessagesWire(
                 put("disable_parallel_tool_use", true)
             }
 
-        /** The arguments as the `input` object; text that is not a JSON object (a cut-off stream) sends `{}`. */
+        /**
+         * The arguments as the `input` object. Mapping version 1 sends `{}` on purpose when the text
+         * is not a JSON object (a cut-off or invalid stream): `input` must be an object, the raw text
+         * stays in the log (`argsJson`), so the request is still a function of the log, and no
+         * made-up field such as `{"_raw": …}` is sent that the model might imitate. Changing this
+         * means a new mapping version.
+         */
         @Suppress("SwallowedException") // Not an error: the raw text stays in the log, the wire needs an object.
         fun argumentsObject(argsJson: String): JsonObject =
             try {
