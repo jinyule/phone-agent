@@ -15,6 +15,7 @@ import dev.phoneagent.core.policy.rules.Fx.text
 import dev.phoneagent.core.ports.ConfirmReason
 import dev.phoneagent.core.ports.ElementRef
 import dev.phoneagent.core.ports.ElementRole
+import dev.phoneagent.core.ports.HandoffKind
 import dev.phoneagent.core.ports.ScreenFlag
 import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.tool.RiskClass
@@ -22,6 +23,8 @@ import dev.phoneagent.core.tool.ToolCall
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.EnumSource
 
 /**
  * What a tap activates (policy-rules.md §2): the element by ref, or what lies under a point,
@@ -152,6 +155,29 @@ class TargetsTest {
         val plain = screen(field("e2", bounds = box(0, 900, 999, 960)).copy(value = "abc"), clear)
         assertEquals(Verdict.Allow, decide(tap("e1"), on(plain)))
     }
+
+    @ParameterizedTest
+    @EnumSource(SecurityLevel::class)
+    fun `leaving a hand-off page needs every control under the point to leave`(level: SecurityLevel) {
+        val s =
+            screen(
+                el("e1", "取消", bounds = box(450, 400, 550, 450)).copy(window = 2),
+                el("e2", "本机号码一键登录", bounds = box(0, 300, 999, 600)).copy(window = 1),
+                flags = setOf(ScreenFlag.LOGIN),
+            )
+        assertEquals(HandoffKind.LOGIN, handOff(decide(tap("e2"), on(s, level))))
+        assertEquals(HandoffKind.LOGIN, handOff(decide(point(500, 425), on(s, level))))
+        // Only "取消" under the point: it leaves.
+        assertEquals(Verdict.Allow, decide(point(500, 700), on(s.copy(elements = s.elements + escape()), level)))
+        assertEquals(Verdict.Allow, decide(tap("e1"), on(s, level)))
+        // Something else drawn on the escape button counts too.
+        val drawn = s.copy(ocr = listOf(ocr("同意并登录", box(460, 410, 540, 440))))
+        assertEquals(HandoffKind.LOGIN, handOff(decide(tap("e1"), on(drawn, level))))
+    }
+
+    private fun escape() = el("e3", "取消", bounds = box(450, 680, 550, 720))
+
+    private fun handOff(verdict: Verdict): HandoffKind = assertInstanceOf(Verdict.HandOff::class.java, verdict).kind
 
     @Test
     fun `OCR naming a sensitive settings entry refuses it`() {

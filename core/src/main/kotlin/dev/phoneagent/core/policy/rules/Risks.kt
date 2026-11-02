@@ -13,11 +13,13 @@ import dev.phoneagent.core.ports.UiElement
  *   among equals), or `null` when there is no element there.
  * @property risk what activating it does, or `null` when ordinary.
  * @property texts all visible text on what the touch may reach: names, content and OCR.
+ * @property candidates every element the touch may reach, smallest first; empty when there is none.
  */
 internal data class Assessment(
     val target: UiElement?,
     val risk: ElementRisk?,
     val texts: List<String>,
+    val candidates: List<UiElement>,
 ) {
     /** The kind of what the touch does: [risk]'s, or NAVIGATE when ordinary. */
     val kind: IntentKind
@@ -100,6 +102,7 @@ internal class Risks(
                 riskiest.risk
             },
             texts,
+            candidates,
         )
     }
 }

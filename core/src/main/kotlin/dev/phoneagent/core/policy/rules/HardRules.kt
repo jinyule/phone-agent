@@ -127,27 +127,34 @@ internal class HardRules(
 
     /**
      * Hand-off: typing into a password, code or payment-password field; or interacting with a
-     * payment-password, captcha, login or FLAG_SECURE page, unless the tap just closes or skips it.
+     * payment-password, captcha, login or FLAG_SECURE page, unless the tap just closes or skips it
+     * whatever it reaches ([escapes]).
      */
     fun handOff(
         step: Step,
         intent: ActionIntent,
         screen: ScreenSnapshot?,
     ): Verdict? {
-        val page = if (screen != null && interacts(step) && !escapes(step, intent, screen)) page(screen) else null
+        val page = if (screen != null && interacts(step) && !escapes(step, screen)) page(screen) else null
         return (FIELD_HAND_OFFS[intent.fieldClass] ?: page)?.verdict()
     }
 
     /** Taps, typing, swipes and Enter; scrolling and reading only look. */
     private fun interacts(step: Step): Boolean = step is ScreenStep && step !is Step.Scroll
 
+    /**
+     * A tap that only leaves the page: every control it may reach is labelled "关闭", "取消" … and
+     * every text on them says so too. One other candidate under the point ("一键登录") is enough
+     * to hand off, since which of them takes the touch is not known.
+     */
     private fun escapes(
         step: Step,
-        intent: ActionIntent,
         screen: ScreenSnapshot,
     ): Boolean {
-        val target = intent.target
-        return step is Step.Tap && target != null && reading.lexicon.isEscape(Elements.label(target, screen))
+        if (step !is Step.Tap) return false
+        val touched = reading.risks.tap(step.aim, screen)
+        val labels = touched.candidates.map { Elements.label(it, screen) }
+        return labels.isNotEmpty() && (labels + touched.texts).all(reading.lexicon::isEscape)
     }
 
     private fun page(screen: ScreenSnapshot): HandOffs? {
