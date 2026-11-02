@@ -55,7 +55,7 @@ class TextEntryTest {
 
             val result = TextEntry.enter(request("hello"), secret = false, levels, field.read)
 
-            assertEquals(Result.Entered(Level.SET_TEXT, exact = true), result)
+            assertEquals(Result.Entered(Level.SET_TEXT, confirmed = true), result)
             assertEquals(listOf("SET_TEXT", "read"), field.log)
             assertEquals("hello", field.text)
         }
@@ -71,7 +71,7 @@ class TextEntryTest {
 
             val result = TextEntry.enter(request("hi"), secret = false, listOf(lazyField), read)
 
-            assertEquals(Result.Entered(Level.SET_TEXT, exact = true), result)
+            assertEquals(Result.Entered(Level.SET_TEXT, confirmed = true), result)
             assertEquals(emptyList<String>(), field.log)
         }
 
@@ -88,7 +88,7 @@ class TextEntryTest {
 
             val result = TextEntry.enter(request("hi"), secret = false, levels, field.read)
 
-            assertEquals(Result.Entered(Level.PASTE, exact = true), result)
+            assertEquals(Result.Entered(Level.PASTE, confirmed = true), result)
             assertEquals(listOf("SET_TEXT", "read", "read-settled", "IME_CONNECTION", "PASTE", "read"), field.log)
         }
 
@@ -105,8 +105,12 @@ class TextEntryTest {
 
             val result = TextEntry.enter(request("hi"), secret = false, levels, field.read)
 
-            assertEquals(Result.Entered(Level.SET_TEXT, exact = false), result)
-            assertFalse(field.log.contains("PASTE"))
+            assertEquals(Result.Mismatch(Level.SET_TEXT, "Hi!"), result)
+            assertEquals(
+                "read back once more after the field settled",
+                listOf("SET_TEXT", "read", "read-settled"),
+                field.log,
+            )
         }
 
     @Test
@@ -116,7 +120,7 @@ class TextEntryTest {
             val levels = listOf(field.level(Level.SET_TEXT, Sent.Refused, writes = "hi"))
 
             assertEquals(
-                Result.Entered(Level.SET_TEXT, exact = true),
+                Result.Entered(Level.SET_TEXT, confirmed = true),
                 TextEntry.enter(request("hi"), secret = false, levels, field.read),
             )
         }
@@ -155,12 +159,12 @@ class TextEntryTest {
 
             val result = TextEntry.enter(request("1234", before = null), secret = true, levels, field.read)
 
-            assertEquals(Result.Entered(Level.SET_TEXT, exact = false), result)
+            assertEquals(Result.Entered(Level.SET_TEXT, confirmed = false), result)
             assertEquals(listOf("SET_TEXT"), field.log)
         }
 
     @Test
-    fun aFieldThatWasReplacedCountsAsEntered() =
+    fun aFieldThatWasReplacedStopsTheChainWithoutClaimingTheText() =
         runTest {
             val field = Field("")
             val levels =
@@ -171,8 +175,8 @@ class TextEntryTest {
 
             val result = TextEntry.enter(request("hi"), secret = false, levels, field.read)
 
-            assertEquals(Result.Entered(Level.SET_TEXT, exact = false), result)
-            assertEquals(listOf("SET_TEXT", "read"), field.log)
+            assertEquals(Result.Unconfirmed(Level.SET_TEXT), result)
+            assertEquals(listOf("SET_TEXT", "read", "read-settled"), field.log)
         }
 
     @Test
@@ -183,7 +187,7 @@ class TextEntryTest {
 
             val result = TextEntry.enter(request(" world", before = "Hello", append = true), false, levels, field.read)
 
-            assertEquals(Result.Entered(Level.SET_TEXT, exact = true), result)
+            assertEquals(Result.Entered(Level.SET_TEXT, confirmed = true), result)
             assertEquals("Hello world", request(" world", before = "Hello", append = true).expected)
             assertEquals("world", request("world", before = "Hello").expected)
         }
@@ -193,5 +197,50 @@ class TextEntryTest {
         assertTrue(TextEntry.matches("+1 (555) 010-9999", "+15550109999"))
         assertFalse(TextEntry.matches("+1 (555) 010-9998", "+15550109999"))
         assertFalse(TextEntry.matches(null, ""))
+    }
+
+    @Test
+    fun aFieldStillFormattingIsReadAgainOnceItSettled() =
+        runTest {
+            var settled = false
+            val level = Level.SET_TEXT to TextEntry.Attempt { Sent.Delivered }
+            val read: suspend (Boolean) -> Shown = { settle ->
+                settled = settled || settle
+                Shown.Text(if (settled) "555-1234" else "555")
+            }
+
+            val result = TextEntry.enter(request("5551234"), secret = false, listOf(level), read)
+
+            assertEquals(Result.Entered(Level.SET_TEXT, confirmed = true), result)
+        }
+
+    @Test
+    fun aPasswordWhoseMaskChangedAfterARefusalIsTrusted() =
+        runTest {
+            val field = Field("••")
+            val levels = listOf(field.level(Level.SET_TEXT, Sent.Refused, writes = "••••"))
+
+            val result = TextEntry.enter(request("1234", before = "••"), secret = true, levels, field.read)
+
+            assertEquals(Result.Entered(Level.SET_TEXT, confirmed = false), result)
+        }
+
+    @Test
+    fun failuresExplainThemselvesToTheModel() {
+        assertEquals(
+            "the field shows '1234', not the requested text; it was not submitted",
+            Result.Mismatch(Level.SET_TEXT, "1234").explain(submitRequested = true),
+        )
+        assertEquals(
+            "the field shows '${"x".repeat(TextEntry.MAX_QUOTED)}…', not the requested text",
+            Result.Mismatch(Level.SET_TEXT, "x".repeat(TextEntry.MAX_QUOTED + 1)).explain(submitRequested = false),
+        )
+        assertEquals(
+            "the text was sent, but the field was replaced before it could be checked; it was not submitted; " +
+                "look at the screen before typing again",
+            Result.Unconfirmed(Level.PASTE).explain(submitRequested = true),
+        )
+        assertEquals("nope", Result.NotEntered("nope").explain(submitRequested = true))
+        assertFalse(TextEntry.matches("1,000", "1000"))
     }
 }

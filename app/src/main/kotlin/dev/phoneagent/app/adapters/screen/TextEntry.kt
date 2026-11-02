@@ -10,6 +10,12 @@ import android.view.accessibility.AccessibilityNodeInfo
  * restoring the clipboard afterwards. After every level the field is read back; as soon as it
  * differs from before, entry stops, so text is never entered twice. The own keyboard (no-UI IME)
  * level arrives in M3.
+ *
+ * The read-back decides the result: the field shows the request ([Result.Entered], ignoring the
+ * spaces, dashes and parentheses formatting fields insert; other rewrites such as "1,000" for
+ * "1000" are a mismatch), shows something else ([Result.Mismatch]), or was replaced before it could
+ * be read ([Result.Unconfirmed]). Password fields cannot be read back: the first level that
+ * delivered, or that changed the mask, is trusted.
  */
 internal object TextEntry {
     /** A fallback level. */
@@ -64,17 +70,52 @@ internal object TextEntry {
 
     /** Outcome of [enter]. */
     sealed interface Result {
-        /** Text went in through [via]; [exact] when the field shows exactly the expected text. */
+        /**
+         * Text went in through [via] and may be submitted: the field shows the request
+         * ([confirmed]), or is a password field that took it (not [confirmed]).
+         */
         data class Entered(
             val via: Level,
-            val exact: Boolean,
+            val confirmed: Boolean,
         ) : Result
+
+        /** Not entered as requested; the field must not be submitted. */
+        sealed interface Failure : Result {
+            /** Why, for the model, in English; [submitRequested] adds that nothing was submitted. */
+            fun explain(submitRequested: Boolean): String
+        }
+
+        /** Text went in through [via], but the field shows [shown] instead of the request. */
+        data class Mismatch(
+            val via: Level,
+            val shown: String,
+        ) : Failure {
+            override fun explain(submitRequested: Boolean): String =
+                "the field shows '${shown.take(MAX_QUOTED)}${if (shown.length > MAX_QUOTED) "…" else ""}', " +
+                    "not the requested text${notSubmitted(submitRequested)}"
+        }
+
+        /** Text was sent through [via], but the field was replaced before it could be read back. */
+        data class Unconfirmed(
+            val via: Level,
+        ) : Failure {
+            override fun explain(submitRequested: Boolean): String =
+                "the text was sent, but the field was replaced before it could be checked" +
+                    "${notSubmitted(submitRequested)}; look at the screen before typing again"
+        }
 
         /** No level changed the field; [reason] is for the model, in English. */
         data class NotEntered(
             val reason: String,
-        ) : Result
+        ) : Failure {
+            override fun explain(submitRequested: Boolean): String = reason
+        }
     }
+
+    /** Longest read-back quoted to the model. */
+    const val MAX_QUOTED: Int = 200
+
+    private fun notSubmitted(submitRequested: Boolean): String = if (submitRequested) "; it was not submitted" else ""
 
     // Formatting fields insert while typing (phone numbers, card groups) does not count as a mismatch.
     private val FORMATTING = Regex("[\\s\\-()]")
@@ -93,12 +134,25 @@ internal object TextEntry {
         for ((level, attempt) in levels) {
             val result =
                 when (val sent = attempt.send(request)) {
-                    is Sent.Skipped -> null.also { skipped += "${level.name.lowercase()}: ${sent.reason}" }
+                    is Sent.Skipped -> {
+                        null.also { skipped += "${level.name.lowercase()}: ${sent.reason}" }
+                    }
 
                     // Password fields cannot be read back; trust the first level that delivered.
-                    Sent.Delivered -> if (secret) Result.Entered(level, exact = false) else verify(level, request, read)
+                    Sent.Delivered -> {
+                        if (secret) {
+                            Result.Entered(
+                                level,
+                                confirmed = false,
+                            )
+                        } else {
+                            verify(level, request, read)
+                        }
+                    }
 
-                    Sent.Refused -> judge(level, read(false), request)
+                    Sent.Refused -> {
+                        judge(level, read(false), request, secret)
+                    }
                 }
             if (result != null) return result
         }
@@ -106,12 +160,18 @@ internal object TextEntry {
         return Result.NotEntered("the field did not accept the text$detail")
     }
 
-    /** Reads the field back right away and, if it did not change yet, once more after it settled. */
+    /**
+     * Reads the field back right away and, unless it already shows the request, once more after it
+     * settled (the app may still be updating or formatting it).
+     */
     private suspend fun verify(
         level: Level,
         request: Request,
         read: suspend (settle: Boolean) -> Shown,
-    ): Result? = judge(level, read(false), request) ?: judge(level, read(true), request)
+    ): Result? {
+        val now = judge(level, read(false), request, secret = false)
+        return if (now is Result.Entered) now else judge(level, read(true), request, secret = false) ?: now
+    }
 
     /** Whether [shown] matches [expected], ignoring formatting characters. */
     fun matches(
@@ -119,22 +179,26 @@ internal object TextEntry {
         expected: String,
     ): Boolean = shown != null && FORMATTING.replace(shown, "") == FORMATTING.replace(expected, "")
 
+    /** What [shown] says about [level]'s attempt; `null` when the field did not change (try the next level). */
     private fun judge(
         level: Level,
         shown: Shown,
         request: Request,
+        secret: Boolean,
     ): Result? =
         when (shown) {
-            // The field was replaced (often because input landed and the app rebuilt it): stop.
+            // The field was replaced (often because input landed and the app rebuilt it): stop,
+            // without claiming what it holds.
             Shown.Gone -> {
-                Result.Entered(level, exact = false)
+                Result.Unconfirmed(level)
             }
 
             is Shown.Text -> {
                 when {
-                    matches(shown.text, request.expected) -> Result.Entered(level, exact = true)
-                    shown.text != request.before -> Result.Entered(level, exact = false)
-                    else -> null
+                    shown.text == request.before -> null
+                    secret -> Result.Entered(level, confirmed = false)
+                    matches(shown.text, request.expected) -> Result.Entered(level, confirmed = true)
+                    else -> Result.Mismatch(level, shown.text.orEmpty())
                 }
             }
         }

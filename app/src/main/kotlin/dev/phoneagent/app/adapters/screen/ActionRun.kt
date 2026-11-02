@@ -181,8 +181,8 @@ internal class ActionRun(
             }
         val result =
             when (entered) {
-                is TextEntry.Result.NotEntered -> {
-                    Actuator.Result.NotDone(entered.reason)
+                is TextEntry.Result.Failure -> {
+                    Actuator.Result.NotDone(entered.explain(action.submit))
                 }
 
                 is TextEntry.Result.Entered -> {
