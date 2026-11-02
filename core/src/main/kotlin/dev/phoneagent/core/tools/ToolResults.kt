@@ -66,7 +66,7 @@ internal object ToolResults {
         val (status, text) =
             when (val result = outcome.status) {
                 ActionOutcome.Status.Ok -> {
-                    ToolStatus.OK to "${effectLine(done, shownEffect(outcome))}\n$screen"
+                    ToolStatus.OK to "${okLine(done, outcome)}\n$screen"
                 }
 
                 is ActionOutcome.Status.Failed -> {
@@ -90,16 +90,22 @@ internal object ToolResults {
         return ToolResult(status, listOf(Part.Text(text)), details(outcome))
     }
 
-    private fun shownEffect(outcome: ActionOutcome): ActionOutcome.Effect {
-        val changes = outcome.diff?.isEmpty == false
-        return if (outcome.effect == ActionOutcome.Effect.NO_CHANGE &&
-            changes
-        ) {
-            ActionOutcome.Effect.CHANGED
+    /**
+     * The status line of a done action. The port's NO_CHANGE compares the screen right before and
+     * right after the action; the diff compares with the screen the model last read. When the
+     * port saw no change but the diff is not empty, the line says both, so the model neither
+     * takes the changes for the action's effect nor hears "no change" over a diff.
+     */
+    private fun okLine(
+        done: String,
+        outcome: ActionOutcome,
+    ): String =
+        if (outcome.effect == ActionOutcome.Effect.NO_CHANGE && outcome.diff?.isEmpty == false) {
+            "$done，但动作前后画面没有变化：可能还在加载（可以 phone_wait），也可能这个动作在这里不起作用。" +
+                "和你上次看到的画面相比的变化见下面，不一定是这个动作造成的。"
         } else {
-            outcome.effect
+            effectLine(done, outcome.effect)
         }
-    }
 
     private fun effectLine(
         done: String,

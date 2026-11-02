@@ -6,6 +6,7 @@ import dev.phoneagent.core.ports.ActionOutcome.Effect
 import dev.phoneagent.core.ports.ActionOutcome.Status
 import dev.phoneagent.core.ports.Direction
 import dev.phoneagent.core.ports.ElementRef
+import dev.phoneagent.core.ports.ElementRole
 import dev.phoneagent.core.ports.ScreenDiff
 import dev.phoneagent.core.ports.ScreenUnavailableException
 import dev.phoneagent.core.ports.SystemKey
@@ -18,6 +19,7 @@ import dev.phoneagent.core.screen.ScreenFormatter
 import dev.phoneagent.core.testing.FakeContext
 import dev.phoneagent.core.testing.FakeScreen
 import dev.phoneagent.core.testing.Screens
+import dev.phoneagent.core.testing.Screens.under
 import dev.phoneagent.core.testing.call
 import dev.phoneagent.core.testing.detail
 import dev.phoneagent.core.testing.text
@@ -226,18 +228,80 @@ class ScreenActionToolsTest {
             assertEquals(Effect.entries.size, lines.values.toSet().size)
         }
 
+    /** The tap result when the port saw no change from before to after the action but [diff] is what the model gets. */
+    private suspend fun tapWithoutPortChange(
+        shown: List<UiElement>,
+        diff: ScreenDiff,
+    ): String {
+        val outcome = ActionOutcome(Status.Ok, Effect.NO_CHANGE, after.copy(elements = shown), diff)
+        return run(
+            "phone_tap",
+            """{"screen":"s12","ref":"e10"}""",
+            FakeScreen().apply {
+                onAct = {
+                    _,
+                    _,
+                    ->
+                    outcome
+                }
+            },
+        ).text()
+    }
+
+    private fun assertNoChangeWithDiff(text: String) {
+        assertTrue(text.startsWith("已点击 @e10，但动作前后画面没有变化"), text)
+        assertTrue(text.contains("和你上次看到的画面相比的变化见下面，不一定是这个动作造成的。"), text)
+        assertTrue(text.contains("\nscreen s13 · 与 s12 相比的变化（其余不变）\n"), text)
+        assertFalse(text.contains("没有可见变化"), text)
+    }
+
     @Test
-    fun `a diff that is not empty is shown as a change, even when the port saw no change`() =
+    fun `no change from the port with a non-empty diff says both, the action did nothing and what differs`() =
         runTest {
-            // Only the messages' parent changed: the fingerprint, and so the port's effect, stays the same.
-            val moved = Screens.CHAT_ELEMENTS.map { if (it.parent?.value == "e5") it.copy(parent = null) else it }
-            val after = after.copy(elements = moved)
             val print = { e: List<UiElement> -> ScreenFingerprint.of(after.pkg, after.activity, e, null) }
-            assertEquals(print(Screens.CHAT_ELEMENTS), print(moved))
-            val diff = ScreenDiffer().diff(Screens.CHAT, after)
-            assertFalse(diff.isEmpty)
-            val outcome = ActionOutcome(Status.Ok, Effect.NO_CHANGE, after, diff)
-            val text =
+            // Only the messages' parent changed, which the fingerprint ignores.
+            val reparented = Screens.CHAT_ELEMENTS.map { if (it.parent?.value == "e5") it.copy(parent = null) else it }
+            assertEquals(print(Screens.CHAT_ELEMENTS), print(reparented))
+            val parentOnly =
+                tapWithoutPortChange(reparented, ScreenDiffer().diff(Screens.CHAT, after.copy(elements = reparented)))
+            assertNoChangeWithDiff(parentOnly)
+            assertTrue(parentOnly.contains("~ @e6 \"张三：明天几点到？\""), parentOnly)
+            // Only a ref changed (the input box e9 is now e12), which the fingerprint ignores too.
+            val renamed =
+                Screens.CHAT_ELEMENTS.map {
+                    if (it.ref.value ==
+                        "e9"
+                    ) {
+                        it.copy(ref = ElementRef("e12"))
+                    } else {
+                        it
+                    }
+                }
+            assertEquals(print(Screens.CHAT_ELEMENTS), print(renamed))
+            val refOnly =
+                tapWithoutPortChange(renamed, ScreenDiffer().diff(Screens.CHAT, after.copy(elements = renamed)))
+            assertNoChangeWithDiff(refOnly)
+            assertTrue(refOnly.contains("+ @e12 输入框") && refOnly.contains("- @e9"), refOnly)
+            // A message came in after the model's read and before the action, which then did nothing.
+            val message = Screens.el("e11", ElementRole.TEXT, "张三：在吗", Screens.box(40, 400, 700, 460)).under("e5")
+            val arrived = Screens.CHAT_ELEMENTS + message
+            val background =
+                tapWithoutPortChange(arrived, ScreenDiffer().diff(Screens.CHAT, after.copy(elements = arrived)))
+            assertNoChangeWithDiff(background)
+            assertTrue(background.contains("+ @e11 \"张三：在吗\""), background)
+            // With an empty diff the port's "no change" stands alone.
+            val unchanged = tapWithoutPortChange(Screens.CHAT_ELEMENTS, ScreenDiff())
+            assertTrue(unchanged.startsWith("已点击 @e10，但画面没有变化：可能还在加载"), unchanged)
+            assertFalse(unchanged.contains("不一定是这个动作造成的"), unchanged)
+            // A change the port saw is just done.
+            val outcome =
+                ActionOutcome(
+                    Status.Ok,
+                    Effect.CHANGED,
+                    after.copy(elements = arrived),
+                    ScreenDiffer().diff(Screens.CHAT, after.copy(elements = arrived)),
+                )
+            val changed =
                 run(
                     "phone_tap",
                     """{"screen":"s12","ref":"e10"}""",
@@ -246,20 +310,7 @@ class ScreenActionToolsTest {
                             { _, _ -> outcome }
                     },
                 ).text()
-            assertTrue(text.startsWith("已点击 @e10。\nscreen s13 · 与 s12 相比的变化（其余不变）"), text)
-            assertFalse(text.contains("没有变化") || text.contains("没有可见变化"), text)
-            // With an empty diff the port's "no change" stands.
-            val same = ActionOutcome(Status.Ok, Effect.NO_CHANGE, after, ScreenDiff())
-            val unchanged =
-                run(
-                    "phone_tap",
-                    """{"screen":"s12","ref":"e10"}""",
-                    FakeScreen().apply {
-                        onAct =
-                            { _, _ -> same }
-                    },
-                ).text()
-            assertTrue(unchanged.contains("画面没有变化"), unchanged)
+            assertTrue(changed.startsWith("已点击 @e10。\nscreen s13"), changed)
         }
 
     @Test

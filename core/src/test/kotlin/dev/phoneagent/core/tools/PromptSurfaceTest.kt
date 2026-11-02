@@ -181,34 +181,33 @@ class PromptSurfaceTest {
         }
 
     @Test
-    fun `results - a diff is shown as a change even when the port saw no change`() =
+    fun `results - no change from the port, but changes since the model's read`() =
         runTest {
-            // Only the messages' parent changed, which the fingerprint (and so the effect) ignores.
-            val after =
-                Screens.CHAT.copy(
-                    id = SnapshotId("s13"),
-                    elements =
-                        Screens.CHAT_ELEMENTS.map {
-                            if (it.parent?.value ==
-                                "e5"
-                            ) {
-                                it.copy(parent = null)
-                            } else {
-                                it
-                            }
-                        },
-                )
-            val outcome =
-                ActionOutcome(
-                    ActionOutcome.Status.Ok,
-                    ActionOutcome.Effect.NO_CHANGE,
-                    after,
-                    ScreenDiffer().diff(Screens.CHAT, after),
-                )
-            Golden.assertMatches(
-                "results/tap-diff-without-port-change.expected.txt",
-                run("phone_tap", """{"screen":"s12","ref":"e7"}""", outcome),
-            )
+            // The port saw no change from right before to right after the tap, yet the diff to the
+            // screen the model read is not empty: only a parent changed, only a ref changed, or a
+            // message came in before the tap.
+            val reparented = Screens.CHAT_ELEMENTS.map { if (it.parent?.value == "e5") it.copy(parent = null) else it }
+            val renamed =
+                Screens.CHAT_ELEMENTS.map {
+                    if (it.ref.value ==
+                        "e9"
+                    ) {
+                        it.copy(ref = ElementRef("e12"))
+                    } else {
+                        it
+                    }
+                }
+            val message = el("e11", ElementRole.TEXT, "张三：在吗", box(40, 400, 700, 460)).copy(parent = ElementRef("e5"))
+            val text =
+                listOf(reparented, renamed, Screens.CHAT_ELEMENTS + message)
+                    .map { elements ->
+                        val after = Screens.CHAT.copy(id = SnapshotId("s13"), elements = elements)
+                        val diff = ScreenDiffer().diff(Screens.CHAT, after)
+                        val outcome =
+                            ActionOutcome(ActionOutcome.Status.Ok, ActionOutcome.Effect.NO_CHANGE, after, diff)
+                        run("phone_tap", """{"screen":"s12","ref":"e7"}""", outcome)
+                    }.joinToString("\n\n=====\n\n")
+            Golden.assertMatches("results/tap-diff-without-port-change.expected.txt", text)
         }
 
     @Test
