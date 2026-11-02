@@ -74,12 +74,44 @@ internal class LaunchTargets(
         /**
          * Start [intent]: the request with its component set to the activity that was checked, its
          * URI-grant flags cleared, and [Intent.FLAG_ACTIVITY_NEW_TASK] set (it is the root of a new
-         * task on the agent display). Every start path takes this, so none starts what was not checked.
+         * task on the agent display). Only [LaunchTargets.check] makes one and every start path
+         * takes one, so none starts what was not checked.
          */
-        class Allowed internal constructor(
-            val intent: Intent,
+        class Allowed private constructor(
+            private val checked: Intent,
         ) : Target {
-            val activity: ComponentName get() = checkNotNull(intent.component)
+            /** A new copy of the checked intent on every read: what a start path does to it stays there. */
+            val intent: Intent get() = Intent(checked)
+
+            /** The activity that was checked. */
+            val activity: ComponentName get() = checkNotNull(checked.component)
+
+            internal companion object {
+                /**
+                 * [LaunchTargets.check] for [targets]. It lives here because only [Allowed] can call
+                 * its constructor: every [Allowed] is one this resolved and checked.
+                 */
+                fun issue(
+                    targets: LaunchTargets,
+                    request: Intent,
+                ): Target {
+                    val matches = targets.resolve(request).distinctBy { it.packageName to it.name }
+                    val only = matches.singleOrNull()
+                    return when {
+                        matches.isEmpty() -> {
+                            Refused(LaunchRefusal.NOT_FOUND, "nothing can handle $request")
+                        }
+
+                        only == null -> {
+                            Refused(LaunchRefusal.SEVERAL_HANDLERS, "${matches.size} activities can handle $request")
+                        }
+
+                        else -> {
+                            targets.refusal(only, request.action) ?: Allowed(targets.pinned(request, only))
+                        }
+                    }
+                }
+            }
         }
 
         /** Start nothing; [detail] is for logcat. */
@@ -93,23 +125,7 @@ internal class LaunchTargets(
      * Resolves [intent] to a single activity and checks it as above. Several handlers are refused:
      * the helper cannot ask the user which one, and guessing could pick one the app did not mean.
      */
-    fun check(intent: Intent): Target {
-        val matches = resolve(intent).distinctBy { it.packageName to it.name }
-        val only = matches.singleOrNull()
-        return when {
-            matches.isEmpty() -> {
-                Target.Refused(LaunchRefusal.NOT_FOUND, "nothing can handle $intent")
-            }
-
-            only == null -> {
-                Target.Refused(LaunchRefusal.SEVERAL_HANDLERS, "${matches.size} activities can handle $intent")
-            }
-
-            else -> {
-                refusal(only, intent.action) ?: Target.Allowed(pinned(intent, only))
-            }
-        }
-    }
+    fun check(intent: Intent): Target = Target.Allowed.issue(this, intent)
 
     /** Why the app's uid could not start [activity] itself with [action], or null. */
     private fun refusal(

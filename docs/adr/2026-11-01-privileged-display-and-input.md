@@ -23,7 +23,7 @@ phase1-architecture §3.5 列出了 `IPrivilegedCore` 的能力面，调研报�
    - 锁屏时什么都不启动（`LOCKED`，协议 2 新增）：用户不在场时，agent 不该打开任何 App。锁屏状态读不到也按锁屏处理，`probe()` 的 lock 一项会报出原因（协议 4 起，见决定 4）。
    - 冷启动只在"这个 App 的任务全在这块屏上"时才 `am force-stop`，否则降级为普通启动并返回 `COLD_IGNORED`。
    - **启动边界：助手代 App 启动的，只能是 App 自己调用 startActivity 也能启动的那个 Activity，并且不能借 shell 身份多带任何权限。** 助手以 shell 身份运行，权限远多于 App；这一条只管"调用身份的权限上限"，付款、发送这类内容判定仍归 PolicyEngine。它由代码（`LaunchTargets`、`AppGrants`）和负例矩阵（`LaunchBoundaryTest`，每一类都在直接启动、`am start` 回退以及两者的冷启动上各断言一次）守住，不靠评审：
-     - 每条启动路径都先过同一个检查：直接 `startActivityAsUser`、`am start` 回退、冷启动的 `am force-stop`，用的都是检查返回的那个 `Allowed`（component 已固定成检查过的 Activity）。启动代码只接受 `Allowed`，检查之后没有地方能换目标。
+     - 每条启动路径都先过同一个检查：直接 `startActivityAsUser`、`am start` 回退、冷启动的 `am force-stop`，用的都是检查返回的那个 `Allowed`（component 已固定成检查过的 Activity）。启动代码只接受 `Allowed`；`Allowed` 的构造器是私有的，只有 `LaunchTargets.check` 能创建它，对外只给 intent 的副本，每次读取都是新的一份，所以检查之后没有地方能换目标，哪条路径改了自己拿到的副本，也影响不到别的路径。
      - intent 先解析成唯一的 Activity：解析不出来是 `NOT_FOUND`，不止一个候选是 `REFUSED`（助手问不了用户选哪个）。
      - 然后按系统在 App 自己调用 `startActivity` 时的检查（`ActivityTaskSupervisor.checkStartAnyActivityPermission`），对 App 的 uid 逐条判断：
        - 不属于本 App 的 Activity 必须已导出。"属于本 App"按 app id 判断，与系统一致，不按包名。

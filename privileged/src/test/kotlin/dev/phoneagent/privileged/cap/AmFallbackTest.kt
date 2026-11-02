@@ -114,6 +114,22 @@ class AmFallbackTest {
     }
 
     /**
+     * The direct start changes the intent it was handed, then fails through reflection: `am start`
+     * still starts what was checked, because each path gets its own copy of the checked intent.
+     */
+    @Test
+    fun aStartPathThatChangesItsIntentChangesNothingTheFallbackStarts() {
+        helper.install(OTHER, exported = false)
+        helper.bridge.atm.onStart = { handed ->
+            handed.component = ComponentName(OTHER, "$OTHER.Main")
+            handed.action = Intent.ACTION_SEND
+            handed.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        assertEquals(StartResult.OK, start(Intent(Intent.ACTION_VIEW, Uri.parse(PAGE))))
+        assertEquals(listOf(am("-a", Intent.ACTION_VIEW, "-d", PAGE, "-f", "$NEW_TASK")), helper.commands.of("am"))
+    }
+
+    /**
      * A cold start on a build without `startActivityAsUser` of an intent `am start` cannot carry:
      * nothing can start it, so the app is not stopped for nothing.
      */
@@ -157,6 +173,7 @@ class AmFallbackTest {
 
     private companion object {
         const val HANDLER = "com.example.browser"
+        const val OTHER = "com.example.other"
         const val PAGE = "https://example.com/a?b=c"
         const val IMAGE = "content://com.example.files/image/1"
         const val NEW_TASK = Intent.FLAG_ACTIVITY_NEW_TASK

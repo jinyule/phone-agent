@@ -38,6 +38,9 @@ internal class FakeActivityTaskManager {
     /** Makes `startActivityAsUser` fail through reflection, so the helper falls back to `am start`. */
     var startUnavailable = false
 
+    /** Runs on the intent `startActivityAsUser` is handed, before it answers or fails. */
+    var onStart: (Intent) -> Unit = {}
+
     /** How many more `getTasks` answers fail while they are read, as a list torn mid-read would. */
     var tornReads = 0
 
@@ -91,6 +94,7 @@ internal class FakeActivityTaskManager {
         options: Bundle?,
         userId: Int,
     ): Any? {
+        onStart(intent)
         check(!startUnavailable) { "startActivityAsUser is not available on this build" }
         started += intent to userId
         return startResult

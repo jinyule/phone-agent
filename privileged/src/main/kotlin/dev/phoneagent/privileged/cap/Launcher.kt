@@ -198,8 +198,8 @@ internal class Launcher(
 /**
  * The two ways to put an activity on a display, in order of preference: the hidden
  * `startActivityAsUser` with `ActivityOptions.setLaunchDisplayId`, then `am start --display` with
- * the intent spelled out as arguments. Both start [LaunchTargets.Target.Allowed.intent], the intent
- * that was checked, in the helper's user; neither looks at the request again.
+ * the intent spelled out as arguments. Both start [LaunchTargets.Target.Allowed.intent], a copy of
+ * the intent that was checked, in the helper's user; neither looks at the request again.
  */
 private class ActivityStarter(
     private val bridge: SystemBridge,
