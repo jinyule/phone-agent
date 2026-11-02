@@ -134,6 +134,40 @@ class SpendingTest {
         assertEquals("spend.unattended", refusal(decide(swipe, on(s, level, unattended = true))))
     }
 
+    @ParameterizedTest
+    @EnumSource(SecurityLevel::class)
+    fun `a pay word anywhere in a control's own label pays, and an amount does not hide a pay word`(
+        level: SecurityLevel,
+    ) {
+        val labels =
+            mapOf(
+                "我已阅读并同意服务协议现在支付并完成本次交易" to null,
+                "订阅 ¥20" to Money(2000, null),
+                "开通会员 ¥15/月" to Money(1500, null),
+                "立即预订 ¥399" to Money(39900, null),
+            )
+        for ((label, amount) in labels) {
+            val s = screen(el("e1", label, bounds = box(0, 900, 999, 960)))
+            val confirmed = card(decide(tap("e1"), on(s, level)))
+            assertEquals(ConfirmReason.SPEND to amount, confirmed.reason to confirmed.amount, label)
+            assertEquals("spend.unattended", refusal(decide(tap("e1"), on(s, level, unattended = true))), label)
+        }
+        // A counter is not money: "评论(23)" stays an entry.
+        assertEquals(Verdict.Allow, decide(tap("e1"), on(screen(el("e1", "评论(23)")), SecurityLevel.AUTONOMOUS)))
+    }
+
+    @Test
+    fun `a long preview in a list row is not a button label`() {
+        // The trade-off of policy-rules.md §3.3: a row shows several texts, read one by one.
+        val row =
+            screen(
+                el("e1", bounds = box(0, 300, 999, 400)),
+                text("t2", "张三", box(0, 300, 300, 340), parent = "e1"),
+                text("t3", "我昨天已经帮你把这个月的房租支付给房东了别担心", box(0, 350, 999, 390), parent = "e1"),
+            )
+        assertEquals(Verdict.Allow, decide(tap("e1"), on(row)))
+    }
+
     @Test
     fun `request_confirmation reads its own amount argument`() {
         val ask =

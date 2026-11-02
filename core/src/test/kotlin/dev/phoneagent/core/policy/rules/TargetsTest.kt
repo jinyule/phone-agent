@@ -110,6 +110,7 @@ class TargetsTest {
         // A blank name is no name: the OCR over the control is its text.
         val blank = el("e1", " ", bounds = box(400, 400, 600, 450))
         assertEquals(listOf("删除"), Evidence.of(blank, null, screen(blank, ocr = s.ocr)))
+        assertEquals(ConfirmReason.DELETE, reason(decide(tap("e1"), on(screen(blank, ocr = s.ocr)))))
         val named = el("e1", "图片", bounds = box(400, 400, 600, 450))
         assertEquals(listOf("图片"), Evidence.of(named, null, screen(named, ocr = s.ocr)))
     }

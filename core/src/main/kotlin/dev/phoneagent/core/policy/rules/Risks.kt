@@ -188,8 +188,11 @@ internal class Controls(
     ): ElementRisk? = settings.sensitiveEntry(texts, screen)?.let { ElementRisk(IntentKind.SETTINGS, "settings:$it") }
 
     /**
-     * The riskiest word among the label (a strong word at its start counts at any length) and each
-     * text; an icon's resource id when there is no text; a generic button by its dialog.
+     * The riskiest word among the control's own label, its label as a whole and each text; an
+     * icon's resource id when there is no text; a generic button by its dialog. A strong word
+     * counts at any length in the control's own label: its name, or the one text it shows, or on a
+     * payment page any text on it. A control that shows several texts elsewhere (a list row: a
+     * name, a preview, a time) is read text by text, so a long preview is not a button.
      */
     private fun labelled(
         element: UiElement,
@@ -197,7 +200,12 @@ internal class Controls(
         screen: ScreenSnapshot,
     ): ElementRisk? {
         val label = Elements.label(element, screen)
-        val hits = listOfNotNull(lexicon.ofControl(label), icon(element, texts)) + texts.mapNotNull(lexicon::classify)
+        val own = listOfNotNull(element.name?.takeIf(String::isNotBlank) ?: texts.singleOrNull())
+        val whole = if (pages.isPayment(screen)) texts else own
+        val hits =
+            whole.mapNotNull(lexicon::ofControl) +
+                listOfNotNull(lexicon.classify(label), lexicon.leading(label), icon(element, texts)) +
+                texts.mapNotNull(lexicon::classify)
         return best(hits) ?: if (lexicon.isGeneric(label)) generic(element, screen, label) else unlabeled(texts, screen)
     }
 

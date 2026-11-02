@@ -28,6 +28,18 @@ internal object Text {
                 "(?:元|块|美元|港元|港币|欧元|英镑|日元|rmb|cny|usd|hkd|eur|gbp|jpy|件|个|份|项|张|次)?",
         )
 
+    /**
+     * Amounts with a currency mark ("¥20", "20 元", "US$5/月", "¥15起"), after [normalize]. Every
+     * run of spaces inside is bounded and a number starts only where no digit precedes, so a
+     * match costs time in proportion to what it covers.
+     */
+    private val MONEY =
+        Regex(
+            "(?:(?:(?:us|hk|nt|s|a|c)\\$|rmb|cny|usd|hkd|eur|gbp|jpy|[$¥€£])\\s{0,8}\\d[\\d,.]*(?:\\s{0,8}万)?" +
+                "(?:\\s{0,8}$CURRENCY_WORDS)?|(?<![\\d.,])\\d[\\d,.]*(?:\\s{0,8}万)?\\s{0,8}$CURRENCY_WORDS)" +
+                "(?:\\s{0,8}(?:/|每)\\s{0,8}(?:月|年|季|周|天|month|year|mo|yr))?(?:\\s{0,8}起)?",
+        )
+
     /** Traditional characters of the vocabulary and their simplified forms, in pairs. */
     private const val TRADITIONAL_PAIRS =
         "萬万與与買买價价會会協协單单歷历曆历發发號号後后員员唄呗圖图塊块備备復复實实寶宝帳账賬账應应開开強强" +
@@ -49,12 +61,6 @@ internal object Text {
         return segments.size >= 2 && segments.all(::isSegment)
     }
 
-    private fun isSegment(segment: String): Boolean =
-        segment.isNotEmpty() && segment[0].isAsciiLetter() &&
-            segment.all { it.isAsciiLetter() || it in '0'..'9' || it == '_' }
-
-    private fun Char.isAsciiLetter(): Boolean = this in 'a'..'z' || this in 'A'..'Z'
-
     /** NFKC (full-width forms become ASCII, ￥ becomes ¥), lower case, simplified, whitespace and zero-width removed. */
     fun compact(raw: String): String = normalize(raw).filterNot(Char::isWhitespace)
 
@@ -63,6 +69,9 @@ internal object Text {
 
     /** [compact] without trailing punctuation or symbols ("发送！" → "发送", "ok." → "ok"). */
     fun bare(raw: String): String = compact(raw).trimEnd { !it.isLetterOrDigit() }
+
+    /** [raw] in [normalize] form with its amounts that carry a currency mark replaced by a space. */
+    fun withoutMoney(raw: String): String = normalize(raw).replace(MONEY, " ")
 
     /** What a label says without its bracketed notes, amounts and counts, in [compact] form. */
     fun words(raw: String): String = stripped(raw).filterNot(Char::isWhitespace)
@@ -90,3 +99,12 @@ internal object Text {
         }
     }
 }
+
+/** Currency words after an amount, in [Text.compact] form, as one regex group. */
+private const val CURRENCY_WORDS = "(?:元|块|美元|港元|港币|欧元|英镑|日元|rmb|cny|usd|hkd|eur|gbp|jpy)"
+
+private fun isSegment(segment: String): Boolean =
+    segment.isNotEmpty() && segment[0].isAsciiLetter() &&
+        segment.all { it.isAsciiLetter() || it in '0'..'9' || it == '_' }
+
+private fun Char.isAsciiLetter(): Boolean = this in 'a'..'z' || this in 'A'..'Z'

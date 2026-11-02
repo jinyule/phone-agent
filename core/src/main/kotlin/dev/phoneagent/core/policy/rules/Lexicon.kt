@@ -23,10 +23,13 @@ internal class Lexicon(
     fun inContext(text: String): Hit? = match(text, tuning.contextMax)
 
     /**
-     * The risk the name of a control names: as [classify], and a strong word the name starts with
-     * counts at any length ("确认支付并同意…").
+     * The risk a control's own label names: as [classify], and a strong word anywhere in it counts
+     * at any length ("我已阅读并同意服务协议现在支付…"): a control's label says what it does.
      */
-    fun ofControl(name: String): Hit? = classify(name) ?: Phrases.leading(name)
+    fun ofControl(label: String): Hit? = classify(label) ?: Phrases.strong(label)
+
+    /** A strong word [text] starts with, at any length ("确认支付并同意…" read from a row's texts joined). */
+    fun leading(text: String): Hit? = Phrases.leading(text)
 
     /** "确定", "OK" and the like: the dialog decides what they do. */
     fun isGeneric(label: String): Boolean = Text.bare(label) in Words.GENERIC
@@ -44,11 +47,15 @@ internal class Lexicon(
 
 /** The matching of [Words] lists, without length limits. Every function takes the raw text. */
 internal object Phrases {
-    /** An [Words.EXACT] word as the whole label, optionally after a [Words.PREFIXES] entry. */
+    /**
+     * An [Words.EXACT] word as the whole label, optionally after a [Words.PREFIXES] entry; an
+     * amount with a currency mark around it does not count ("订阅 ¥20", "开通会员 ¥15/月"), a
+     * count does ("评论(23)" is an entry).
+     */
     fun exact(label: String): Hit? {
-        val bare = Text.bare(label)
+        val forms = setOf(Text.bare(label), Text.bare(Text.withoutMoney(label)))
         return Words.EXACT
-            .firstOrNull { (word, _) -> Words.PREFIXES.any { bare == it + word } }
+            .firstOrNull { (word, _) -> Words.PREFIXES.any { it + word in forms } }
             ?.let { (word, kind) -> Hit(kind, word) }
     }
 

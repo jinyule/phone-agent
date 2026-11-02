@@ -95,14 +95,38 @@ class LexiconTest {
     }
 
     @Test
-    fun `a strong word a control's name starts with counts at any length`() {
+    fun `a strong word anywhere in a control's own label counts at any length`() {
         val long = "确认支付并同意服务协议和扣款授权及隐私政策"
         assertNull(lexicon.classify(long))
         assertEquals(Hit(IntentKind.SPEND, "支付"), lexicon.ofControl(long))
         assertEquals(Hit(IntentKind.DELETE, "删除"), lexicon.ofControl("立即删除这条消息和它的所有回复以及附件"))
-        assertNull(lexicon.ofControl("这条消息里提到了删除两个字但它只是正文"))
+        assertEquals(Hit(IntentKind.SPEND, "支付"), lexicon.ofControl("我已阅读并同意服务协议现在支付并完成本次交易"))
+        assertEquals(Hit(IntentKind.DELETE, "删除"), lexicon.ofControl("这条消息里提到了删除两个字但它只是正文"))
+        // Statuses and codes to oneself stay what they are at any length.
         assertNull(lexicon.ofControl("待付款的订单一共有三个请尽快处理"))
         assertNull(lexicon.ofControl("发送验证码到手机"))
+        // A row's texts joined: only a strong word at the start counts.
+        assertEquals(Hit(IntentKind.SPEND, "支付"), lexicon.leading(long))
+        assertNull(lexicon.leading("这条消息里提到了删除两个字但它只是正文"))
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @CsvSource(
+        delimiter = '|',
+        value = [
+            "订阅 ¥20|SPEND|订阅",
+            "开通会员 ¥15/月|SPEND|开通会员",
+            "¥399 立即预订|SPEND|预订",
+            "立即预订（US$399 起）|SPEND|预订",
+            "订阅 20元|SPEND|订阅",
+        ],
+    )
+    fun `an amount with a currency mark does not hide a whole word`(
+        label: String,
+        kind: IntentKind,
+        matched: String,
+    ) {
+        assertEquals(Hit(kind, matched), lexicon.classify(label))
     }
 
     @Test
