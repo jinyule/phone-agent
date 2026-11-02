@@ -53,8 +53,8 @@ import org.junit.jupiter.api.Test
  *
  * Mostly c1 runs [first] (its own timeout of 1 s around a prompt, or a failure it catches) and
  * then asks a second question; the test answers that one and checks what the log held open
- * meanwhile. A prompt the log never opened is not closed; a handoff waiting for the lock is
- * handed over only once the one before it is back.
+ * meanwhile. A prompt the log never opened is not closed; a prompt waiting for the lock opens
+ * only once the one before it is closed in the log, and for a handoff back.
  */
 class AgentLoopPromptLockTest {
     private val texts = LoopTexts()
@@ -245,6 +245,34 @@ class AgentLoopPromptLockTest {
             assertEquals(listOf(second), open)
             assertEquals(listOf("hand", "back", "back done", "hand"), moved, "the first is back before the second")
             assertEquals(listOf<SessionEvent>(PromptWithdrawn(first)), harness.events().closing(first))
+        }
+
+    @Test
+    fun `a question waiting for the lock is asked only once the one cut off before it is withdrawn`() =
+        runTest {
+            val ask =
+                FakeTool("ask", RiskClass.WRITE) { _, ctx ->
+                    coroutineScope {
+                        launch { withTimeoutOrNull(1_000) { ctx.interaction.ask(Question("哪个账号？")) } }
+                        launch { ctx.interaction.ask(Question("还要继续吗？")) }
+                    }
+                    ToolResult.ok("问好了")
+                }
+            val model = FakeChatModel().calls(call("c1", "ask")).answers("好了")
+            val harness = LoopHarness(this, model, tools = listOf(ask))
+            val loop = harness.start()
+            loop.followup(text("登录"))
+            val first = loop.awaitPrompt().promptId!!
+            // The log is busy when the first question is cut off, so closing it waits for the log.
+            val release = harness.holdLog(loop)
+            advanceTimeBy(1_500)
+            release.complete(Unit)
+            val (second, _) = harness.answerSecond(loop, first)
+
+            val events = harness.events()
+            val asked = events.indexOfFirst { (it as? QuestionAsked)?.promptId == second }
+            assertTrue(events.indexOf(PromptWithdrawn(first)) in 0..<asked, "$events")
+            assertEquals(listOf<SessionEvent>(PromptWithdrawn(first)), events.closing(first))
         }
 
     @Test
