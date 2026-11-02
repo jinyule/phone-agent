@@ -2,8 +2,11 @@ package dev.phoneagent.core.agent
 
 import dev.phoneagent.core.ids.SnapshotId
 import dev.phoneagent.core.ids.ToolCallId
+import dev.phoneagent.core.ports.ActionOutcome
 import dev.phoneagent.core.ports.Frame
 import dev.phoneagent.core.ports.LaunchTarget
+import dev.phoneagent.core.ports.ScreenPort
+import dev.phoneagent.core.ports.ScreenUnavailableException
 import dev.phoneagent.core.ports.StoragePath
 import dev.phoneagent.core.ports.SystemKey
 import dev.phoneagent.core.ports.UiAction
@@ -22,6 +25,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 
 /** A call's screen records what it saw and did (phase1 §3.9). */
 class RecordingScreenTest {
@@ -66,6 +70,56 @@ class RecordingScreenTest {
             port.frame = Frame(byteArrayOf(3), "image/gif", 10, 20, som = false)
             assertSame(port.frame, screen.frame(maxEdge = 720, som = false))
             assertEquals(1, recorded.size, "a mime the model cannot take is not recorded")
+        }
+
+    @Test
+    fun `an action or a launch that throws is recorded as failed with the class only, and the exception goes on`() =
+        runTest {
+            val failure = ScreenUnavailableException("display 7 gone")
+            val broken =
+                object : ScreenPort by port {
+                    override suspend fun act(
+                        action: UiAction,
+                        on: SnapshotId?,
+                    ): ActionOutcome = throw failure
+
+                    override suspend fun launch(target: LaunchTarget): ActionOutcome = throw failure
+                }
+            val screen = RecordingScreen(broken, c1, blobs) { recorded += it }
+            val back = UiAction.Key(SystemKey.BACK)
+            val target = LaunchTarget.App("com.example.chat")
+
+            assertSame(failure, assertThrows<ScreenUnavailableException> { screen.act(back, on = SnapshotId("s1")) })
+            assertSame(failure, assertThrows<ScreenUnavailableException> { screen.launch(target) })
+            val outcome =
+                ActionOutcome(
+                    ActionOutcome.Status.Failed("threw ${ScreenUnavailableException::class.java.name}"),
+                    ActionOutcome.Effect.UNKNOWN,
+                    after = null,
+                )
+            assertEquals(
+                listOf(ScreenActed(c1, SnapshotId("s1"), back, outcome), ScreenLaunched(c1, target, outcome)),
+                recorded,
+            )
+        }
+
+    @Test
+    fun `an error from the port (a bug) is recorded as unfinished and goes on`() =
+        runTest {
+            val bug = AssertionError("port bug")
+            val broken =
+                object : ScreenPort by port {
+                    override suspend fun act(
+                        action: UiAction,
+                        on: SnapshotId?,
+                    ): ActionOutcome = throw bug
+                }
+            val screen = RecordingScreen(broken, c1, blobs) { recorded += it }
+
+            val back = UiAction.Key(SystemKey.BACK)
+            assertSame(bug, assertThrows<AssertionError> { screen.act(back, on = null) })
+            val unfinished = ActionOutcome(ActionOutcome.Status.Failed("did not finish"), ActionOutcome.Effect.UNKNOWN)
+            assertEquals(listOf(ScreenActed(c1, null, back, unfinished)), recorded)
         }
 
     @Test

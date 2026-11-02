@@ -496,7 +496,7 @@ fun interface Chain<I, O> { suspend fun proceed(input: I): O }   // 不调用 pr
   - `handoff/started`、`handoff/end`：从 `handoff/started` 起之前的屏都不算，`handoff/end` 再把接管期间记的屏也作废；接管不论怎样结束（正常结束、被停止、超时、意外异常、进程被杀后修复）都一样；
   - `session/resumed`：进程结束过，App 可能也不在原来的状态；
   - 非 READ 调用的 `tool/started`（按 verdictSeq 指向的那条 verdict 的 `intent.kind` 判断）：一开始执行，动作就可能改变了屏幕，不论之后正常返回、超时、被停止还是进程被杀；
-  - `screen/acted`、`screen/launched`：事件自带的回读屏（`after`）算作在边界之后记录的，所在调用有了结果就有效；`after` 为 null 时就没有有效的屏。
+  - `screen/acted`、`screen/launched`：事件自带的回读屏（`after`）算作在边界之后记录的，所在调用有了结果就有效；`after` 为 null 时就没有有效的屏。动作或启动抛异常、被取消时也照样记一条（`Failed`，只写异常类名，`effect = UNKNOWN`，`after` 为 null），因为它可能已经到达设备（ScreenPort 契约）；被截断以后才返回的动作，记它返回的结果。这两种记录都在 `NonCancellable` 里写，日志被别的写入占住时等它放开；日志已经失败时，补写抛日志的异常，任务以 `ERROR` 停止。它们和其他 `screen/*` 事件一样不进模型请求。
 
   边界之后还没读到屏，就是 `screen = null`，交给 PolicyEngine 处理（WP05 对依赖屏幕的动作返回 `NO_SCREEN`，提示先 `phone_observe`）。全部只从日志推导，不用内存状态。
   - 这一屏可能比模型看到的更新：调用的结果不一定把它记录的屏展示给模型（比如动作之后回读的屏）。这样取是有意的：用更新的屏，最坏是带 ref 的调用多一次 stale 拒绝（快照 id 对不上）；如果严格按"模型看到的屏"判，坐标点击会在过期的屏上解析，可能放行一次在当前屏上本该确认的点击。
