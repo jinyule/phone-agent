@@ -10,7 +10,6 @@ import dev.phoneagent.core.model.openai.Kit.base
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.MockResponse
-import mockwebserver3.MockWebServer
 import mockwebserver3.junit5.StartStop
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
@@ -27,7 +26,7 @@ import org.junit.jupiter.params.provider.ValueSource
  */
 class ResponsesTerminalTest {
     @StartStop
-    private val server = MockWebServer()
+    private val server = Kit.server()
 
     private fun model(credential: Credential = Kit.KEY): ChatModel =
         Kit.adapters().unprobed(

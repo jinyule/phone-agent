@@ -9,7 +9,6 @@ import dev.phoneagent.core.model.openai.Kit.json
 import dev.phoneagent.core.model.openai.Kit.next
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
-import mockwebserver3.MockWebServer
 import mockwebserver3.junit5.StartStop
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -22,7 +21,7 @@ import org.junit.jupiter.api.Test
  */
 class SavedWireTest {
     @StartStop
-    private val server = MockWebServer()
+    private val server = Kit.server()
 
     @Test
     fun `model takes the wire options explicitly`() {

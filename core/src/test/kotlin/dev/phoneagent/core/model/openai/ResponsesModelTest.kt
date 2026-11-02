@@ -16,7 +16,6 @@ import dev.phoneagent.core.model.openai.Kit.next
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
-import mockwebserver3.MockWebServer
 import mockwebserver3.junit5.StartStop
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -28,7 +27,7 @@ class ResponsesModelTest {
     private fun event(json: String) = "data: $json\n\n"
 
     @StartStop
-    private val server = MockWebServer()
+    private val server = Kit.server()
 
     private val completed =
         "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"Hi\"}\n\n" +

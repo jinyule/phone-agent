@@ -4,7 +4,6 @@ import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.openai.Kit.base
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
 import kotlinx.coroutines.test.runTest
-import mockwebserver3.MockWebServer
 import mockwebserver3.junit5.StartStop
 import okhttp3.Headers.Companion.headersOf
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -14,7 +13,7 @@ import org.junit.jupiter.api.assertThrows
 
 class OpenAiAdaptersTest {
     @StartStop
-    private val server = MockWebServer()
+    private val server = Kit.server()
 
     @Test
     fun `the public entry point serves both protocols`() =

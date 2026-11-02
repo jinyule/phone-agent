@@ -11,7 +11,6 @@ import dev.phoneagent.core.model.openai.Kit.enqueueSse
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
-import mockwebserver3.MockWebServer
 import mockwebserver3.junit5.StartStop
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
@@ -29,7 +28,7 @@ import org.junit.jupiter.params.provider.ValueSource
  */
 class LeakedCallsTest {
     @StartStop
-    private val server = MockWebServer()
+    private val server = Kit.server()
 
     private val tag = "<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"city\": \"Paris\"}}\n</tool_call>"
     private val dsml =

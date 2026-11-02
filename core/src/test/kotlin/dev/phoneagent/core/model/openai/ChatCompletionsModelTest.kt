@@ -25,7 +25,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import mockwebserver3.MockResponse
 import mockwebserver3.MockResponseBody
-import mockwebserver3.MockWebServer
 import mockwebserver3.SocketEffect
 import mockwebserver3.junit5.StartStop
 import okhttp3.Call
@@ -43,7 +42,7 @@ import java.util.concurrent.TimeUnit
 
 class ChatCompletionsModelTest {
     @StartStop
-    private val server = MockWebServer()
+    private val server = Kit.server()
 
     private val textReply =
         Kit.sse(

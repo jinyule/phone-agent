@@ -10,7 +10,6 @@ import dev.phoneagent.core.model.openai.Kit.enqueueError
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.MockResponse
-import mockwebserver3.MockWebServer
 import mockwebserver3.junit5.StartStop
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -24,7 +23,7 @@ import org.junit.jupiter.api.assertThrows
  */
 class RedactionTest {
     @StartStop
-    private val server = MockWebServer()
+    private val server = Kit.server()
 
     private fun chat(keys: Keys = Keys(KEY)): ChatModel =
         Kit.adapters(keys).unprobed(Kit.profile(server.base()), Kit.MODEL, Kit.capabilities(), Kit.blobs())

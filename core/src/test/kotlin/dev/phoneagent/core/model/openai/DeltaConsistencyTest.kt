@@ -9,7 +9,6 @@ import dev.phoneagent.core.model.openai.Kit.enqueueSse
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
-import mockwebserver3.MockWebServer
 import mockwebserver3.junit5.StartStop
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
@@ -25,7 +24,7 @@ import org.junit.jupiter.params.provider.ValueSource
  */
 class DeltaConsistencyTest {
     @StartStop
-    private val server = MockWebServer()
+    private val server = Kit.server()
 
     private fun chat(): ChatModel {
         val profile = Kit.profile(server.base())

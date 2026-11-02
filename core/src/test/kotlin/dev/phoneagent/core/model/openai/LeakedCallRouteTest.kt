@@ -6,7 +6,6 @@ import dev.phoneagent.core.model.openai.Kit.base
 import dev.phoneagent.core.model.openai.LeakedCallFormat.DSML
 import dev.phoneagent.core.model.openai.LeakedCallFormat.TOOL_CALL_TAG
 import kotlinx.coroutines.test.runTest
-import mockwebserver3.MockWebServer
 import mockwebserver3.junit5.StartStop
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -23,7 +22,7 @@ import org.junit.jupiter.api.assertThrows
  */
 class LeakedCallRouteTest {
     @StartStop
-    private val server = MockWebServer()
+    private val server = Kit.server()
 
     private val adapters = Kit.adapters()
 

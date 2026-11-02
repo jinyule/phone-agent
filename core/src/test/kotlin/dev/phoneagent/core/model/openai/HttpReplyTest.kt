@@ -48,7 +48,7 @@ class HttpReplyTest {
         val response =
             Response
                 .Builder()
-                .request(Request.Builder().url("http://localhost/").build())
+                .request(Request.Builder().url("http://127.0.0.1/").build())
                 .protocol(Protocol.HTTP_1_1)
                 .code(200)
                 .message("OK")

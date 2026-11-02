@@ -10,6 +10,7 @@ import dev.phoneagent.core.model.openai.Kit.base
 import dev.phoneagent.core.model.openai.Kit.enqueueError
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
 import dev.phoneagent.core.model.openai.Kit.json
+import dev.phoneagent.core.model.openai.Kit.literalUrl
 import dev.phoneagent.core.model.openai.Kit.next
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonArray
@@ -17,7 +18,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
-import mockwebserver3.MockWebServer
 import mockwebserver3.RecordedRequest
 import mockwebserver3.junit5.StartStop
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -28,7 +28,7 @@ import org.junit.jupiter.api.assertThrows
 
 class ProviderProbeTest {
     @StartStop
-    private val server = MockWebServer()
+    private val server = Kit.server()
 
     private val probe get() = Kit.adapters().probe()
     private val profile get() = Kit.profile(server.base())
@@ -211,7 +211,7 @@ class ProviderProbeTest {
     fun `a redirect naming an optional field is not a refusal of it`() =
         runTest {
             server.enqueueError(404, "{}")
-            val location = server.url("/elsewhere/chat/completions?parallel_tool_calls=false&stream_options=x")
+            val location = server.literalUrl("/elsewhere/chat/completions?parallel_tool_calls=false&stream_options=x")
             server.enqueue(
                 MockResponse
                     .Builder()

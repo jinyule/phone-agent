@@ -8,7 +8,6 @@ import dev.phoneagent.core.model.openai.Kit.base
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonPrimitive
-import mockwebserver3.MockWebServer
 import mockwebserver3.junit5.StartStop
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.assertThrows
@@ -24,7 +23,7 @@ import org.junit.jupiter.params.provider.ValueSource
  */
 class ChatStopReasonTest {
     @StartStop
-    private val server = MockWebServer()
+    private val server = Kit.server()
 
     private fun model(): ChatModel =
         Kit.adapters().unprobed(Kit.profile(server.base()), Kit.MODEL, Kit.capabilities(), Kit.blobs())

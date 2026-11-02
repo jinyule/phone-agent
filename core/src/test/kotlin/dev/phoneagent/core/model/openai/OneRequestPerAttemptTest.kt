@@ -5,9 +5,9 @@ import dev.phoneagent.core.model.ModelError
 import dev.phoneagent.core.model.openai.Kit.base
 import dev.phoneagent.core.model.openai.Kit.enqueueError
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
+import dev.phoneagent.core.model.openai.Kit.literalUrl
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.MockResponse
-import mockwebserver3.MockWebServer
 import mockwebserver3.SocketEffect
 import mockwebserver3.junit5.StartStop
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -26,7 +26,7 @@ import org.junit.jupiter.params.provider.ValueSource
  */
 class OneRequestPerAttemptTest {
     @StartStop
-    private val server = MockWebServer()
+    private val server = Kit.server()
 
     private val success =
         Kit.sse(
@@ -79,7 +79,7 @@ class OneRequestPerAttemptTest {
                 MockResponse
                     .Builder()
                     .code(status)
-                    .addHeader("Location", server.url("/v2/chat/completions"))
+                    .addHeader("Location", server.literalUrl("/v2/chat/completions"))
                     .build(),
             )
             server.enqueueSse(success)

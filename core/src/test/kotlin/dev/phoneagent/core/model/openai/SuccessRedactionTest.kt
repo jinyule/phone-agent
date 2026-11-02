@@ -10,7 +10,6 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import mockwebserver3.MockResponse
-import mockwebserver3.MockWebServer
 import mockwebserver3.junit5.StartStop
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -30,7 +29,7 @@ import org.junit.jupiter.params.provider.CsvSource
  */
 class SuccessRedactionTest {
     @StartStop
-    private val server = MockWebServer()
+    private val server = Kit.server()
 
     private val adapters get() = Kit.adapters(Keys(ECHOED))
 

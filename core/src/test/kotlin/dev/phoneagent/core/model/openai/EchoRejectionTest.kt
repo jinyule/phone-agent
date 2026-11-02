@@ -13,7 +13,6 @@ import dev.phoneagent.core.model.openai.Kit.enqueueSse
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonPrimitive
 import mockwebserver3.MockResponse
-import mockwebserver3.MockWebServer
 import mockwebserver3.junit5.StartStop
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -31,7 +30,7 @@ import org.junit.jupiter.api.assertThrows
  */
 class EchoRejectionTest {
     @StartStop
-    private val server = MockWebServer()
+    private val server = Kit.server()
 
     private fun model(
         protocol: ModelProtocol = ModelProtocol.OPENAI_CHAT_COMPLETIONS,

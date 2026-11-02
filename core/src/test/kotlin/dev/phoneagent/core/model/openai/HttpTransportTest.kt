@@ -1,6 +1,7 @@
 package dev.phoneagent.core.model.openai
 
 import dev.phoneagent.core.model.ModelError
+import dev.phoneagent.core.model.openai.Kit.literalUrl
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -8,7 +9,6 @@ import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import mockwebserver3.MockResponse
-import mockwebserver3.MockWebServer
 import mockwebserver3.junit5.StartStop
 import okhttp3.Call
 import okhttp3.Connection
@@ -29,7 +29,7 @@ import kotlin.coroutines.CoroutineContext
 
 class HttpTransportTest {
     @StartStop
-    private val server = MockWebServer()
+    private val server = Kit.server()
 
     private val ioThread = Executors.newSingleThreadExecutor()
     private val io = ioThread.asCoroutineDispatcher()
@@ -46,7 +46,7 @@ class HttpTransportTest {
         ioThread.shutdownNow()
     }
 
-    private fun request() = Request.Builder().url(server.url("/v1/x")).build()
+    private fun request() = Request.Builder().url(server.literalUrl("/v1/x")).build()
 
     /** Connections the pool holds that a call still owns. */
     private fun connectionsInUse() =

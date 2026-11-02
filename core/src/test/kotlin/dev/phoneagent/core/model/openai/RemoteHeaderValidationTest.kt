@@ -6,7 +6,6 @@ import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.openai.Kit.base
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.MockResponse
-import mockwebserver3.MockWebServer
 import mockwebserver3.junit5.StartStop
 import okhttp3.OkHttpClient
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -24,7 +23,7 @@ import org.junit.jupiter.api.assertThrows
  */
 class RemoteHeaderValidationTest {
     @StartStop
-    private val server = MockWebServer()
+    private val server = Kit.server()
 
     private val client: OkHttpClient = HttpTimeouts().client()
     private val adapters get() = Kit.adapters(Keys(KEY), client)

@@ -33,8 +33,10 @@ import kotlinx.serialization.json.putJsonObject
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import mockwebserver3.RecordedRequest
+import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import java.io.IOException
+import java.net.InetAddress
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.CopyOnWriteArrayList
@@ -227,7 +229,21 @@ internal object Kit {
         enqueue(builder.build())
     }
 
-    fun MockWebServer.base(): String = url("/v1").toString().removeSuffix("/")
+    /**
+     * The address every test server binds and every test client dials. Never `localhost`: OkHttp
+     * tries `[::1]` first for it, and whatever listens there at the same port (an emulator's
+     * ephemeral port) would get the request.
+     */
+    val LOOPBACK: InetAddress = InetAddress.getByName("127.0.0.1")
+
+    /** A test server bound to [LOOPBACK]; `@StartStop` finds it started and only stops it. */
+    fun server(): MockWebServer = MockWebServer().apply { start(LOOPBACK, 0) }
+
+    /** [path] on this server at the literal address it is bound to. */
+    fun MockWebServer.literalUrl(path: String): HttpUrl =
+        url(path).newBuilder().host(checkNotNull(socketAddress.address.hostAddress)).build()
+
+    fun MockWebServer.base(): String = literalUrl("/v1").toString().removeSuffix("/")
 
     fun MockWebServer.next(): RecordedRequest =
         checkNotNull(takeRequest(TAKE_TIMEOUT_S, TimeUnit.SECONDS)) { "no request" }

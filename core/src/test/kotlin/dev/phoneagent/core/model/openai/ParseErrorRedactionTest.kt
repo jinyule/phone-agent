@@ -8,7 +8,6 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import mockwebserver3.MockResponse
-import mockwebserver3.MockWebServer
 import mockwebserver3.junit5.StartStop
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -25,7 +24,7 @@ import org.junit.jupiter.params.provider.ValueSource
  */
 class ParseErrorRedactionTest {
     @StartStop
-    private val server = MockWebServer()
+    private val server = Kit.server()
 
     private val adapters get() = Kit.adapters(Keys(KEY))
 
