@@ -46,7 +46,7 @@ phase1-architecture §3.5 列出了 `IPrivilegedCore` 的能力面，调研报�
 4. **`probe()` 在助手自己的 `ImageReader` 上跑**：建一块 360x720 的小屏 → 设 IME 策略 → 读任务列表 → 注入一次落在空屏中间的点击 → 注册主屏监听 → 释放。返回 `steps`/`results` 两个平行数组，每项是 `ok` 或原因。不需要 App 传 Surface，帧也不出助手进程。
 
 5. **静音和授权用平台命令，程序名有白名单**（`ShellCommands`：`am`/`pm`/`appops`/`input`，参数由助手拼）。`appops` 的 `PLAY_AUDIO` 反射需要 `AppOpsManager` 的隐藏重载和 `MANAGE_APP_OPS_MODES`，各版本差异大；命令形式 Mika 已在真机验证过。仍然没有"执行任意命令"的接口。
-   静音前的模式记在 `/data/local/tmp/phoneagent_audio_mute_<user>`，助手启动时先把上一个助手没来得及恢复的包还原。原本没设置过的包恢复成 `allow` 而不是显式 `default`（显式 `default` 会让 App 一直没声音）。
+   静音前的模式记在 `/data/local/tmp/phoneagent_audio_mute_<user>`，助手启动时先把上一个助手没来得及恢复的包还原。原本没设置过的包恢复成 `allow` 而不是显式 `default`（显式 `default` 会让 App 一直没声音）。账本里没有记录的包，解除静音什么都不做（返回 true）：不是本助手静音的，别人设的模式不去动。
 
 6. **测试分两层**：
    - 判断逻辑全部写成纯函数或纯状态类（`DisplaySpec`、`PressKeys`、`StrokeSpec`、`LaunchGate`、`TaskOwnership`、`MainScreenLog`、`AudioMuteLedger`、`GrantSpec`），JVM 单测覆盖每个分支，并用变异（去掉某项保护看测试是否变红）证明断言有效。

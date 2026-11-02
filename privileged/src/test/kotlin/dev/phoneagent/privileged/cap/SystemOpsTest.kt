@@ -58,6 +58,27 @@ class SystemOpsTest {
     }
 
     @Test
+    fun unmutingAPackageThisHelperNeverMutedDoesNothing() {
+        assertTrue("nothing to undo is not a failure", helper.core.setAudioMuted(MUSIC, false))
+        assertEquals("a mode somebody else set is left alone", emptyList<List<String>>(), helper.commands.of("appops"))
+    }
+
+    @Test
+    fun unmutingRestoresTheEarlierModeOnceAndThenDoesNothing() {
+        assertTrue(helper.core.setAudioMuted(MUSIC, true))
+        assertTrue(helper.core.setAudioMuted(MUSIC, false))
+        assertTrue(helper.core.setAudioMuted(MUSIC, false))
+        assertEquals(
+            listOf(
+                listOf("appops", "get", "--user", "0", MUSIC, "PLAY_AUDIO"),
+                listOf("appops", "set", "--user", "0", MUSIC, "PLAY_AUDIO", "ignore"),
+                listOf("appops", "set", "--user", "0", MUSIC, "PLAY_AUDIO", "allow"),
+            ),
+            helper.commands.of("appops"),
+        )
+    }
+
+    @Test
     fun aColdStartNeverForceStopsAnInvalidPackageName() {
         // The package manager never hands out such a name; the force-stop target is checked anyway.
         val odd = helper.install("--user", activity = "--user.Main")

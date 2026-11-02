@@ -61,8 +61,13 @@ internal class SystemOps(
         return appops("set", pkg, "ignore").ok
     }
 
+    /**
+     * Restores the mode [pkg] had before this helper muted it. A package with no entry in the
+     * ledger was not muted by this helper: nothing is written, so a mode somebody else set stays.
+     */
     private fun unmute(pkg: String): Boolean {
-        val restored = appops("set", pkg, AudioMuteLedger.restoreMode(ledger[pkg])).ok
+        val prior = ledger[pkg] ?: return true
+        val restored = appops("set", pkg, AudioMuteLedger.restoreMode(prior)).ok
         if (restored) ledger.remove(pkg)
         return restored
     }
