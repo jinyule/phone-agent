@@ -22,7 +22,22 @@ class EntryLevelsTest {
         node("android.widget.EditText", Rect(0, 0, 1000, 100)) {
             isEditable = true
             text = "old"
+        }.also { it.log.answer = { action, args -> moveSelection(it, action, args) } }
+
+    /** Moves [field]'s selection where ACTION_SET_SELECTION asks, as EditText does; accepts the action. */
+    private fun moveSelection(
+        field: AccessibilityNodeInfo,
+        action: Int,
+        args: android.os.Bundle?,
+    ): Boolean {
+        if (action == AccessibilityNodeInfo.ACTION_SET_SELECTION) {
+            field.setTextSelection(
+                args!!.getInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT),
+                args.getInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT),
+            )
         }
+        return true
+    }
 
     private fun request(
         text: String,
@@ -82,6 +97,8 @@ class EntryLevelsTest {
         }
 
         override fun selection(): Pair<Int, Int>? = cursor
+
+        override fun cursorAtEnd(): Boolean? = null
     }
 
     private fun selection(index: Int): Pair<Int, Int> {
@@ -176,7 +193,8 @@ class EntryLevelsTest {
             )
             assertEquals("restore", refusing.log.last())
 
-            field.log.answer = { action, _ -> action != AccessibilityNodeInfo.ACTION_PASTE }
+            field.log.answer =
+                { action, args -> moveSelection(field, action, args) && action != AccessibilityNodeInfo.ACTION_PASTE }
             var waited = false
             assertEquals(
                 TextEntry.Sent.Refused,

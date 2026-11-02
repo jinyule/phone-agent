@@ -14,9 +14,11 @@ import android.view.accessibility.AccessibilityNodeInfo
  * The read-back decides the result: the field shows the request ([Result.Entered], ignoring the
  * spaces, dashes and parentheses formatting fields insert; other rewrites such as "1,000" for
  * "1000" are a mismatch), shows something else ([Result.Mismatch]), or was replaced before it could
- * be read ([Result.Unconfirmed]). Only a match is submitted; after a mismatch the model sees what
- * the field shows and decides whether to press ENTER. Password fields cannot be read back: the
- * first level that delivered, or that changed the mask, is trusted.
+ * be read ([Result.Unconfirmed]). A field that already shows the request is left alone
+ * ([Result.AlreadyShown]). Only a match is submitted; after a mismatch the model sees what the
+ * field shows and decides whether to press ENTER. Password fields cannot be read back: the first
+ * level that delivered, or that changed the mask, is trusted, and text is added to a password only
+ * where the editor confirms its end.
  */
 internal object TextEntry {
     /** A fallback level. */
@@ -80,6 +82,9 @@ internal object TextEntry {
             val confirmed: Boolean,
         ) : Result
 
+        /** The field already showed the request: nothing was typed, and it may be submitted. */
+        data object AlreadyShown : Result
+
         /** Not entered as requested; the field must not be submitted. */
         sealed interface Failure : Result {
             /** Why, for the model, in English; [submitRequested] adds that nothing was submitted. */
@@ -117,7 +122,7 @@ internal object TextEntry {
     fun clipboardLost(submitRequested: Boolean): String =
         "the text was entered, but the user's clipboard could not be restored${notSubmitted(submitRequested)}"
 
-    /** Why appending to a non-empty password field failed, for the model. */
+    /** Why appending to a password field failed (its end could not be confirmed), for the model. */
     const val WHOLE_PASSWORD: String = "a password field can only be typed as a whole"
 
     /** Longest read-back quoted to the model. */
@@ -130,9 +135,22 @@ internal object TextEntry {
 
     /**
      * Runs [levels] in order until the field changes. [read] reads the field back; with
-     * `settle = true` it first waits for the app to update the field.
+     * `settle = true` it first waits for the app to update the field. A field that is not a
+     * password and already shows the request runs no level.
      */
     suspend fun enter(
+        request: Request,
+        secret: Boolean,
+        levels: List<Pair<Level, Attempt>>,
+        read: suspend (settle: Boolean) -> Shown,
+    ): Result =
+        if (!secret && matches(request.before, request.expected)) {
+            Result.AlreadyShown
+        } else {
+            fallBack(request, secret, levels, read)
+        }
+
+    private suspend fun fallBack(
         request: Request,
         secret: Boolean,
         levels: List<Pair<Level, Attempt>>,
@@ -140,7 +158,7 @@ internal object TextEntry {
     ): Result {
         // A password field shows a mask (or nothing): SET_TEXT and paste would write the mask back
         // or replace the password, so appending goes only through the input connection, which
-        // types at a confirmed cursor.
+        // types only where the editor confirms the password's end.
         val maskedAppend = secret && request.append && request.before != ""
         val usable = if (maskedAppend) levels.filter { it.first == Level.IME_CONNECTION } else levels
         val skipped = ArrayList<String>()
@@ -266,7 +284,7 @@ internal object EntryLevels {
                     TextEntry.Sent.Skipped("the field does not hold input focus")
                 }
 
-                request.append && !placeCursor(field, ime, request.before?.length ?: 0) -> {
+                request.append && !placeAtEnd(field, ime, request.before) -> {
                     TextEntry.Sent.Skipped(NO_CURSOR)
                 }
 
@@ -313,7 +331,8 @@ internal object EntryLevels {
 
     /**
      * Selects what the paste replaces (the old text, or the end for append), then holds the text
-     * on the clipboard and pastes. Nothing is put on the clipboard when the selection is refused.
+     * on the clipboard and pastes. Nothing is put on the clipboard unless the field, read again,
+     * reports that selection.
      */
     private suspend fun pasteHeld(
         field: AccessibilityNodeInfo,
@@ -324,8 +343,8 @@ internal object EntryLevels {
         val length = request.before?.length ?: 0
         val placed =
             when {
-                request.append -> select(field, length, length)
-                length > 0 -> select(field, 0, length)
+                request.append -> select(field, length, length) && nodeSelection(field) == (length to length)
+                length > 0 -> select(field, 0, length) && nodeSelection(field) == (0 to length)
                 else -> true
             }
         return when {
@@ -362,6 +381,22 @@ internal object EntryLevels {
 
     private fun sentIf(delivered: Boolean): TextEntry.Sent =
         if (delivered) TextEntry.Sent.Delivered else TextEntry.Sent.Refused
+
+    /**
+     * Puts the cursor at the end of [field]'s text, [before] being what the field showed; `false`
+     * unless confirmed there. A password's mask need not be as long as the password, or is not
+     * shown at all, so for a password only the editor's own word that nothing follows the cursor
+     * confirms the end; when the length is unknown the cursor is not moved.
+     */
+    private fun placeAtEnd(
+        field: AccessibilityNodeInfo,
+        ime: ImeConnection,
+        before: String?,
+    ): Boolean {
+        if (!field.isPassword) return placeCursor(field, ime, before?.length ?: 0)
+        val placed = before == null || placeCursor(field, ime, before.length)
+        return placed && ime.cursorAtEnd() == true
+    }
 
     /**
      * Puts the cursor at [offset] through the input connection, else the node, and checks where

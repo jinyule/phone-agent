@@ -164,4 +164,11 @@ internal interface ImeConnection {
 
     /** The editor's selection as absolute offsets (start to end), or `null` when it cannot be read. */
     fun selection(): Pair<Int, Int>?
+
+    /**
+     * Whether the editor's cursor is collapsed at the end of its text (nothing follows it), or
+     * `null` when that cannot be read. Works for password fields, whose text accessibility hides;
+     * the text looked at is not kept.
+     */
+    fun cursorAtEnd(): Boolean?
 }

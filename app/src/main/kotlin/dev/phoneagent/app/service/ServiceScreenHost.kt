@@ -214,4 +214,12 @@ internal class ServiceImeConnection(
             (offset + around.selectionStart) to (offset + around.selectionEnd)
         }
     }
+
+    // One character after the selection is asked for: none comes back only at the end.
+    override fun cursorAtEnd(): Boolean? {
+        val around = ime.currentInputConnection?.getSurroundingText(0, 1, 0) ?: return null
+        val start = around.selectionStart
+        val end = around.selectionEnd
+        return if (start < 0 || end < 0) null else start == end && end == around.text.length
+    }
 }

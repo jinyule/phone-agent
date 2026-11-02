@@ -82,6 +82,37 @@ class TypingOutcomeTest {
         return ActionRun(parts, host, GEOMETRY, baseline, compareWith = null).perform(action, aim)
     }
 
+    /** A readable clipboard that records every call, so a test can assert it was never touched. */
+    private class WatchedClipboard : ClipboardAccess {
+        val calls = ArrayList<String>()
+
+        override fun save(): SavedClip = SavedClip(null).also { calls += "save" }
+
+        override fun put(
+            text: String,
+            sensitive: Boolean,
+        ): Boolean = true.also { calls += "put" }
+
+        override fun restore(saved: SavedClip): Boolean = true.also { calls += "restore" }
+    }
+
+    @Test
+    fun aFieldThatAlreadyShowsTheRequestIsSubmittedWithoutTouchingItOrTheClipboard() =
+        runTest {
+            // Fix list r2 B2 (Claude r2 B2 / Codex R2-B3): already right, as shown, as formatted, or empty.
+            for ((shows, typed) in listOf("hello" to "hello", "555-1234" to "5551234", "" to "")) {
+                val field = field { text = shows }
+                val clipboard = WatchedClipboard()
+                val system = TestSystem().apply { this.clipboard = clipboard }
+
+                val outcome = typeInto(field, UiAction.Type(Target.Point(500, 125), typed, submit = true), system)
+
+                assertEquals("'$shows' for '$typed'", ActionOutcome.Status.Ok, outcome.status)
+                assertEquals("submitted, nothing else", listOf(AccessibilityAction.ACTION_IME_ENTER.id), field.log.ids)
+                assertEquals("the clipboard is not touched", emptyList<String>(), clipboard.calls)
+            }
+        }
+
     @Test
     fun aFieldThatShowsOtherTextFailsWithWhatItShowsAndIsNotSubmitted() =
         runTest {
@@ -158,6 +189,77 @@ class TypingOutcomeTest {
 
             assertTrue(setTexts(field).none { it.contains("•") })
             assertEquals(ActionOutcome.Status.Failed("a password field can only be typed as a whole"), outcome.status)
+        }
+
+    /**
+     * An editor behind the input connection that holds the real [content], which accessibility does
+     * not show for a password, and moves its [cursor] honestly (out-of-range moves are ignored, as
+     * `BaseInputConnection` does).
+     */
+    private class Editor(
+        var content: String,
+        var cursor: Int,
+    ) : ImeConnection {
+        override val editorPackage: String = APP
+
+        override fun commit(
+            text: String,
+            replace: Boolean,
+        ): Boolean {
+            if (replace) content = "".also { cursor = 0 }
+            content = content.substring(0, cursor) + text + content.substring(cursor)
+            cursor += text.length
+            return true
+        }
+
+        override fun performEditorAction(): Boolean = true
+
+        override fun setSelection(
+            start: Int,
+            end: Int,
+        ): Boolean {
+            if (start in 0..content.length && start == end) cursor = start
+            return true
+        }
+
+        override fun selection(): Pair<Int, Int> = cursor to cursor
+
+        override fun cursorAtEnd(): Boolean = cursor == content.length
+    }
+
+    @Test
+    fun appendingToAPasswordGoesOnlyAtTheEndTheEditorConfirms() =
+        runTest {
+            // Fix list r2 B3 (Codex R2-B4): the password is "secret"; accessibility shows nothing, or a
+            // mask shorter than the password. Neither length is where the password ends.
+            for (shows in listOf(null, "••••")) {
+                val field =
+                    field {
+                        isPassword = true
+                        text = shows
+                    }
+                val editor = Editor("secret", cursor = 0)
+                host.ime = editor
+
+                val outcome = typeInto(field, UiAction.Type(Target.Point(500, 125), "abc", append = true))
+
+                assertEquals("$shows", ActionOutcome.Status.Failed(TextEntry.WHOLE_PASSWORD), outcome.status)
+                assertEquals("$shows", "secret", editor.content)
+            }
+
+            // Where the editor itself says its cursor is at the end, the text goes there.
+            val field =
+                field {
+                    isPassword = true
+                    text = null
+                }
+            val editor = Editor("secret", cursor = 6)
+            host.ime = editor
+
+            val outcome = typeInto(field, UiAction.Type(Target.Point(500, 125), "abc", append = true))
+
+            assertEquals(ActionOutcome.Status.Ok, outcome.status)
+            assertEquals("secretabc", editor.content)
         }
 
     @Test

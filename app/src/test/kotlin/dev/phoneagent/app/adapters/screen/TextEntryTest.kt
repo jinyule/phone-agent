@@ -61,6 +61,31 @@ class TextEntryTest {
         }
 
     @Test
+    fun aFieldThatAlreadyShowsTheRequestRunsNoLevel() =
+        runTest {
+            // Fix list r2 B2: typing it again would only fall through every level and fail.
+            for ((before, request) in listOf(
+                "hello" to request("hello", before = "hello"),
+                "555-1234" to request("5551234", before = "555-1234"),
+                "" to request("", before = ""),
+                "Hi" to request("", before = "Hi", append = true),
+            )) {
+                val field = Field(before)
+                val levels =
+                    listOf(field.level(Level.SET_TEXT, Sent.Delivered), field.level(Level.PASTE, Sent.Delivered))
+
+                assertEquals(before, Result.AlreadyShown, TextEntry.enter(request, secret = false, levels, field.read))
+                assertEquals(before, emptyList<String>(), field.log)
+            }
+
+            // A password field's read-back is a mask: it is never taken as already right.
+            val password = Field("")
+            val levels = listOf(password.level(Level.SET_TEXT, Sent.Delivered))
+            TextEntry.enter(request("", before = ""), secret = true, levels, password.read)
+            assertEquals(listOf("SET_TEXT"), password.log)
+        }
+
+    @Test
     fun waitsForTheAppOnceBeforeFallingBack() =
         runTest {
             val field = Field("")

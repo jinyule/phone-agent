@@ -43,6 +43,8 @@ class EntryLevelsSafetyTest {
         ): Boolean = false
 
         override fun selection(): Pair<Int, Int>? = null
+
+        override fun cursorAtEnd(): Boolean? = null
     }
 
     private open class Clipboard : ClipboardAccess {
@@ -98,5 +100,24 @@ class EntryLevelsSafetyTest {
                 "nothing of ours is left on the clipboard",
                 clipboard.log.none { it.startsWith("put") } || "restore" in clipboard.log,
             )
+        }
+
+    @Test
+    fun pasteDoesNotPasteWhereTheSelectionDidNotGo() =
+        runTest {
+            // Fix list r2 S3 (Codex R2-S1): the editor says yes to SET_SELECTION, the cursor stays at 0.
+            field.setTextSelection(0, 0)
+            for (request in listOf(
+                TextEntry.Request(" world", append = true, before = "Hello"),
+                TextEntry.Request("Bye", append = false, before = "Hello"),
+            )) {
+                val clipboard = Clipboard()
+
+                val sent = EntryLevels.paste(field, clipboard) {}.send(request)
+
+                assertEquals(request.text, TextEntry.Sent.Skipped("cannot place the cursor"), sent)
+                assertFalse(request.text, AccessibilityNodeInfo.ACTION_PASTE in field.log.ids)
+                assertTrue(request.text, clipboard.log.none { it.startsWith("put") })
+            }
         }
 }
