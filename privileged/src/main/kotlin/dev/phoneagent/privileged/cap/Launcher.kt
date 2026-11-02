@@ -24,7 +24,7 @@ import dev.phoneagent.privileged.StartResult
  * What the helper guarantees, whatever the app asks for: the target display is one of its own, the
  * app is the copy installed for the helper's user, an app the user has visible on the main screen
  * is never started, a cold start never kills a process whose tasks live elsewhere, and the intent
- * cannot hand out URI permissions. Which intents the agent may send at all is decided by the app's
+ * cannot hand out URI permissions or carry another intent ([NestedIntents]). Which intents the agent may send at all is decided by the app's
  * PolicyEngine (phase1-architecture §6); the helper is not a second policy.
  */
 internal class Launcher(
@@ -75,7 +75,7 @@ internal class Launcher(
             intent == null -> "no intent"
             !displays.owns(displayId) -> "display $displayId is not one of the agent's"
             userId != myUser && userId != USER_CURRENT -> "user $userId is not the helper's user $myUser"
-            else -> null
+            else -> NestedIntents.find(intent)
         }
 
     private fun attempt(

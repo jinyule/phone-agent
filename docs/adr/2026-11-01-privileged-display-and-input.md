@@ -22,6 +22,7 @@ phase1-architecture §3.5 列出了 `IPrivilegedCore` 的能力面，调研报�
    - 锁屏时什么都不启动（`LOCKED`，协议 2 新增）：用户不在场时，agent 不该打开任何 App。锁屏状态读不到也按锁屏处理。
    - 冷启动只在"这个 App 的任务全在这块屏上"时才 `am force-stop`，否则降级为普通启动并返回 `COLD_IGNORED`。
    - intent 里的 `FLAG_GRANT_*`（URI 授权）在启动前被清掉：助手是 shell 身份，不替任何人授予 URI 权限。
+   - 带嵌套 intent 的请求一律拒绝（`REFUSED`，`NestedIntents`）：extras 里任何一层的 Intent、Intent 数组或列表，`ACTION_CHOOSER`，selector，带 intent 的 ClipData 条目；extras 读不出来也拒绝。嵌套的 intent 会被接收方再启动一次，助手没检查过它启动什么、用谁的权限。ClipData 里的普通 URI 照旧允许。
    - 只支持主用户（`userId` 必须是助手自己的用户或 `USER_CURRENT`）。分身和工作资料留到以后。
    - `injectKey` 只放行导航和编辑键（`PressKeys`）。音量、电源、Home、最近任务、助手、相机、媒体键作用于整机而不是 agent 的屏，一律拒绝。
      `phone_key` 的 schema 仍然有 `home`（phase1 §5）：主屏模式下由无障碍的 `performGlobalAction` 实现；后台屏上由 ScreenPort（WP14）直接返回 Failed，原因"后台屏上没有桌面，请用 phone_launch 切换 App"，不调用 `injectKey`。
@@ -53,7 +54,7 @@ phase1-architecture §3.5 列出了 `IPrivilegedCore` 的能力面，调研报�
 
 - **助手不做任何把关，全交给 PolicyEngine**（接近 Mika 的 `phone_system_command` 思路）。一个参数写错就能打扰用户；而且助手是 uid 2000，错误代价比 App 大。现在这几条都是"不越界"而不是"判断内容"，不会和 PolicyEngine 的职责重叠。
 - **从 `phone_key` 的 schema 里去掉 `home`**（B 段最初的做法）。工具清单要保持稳定；主屏模式下 `home` 由无障碍实现，是能用的。所以 schema 保留 `home`，后台屏上由 ScreenPort 给出带原因的失败，助手照样拒绝注入 HOME。
-- **助手也做 intent 白名单**（Mika 的 `ShellLinks` / `SystemIntents`）。那会出现两份规则，而设计明确要求判定点只有一个（D8）。助手只清掉 URI 授权标志这种与身份有关的东西。
+- **助手也做 intent 白名单**（Mika 的 `ShellLinks` / `SystemIntents`）。那会出现两份规则，而设计明确要求判定点只有一个（D8）。助手只处理与身份有关的东西：清掉 URI 授权标志，拒绝嵌套 intent。
 - **`moveTask` 不做归属检查**（Mika 的做法）。那样 App 一个错误的 taskId 就能把用户正在用的 App 拉进后台屏。代价是跳出回收需要 `watchMainScreen` 的窗口配合，见"后果"。
 - **用 `UiAutomation` 或无障碍手势注入**，而不是 `injectInputEvent`。无障碍手势是 WP14 的路径（`dispatchGesture` + `setDisplayId`），B 段提供的是最底层的回退；两者并存是 §3.3 "点击逐级回退"的要求。
 - **`createDisplay` 用 `VirtualDisplayConfig`**（API 34+ 的新接口，可以设更多属性）。它要求构造隐藏的 builder，收益只有几个暂时用不上的属性，不如 6 参数重载稳。

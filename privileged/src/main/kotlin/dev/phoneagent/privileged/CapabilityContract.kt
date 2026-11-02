@@ -25,7 +25,10 @@ public object StartResult {
     /** Another agent display already runs this app (a parallel task owns it). */
     public const val IN_USE_BY_AGENT: Int = 5
 
-    /** Refused by the helper: not its own display, another user, or a malformed intent. */
+    /**
+     * Refused by the helper: not its own display, another user, a malformed intent, or (protocol
+     * 2) an intent that carries another intent.
+     */
     public const val REFUSED: Int = 6
 
     /**
