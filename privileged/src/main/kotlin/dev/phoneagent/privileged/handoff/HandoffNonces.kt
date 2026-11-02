@@ -5,7 +5,8 @@
  *
  * Modified by PhoneAgent contributors: replaced the USB slot by an armed SHA-256 commitment,
  * made matching and consuming separate steps, consuming clears only the matched slot,
- * TTLs are validated constructor parameters.
+ * TTLs are validated constructor parameters, resume nonces are bound to the helper process and
+ * overlap by one generation.
  */
 package dev.phoneagent.privileged.handoff
 
@@ -17,9 +18,13 @@ import java.security.SecureRandom
  * restarts at 0 on every boot, so each time is stored with the boot it belongs to: a launch or armed
  * nonce from another boot, or from an unknown boot, never matches, even when the new uptime falls
  * back inside its TTL.
+ *
+ * Resume nonces belong to the helper process they were given to ([resumePid],
+ * [previousResumePid]) and never expire. [previousResume] is the one a running helper may still
+ * hold because the reply that carried [resume] never reached anyone; see [HandoffNonces.admit].
  */
 public data class NonceSlots(
-    /** Given to the accepted helper for its next handoff; no expiry, rotated on every acceptance. */
+    /** Given to the last admitted helper for its next handoff; no expiry, rotated on every admission. */
     val resume: String? = null,
     /** Issued by the app for a helper it launches itself (in-app ADB). */
     val launch: String? = null,
@@ -33,10 +38,17 @@ public data class NonceSlots(
     val armedAtMs: Long = 0,
     /** Boot [armedHash] was armed in; null when unknown. */
     val armedBoot: Int? = null,
+    /** pid of the helper [resume] was given to. */
+    val resumePid: Int? = null,
+    /** The resume nonce that was live before [resume] was handed out. */
+    val previousResume: String? = null,
+    /** pid of the helper [previousResume] was given to. */
+    val previousResumePid: Int? = null,
 ) {
     /** Says which slots are filled, never their values. */
     override fun toString(): String =
-        "NonceSlots(resume=${resume != null}, launch=${launch != null}@$launchAtMs/boot $launchBoot, " +
+        "NonceSlots(resume=${resume != null}/pid $resumePid, previous=${previousResume != null}/pid " +
+            "$previousResumePid, launch=${launch != null}@$launchAtMs/boot $launchBoot, " +
             "armed=${armedHash != null}@$armedAtMs/boot $armedBoot)"
 }
 
@@ -54,6 +66,9 @@ public enum class NonceSlot {
     /** [NonceSlots.resume]. */
     RESUME,
 
+    /** [NonceSlots.previousResume]. */
+    PREVIOUS_RESUME,
+
     /** [NonceSlots.launch]. */
     LAUNCH,
 
@@ -65,10 +80,16 @@ public enum class NonceSlot {
  * One-time handoff nonces generated or armed by the app. A helper's nonce reaches it only through
  * stdin, because every shell-uid process can read `/proc/<pid>/cmdline` (phase1-architecture §2.2).
  *
- * The app first [match]es (before touching the offered Binder), then [consume]s once every other
- * check passed and the helper's death is followed, and gives the accepted helper a fresh
- * [issueResume] nonce. A null from [consume] means the nonce stopped being live after [match]: the
- * helper is refused. All methods are serialized on this object.
+ * The app first [match]es (before touching the offered Binder). Once every other check passed and
+ * the helper's death is followed, it [admit]s: one save uses the nonce up and hands out the next
+ * resume nonce. A null from [admit] means the nonce stopped being live after [match]: the helper is
+ * refused. A stale helper's nonce is burnt with [consume]. All methods are serialized on this object.
+ *
+ * Resume nonces overlap by one generation, so the app can die anywhere in an admission: before the
+ * save nothing changed; after it, the reply may never arrive, and the helper still holding the
+ * nonce from before can hand off again. The cost: a replaced helper's resume nonce stays valid until
+ * the next admission. A replaced helper that ignores its `shutdown()` can come back once and push
+ * the new helper out; there is still only one helper connected in the end.
  */
 public class HandoffNonces(
     private val store: NonceStore,
@@ -101,14 +122,24 @@ public class HandoffNonces(
         return true
     }
 
-    /** The live slot [nonce] matches, or null. Does not change any state. */
+    /**
+     * The live slot [nonce] matches when presented by the helper process [pid], or null. Resume
+     * nonces match only for the process they were given to. Does not change any state.
+     */
     @Synchronized
-    public fun match(nonce: String?): NonceSlot? {
+    public fun match(
+        nonce: String?,
+        pid: Int,
+    ): NonceSlot? {
         if (nonce == null || !Nonces.isWellFormed(nonce)) return null
         val slots = store.load()
         return when {
-            same(nonce, slots.resume) -> {
+            same(nonce, slots.resume) && slots.resumePid == pid -> {
                 NonceSlot.RESUME
+            }
+
+            same(nonce, slots.previousResume) && slots.previousResumePid == pid -> {
+                NonceSlot.PREVIOUS_RESUME
             }
 
             same(nonce, slots.launch) && live(slots.launchAtMs, slots.launchBoot, launchTtlMs) -> {
@@ -135,30 +166,63 @@ public class HandoffNonces(
         return current != null && atBoot == current && clock() - atMs in 0..ttlMs
     }
 
-    /** Uses up [nonce]: clears the slot it matches and returns that slot, or null if it matches none. */
+    /**
+     * Admits the helper process [pid] that presented [nonce], in one save: uses the nonce up and
+     * gives [pid] the next resume nonce, which is returned. The resume nonce a running helper may
+     * still hold stays valid as [NonceSlots.previousResume]: the one presented, when a resume nonce
+     * was presented; otherwise the current one, whose helper is being replaced. Null, and nothing
+     * saved, when [nonce] is not live for [pid].
+     */
     @Synchronized
-    public fun consume(nonce: String?): NonceSlot? {
-        val slot = match(nonce) ?: return null
+    public fun admit(
+        nonce: String?,
+        pid: Int,
+    ): String? {
+        val slot = match(nonce, pid) ?: return null
         val slots = store.load()
+        val next = random()
+        val kept = if (slot == NonceSlot.PREVIOUS_RESUME) previousOf(slots) else currentOf(slots)
         store.save(
-            when (slot) {
-                NonceSlot.RESUME -> slots.copy(resume = null)
-                NonceSlot.LAUNCH -> slots.copy(launch = null, launchAtMs = 0, launchBoot = null)
-                NonceSlot.ARMED -> slots.copy(armedHash = null, armedAtMs = 0, armedBoot = null)
-            },
+            cleared(slots, slot).copy(
+                resume = next,
+                resumePid = pid,
+                previousResume = kept.first,
+                previousResumePid = kept.second,
+            ),
         )
-        return slot
+        return next
     }
 
-    /** Issues the next resume nonce, replacing the previous one (whose helper is being replaced). */
+    /**
+     * Uses up [nonce] of the helper process [pid] without admitting it (a stale helper): clears the
+     * slot it matches and returns that slot, or null if it matches none.
+     */
     @Synchronized
-    public fun issueResume(): String = random().also { store.save(store.load().copy(resume = it)) }
+    public fun consume(
+        nonce: String?,
+        pid: Int,
+    ): NonceSlot? = match(nonce, pid)?.also { store.save(cleared(store.load(), it)) }
+
+    private fun currentOf(slots: NonceSlots): Pair<String?, Int?> = slots.resume to slots.resumePid
+
+    private fun previousOf(slots: NonceSlots): Pair<String?, Int?> = slots.previousResume to slots.previousResumePid
+
+    private fun cleared(
+        slots: NonceSlots,
+        slot: NonceSlot,
+    ): NonceSlots =
+        when (slot) {
+            NonceSlot.RESUME -> slots.copy(resume = null, resumePid = null)
+            NonceSlot.PREVIOUS_RESUME -> slots.copy(previousResume = null, previousResumePid = null)
+            NonceSlot.LAUNCH -> slots.copy(launch = null, launchAtMs = 0, launchBoot = null)
+            NonceSlot.ARMED -> slots.copy(armedHash = null, armedAtMs = 0, armedBoot = null)
+        }
 
     /**
      * Forgets every nonce: no running helper can hand off again until a new launch.
      *
      * The caller must serialize this with admission (in the app: under `HelperClient`'s lock).
-     * Otherwise a clear that lands after an admission's [consume] does not stop that helper.
+     * Otherwise a clear that lands after an [admit] does not stop that helper.
      */
     @Synchronized
     public fun clear(): Unit = store.save(NonceSlots())

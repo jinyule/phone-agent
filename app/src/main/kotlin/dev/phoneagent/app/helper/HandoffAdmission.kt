@@ -28,8 +28,10 @@ import dev.phoneagent.privileged.handoff.HelperOffer
  * `releaseAll()`; the rejection then makes it exit.
  *
  * [decide] does not use up the nonce of an admitted helper: the caller first follows the helper's
- * death, then [commit]s, which uses up the nonce and issues the next resume nonce. Until then
- * nothing is written, so a handoff that fails late leaves the connected helper's resume nonce alone.
+ * death, then [commit]s, which uses up the nonce and issues the next resume nonce in one save
+ * ([HandoffNonces.admit]). Until then nothing is written, so a handoff that fails late leaves the
+ * connected helper's resume nonce alone; and the resume nonce from before stays valid for one more
+ * admission, so the app may die anywhere in the commit.
  * A nonce that stopped being live while the helper was queried (expired, replaced by a new `arm`)
  * is refused as [HandoffReject.BAD_NONCE], for stale helpers too.
  *
@@ -49,11 +51,12 @@ internal class HandoffAdmission(
             val reason: HandoffReject,
         ) : Decision
 
-        /** Passed every check with [nonce]; nothing is written until [commit]. */
+        /** The helper process [pid] passed every check with [nonce]; nothing is written until [commit]. */
         data class Admitted(
             val core: IPrivilegedCore,
             val binder: IBinder,
             val nonce: String?,
+            val pid: Int,
         ) : Decision {
             override fun toString(): String = "Admitted"
         }
@@ -63,7 +66,7 @@ internal class HandoffAdmission(
      * Uses up the nonce of [admitted] and returns the helper's next resume nonce, or null when the
      * nonce is no longer live (the caller then refuses with [HandoffReject.BAD_NONCE]).
      */
-    fun commit(admitted: Decision.Admitted): String? = nonces.consume(admitted.nonce)?.let { nonces.issueResume() }
+    fun commit(admitted: Decision.Admitted): String? = nonces.admit(admitted.nonce, admitted.pid)
 
     fun decide(
         extras: Bundle?,
@@ -74,7 +77,7 @@ internal class HandoffAdmission(
         val binder = HandoffBundles.binder(extras)
         val early =
             HandoffGate.precheck(callingUid, callingPid, offer)
-                ?: HandoffReject.BAD_NONCE.takeIf { nonces.match(offer.nonce) == null }
+                ?: HandoffReject.BAD_NONCE.takeIf { nonces.match(offer.nonce, callingPid) == null }
         return if (early == null && binder != null) {
             inspect(binder, offer, callingUid, callingPid)
         } else {
@@ -103,7 +106,7 @@ internal class HandoffAdmission(
             }
 
             else -> {
-                Decision.Admitted(core, binder, offer.nonce)
+                Decision.Admitted(core, binder, offer.nonce, callingPid)
             }
         }
     }
@@ -116,7 +119,7 @@ internal class HandoffAdmission(
         offer: HelperOffer,
         pid: Int,
     ): Decision {
-        if (nonces.consume(offer.nonce) == null) return rejected(HandoffReject.BAD_NONCE, offer)
+        if (nonces.consume(offer.nonce, pid) == null) return rejected(HandoffReject.BAD_NONCE, offer)
         try {
             core.releaseAll()
         } catch (e: RemoteException) {

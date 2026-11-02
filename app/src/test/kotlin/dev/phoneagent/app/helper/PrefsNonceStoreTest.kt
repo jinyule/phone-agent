@@ -13,10 +13,14 @@ class PrefsNonceStoreTest {
     private val context = ApplicationProvider.getApplicationContext<Context>()
 
     @Test
-    fun slotsSurviveANewStoreIncludingTheirBoots() {
-        val slots = NonceSlots("r".repeat(64), "l".repeat(64), 1_000, 7, "a".repeat(64), 2_000, 8)
+    fun slotsSurviveANewStoreIncludingTheirBootsAndPids() {
+        val slots =
+            NonceSlots("r".repeat(64), "l".repeat(64), 1_000, 7, "a".repeat(64), 2_000, 8, 4242, "p".repeat(64), 4141)
         PrefsNonceStore(context).save(slots)
         assertEquals(slots, PrefsNonceStore(context).load())
+        val replaced = NonceSlots(resume = "s".repeat(64), resumePid = 4343)
+        PrefsNonceStore(context).save(replaced)
+        assertEquals("cleared fields stay cleared", replaced, PrefsNonceStore(context).load())
     }
 
     @Test

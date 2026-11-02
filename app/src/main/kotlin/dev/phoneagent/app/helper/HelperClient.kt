@@ -29,7 +29,11 @@ import java.util.concurrent.CopyOnWriteArrayList
 /**
  * The app's end of the helper connection: admits helpers that hand off through
  * [HelperHandoffProvider] (checks in [HandoffAdmission]), holds the verified Binder and follows
- * its death. An admitted helper replaces the previous one, which is told to shut down.
+ * its death. An admitted helper replaces the previous one, which is told to shut down as the last
+ * step before the reply goes out: until then, if this process dies, the old helper keeps running
+ * and can hand off again with the resume nonce it holds (see [HandoffNonces.admit]). Dying after
+ * that step and before the reply arrives leaves neither helper able to hand off; a new launch is
+ * needed.
  *
  * Thread-safe. State changes are queued under the internal lock, in the order they happen, and
  * delivered outside it, one at a time: by the thread that caused the change, or by the thread that
@@ -87,15 +91,16 @@ class HelperClient internal constructor(
         callingUid: Int,
         callingPid: Int,
     ): Bundle {
-        val reply =
+        val (reply, replaced) =
             synchronized(lock) {
                 when (val decision = admission.decide(extras, callingUid, callingPid)) {
-                    is HandoffAdmission.Decision.Rejected -> HandoffBundles.rejected(decision.reason)
-                    is HandoffAdmission.Decision.Stale -> stale(decision.reason, callingPid)
+                    is HandoffAdmission.Decision.Rejected -> HandoffBundles.rejected(decision.reason) to null
+                    is HandoffAdmission.Decision.Stale -> stale(decision.reason, callingPid) to null
                     is HandoffAdmission.Decision.Admitted -> connect(decision, callingPid)
                 }
             }
         deliverChanges()
+        replaced?.let(::retire)
         return reply
     }
 
@@ -134,29 +139,30 @@ class HelperClient internal constructor(
         return HandoffBundles.rejected(reason)
     }
 
+    /** The reply, and the connection the admitted helper replaces (to [retire] once the lock is released). */
     private fun connect(
         admitted: HandoffAdmission.Decision.Admitted,
         pid: Int,
-    ): Bundle {
+    ): Pair<Bundle, Connection?> {
         val binder = admitted.binder
         val death = IBinder.DeathRecipient { onHelperDied(binder) }
         try {
             binder.linkToDeath(death, 0)
         } catch (e: RemoteException) {
             Log.w(TAG, "helper $pid died during the handoff", e)
-            return HandoffBundles.rejected(HandoffReject.BINDER_ELSEWHERE)
+            return HandoffBundles.rejected(HandoffReject.BINDER_ELSEWHERE) to null
         }
         val nextNonce = admission.commit(admitted)
         return if (nextNonce != null) {
-            connection?.takeIf { it.core.asBinder() !== binder }?.let(::retire)
+            val replaced = connection?.takeIf { it.core.asBinder() !== binder }
             connection = Connection(admitted.core, pid, death)
             change(HelperState.Connected(admitted.core, pid))
             Log.i(TAG, "helper pid $pid admitted")
-            HandoffBundles.accepted(nextNonce, token)
+            HandoffBundles.accepted(nextNonce, token) to replaced
         } else {
             binder.unlinkToDeath(death, 0)
             Log.w(TAG, "helper $pid: its nonce expired or was replaced during the handoff")
-            HandoffBundles.rejected(HandoffReject.BAD_NONCE)
+            HandoffBundles.rejected(HandoffReject.BAD_NONCE) to null
         }
     }
 
@@ -172,7 +178,10 @@ class HelperClient internal constructor(
         deliverChanges()
     }
 
-    /** A newer helper was admitted: stop following the old one and tell it to release and exit. */
+    /**
+     * A newer helper was admitted: stop following the old one and tell it to release and exit.
+     * Runs outside [lock]; a death of [previous] meanwhile is ignored, it is no longer [connection].
+     */
     private fun retire(previous: Connection) {
         previous.core.asBinder().unlinkToDeath(previous.death, 0)
         try {
