@@ -18,16 +18,44 @@ public data class WireOptions(
     val chat: ChatQuirks = ChatQuirks.DEFAULT,
     val responses: ResponsesQuirks = ResponsesQuirks(),
 ) {
+    /**
+     * The leaked-call formats [profile]'s route may recover ([ChatQuirks.recoverLeakedCalls]), and
+     * so the only ones a settings switch may offer: on a preset route (the preset found as
+     * [defaultsFor] finds it, official hosts included) its [ProviderPreset.leakedCallFormats]; on
+     * a custom route what [ChatQuirks.leakedCallFormats] declares.
+     */
+    public fun allowedLeakedCalls(profile: ProviderProfile): Set<LeakedCallFormat> =
+        presetOf(profile)?.leakedCallFormats ?: chat.leakedCallFormats
+
+    /**
+     * Throws [IllegalArgumentException] unless these options fit [profile]'s route: a preset route
+     * declares no formats of its own, and every recovered format is one [allowedLeakedCalls] allows.
+     */
+    internal fun requireFits(profile: ProviderProfile) {
+        val preset = presetOf(profile)
+        require(preset == null || chat.leakedCallFormats.isEmpty()) {
+            "Provider ${profile.id}: on a preset route (${preset?.id}) the preset declares the leaked-call " +
+                "formats, the options may not"
+        }
+        val refused = chat.recoverLeakedCalls - allowedLeakedCalls(profile)
+        require(refused.isEmpty()) {
+            "Provider ${profile.id}: recovering leaked calls in $refused is not allowed on this route " +
+                "(allowed: ${allowedLeakedCalls(profile)})"
+        }
+    }
+
     /** Starting points. */
     public companion object {
         /**
          * The options of [profile]'s preset; a custom profile that points at a preset's official
          * host gets that preset's (model-layer §4.1 step 5); anything else the defaults.
          */
-        public fun defaultsFor(profile: ProviderProfile): WireOptions {
-            val preset = profile.preset?.let(ProviderPresets::byId) ?: ProviderPresets.matchingOfficial(profile.baseUrl)
-            return WireOptions(chat = preset?.chat ?: ChatQuirks.DEFAULT)
-        }
+        public fun defaultsFor(profile: ProviderProfile): WireOptions =
+            WireOptions(chat = presetOf(profile)?.chat ?: ChatQuirks.DEFAULT)
+
+        /** The preset [profile]'s route is: its own, else the one whose official host it points at. */
+        private fun presetOf(profile: ProviderProfile): ProviderPreset? =
+            profile.preset?.let(ProviderPresets::byId) ?: ProviderPresets.matchingOfficial(profile.baseUrl)
     }
 }
 

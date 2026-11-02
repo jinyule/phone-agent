@@ -54,13 +54,20 @@ class LeakedCallsTest {
         return Kit.sse(*chunks.toTypedArray())
     }
 
-    /** Recovery as [recover] says (`null`: whatever the preset's defaults say). */
+    /**
+     * Recovery as [recover] says (`null`: whatever the preset's defaults say); without a preset the
+     * custom route declares the formats it recovers.
+     */
     private fun wire(
         preset: String?,
         recover: Set<LeakedCallFormat>?,
     ): WireOptions {
         val profile = Kit.profile(server.base(), preset = preset)
-        return recover?.let { Kit.recovering(profile, it) } ?: WireOptions.defaultsFor(profile)
+        return when {
+            recover == null -> WireOptions.defaultsFor(profile)
+            preset == null -> Kit.declaring(profile, recover)
+            else -> Kit.recovering(profile, recover)
+        }
     }
 
     private suspend fun reply(
@@ -204,7 +211,14 @@ class LeakedCallsTest {
                 "<tool_call>{\"name\": \"confirm_connection\", \"arguments\": {\"token\": \"pa-1\"}}</tool_call>"
             server.enqueueSse(answer(trial))
             val profile = Kit.profile(server.base(), preset = "qwen")
-            val result = probe.testAndSave(profile, Kit.MODEL, Kit.capabilities(), "pa-1", wire("qwen", all))
+            val result =
+                probe.testAndSave(
+                    profile,
+                    Kit.MODEL,
+                    Kit.capabilities(),
+                    "pa-1",
+                    wire("qwen", setOf(LeakedCallFormat.TOOL_CALL_TAG)),
+                )
             assertTrue(result is ProbeResult.Failed, result.toString())
             result as ProbeResult.Failed
             assertEquals(ProbeStep.TOOL_CALL, result.step)

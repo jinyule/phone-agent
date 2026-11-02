@@ -59,7 +59,8 @@ public class OpenAiAdapters internal constructor(
      * There is no default, so a saved negotiation cannot be dropped by omission; the model never
      * changes it. Throws [IllegalArgumentException] for
      * profiles the OpenAI adapters cannot serve: another protocol, or header values that are not
-     * valid HTTP.
+     * valid HTTP; and for [wire] that recovers leaked calls in a format the route does not allow
+     * ([WireOptions.allowedLeakedCalls]).
      */
     public fun model(
         profile: ProviderProfile,

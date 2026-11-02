@@ -33,20 +33,25 @@ import kotlinx.serialization.json.putJsonObject
  * @property streamUsage send `stream_options.include_usage` (usage in the last chunk).
  * @property maxTokensField field that carries `ChatRequest.maxOutputTokens`.
  * @property reasoningEffort how a requested reasoning level is sent.
+ * @property leakedCallFormats formats a custom route declares its models write tool calls in when
+ *   they leak them into the answer text: what [recoverLeakedCalls] may hold there. None by
+ *   default; a preset route declares none here, its preset does ([ProviderPreset.leakedCallFormats]).
  * @property recoverLeakedCalls formats of tool calls written into the answer text that become calls
  *   ([LeakedToolMarkup]). Empty by default and in every preset: a recovered call never went
  *   through the provider's tool channel, and the PolicyEngine cannot yet ask the user to confirm
- *   one, so recovery is an explicit user choice ([ProviderPreset.leakedCallFormats] says which
- *   formats a provider is known to leak). When set, a reply becomes calls only if it has no native
- *   call and its whole text, apart from whitespace, is complete calls of the request's tools in
- *   one of these formats; any other text stays as written. Recovered ids are listed in the
- *   reply's `providerMetadata.recovered_tool_calls`.
+ *   one, so recovery is an explicit user choice. Only formats the route allows
+ *   ([WireOptions.allowedLeakedCalls]) may be set: creating a model, or starting "test and
+ *   save", with any other throws [IllegalArgumentException]. When set, a reply becomes calls only
+ *   if it has no native call and its whole text, apart from whitespace, is complete calls of the
+ *   request's tools in one of these formats; any other text stays as written. Recovered ids are
+ *   listed in the reply's `providerMetadata.recovered_tool_calls`.
  */
 public data class ChatQuirks(
     val parallelToolCalls: Boolean = true,
     val streamUsage: Boolean = true,
     val maxTokensField: MaxTokensField = MaxTokensField.MAX_TOKENS,
     val reasoningEffort: ReasoningEffortStyle = ReasoningEffortStyle.REASONING_EFFORT,
+    val leakedCallFormats: Set<LeakedCallFormat> = emptySet(),
     val recoverLeakedCalls: Set<LeakedCallFormat> = emptySet(),
 ) {
     /** Defaults. */

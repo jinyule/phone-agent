@@ -25,7 +25,10 @@ internal data class WireInputs(
     val options: WireOptions,
 ) {
     companion object {
-        /** The inputs [profile] implies; throws [IllegalArgumentException] for header values HTTP cannot carry. */
+        /**
+         * The inputs [profile] implies; throws [IllegalArgumentException] for header values HTTP
+         * cannot carry and for [options] that do not fit the route ([WireOptions.requireFits]).
+         */
         fun of(
             profile: ProviderProfile,
             options: WireOptions,
@@ -35,7 +38,7 @@ internal data class WireInputs(
                 echoReasoning = profile.echoReasoning,
                 headers = profile.httpHeaders(),
                 plan = profile.credential is Credential.ChatGptPlan,
-                options = options,
+                options = options.also { it.requireFits(profile) },
             )
     }
 }

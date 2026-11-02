@@ -126,13 +126,27 @@ internal object Kit {
         return BlobSource { ref -> map[ref] ?: throw IOException("no blob $ref") }
     }
 
-    /** [profile]'s default wire options, recovering calls leaked into the text in [formats]. */
+    /**
+     * [profile]'s default wire options, recovering calls leaked into the text in [formats]: by
+     * default every format the route allows (a preset route's own; none on a custom route that
+     * declared none, see [declaring]).
+     */
     fun recovering(
         profile: ProviderProfile,
-        formats: Set<LeakedCallFormat> = LeakedCallFormat.entries.toSet(),
+        formats: Set<LeakedCallFormat>? = null,
     ): WireOptions {
         val defaults = WireOptions.defaultsFor(profile)
-        return defaults.copy(chat = defaults.chat.copy(recoverLeakedCalls = formats))
+        val recover = formats ?: defaults.allowedLeakedCalls(profile)
+        return defaults.copy(chat = defaults.chat.copy(recoverLeakedCalls = recover))
+    }
+
+    /** Wire options of the custom route [profile] that declares [formats] and recovers them all. */
+    fun declaring(
+        profile: ProviderProfile,
+        formats: Set<LeakedCallFormat>,
+    ): WireOptions {
+        val defaults = WireOptions.defaultsFor(profile)
+        return defaults.copy(chat = defaults.chat.copy(leakedCallFormats = formats, recoverLeakedCalls = formats))
     }
 
     /** Resource text under `core/src/test/resources/wire/`. */

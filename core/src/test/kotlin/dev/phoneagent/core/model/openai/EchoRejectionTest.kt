@@ -39,7 +39,15 @@ class EchoRejectionTest {
         recover: Boolean = false,
     ): ChatModel {
         val profile = Kit.profile(server.base(), protocol = protocol)
-        val wire = if (recover) Kit.recovering(profile) else WireOptions.defaultsFor(profile)
+        val wire =
+            if (recover) {
+                Kit.declaring(
+                    profile,
+                    setOf(LeakedCallFormat.TOOL_CALL_TAG),
+                )
+            } else {
+                WireOptions.defaultsFor(profile)
+            }
         return Kit.adapters(Keys(secret)).model(profile, Kit.MODEL, Kit.capabilities(), Kit.blobs(), wire)
     }
 

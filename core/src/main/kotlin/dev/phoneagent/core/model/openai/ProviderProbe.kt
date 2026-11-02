@@ -91,7 +91,8 @@ public class ProviderProbe internal constructor(
      * when the provider's message names one of the Chat fields. Nothing else refuses a field: not
      * another status, and not the adapters' own words (a redirect's target names no refusal, so a
      * 3xx fails the trial at once). A field turned off for a trial that then fails anyway is not
-     * reported.
+     * reported. Throws [IllegalArgumentException], before any request, when [wire] recovers leaked
+     * calls in a format the route does not allow ([WireOptions.allowedLeakedCalls]).
      */
     public suspend fun testAndSave(
         profile: ProviderProfile,
@@ -100,6 +101,7 @@ public class ProviderProbe internal constructor(
         token: String = "pa-" + UUID.randomUUID().toString().take(TOKEN_LENGTH),
         wire: WireOptions = WireOptions.defaultsFor(profile),
     ): ProbeResult {
+        wire.requireFits(profile)
         // Records every secret this run's requests use: what the results must not show.
         val env = adapters.env.recording()
         val listing =

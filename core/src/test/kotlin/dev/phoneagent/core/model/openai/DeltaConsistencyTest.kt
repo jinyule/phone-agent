@@ -28,8 +28,9 @@ class DeltaConsistencyTest {
     private val server = MockWebServer()
 
     private fun chat(): ChatModel {
-        val profile = Kit.profile(server.base(), preset = "deepseek")
-        return Kit.adapters().model(profile, Kit.MODEL, Kit.capabilities(), Kit.blobs(), Kit.recovering(profile))
+        val profile = Kit.profile(server.base())
+        val wire = Kit.declaring(profile, setOf(LeakedCallFormat.DSML, LeakedCallFormat.TOOL_CALL_TAG))
+        return Kit.adapters().model(profile, Kit.MODEL, Kit.capabilities(), Kit.blobs(), wire)
     }
 
     private fun responses(): ChatModel =

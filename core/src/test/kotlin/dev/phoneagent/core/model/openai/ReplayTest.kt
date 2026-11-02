@@ -91,7 +91,13 @@ class ReplayTest {
                 preset = meta.str("preset"),
             )
         val recover = meta.array("recover").orEmpty().map { LeakedCallFormat.valueOf((it as JsonPrimitive).content) }
-        val wire = Kit.recovering(profile, recover.toSet())
+        // A custom route recovers only formats it declares; a preset route only its preset's.
+        val wire =
+            if (profile.preset == null) {
+                Kit.declaring(profile, recover.toSet())
+            } else {
+                Kit.recovering(profile, recover.toSet())
+            }
         val model = Kit.adapters().model(profile, Kit.MODEL, Kit.capabilities(), Kit.blobs(), wire)
         val deltas = Deltas()
         return try {
