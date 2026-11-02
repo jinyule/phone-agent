@@ -112,7 +112,7 @@ internal class ActionRun(
         watch: ChangeWatch,
     ): Actuator.Result =
         when (aim) {
-            is Aim.AtElement -> actuator.tap(aim.element.target, action.long, probe(watch))
+            is Aim.AtElement -> actuator.tap(aim.element.target, action.long, WatchProbe(watch, parts.system, timings))
             is Aim.AtPixel -> actuator.tapAt(aim.pixel, action.long)
             Aim.Anywhere -> error("a tap always has a target")
         }
@@ -221,13 +221,6 @@ internal class ActionRun(
                 },
         )
 
-    private fun probe(watch: ChangeWatch): ClickProbe =
-        object : ClickProbe {
-            override fun nowMs(): Long = parts.system.uptimeMs()
-
-            override suspend fun changed(): Boolean = watch.awaitSettled(timings.quietMs)
-        }
-
     /** Settles, reads back and builds the outcome of [result]. */
     private suspend fun finish(
         result: Actuator.Result,
@@ -259,4 +252,15 @@ internal class ActionRun(
             }
         }
     }
+}
+
+/** [ClickProbe] over the action's open [watch]: a change within [ScreenTimings.quietMs] counts. */
+private class WatchProbe(
+    private val watch: ChangeWatch,
+    private val system: ScreenSystem,
+    private val timings: ScreenTimings,
+) : ClickProbe {
+    override fun nowMs(): Long = system.uptimeMs()
+
+    override suspend fun changed(): Boolean = watch.awaitSettled(timings.quietMs)
 }
