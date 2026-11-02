@@ -179,6 +179,15 @@ class LeakedCallsTest {
         }
 
     @Test
+    fun `a call shell with keys besides the name and one argument key keeps the text`() =
+        runTest {
+            val noted = tag.replace("}}", "}, \"note\": \"example only\"}")
+            assertKept(noted, reply(noted))
+            val both = tag.replace("}}", "}, \"parameters\": {\"city\": \"Rome\"}}")
+            assertKept(both, reply(both))
+        }
+
+    @Test
     fun `a reply with a native call keeps the leaked text`() =
         runTest {
             val response = reply(tag, nativeCall = true)

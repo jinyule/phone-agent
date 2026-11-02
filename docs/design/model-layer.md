@@ -158,7 +158,7 @@ data class WireProfile(
 - **推理内容**：字段名和"要不要回传"各家不同（`reasoning_content` 等）。在 `ProviderProfile.reasoningField` 和 `ProviderProfile.echoReasoning` 里按服务商配置，由能力探测确认；**探测不了的标"未验证"**。写请求头时这两项冻结进 `wire`（§2"线路快照"）。
 - **工具调用漏成文字**：有的模型会把工具调用写成正文里的标记（DeepSeek DSML、`<tool_call>` 等），参考 Mika 的 `LeakedToolMarkup`。还原**默认关闭，所有预设（包括 DeepSeek、通义、Ollama）都不打开**：还原出来的调用没走服务商的工具通道，而 PolicyEngine 现在还不能对还原出来的调用要求用户确认。以后作为用户显式开启的兼容选项提供（UI 由 WP09 决定）。预设的 `leakedCallFormats` 记下这条线路有证据会漏出的格式（DeepSeek 是 DSML，通义和 Ollama 是 `<tool_call>`），开启时 `ChatQuirks.recoverLeakedCalls` 只填这些格式。开启后，下面几条都满足才还原，否则正文原样保留：
   - 本次请求声明了工具，原生 `tool_calls` 里没有调用；
-  - 整段正文去掉空白以后，只由某一种已开启格式的完整调用块组成：DSML 是 `function_calls` 外层里的闭合 invoke，`<tool_call>` 要有 `name` 和对象形式的参数；
+  - 整段正文去掉空白以后，只由某一种已开启格式的完整调用块组成：DSML 是 `function_calls` 外层里的闭合 invoke；`<tool_call>` 要有 `name` 和对象形式的参数，而且调用外壳的键集合只能是 `{name, arguments}` 或 `{name, parameters}`，多出任何别的键（比如 `note`），或者两种参数键同时出现，都保留正文。这条只管外壳，不管参数对象里有哪些键，也不读参数里的自然语言去猜要不要执行；
   - 前后有任何说明、引用、示例前缀或"不要执行"之类的话，都不还原；两种格式混在一起也不还原；
   - 每个名字都在 `request.tools` 里，全有或全无。
 

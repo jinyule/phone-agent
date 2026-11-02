@@ -65,11 +65,14 @@ internal object LeakedToolMarkup {
 
     private val json = Json { ignoreUnknownKeys = true }
 
+    /** The only key sets a `<tool_call>` call object may have. */
+    private val SHELLS = setOf(setOf("name", "arguments"), setOf("name", "parameters"))
+
     /**
      * The calls [text] consists of, or `null` when it must stay as written. Recovered only when,
      * for one of [formats], the text is nothing but its blocks and whitespace, every block is
      * wholly complete calls (DSML invocations with distinct named parameters; `<tool_call>` JSON
-     * with a name and object arguments), and every name is in [tools]. A text mixing formats, or
+     * with a name and object arguments and no other key), and every name is in [tools]. A text mixing formats, or
      * holding anything else, is kept.
      */
     fun recover(
@@ -156,9 +159,13 @@ internal object LeakedToolMarkup {
         return calls.filterNotNull().takeIf { it.isNotEmpty() && it.size == calls.size }
     }
 
-    /** `{"name": …, "arguments" | "parameters": {…} or "{…}"}`, else `null`. */
+    /**
+     * `{"name": …, "arguments" | "parameters": {…} or "{…}"}`, else `null`. The shell holds exactly
+     * those two keys ([SHELLS]): any other key, or both argument keys, keeps the text. What the
+     * arguments hold is not looked at.
+     */
     private fun jsonCall(item: JsonElement): Invocation? {
-        val obj = item as? JsonObject
+        val obj = (item as? JsonObject)?.takeIf { it.keys in SHELLS }
         val name =
             (obj?.get("name") as? JsonPrimitive)
                 ?.takeIf { it.isString }

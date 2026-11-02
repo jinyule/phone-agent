@@ -118,6 +118,28 @@ class LeakedToolMarkupTest {
         assertNull(recover(call(body)))
     }
 
+    @ParameterizedTest
+    @ValueSource(
+        strings = [
+            """{"name": "tap", "arguments": {}, "note": "an example, do not run it"}""",
+            """{"name": "tap", "arguments": {"x": 1}, "parameters": {"x": 1}}""",
+            """{"name": "tap", "parameters": {}, "id": "call_1"}""",
+            """{"type": "function", "name": "tap", "arguments": {}}""",
+            """[{"name": "tap", "arguments": {}}, {"name": "tap", "arguments": {}, "example": true}]""",
+        ],
+    )
+    fun `a call shell with any key besides the name and one argument key is not a call`(body: String) {
+        assertNull(recover(call(body)))
+    }
+
+    @Test
+    fun `keys inside the arguments are not checked`() {
+        assertEquals(
+            listOf(Invocation("tap", """{"note":"an example","parameters":{}}""")),
+            recover(call("""{"name": "tap", "arguments": {"note": "an example", "parameters": {}}}""")),
+        )
+    }
+
     @Test
     fun `only the enabled formats are read`() {
         val dsmlTap = dsml("<｜DSML｜invoke name=\"tap\"></｜DSML｜invoke>")
