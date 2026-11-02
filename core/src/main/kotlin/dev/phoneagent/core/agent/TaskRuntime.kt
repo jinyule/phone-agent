@@ -36,9 +36,10 @@ public interface TaskRuntime {
      * Stops this task's current run only, for [cause]; clears the inbox, so continuing takes a new
      * command of the user. Pending tool calls end CANCELLED (`ToolStatus.CANCELLED` says what the
      * model is told), and `task/stopped` is recorded last, once everything that may still append
-     * was cancelled and joined. No cause ends the session (D14): the task continues when the
-     * user's next input opens a new turn, never on its own, and after [StopCause.SHUTDOWN] or
-     * [StopCause.ERROR] only once the log was resumed (`session/resumed`).
+     * was cancelled and joined (inbox recording included). After it this instance appends
+     * nothing and takes no more input. No cause ends the session (D14): the task continues on a
+     * new instance, which writes `session/resumed` first, when the user's next input opens a new
+     * turn, never on its own.
      */
     public fun stop(cause: StopCause)
 

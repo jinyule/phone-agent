@@ -7,7 +7,7 @@ import dev.phoneagent.core.session.StopLogs.Companion.context
 import dev.phoneagent.core.session.StopLogs.Companion.goOn
 import dev.phoneagent.core.session.StopLogs.Companion.injected
 import dev.phoneagent.core.session.StopLogs.Companion.nextTurn
-import dev.phoneagent.core.session.StopLogs.Companion.resume
+import dev.phoneagent.core.session.StopLogs.Companion.resumed
 import dev.phoneagent.core.session.StopLogs.Companion.stoppedRun
 import dev.phoneagent.core.session.StopLogs.Companion.stoppedTurn
 import dev.phoneagent.core.session.StopLogs.Unknown
@@ -18,10 +18,11 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 
 /**
- * A stop ends the current run only. After any `task/stopped` the session continues when the
- * user's own input opens a new turn, never on its own; a shutdown or an error is resumed first, and
- * a stop the process did not finish is recovered as an error. The rules hold where records are
- * written and where they are read, unknown ignorable records included.
+ * A stop ends the current run only. Every `task/stopped` is followed by `session/resumed` (the
+ * stopped runtime instance writes nothing more), and the session continues when the user's own
+ * input opens a new turn, never on its own; a stop the process did not finish is recovered as an
+ * error. The rules hold where records are written and where they are read, unknown ignorable
+ * records included.
  */
 class StopInvariantsTest {
     private val logs = StopLogs()
@@ -34,7 +35,7 @@ class StopInvariantsTest {
     fun `after any stop the user's next input continues the session in a new turn`() =
         runTest {
             StopCause.entries.forEach { cause ->
-                logs.assertAccepts("$cause", stoppedRun(cause) + resume(cause) + nextTurn)
+                logs.assertAccepts("$cause", stoppedRun(cause) + resumed + nextTurn)
             }
         }
 
@@ -57,7 +58,7 @@ class StopInvariantsTest {
                 )
             StopCause.entries.forEach { cause ->
                 afterStop.forEach { (name, events) ->
-                    logs.assertRejectsLast("$cause, $name", stoppedRun(cause) + resume(cause) + events)
+                    logs.assertRejectsLast("$cause, $name", stoppedRun(cause) + resumed + events)
                 }
             }
         }
@@ -90,7 +91,7 @@ class StopInvariantsTest {
                 "the screen read on its own while waiting",
                 crashed + ScreenObserved(null, SessionSamples.snapshot) + nextTurn,
             )
-            val unknownFirst = stoppedRun(StopCause.USER) + Unknown + backgroundOnly
+            val unknownFirst = stoppedRun(StopCause.USER) + resumed + Unknown + backgroundOnly
             assertEquals(
                 unknownFirst.size + 2,
                 logs.corruptLine(unknownFirst),
@@ -117,24 +118,25 @@ class StopInvariantsTest {
                 listOf(InboxSpliced(InboxQueue.NEXT_TURN, 1), goOn, InboxSpliced(InboxQueue.NEXT_STEP, 1), injected)
             logs.assertAccepts(
                 "the queued background message first",
-                stoppedRun(StopCause.USER) + queued + backgroundFirst + StepStarted(2, 1),
+                stoppedRun(StopCause.USER) + resumed + queued + backgroundFirst + StepStarted(2, 1),
             )
             logs.assertAccepts(
                 "the user's input first",
-                stoppedRun(StopCause.USER) + queued + userFirst + StepStarted(2, 1),
+                stoppedRun(StopCause.USER) + resumed + queued + userFirst + StepStarted(2, 1),
             )
             logs.assertRejectsLast(
                 "the queued background message alone",
-                stoppedRun(StopCause.USER) + queued + InboxSpliced(InboxQueue.NEXT_STEP, 1) + injected +
+                stoppedRun(StopCause.USER) + resumed + queued + InboxSpliced(InboxQueue.NEXT_STEP, 1) + injected +
                     StepStarted(2, 1),
             )
         }
 
     @Test
-    fun `a shutdown or an error is resumed before anything else`() =
+    fun `every stop is resumed before anything else, so nothing of the stopped run comes after it`() =
         runTest {
-            listOf(StopCause.SHUTDOWN, StopCause.ERROR).forEach { cause ->
+            StopCause.entries.forEach { cause ->
                 logs.assertRejectsLast("$cause, turn/start", stoppedRun(cause) + TurnStarted(2))
+                logs.assertRejectsLast("$cause, the user's input", stoppedRun(cause) + goOn)
                 logs.assertRejectsLast(
                     "$cause, level change",
                     stoppedRun(cause) + TaskLevelChanged(SecurityLevel.CAUTIOUS),
@@ -147,7 +149,15 @@ class StopInvariantsTest {
             }
             logs.assertAccepts(
                 "a level change while waiting",
-                stoppedRun(StopCause.USER) + TaskLevelChanged(SecurityLevel.CAUTIOUS) + nextTurn,
+                stoppedRun(StopCause.USER) + resumed + TaskLevelChanged(SecurityLevel.CAUTIOUS) + nextTurn,
+            )
+            logs.assertAccepts(
+                "a stop while waiting, resumed again",
+                stoppedRun(StopCause.USER) + resumed + TaskStopped(StopCause.SHUTDOWN) + resumed + nextTurn,
+            )
+            logs.assertRejectsLast(
+                "a stop while waiting, then the next turn",
+                stoppedRun(StopCause.USER) + resumed + TaskStopped(StopCause.SHUTDOWN) + TurnStarted(2),
             )
         }
 
@@ -167,7 +177,7 @@ class StopInvariantsTest {
             )
             logs.assertAccepts(
                 "a stop before the turn's input",
-                stoppedRun(StopCause.USER) + TurnStarted(2) + TurnEnded(2, TurnEndReason.STOPPED) +
+                stoppedRun(StopCause.USER) + resumed + TurnStarted(2) + TurnEnded(2, TurnEndReason.STOPPED) +
                     TaskStopped(StopCause.USER),
             )
         }
@@ -181,6 +191,12 @@ class StopInvariantsTest {
                 logs.corruptLine(shutdown + TurnStarted(2)),
                 "turn/start without session/resumed",
             )
+            val userStop = stoppedRun(StopCause.USER) + Unknown
+            assertEquals(
+                userStop.size + 3,
+                logs.corruptLine(userStop + TurnStarted(2)),
+                "turn/start without session/resumed after a user stop",
+            )
             assertNull(logs.corruptLine(shutdown + SessionResumed(0) + nextTurn), "the unknown record itself is fine")
             val stopped = stoppedTurn() + Unknown
             assertEquals(
@@ -189,11 +205,11 @@ class StopInvariantsTest {
                 "turn/start without task/stopped",
             )
             assertNull(
-                logs.corruptLine(stopped + TaskStopped(StopCause.USER) + nextTurn),
+                logs.corruptLine(stopped + TaskStopped(StopCause.USER) + resumed + nextTurn),
                 "between turn/end and task/stopped",
             )
             assertNull(
-                logs.corruptLine(stoppedRun(StopCause.USER) + Unknown + nextTurn),
+                logs.corruptLine(stoppedRun(StopCause.USER) + resumed + Unknown + nextTurn),
                 "while the stopped task waits",
             )
             listOf(
@@ -267,9 +283,11 @@ class StopInvariantsTest {
             assertThrows<IllegalArgumentException>(
                 "turn/start before session/resumed",
             ) { shutdown.append(TurnStarted(2)) }
-            (resume(StopCause.SHUTDOWN) + nextTurn).forEach { shutdown.append(it) }
+            (resumed + nextTurn).forEach { shutdown.append(it) }
 
             val user = logs.reopened(stoppedRun(StopCause.USER)).store
+            assertThrows<IllegalArgumentException>("turn/start before session/resumed") { user.append(TurnStarted(2)) }
+            user.append(SessionResumed(0))
             assertThrows<IllegalArgumentException>("a step before the user's input") { user.append(StepStarted(1, 2)) }
             user.append(TurnStarted(2))
             user.append(injected)

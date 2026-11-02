@@ -16,15 +16,17 @@ import kotlin.reflect.KClass
  * - `turn/end(STOPPED)` is followed by `task/stopped`; a log may end between the two (an
  *   unfinished stop, recovered with `task/stopped(ERROR)`). `task/stopped` and `session/resumed`
  *   come with no turn open.
- * - After `task/stopped(SHUTDOWN or ERROR)` the next record is `session/resumed`.
- * - From every `task/stopped` and every `session/resumed` on, the task waits for the user: until a
+ * - After every `task/stopped` the next record is `session/resumed`: the stopped runtime instance
+ *   appends nothing more, and the instance that continues the task takes the log over first.
+ * - From every `session/resumed` on (so after every stop), the task waits for the user: until a
  *   `user/message` of kind USER is recorded in a turn, nothing runs. A turn may start, the inbox,
  *   the security level and other user messages may be recorded, the run may stop or be resumed
  *   again, and the runtime may read the screen on its own (`screen/snapshot` without a call), but
  *   no step, request, reply, call, prompt, side request or context change.
  *
  * An ignorable record of a type this build does not know changes none of this: it ends no wait
- * and does not stand between `turn/end(STOPPED)` and its `task/stopped`. The store, which only
+ * and stands neither between `turn/end(STOPPED)` and its `task/stopped` nor between a
+ * `task/stopped` and its `session/resumed`. The store, which only
  * knows the records it reads back, and the reader therefore judge every log alike.
  */
 internal class RunRules {
@@ -35,10 +37,10 @@ internal class RunRules {
     /** The last record was `turn/end(STOPPED)`. */
     private var stopUnfinished = false
 
-    /** The last stop was SHUTDOWN or ERROR and the log has not been resumed since. */
+    /** The cause of the last stop while the log has not been resumed since. */
     private var resumeDue: StopCause? = null
 
-    /** A stop or a resume happened and the user's input has not been recorded in a turn since. */
+    /** The log was resumed and the user's input has not been recorded in a turn since. */
     private var waiting = false
 
     /** Why [event] may not follow the records accepted so far, or `null` when it may. */
@@ -65,8 +67,7 @@ internal class RunRules {
 
     private fun stop(cause: StopCause) {
         stopUnfinished = false
-        resumeDue = cause.takeIf { it in RESUMED_FIRST }
-        waiting = true
+        resumeDue = cause
     }
 
     private fun resume() {
@@ -110,9 +111,6 @@ internal class RunRules {
 
     private fun nameOf(event: SessionEvent): String = SessionEventTypes.typeOf(event)
 }
-
-/** Stops after which the log is resumed before anything else. */
-private val RESUMED_FIRST = setOf(StopCause.SHUTDOWN, StopCause.ERROR)
 
 /** Records that close a step, a turn or a run: every call that needs a result has one. */
 private val CLOSING: Set<KClass<out SessionEvent>> =

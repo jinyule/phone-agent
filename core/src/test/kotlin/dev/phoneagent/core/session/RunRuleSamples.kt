@@ -41,7 +41,7 @@ internal object RunRuleSamples : RuleSampleKit() {
             name = "stop-prefix-visible-with-next-input",
             rule =
                 "A prefix cut by stop (or by a final failure) is not superseded: it joins the model view with the " +
-                    "next user/message, which opens the next turn after task/stopped.",
+                    "next user/message, which opens the next turn after task/stopped and session/resumed.",
             records =
                 records(
                     p.start.alone,
@@ -53,6 +53,7 @@ internal object RunRuleSamples : RuleSampleKit() {
                     StepEnded(1, 1, StepOutcome.CANCELLED).alone,
                     TurnEnded(1, TurnEndReason.STOPPED).alone,
                     TaskStopped(StopCause.USER).alone,
+                    SessionResumed(0).alone,
                     TurnStarted(2).alone,
                     goOn.alone,
                     StepStarted(2, 1).alone,
@@ -63,8 +64,8 @@ internal object RunRuleSamples : RuleSampleKit() {
             views =
                 listOf(
                     View(9, listOf(user(ask))),
-                    View(11, listOf(user(ask), assistant(stopPrefix), user(goOn))),
-                    View(15, listOf(user(ask), assistant(stopPrefix), user(goOn), assistant(resumed))),
+                    View(12, listOf(user(ask), assistant(stopPrefix), user(goOn))),
+                    View(16, listOf(user(ask), assistant(stopPrefix), user(goOn), assistant(resumed))),
                 ),
         )
 
@@ -89,6 +90,7 @@ internal object RunRuleSamples : RuleSampleKit() {
                     StepEnded(1, 1, StepOutcome.CANCELLED).alone,
                     TurnEnded(1, TurnEndReason.STOPPED).alone,
                     TaskStopped(StopCause.USER).alone,
+                    SessionResumed(0).alone,
                     TurnStarted(2).alone,
                     resumeAfterStop.alone,
                     StepStarted(2, 1).alone,
@@ -100,7 +102,7 @@ internal object RunRuleSamples : RuleSampleKit() {
                 listOf(
                     View(9, listOf(user(ask))),
                     View(
-                        15,
+                        16,
                         listOf(
                             user(ask),
                             withoutReasoning(stoppedAfterThinking),
@@ -240,6 +242,7 @@ internal object RunRuleSamples : RuleSampleKit() {
                     StepEnded(1, 1, StepOutcome.CANCELLED).alone,
                     TurnEnded(1, TurnEndReason.STOPPED).alone,
                     TaskStopped(StopCause.USER).alone,
+                    SessionResumed(0).alone,
                     TurnStarted(2).alone,
                     goOn.alone,
                     StepStarted(2, 1).alone,
@@ -251,7 +254,7 @@ internal object RunRuleSamples : RuleSampleKit() {
                 listOf(
                     View(14, listOf(user(ask), assistant(twoTaps), tool(mayHaveRun), tool(neverRan))),
                     View(
-                        20,
+                        21,
                         listOf(
                             user(ask),
                             assistant(twoTaps),

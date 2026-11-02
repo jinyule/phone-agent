@@ -188,9 +188,9 @@ public class SessionStore private constructor(
          *
          * No stop is final: every readable log can be continued. The store continues from the state
          * the log left, under the rules of `SessionInvariants` (`RunRules`): after a log that ends
-         * with `turn/end(STOPPED)` it accepts only `task/stopped` next, after a SHUTDOWN or ERROR
-         * stop only `session/resumed`, and after any stop or resume nothing that runs before the
-         * user's input.
+         * with `turn/end(STOPPED)` it accepts only `task/stopped` next, after any `task/stopped`
+         * only `session/resumed`, and after any stop or resume nothing that runs before the user's
+         * input.
          *
          * Recovery (the runtime's, phase1 §3.7) decides what to write before `session/resumed` from
          * the whole of [Opened.log], never from the last stop's cause alone (a SHUTDOWN may already

@@ -118,9 +118,8 @@ class StopLogs {
                 TurnEnded(1, TurnEndReason.STOPPED),
             )
 
-        /** What a stop with [cause] needs before the session goes on: `session/resumed` after SHUTDOWN or ERROR. */
-        fun resume(cause: StopCause): List<SessionEvent> =
-            if (cause == StopCause.SHUTDOWN || cause == StopCause.ERROR) listOf(SessionResumed(0)) else emptyList()
+        /** What every stop needs before the session goes on: the new runtime instance takes the log over. */
+        val resumed: List<SessionEvent> = listOf(SessionResumed(0))
 
         /** The user's input opening turn 2 and its first step. */
         val nextTurn: List<SessionEvent> = listOf(TurnStarted(2), goOn, StepStarted(2, 1))

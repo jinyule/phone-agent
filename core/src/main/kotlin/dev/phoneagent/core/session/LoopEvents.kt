@@ -35,17 +35,16 @@ public data class TaskLevelChanged(
 
 /**
  * `task/stopped`: the current run of the task stopped before finishing (`TaskRuntime.stop`). Written
- * last when a stop is handled, once nothing else may append: the results of the calls still
- * without one (CANCELLED, see `ToolStatus.CANCELLED`), `prompt/withdrawn`, `step/end(CANCELLED)`
- * and `turn/end(STOPPED)` come before it, and it comes with no turn open and no call that needs a
- * result without one (`SessionInvariants`). Not ignorable: the run rules depend on it.
+ * last when a stop is handled, once every append of the stopped run has completed (inbox
+ * recording included): the results of the calls still without one (CANCELLED, see
+ * `ToolStatus.CANCELLED`), `prompt/withdrawn`, `step/end(CANCELLED)` and `turn/end(STOPPED)` come
+ * before it, and it comes with no turn open and no call that needs a result without one
+ * (`SessionInvariants`). Not ignorable: the run rules depend on it.
  *
- * No cause ends the session (D14). Every cause ends this run only, and the task then waits for
- * the user: nothing runs until the user's own input (`user/message` of kind USER) is recorded in
- * a new turn, never on its own. After [StopCause.SHUTDOWN] and [StopCause.ERROR] the log is
- * resumed first: `session/resumed` is the next record. After [StopCause.USER] and
- * [StopCause.LIMIT] the next turn may start directly; a new runtime instance that takes the log
- * over writes `session/resumed` first, as always.
+ * No cause ends the session (D14). Every cause ends this run only. The stopped runtime instance
+ * writes nothing after this record, so the next record is always `session/resumed`, written by
+ * the instance that continues the task; then the task waits for the user: nothing runs until the
+ * user's own input (`user/message` of kind USER) is recorded in a new turn, never on its own.
  *
  * Unfinished stop: when the process ended between `turn/end(STOPPED)` and this record, the log
  * ends with the `turn/end`, and the cause was never written. Recovery writes this record with
@@ -67,7 +66,7 @@ public enum class StopCause {
     /** The user pressed stop. The user's next input continues the task. */
     USER,
 
-    /** The app or service is shutting down. The log is resumed before the task continues. */
+    /** The app or service is shutting down. */
     SHUTDOWN,
 
     /**
@@ -79,8 +78,7 @@ public enum class StopCause {
 
     /**
      * An unrecoverable error (e.g. the session log could not be flushed), or a stop whose
-     * `task/stopped` was never written (recovery of an unfinished stop). The log is resumed before
-     * the task continues.
+     * `task/stopped` was never written (recovery of an unfinished stop).
      */
     ERROR,
 }
@@ -256,7 +254,7 @@ public enum class InboxEntryKind {
  * restart, possibly after a crash), or within the process when a new instance continues a task
  * whose runtime stopped. Written by that instance after repair, before anything else it writes:
  * no turn is open and every call that needs a result has one (`SessionInvariants`). It is the
- * record right after a `task/stopped` with SHUTDOWN or ERROR. Like a stop, it leaves the task
+ * record right after every `task/stopped`, whatever the cause. Like a stop, it leaves the task
  * waiting for the user: nothing runs until the user's own input is recorded in a new turn, and the
  * model must observe the screen again before acting. Not ignorable: the run rules depend on it.
  *
