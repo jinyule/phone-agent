@@ -56,9 +56,13 @@ public enum class UserMessageKind {
  * `request/header`: everything in a main-conversation request except the messages. Written before
  * a request whenever it differs from the previous header; a main request is exactly
  * `header.toRequest(deriveMessages(records))` with the latest header (see [SessionEvent], "Model
- * view"). Side requests (vision, light judgments) are recorded as [SideRequest] instead and never
- * use a header, so a header always serves the main role. Validated like the [ChatRequest] it
- * produces, so a bad header fails where it is read.
+ * view"). The order of one request (phase1 §3.7): the `request` chain settles the model and the
+ * wanted reasoning level → `ChatModel.prepare` on that final model → the same `RequestSettings`
+ * fills [reasoning] and [wire] → the header is appended if it changed → `deriveMessages` → the
+ * request is frozen → flush → `complete`. When the chain changes the model or the level, prepare
+ * runs again; an earlier wire is never reused. Side requests (vision, light judgments) are
+ * recorded as [SideRequest] instead and never use a header, so a header always serves the main
+ * role. Validated like the [ChatRequest] it produces, so a bad header fails where it is read.
  *
  * @property provider provider profile used.
  * @property model wire model name.

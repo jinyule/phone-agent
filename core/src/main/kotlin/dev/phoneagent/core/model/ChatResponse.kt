@@ -91,7 +91,10 @@ public data class Usage(
 
 /**
  * Streaming fragment passed to `ChatModel.complete`'s `onDelta`. For display only: the final
- * [ChatResponse] is authoritative and is what gets recorded.
+ * [ChatResponse] is authoritative and is what gets recorded. The [Text] fragments, in order, are
+ * always a prefix of the final reply's text. [Reasoning], [ToolCallStarted] and [ToolCallArgs] are
+ * previews that promise nothing: when the server degrades the reply, they may be missing from the
+ * final [ChatResponse], and the UI re-renders from that.
  */
 public sealed interface Delta {
     /** Visible reply text, appended to what came before. */

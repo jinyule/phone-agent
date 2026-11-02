@@ -6,6 +6,13 @@ import dev.phoneagent.core.ids.BlobRef
  * Turns a [Credential] into the secret for a request. Injected into adapters when they are
  * built; implemented by the key store and the ChatGPT token source and wired by the app.
  * Secrets never appear in logs, exception messages or `toString`.
+ *
+ * Redaction (adapters, model-layer §2): a request's secret is removed from everything an adapter
+ * returns, streams or reports. A signed or encrypted reasoning block (an Anthropic `thinking`
+ * block with its `signature`, the `data` of `redacted_thinking`, the Responses
+ * `encrypted_content`, and the like) breaks when changed and cannot be redacted: when the secret
+ * appears in one, the whole reply fails as [ModelError.BadResponse] with a fixed text, and no
+ * delta of it has shown the secret first.
  */
 public fun interface CredentialResolver {
     /**

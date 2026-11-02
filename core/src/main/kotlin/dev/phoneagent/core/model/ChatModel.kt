@@ -35,7 +35,9 @@ public interface ChatModel {
 
     /**
      * Sends [request] and returns the complete reply. [onDelta] receives streaming fragments in
-     * order, on the calling coroutine, before this returns; it must not block or throw.
+     * order, on the calling coroutine, before this returns; it must not block or throw. The text
+     * fragments are a prefix of the returned reply's text; reasoning and tool-call previews may
+     * not appear in it, so displays re-render from the returned [ChatResponse] ([Delta]).
      * Cancelling the caller aborts the HTTP exchange. A request whose `wire.mappingVersion` or
      * `wire.credential` is not what [prepare] gives fails with [ModelError.InvalidRequest] before
      * anything is sent. The core test sources hold `ChatModelContract`, which adapter tests inherit.
