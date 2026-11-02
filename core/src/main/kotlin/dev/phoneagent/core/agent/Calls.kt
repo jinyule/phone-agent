@@ -196,7 +196,9 @@ internal class Calls(
      * The execution facts are written here, so nothing else produces them (an interceptor that
      * answers without `proceed` runs nothing): `tool/started` on [verdictSeq], flushed, then
      * `Tool.execute`, then `tool/executed` with the status it returned (ERROR when it threw),
-     * before `toolPostExecute`. A cancelled or timed-out execute gets no `tool/executed`.
+     * before `toolPostExecute`. A cancelled or timed-out execute gets no `tool/executed`. A stop or
+     * timeout that arrives while `tool/started` is written or flushed runs nothing; the log still
+     * says the call started, so its result says it may have taken effect.
      */
     private inner class ExecutionEnd(
         private val judged: ExecuteInput,
@@ -221,6 +223,8 @@ internal class Calls(
             loop.log.append(ToolStarted(id, verdictSeq))
             started = true
             loop.log.flush()
+            // The flush finishes even when a stop or the budget cancels it meanwhile: then run nothing.
+            currentCoroutineContext().ensureActive()
             val result =
                 try {
                     judged.tool.execute(judged.call, judged.context)
