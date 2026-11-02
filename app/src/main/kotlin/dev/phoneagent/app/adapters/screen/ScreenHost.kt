@@ -126,16 +126,24 @@ internal fun Screenshot.release() {
 
 /**
  * The screenshot [take] gives within [waitMs], or `null` when none came in time (or [take] gave
- * none). One that arrives just as the time runs out is nobody's: it is released.
+ * none). A screenshot taken but not handed over, because the time ran out or the caller was
+ * cancelled just as it came, is nobody's: it is freed here with [release], once. One that is
+ * handed over is the caller's.
  */
 internal suspend fun screenshotWithin(
     waitMs: Long,
+    release: (Screenshot) -> Unit = Screenshot::release,
     take: suspend () -> Screenshot?,
 ): Screenshot? {
     var taken: Screenshot? = null
-    val shot = withTimeoutOrNull(waitMs) { take().also { taken = it } }
-    if (shot == null) taken?.release()
-    return shot
+    var handedOver = false
+    try {
+        val shot = withTimeoutOrNull(waitMs) { take().also { taken = it } }
+        handedOver = shot != null
+        return shot
+    } finally {
+        if (!handedOver) taken?.let(release)
+    }
 }
 
 /** The accessibility service's input connection to the focused editor. */
