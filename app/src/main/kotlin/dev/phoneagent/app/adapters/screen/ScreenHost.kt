@@ -113,4 +113,13 @@ internal interface ImeConnection {
 
     /** Sends the editor's IME action (search, send, done…). Returns whether it was sent. */
     fun performEditorAction(): Boolean
+
+    /** Asks the editor to select [start]..[end] (a cursor when equal). Returns whether it was sent. */
+    fun setSelection(
+        start: Int,
+        end: Int,
+    ): Boolean
+
+    /** The editor's selection as absolute offsets (start to end), or `null` when it cannot be read. */
+    fun selection(): Pair<Int, Int>?
 }

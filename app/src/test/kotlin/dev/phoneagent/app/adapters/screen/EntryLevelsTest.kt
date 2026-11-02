@@ -50,10 +50,15 @@ class EntryLevelsTest {
         }
     }
 
+    /** An input connection; [moves] says whether it can move the cursor, [lands] where a move ends. */
     private class FakeIme(
         override val editorPackage: String?,
+        private val moves: Boolean = true,
+        private val lands: (Int) -> Int = { it },
     ) : ImeConnection {
         val commits = ArrayList<Pair<String, Boolean>>()
+        val selections = ArrayList<Pair<Int, Int>>()
+        private var cursor: Pair<Int, Int>? = null
 
         override fun commit(
             text: String,
@@ -64,6 +69,18 @@ class EntryLevelsTest {
         }
 
         override fun performEditorAction(): Boolean = true
+
+        override fun setSelection(
+            start: Int,
+            end: Int,
+        ): Boolean {
+            if (!moves) return false
+            selections += start to end
+            cursor = lands(start) to lands(end)
+            return true
+        }
+
+        override fun selection(): Pair<Int, Int>? = cursor
     }
 
     private fun selection(index: Int): Pair<Int, Int> {
@@ -209,8 +226,53 @@ class EntryLevelsTest {
             assertEquals(TextEntry.Sent.Delivered, level.send(request("!", append = true)))
 
             assertEquals(listOf("new" to true, "!" to false), ime.commits)
-            assertEquals(listOf(AccessibilityNodeInfo.ACTION_SET_SELECTION), field.log.ids)
+            assertEquals("the cursor is moved through the connection", listOf(3 to 3), ime.selections)
+            assertTrue(field.log.ids.isEmpty())
+        }
+
+    @Test
+    fun theInputConnectionCommitsOnlyWhereTheCursorWasConfirmed() =
+        runTest {
+            // Claude r1 x4: the app keeps the cursor where it was; " world" would land in the middle.
+            field.isFocused = true
+            val ime = FakeIme(editorPackage = APP, lands = { 1 })
+            val host = FakeHost().apply { this.ime = ime }
+
+            val sent =
+                EntryLevels
+                    .imeConnection(
+                        field,
+                        host,
+                    ) { error("already focused") }
+                    .send(request("!", append = true))
+
+            assertEquals(TextEntry.Sent.Skipped("cannot place the cursor"), sent)
+            assertTrue(ime.commits.isEmpty())
+        }
+
+    @Test
+    fun withoutAConnectionCursorTheNodePlacesItAndReportsWhereItIs() =
+        runTest {
+            field.isFocused = true
+            field.log.answer = { action, args ->
+                if (action == AccessibilityNodeInfo.ACTION_SET_SELECTION) {
+                    val start = args!!.getInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT)
+                    field.setTextSelection(start, args.getInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT))
+                }
+                true
+            }
+            val ime = FakeIme(editorPackage = APP, moves = false)
+            val host = FakeHost().apply { this.ime = ime }
+            val level = EntryLevels.imeConnection(field, host) { error("already focused") }
+
+            assertEquals(TextEntry.Sent.Delivered, level.send(request("!", append = true)))
             assertEquals(3 to 3, selection(0))
+            assertEquals(listOf("!" to false), ime.commits)
+
+            // A node that does not report its selection cannot confirm the cursor.
+            field.log.answer = { _, _ -> true }
+            field.setTextSelection(-1, -1)
+            assertEquals(TextEntry.Sent.Skipped("cannot place the cursor"), level.send(request("!", append = true)))
         }
 
     @Test

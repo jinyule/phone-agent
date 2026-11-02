@@ -218,4 +218,26 @@ internal class ServiceImeConnection(
         connection.performEditorAction(if (none) EditorInfo.IME_ACTION_DONE else declared)
         return true
     }
+
+    override fun setSelection(
+        start: Int,
+        end: Int,
+    ): Boolean {
+        val connection = ime.currentInputConnection ?: return false
+        connection.setSelection(start, end)
+        return true
+    }
+
+    // The editor handles calls on one connection in order, so this sees a setSelection sent before.
+    override fun selection(): Pair<Int, Int>? {
+        val around = ime.currentInputConnection?.getSurroundingText(0, 0, 0)
+        val offset = around?.offset ?: -1
+        return if (around == null ||
+            offset < 0
+        ) {
+            null
+        } else {
+            (offset + around.selectionStart) to (offset + around.selectionEnd)
+        }
+    }
 }

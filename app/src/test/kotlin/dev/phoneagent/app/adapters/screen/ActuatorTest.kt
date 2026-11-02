@@ -306,6 +306,13 @@ class ActuatorTest {
                         actions++
                         return true
                     }
+
+                    override fun setSelection(
+                        start: Int,
+                        end: Int,
+                    ) = false
+
+                    override fun selection(): Pair<Int, Int>? = null
                 }
 
             assertEquals(Actuator.Result.Done(Actuator.Via.NODE), actuator().enter(field))

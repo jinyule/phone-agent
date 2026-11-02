@@ -246,8 +246,11 @@ internal object EntryLevels {
                     TextEntry.Sent.Skipped("the field does not hold input focus")
                 }
 
+                request.append && !placeCursor(field, ime, request.before?.length ?: 0) -> {
+                    TextEntry.Sent.Skipped(NO_CURSOR)
+                }
+
                 request.append -> {
-                    moveCursorToEnd(field, request.before)
                     sentIf(ime.commit(request.text, replace = false))
                 }
 
@@ -280,44 +283,73 @@ internal object EntryLevels {
             }
         }
 
+    /**
+     * Selects what the paste replaces (the old text, or the end for append), then holds the text
+     * on the clipboard and pastes. Nothing is put on the clipboard when the selection is refused.
+     */
     private suspend fun pasteHeld(
         field: AccessibilityNodeInfo,
         clipboard: ClipboardAccess,
         request: TextEntry.Request,
         awaitChange: suspend () -> Unit,
     ): TextEntry.Sent {
-        val held = clipboard.put(request.text, sensitive = field.isPassword)
-        if (!held) return TextEntry.Sent.Skipped("the clipboard is unavailable")
         val length = request.before?.length ?: 0
-        if (request.append) {
-            select(field, length, length)
-        } else if (length > 0) {
-            select(field, 0, length)
+        val placed =
+            when {
+                request.append -> select(field, length, length)
+                length > 0 -> select(field, 0, length)
+                else -> true
+            }
+        return when {
+            !placed -> {
+                TextEntry.Sent.Skipped(NO_CURSOR)
+            }
+
+            !clipboard.put(request.text, sensitive = field.isPassword) -> {
+                TextEntry.Sent.Skipped("the clipboard is unavailable")
+            }
+
+            else -> {
+                val pasted = field.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+                if (pasted) awaitChange()
+                sentIf(pasted)
+            }
         }
-        val pasted = field.performAction(AccessibilityNodeInfo.ACTION_PASTE)
-        if (pasted) awaitChange()
-        return sentIf(pasted)
     }
 
     private fun sentIf(delivered: Boolean): TextEntry.Sent =
         if (delivered) TextEntry.Sent.Delivered else TextEntry.Sent.Refused
 
-    private fun moveCursorToEnd(
+    /**
+     * Puts the cursor at [offset] through the input connection, else the node, and checks where
+     * it ended up (the connection's selection, else the node's); `false` unless confirmed there.
+     */
+    private fun placeCursor(
         field: AccessibilityNodeInfo,
-        before: String?,
-    ) {
-        val length = before?.length ?: 0
-        select(field, length, length)
+        ime: ImeConnection,
+        offset: Int,
+    ): Boolean {
+        val asked = ime.setSelection(offset, offset) || select(field, offset, offset)
+        return asked && (ime.selection() ?: nodeSelection(field)) == (offset to offset)
+    }
+
+    private fun nodeSelection(field: AccessibilityNodeInfo): Pair<Int, Int>? {
+        field.refresh()
+        val start = field.textSelectionStart
+        val end = field.textSelectionEnd
+        return if (start < 0 || end < 0) null else start to end
     }
 
     private fun select(
         field: AccessibilityNodeInfo,
         start: Int,
         end: Int,
-    ) {
+    ): Boolean {
         val args = Bundle()
         args.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, start)
         args.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, end)
-        field.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, args)
+        return field.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, args)
     }
+
+    private const val NO_CURSOR = "cannot place the cursor"
 }
