@@ -25,7 +25,9 @@ import dev.phoneagent.privileged.handoff.HelperOffer
  * caller is uid 2000 and reports its own uid/pid → the nonce is live (before touching the Binder)
  * → `identity()` names the calling process → `protocolVersion()`, versionCode and APK match this
  * build. A helper failing only the last check is stale: its nonce is burnt and it is told to
- * `releaseAll()`; the rejection then makes it exit.
+ * `releaseAll()`; the rejection then makes it exit. A failed `identity()` or `protocolVersion()`
+ * call is [HandoffReject.BINDER_ELSEWHERE] and leaves the nonce alone; only a protocol version
+ * that was read and differs is [HandoffReject.STALE_PROTOCOL].
  *
  * [decide] does not use up the nonce of an admitted helper: the caller first follows the helper's
  * death, then [commit]s, which uses up the nonce and issues the next resume nonce in one save
@@ -94,11 +96,12 @@ internal class HandoffAdmission(
     ): Decision {
         val core = IPrivilegedCore.Stub.asInterface(binder)
         val elsewhere = HandoffGate.checkIdentity(ask("identity") { core.identity() }, callingUid, callingPid)
-        val stale =
-            elsewhere ?: HandoffGate.checkVersion(ask("protocolVersion") { core.protocolVersion() }, offer, appBuild())
+        // A protocolVersion() call that fails is no version at all: a refusal like identity(), not a stale helper.
+        val protocol = if (elsewhere == null) ask("protocolVersion") { core.protocolVersion() } else null
+        val stale = protocol?.let { HandoffGate.checkVersion(it, offer, appBuild()) }
         return when {
-            elsewhere != null -> {
-                rejected(elsewhere, offer)
+            elsewhere != null || protocol == null -> {
+                rejected(elsewhere ?: HandoffReject.BINDER_ELSEWHERE, offer)
             }
 
             stale != null -> {

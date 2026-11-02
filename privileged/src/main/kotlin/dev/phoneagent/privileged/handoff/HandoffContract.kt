@@ -92,10 +92,13 @@ public enum class HandoffReject {
     /** The nonce is missing, expired, already used, or was never issued. */
     BAD_NONCE,
 
-    /** `identity()` on the offered Binder does not name the calling process. */
+    /**
+     * `identity()` on the offered Binder does not name the calling process, or `identity()` or
+     * `protocolVersion()` failed. The nonce is left alone.
+     */
     BINDER_ELSEWHERE,
 
-    /** The helper speaks a different [dev.phoneagent.privileged.PrivilegedProtocol.VERSION]. */
+    /** The helper read out a different [dev.phoneagent.privileged.PrivilegedProtocol.VERSION]. */
     STALE_PROTOCOL,
 
     /** The helper runs code from another APK (the app was updated or reinstalled). */

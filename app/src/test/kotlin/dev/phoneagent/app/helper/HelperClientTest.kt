@@ -189,6 +189,23 @@ class HelperClientTest {
     }
 
     @Test
+    fun aProtocolVersionCallThatFailsIsARefusalNotAStaleHelperAndKeepsTheNonce() {
+        val nonce = armed()
+        for (failure in listOf(RemoteException("dead"), IllegalStateException("bad state"), SecurityException("no"))) {
+            val helper = FakeHelper().apply { failProtocol = failure }
+            assertEquals(
+                failure.toString(),
+                HandoffReject.BINDER_ELSEWHERE,
+                client.offer(extras(helper, nonce), shell, pid).reject(),
+            )
+            assertEquals("not told to release", listOf("identity", "protocolVersion"), helper.calls)
+        }
+        assertEquals(HelperState.NotConnected, client.state)
+        assertEquals(emptyList<HelperState.NeedsLaunch>(), launches)
+        client.offer(extras(FakeHelper(), nonce), shell, pid).accepted()
+    }
+
+    @Test
     fun aStaleHelperWhoseReleaseAllThrowsIsStillRejectedAndRelaunched() {
         val failures = listOf(IllegalStateException("busy"), SecurityException("not you"), RemoteException("dead"))
         for (failure in failures) {

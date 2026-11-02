@@ -80,12 +80,14 @@ public object HandoffGate {
         }
 
     /**
-     * [helperProtocol] is what `protocolVersion()` returned (null if the call failed). The helper
-     * must speak the app's protocol and run the exact APK the app runs; a missing field counts as
-     * a mismatch, so helpers that predate a field are restarted rather than trusted.
+     * [helperProtocol] is what `protocolVersion()` returned. The helper must speak the app's
+     * protocol and run the exact APK the app runs; a missing offer field counts as a mismatch, so
+     * helpers that predate a field are restarted rather than trusted. A `protocolVersion()` call
+     * that failed is not a version: the caller refuses it as [HandoffReject.BINDER_ELSEWHERE]
+     * before this check, as it does a failed `identity()`.
      */
     public fun checkVersion(
-        helperProtocol: Int?,
+        helperProtocol: Int,
         offer: HelperOffer,
         app: AppBuild,
     ): HandoffReject? =

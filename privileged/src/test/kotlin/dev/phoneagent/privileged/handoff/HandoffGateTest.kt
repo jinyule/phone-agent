@@ -73,7 +73,6 @@ class HandoffGateTest {
     fun versionRejectsAnotherProtocolFirst() {
         assertEquals(HandoffReject.STALE_PROTOCOL, HandoffGate.checkVersion(app.protocolVersion + 1, offer, app))
         assertEquals(HandoffReject.STALE_PROTOCOL, HandoffGate.checkVersion(app.protocolVersion - 1, offer, app))
-        assertEquals(HandoffReject.STALE_PROTOCOL, HandoffGate.checkVersion(null, offer, app))
         assertEquals(
             HandoffReject.STALE_PROTOCOL,
             HandoffGate.checkVersion(app.protocolVersion + 1, offer.copy(versionCode = 1), app),

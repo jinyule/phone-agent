@@ -23,6 +23,9 @@ class FakeHelper(
     var onIdentity: () -> Unit = {},
     var failRelease: Exception? = null,
 ) : IPrivilegedCore.Stub() {
+    /** What [protocolVersion] throws instead of answering; null answers [protocol]. */
+    var failProtocol: Exception? = null
+
     /** What [probe] does; by default it refuses as the A-stage helper does. */
     var onProbe: () -> Bundle = { throw PrivilegedError.notImplemented("probe") }
     val calls = mutableListOf<String>()
@@ -49,6 +52,7 @@ class FakeHelper(
 
     override fun protocolVersion(): Int {
         calls += "protocolVersion"
+        failProtocol?.let { throw it }
         return protocol
     }
 
