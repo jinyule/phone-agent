@@ -275,7 +275,7 @@ class AgentLoopPolicyTest {
             .seq
 
     @Test
-    fun `failing to move the task ends the hand-off as failed with the reason`() =
+    fun `failing to move the task ends the hand-off as failed with the move and the exception class`() =
         runTest {
             val noHand = FakeSurfaces(failing = setOf("hand"))
             val first = send(ScriptedPolicy(handOff), surfaces = noHand)
@@ -287,7 +287,7 @@ class AgentLoopPolicyTest {
                     .only<HandoffEnded>()
                     .single()
             assertEquals(HandoffResult.FAILED, ended.result)
-            assertEquals("hand over failed: display gone", ended.detail)
+            assertEquals("hand over failed: java.io.IOException", ended.detail)
             assertEquals(LoopTexts().handoffFailed, first.result().text())
 
             val noBack = FakeSurfaces(failing = setOf("back"))
@@ -295,7 +295,7 @@ class AgentLoopPolicyTest {
             second.loop.answer(second.loop.awaitPrompt().promptId!!, UserReply.HandoffDone)
             second.loop.awaitPhase(Phase.Done)
             assertEquals(
-                "take back failed: task vanished",
+                "take back failed: java.io.IOException",
                 second.harness
                     .events()
                     .only<HandoffEnded>()

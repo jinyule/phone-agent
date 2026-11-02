@@ -107,7 +107,8 @@ internal class Prompts(
          * Moves the task to the user and back when there is a [dev.phoneagent.core.ports.SurfaceManager];
          * without one (main-display mode) the user acts where the task already is. Moving failures
          * ([IOException], as the ports report device trouble) end the handoff as FAILED with a
-         * detail. A stop while handed over leaves the app with the user.
+         * detail naming the move and the exception's class only (its text may quote the screen).
+         * A stop while handed over leaves the app with the user.
          */
         private suspend fun handOver(
             id: PromptId,
@@ -130,7 +131,7 @@ internal class Prompts(
             try {
                 Result.success(move())
             } catch (failure: IOException) {
-                Result.failure(IOException("$what failed: ${failure.message}", failure))
+                Result.failure(IOException("$what failed: ${failure.javaClass.name}"))
             }
 
         private fun failed(failure: Throwable): Pair<HandoffResult, String?> = HandoffResult.FAILED to failure.message

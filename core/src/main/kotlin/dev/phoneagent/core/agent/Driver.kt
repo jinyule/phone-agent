@@ -131,12 +131,16 @@ internal class TurnEndings(
         }
     }
 
-    /** An interceptor or the dispatch failed with [failure]. Throws when the log fails meanwhile. */
+    /**
+     * An interceptor or the dispatch failed with [failure]. The detail names its class only:
+     * message, cause and `toString` may quote the screen, input or credentials. Throws when the
+     * log fails meanwhile.
+     */
     suspend fun afterFailure(
         state: TurnState,
         failure: Exception,
     ) {
-        repair(state, RepairCause.FAILED, failure.toString())
+        repair(state, RepairCause.FAILED, "failed with ${failure.javaClass.name}")
     }
 
     /** The log failed with [failure]: record the end on a reopened log when storage allows it. */

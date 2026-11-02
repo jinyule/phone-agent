@@ -91,7 +91,7 @@ class AgentLoopFailureTest {
             advanceUntilIdle()
             val failed = harness.events().only<TurnEnded>().single()
             assertEquals(TurnEndReason.FAILED, failed.reason)
-            assertEquals("java.lang.IllegalStateException: context provider crashed", failed.detail)
+            assertEquals("failed with java.lang.IllegalStateException", failed.detail)
             assertEquals(Phase.Idle, loop.phase.value)
 
             loop.followup(text("two"))
