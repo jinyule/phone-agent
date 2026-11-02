@@ -197,6 +197,17 @@ class CallsTest {
     }
 
     @Test
+    fun `cautious - a launch the user declined did not run, so the app's first action still asks`() {
+        val launch = call("phone_launch", "app" to "com.tencent.mm")
+        assertEquals(ConfirmReason.FIRST_IN_APP, reason(decide(launch, ctx(CAUTIOUS, null, operated = setOf(APP)))))
+        // Declined: the launch never ran, so the runtime does not count it; the app is reached another way.
+        val wechat = screen(el("e1", "通讯录"), pkg = "com.tencent.mm")
+        val next = decide(tap("e1"), ctx(CAUTIOUS, wechat, operated = setOf(APP)))
+        assertEquals(ConfirmReason.FIRST_IN_APP, reason(next))
+        assertEquals("com.tencent.mm", assertInstanceOf(Verdict.Confirm::class.java, next).card.pkg)
+    }
+
+    @Test
     fun `arguments are read the way the tools read them`() {
         val chat = screen(el("e1", "发送"))
         for (ref in listOf("e1", "@e1", " e1 ", " @e1")) {

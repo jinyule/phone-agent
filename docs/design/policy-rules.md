@@ -237,7 +237,7 @@ ref 和坐标两条路用的是同一份证据和同一套判定；屏幕格式�
    - **批准后复核**（`ctx.approved` 不为 null）是独立的一支，在第 2、3 步之后：不论当前档位和历史还要不要确认，都在新屏 S' 上算出这次调用的卡（原因取档位给的；档位不再要求时取 kind 对应的原因：SPEND、OUTWARD、DELETE、SETTINGS；都没有时用已批准卡的原因），按 §6.3 和已批准的卡比较。SPEND 在无人值守时照样拒绝。
 5. 其他：Allow。
 
-`PolicyContext` 用到的字段：`level`、`unattended`、`screen`、`operatedPackages`、`outwardConfirmedPackages`、`approved`（各字段的计算方式见 `PolicyContext` 的 KDoc）。其中 **`operatedPackages`** 只取 session 日志里 `policy/verdict` 记录的 `intent.pkg`（null 不计入）。`phone_launch` 一个 App 也算在内（它有包名），所以谨慎档下"启动 App，再第一次点击"时，点击不再是 FIRST_IN_APP；首次确认落在启动这一步（`CallsTest` 有这个两步序列）。
+`PolicyContext` 用到的字段：`level`、`unattended`、`screen`、`operatedPackages`、`outwardConfirmedPackages`、`approved`（各字段的计算方式见 `PolicyContext` 的 KDoc）。其中 **`operatedPackages`** 只取这个任务里**已经执行**的非 READ 调用的 `intent.pkg`：最终放行、并且日志里有 `tool/started` 的调用才算；被拒绝、转交、确认被用户拒绝或没有执行的调用都不算，null 也不算（和 `PolicyContext` 的 KDoc 一致）。`phone_launch` 执行了就算在内（它有包名），所以谨慎档下"启动 App，再第一次点击"时，首次确认落在启动这一步，之后的点击不再是 FIRST_IN_APP；用户拒绝了启动的确认时，这个包不计入，之后不论从哪条路进了这个 App，第一个非 READ 调用仍然出 FIRST_IN_APP（`CallsTest` 有这两个序列）。policy 只按传进来的集合判断，集合的推导由 runtime 负责（§6.4）。
 
 ### 6.2 拒绝原因与提示
 
@@ -286,7 +286,7 @@ policy 只判定，下面这些由 runtime（WP02）做，WP09 的集成测试�
 - **每个调用**（包括 READ 的工具）都先 `resolve` 再 `evaluate`；`resolve` 用的 `screen` 必须就是 `ctx.screen`（复核时是 S'）。
 - **再问上限**：复核返回新的 Confirm 时再问用户，默认最多再问 1 次，可配置；超过上限这次调用不执行，并告诉模型原因（policy 不计次数，不保存状态）。
 - **动作后的新屏**：返回给模型的每张新快照，先合成一次 `phone_observe` 交给 PolicyEngine 判定；被拒绝时不给模型看任何内容（这一条兜住 https App Link 打开的金融 App，§2）。policy 保证对名单 App、本 App 和敏感设置页的读屏一定拒绝。
-- `operatedPackages`、`outwardConfirmedPackages` 按 `PolicyContext` 的 KDoc 从日志推导（§6.1 末尾）。
+- `operatedPackages` 只从已经执行的非 READ 调用推导（最终放行并有 `tool/started`；被拒绝、转交、确认被拒、没有执行的都不算，null 不算），`outwardConfirmedPackages` 只取结果为 APPROVED、原因为 OUTWARD 的卡的 `pkg`；两者都按 `PolicyContext` 的 KDoc 从日志推导（§6.1 末尾）。WP09 的集成测试要覆盖"拒绝启动确认后再进入同一个 App"这个序列。
 
 ---
 
