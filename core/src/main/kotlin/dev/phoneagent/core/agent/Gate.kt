@@ -19,15 +19,16 @@ import kotlinx.coroutines.withTimeoutOrNull
 /**
  * `toolPreExecute` with the PolicyEngine as its last, fixed guard (phase1 §3.8, AGENTS §3.3).
  * The interceptor chain runs first; the policy then resolves and judges the recorded call on the
- * screen the model last saw ([latestSnapshot]) whatever the chain returned, and the stricter
- * verdict wins (Refuse > HandOff > Confirm > Allow; the policy's on a tie), so no interceptor can
- * bypass it. Every policy verdict is logged.
+ * newest screen recorded by a call that already has its result ([latestSnapshot]) whatever the
+ * chain returned, and the stricter verdict wins (Refuse > HandOff > Confirm > Allow; the policy's
+ * on a tie), so no interceptor can bypass it. Every policy verdict is logged.
  *
  * An approved card is not enough to run (contracts addendum §8, §14): the runtime always tries to
- * observe a fresh screen S' ([freshScreen]) and records it (`screen/snapshot` without a call: a
- * runtime observation the model has not seen); the policy then resolves and judges the call again
- * with the card as `PolicyContext.approved`, on S', or on no screen when there is no screen port or
- * the read failed or took longer than [LoopConfig.recheckScreenTimeoutMs]. Whether a call may run
+ * observe a fresh screen S' ([freshScreen]) and records it under the call (`screen/snapshot`
+ * with its callId, so once the call has its result, whatever it is, S' is the screen later calls
+ * are judged on); the policy then resolves and judges the call again with the card as
+ * `PolicyContext.approved`, on S', or on no screen when there is no screen port or the read failed
+ * or took longer than [LoopConfig.recheckScreenTimeoutMs]. Whether a call may run
  * without a screen is the policy's decision, never the runtime's. Allow runs it; Refuse and
  * HandOff end as such; a new Confirm (the screen changed under the approval) is shown again, at
  * most [LoopConfig.maxReconfirmations] times per call, after which the call is refused and the
@@ -89,7 +90,7 @@ internal class Gate(
         interaction: UserInteraction,
         reconfirmed: Int,
     ): Ruling {
-        val screen = freshScreen(loop)
+        val screen = freshScreen(loop, call.id)
         val judged = judge(call, tool, screen, card, Verdict.Allow)
         val exhausted = judged.verdict is Verdict.Confirm && reconfirmed >= loop.config.maxReconfirmations
         return if (exhausted) {
@@ -167,15 +168,15 @@ internal sealed interface Ruling {
 }
 
 /**
- * A screen the runtime reads on its own, recorded as `screen/snapshot` under [callId]: `null` for
- * the re-check after approval (a screen only that re-check uses), the handed-off call after a
- * handoff (so it is `PolicyContext.screen` once that call has its result). Returns `null`, recording
- * nothing, when there is no screen port, the surface is unusable, or the read takes longer than
+ * A screen the runtime reads on its own for call [callId] (the re-check after its approval, or
+ * the look after its handoff), recorded as `screen/snapshot` under [callId], so it is
+ * `PolicyContext.screen` once that call has its result. Returns `null`, recording nothing, when
+ * there is no screen port, the surface is unusable, or the read takes longer than
  * [LoopConfig.recheckScreenTimeoutMs].
  */
 internal suspend fun freshScreen(
     loop: LoopContext,
-    callId: ToolCallId? = null,
+    callId: ToolCallId,
 ): ScreenSnapshot? {
     val port = loop.setup.screen ?: return null
     val screen =

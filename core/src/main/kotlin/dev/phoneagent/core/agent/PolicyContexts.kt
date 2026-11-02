@@ -29,11 +29,11 @@ import dev.phoneagent.core.tool.ToolStatus
 /**
  * The screen the policy judges a call on (`PolicyContext.screen`, contracts addendum §14): the
  * newest snapshot recorded by a tool call whose `tool/result` is already in the log (an
- * observation, the screen read back after an action or launch, or the runtime's look after that
- * call's handoff). Runtime observations without a call (the re-check after approval) and those of a
- * call still running do not count. `null` before any screen counts, and after a handoff whose
- * screen could not be read: a `handoff/end` hides every screen before it, since the user may have
- * changed what is shown.
+ * observation, the screen read back after an action or launch, or the runtime's own read for that
+ * call: the re-check after its approval, the look after its handoff). Snapshots of a call still
+ * running, and any without a call, do not count. `null` before any screen counts, and after a
+ * handoff whose screen could not be read: a `handoff/end` hides every screen before it, since the
+ * user may have changed what is shown.
  *
  * This screen can be newer than the one the model saw: a call's result need not show the screen it
  * recorded (an action's read-back, for one). That is deliberate. Judging on the newer screen costs

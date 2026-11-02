@@ -489,11 +489,11 @@ fun interface Chain<I, O> { suspend fun proceed(input: I): O }   // 不调用 pr
 **`requestError` 默认行为**（`RetryInterceptor`）：可重试的错误每个 step 最多重试 5 次；服务端给了 retry-after 就按它等，否则从 500 ms 指数退避到 10 s，一半固定一半随机。retry-after 超过 `maxRetryAfterMs`（默认 60 s，构造时校验）**不重试**，直接按不可重试失败，不会把等待缩短到上限。重试前的等待可以被 steer 打断。
 
 **`toolPreExecute` 与 PolicyEngine**：
-- 拦截器链先跑。PolicyEngine 再用 `IntentResolver` 解析调用，在 `ctx.screen` 上判定。`ctx.screen` 从日志推导：**已经有 `tool/result` 的调用所记录的最近一屏**（包括接管结束后 runtime 记在那个调用名下的一屏，§7.3）；批准后复核读的屏（`callId = null`）不算。`handoff/end` 之前的屏都不算：接管后读不到屏，就是 `screen = null`。
+- 拦截器链先跑。PolicyEngine 再用 `IntentResolver` 解析调用，在 `ctx.screen` 上判定。`ctx.screen` 从日志推导：**已经有 `tool/result` 的调用所记录的最近一屏**（包括 runtime 记在那个调用名下的屏：批准后复核读的屏 S'，以及接管结束后读的屏，§7.3）；还没有结果的调用记的屏、不属于任何调用的屏都不算。`handoff/end` 之前的屏都不算：接管后读不到屏，就是 `screen = null`。
   - 这一屏可能比模型看到的更新：调用的结果不一定把它记录的屏展示给模型（比如动作之后回读的屏）。这样取是有意的：用更新的屏，最坏是带 ref 的调用多一次 stale 拒绝（快照 id 对不上）；如果严格按"模型看到的屏"判，坐标点击会在过期的屏上解析，可能放行一次在当前屏上本该确认的点击。
 - 链和策略的结论取更严的（Refuse > HandOff > Confirm > Allow，平手取策略的）。每个判定都写 `policy/verdict`。
 - Refuse：原因作为结果返回给模型。HandOff：转交给用户。Confirm：显示确认卡。
-- **批准后复核**：runtime 一律尝试读一张新屏 S'（最多等 `LoopConfig.recheckScreenTimeoutMs`，默认 5 s，构造时校验），读到就记成 `screen/snapshot(callId = null)`；以 `approved = card` 重新解析、判定。
+- **批准后复核**：runtime 一律尝试读一张新屏 S'（最多等 `LoopConfig.recheckScreenTimeoutMs`，默认 5 s，构造时校验），读到就记在这个调用名下（`screen/snapshot(callId)`），这个调用有了结果（不论放行、拒绝还是执行完）以后，S' 就是后续调用判定用的 `ctx.screen`；以 `approved = card` 重新解析、判定。
   - 读到了：在 S' 上判定。没有屏幕端口、读失败（`ScreenUnavailableException`）或超时：以 `screen = null` 判定，不报 `ERROR`。没有屏幕能不能放行由 PolicyEngine 决定（WP05：坐标点击、输入、滚动这类写动作一律 Refuse），runtime 不去猜调用依不依赖屏幕；
   - Allow → 执行；
   - Refuse / HandOff → 按对应结局处理；

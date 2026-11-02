@@ -97,7 +97,7 @@ class AgentLoopRecheckTest {
                     .events()
                     .only<ScreenObserved>()
                     .single()
-            assertNull(observed.callId, "a runtime observation the model has not seen")
+            assertEquals(ToolCallId("c1"), observed.callId, "recorded under the call it re-checks")
             assertEquals(
                 2,
                 run.harness
@@ -122,10 +122,11 @@ class AgentLoopRecheckTest {
         }
 
     @Test
-    fun `the policy judges on the newest screen a finished call recorded, the re-check on its own`() =
+    fun `the re-check's screen counts for later calls once its call has a result`() =
         runTest {
-            // look's result shows only text: the policy still judges on the screen it recorded,
-            // which can be newer than what the model saw (PolicyContexts, latestSnapshot).
+            // look's and send's results show only text: the policy still judges on the screen
+            // they recorded, which can be newer than what the model saw (latestSnapshot). The
+            // re-check reads s2 under c1, so c2 is judged on s2, not on c0's s1.
             val policy = ScriptedPolicy(Verdict.Allow, Verdict.Confirm(sendCard))
             val screen = ScriptedScreen(ScriptedScreen.snapshotOf("s1"), ScriptedScreen.snapshotOf("s2"))
             val look =
@@ -147,13 +148,36 @@ class AgentLoopRecheckTest {
             loop.awaitPhase(Phase.Done)
 
             assertEquals(
-                listOf(null, "s1", "s2", "s1"),
+                listOf(null, "s1", "s2", "s2"),
                 policy.contexts.map { it.screen?.id?.value },
-                "nothing recorded yet; what c0 recorded; the re-check's own read; that read does not count after it",
+                "nothing recorded yet; what c0 recorded; the re-check's own read; that read once c1 has its result",
             )
             assertEquals(listOf(null, null, sendCard, null), policy.contexts.map { it.approved })
             val observed = harness.events().only<ScreenObserved>()
-            assertEquals(listOf(ToolCallId("c0"), null), observed.map { it.callId })
+            assertEquals(listOf(ToolCallId("c0"), ToolCallId("c1")), observed.map { it.callId })
+        }
+
+    @Test
+    fun `a call refused on its re-check still leaves the screen it read for the next call`() =
+        runTest {
+            val policy =
+                ScriptedPolicy(Verdict.Confirm(sendCard), Verdict.Refuse("换了联系人", "联系人变了，先 phone_observe"))
+            val screen = ScriptedScreen(ScriptedScreen.snapshotOf("s2"))
+            val model =
+                FakeChatModel()
+                    .calls(call("c1", "send"))
+                    .calls(call("c2", "look-later"))
+                    .answers("ok")
+            val send = FakeTool("send", risk = RiskClass.OUTWARD)
+            val tools = listOf(send, FakeTool("look-later"))
+            val harness = LoopHarness(this, model, tools = tools, policy = policy, screen = screen)
+            val loop = harness.start()
+            loop.followup(text("给小王发消息"))
+            loop.approveNext()
+            loop.awaitPhase(Phase.Done)
+
+            assertTrue(send.calls.isEmpty())
+            assertEquals(listOf(null, "s2", "s2"), policy.contexts.map { it.screen?.id?.value })
         }
 
     @Test
