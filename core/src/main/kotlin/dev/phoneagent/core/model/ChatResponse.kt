@@ -8,7 +8,10 @@ import kotlinx.serialization.json.JsonObject
  * A complete model reply. Refusals and failures are not responses: they are thrown as [ModelError].
  *
  * @property parts reply content: [Part.Text], [Part.ToolCall] and [Part.Reasoning] only.
- * @property stopReason why generation stopped.
+ * @property stopReason why generation stopped. Adapter obligation: a reply that ended normally
+ *   with complete tool calls is [StopReason.TOOL_USE]; an incomplete reply (cut off, or ended for
+ *   a reason the adapter does not map) is [StopReason.MAX_TOKENS] or [StopReason.OTHER], and the
+ *   loop then discards its tool calls.
  * @property usage token counts, or `null` when the provider reported none.
  * @property providerMetadata provider-reported facts that are not model-visible (e.g. response id,
  *   Anthropic `input_transformations`); recorded in the log, never sent back.
@@ -36,13 +39,16 @@ public enum class StopReason {
     /** Finished its turn. */
     END_TURN,
 
-    /** Stopped to have tools run. */
+    /** Stopped to have tools run; the reply's tool calls are complete. */
     TOOL_USE,
 
     /** Hit the output cap; the loop discards tool calls of such a reply (phase1 §3.7). */
     MAX_TOKENS,
 
-    /** Any other provider reason; the adapter keeps the raw value in `providerMetadata`. */
+    /**
+     * Any other provider reason; the adapter keeps the raw value in `providerMetadata`. The loop
+     * treats the reply as incomplete and discards its tool calls.
+     */
     OTHER,
 }
 

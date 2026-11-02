@@ -160,6 +160,20 @@ class ModelContractsTest {
     }
 
     @Test
+    fun `a server delay is never negative`() {
+        val negative =
+            mapOf(
+                "RateLimited" to { ModelError.RateLimited(-1) },
+                "Overloaded" to { ModelError.Overloaded(-1) },
+                "Server" to { ModelError.Server(503, "busy", retryAfterMs = -1) },
+            )
+        negative.forEach { (name, build) -> assertThrows<IllegalArgumentException>(name) { build() } }
+        assertEquals(0L, ModelError.RateLimited(0).retryAfterMs)
+        assertEquals(0L, ModelError.Overloaded(0).retryAfterMs)
+        assertEquals(0L, ModelError.Server(503, "busy", retryAfterMs = 0).retryAfterMs)
+    }
+
+    @Test
     fun `chat model streams deltas before returning`() =
         runTest {
             val model =

@@ -20,8 +20,9 @@ public sealed class ModelError(
 
     /**
      * Delay the server asked for before a retry (`Retry-After`), in milliseconds, or `null` when it
-     * named none. Only [RateLimited], [Overloaded] and [Server] carry one; adapters drop values
-     * they cannot parse or that are negative.
+     * named none; never negative (construction rejects it). Only [RateLimited], [Overloaded] and
+     * [Server] carry one. Adapters turn a value they cannot parse, or a negative one, into `null`:
+     * a bad header is not left to fail construction.
      */
     public open val retryAfterMs: Long? get() = null
 
@@ -56,6 +57,10 @@ public sealed class ModelError(
         /** Server-requested delay, or `null`. */
         override val retryAfterMs: Long?,
     ) : ModelError("rate limited (retry after ${retryAfterMs ?: "?"} ms)") {
+        init {
+            requireDelay(retryAfterMs)
+        }
+
         override val kind: ModelErrorKind get() = ModelErrorKind.RATE_LIMITED
     }
 
@@ -64,6 +69,10 @@ public sealed class ModelError(
         /** Server-requested delay, or `null`. */
         override val retryAfterMs: Long?,
     ) : ModelError("provider overloaded") {
+        init {
+            requireDelay(retryAfterMs)
+        }
+
         override val kind: ModelErrorKind get() = ModelErrorKind.OVERLOADED
     }
 
@@ -115,6 +124,10 @@ public sealed class ModelError(
         /** Server-requested delay, or `null`. */
         override val retryAfterMs: Long? = null,
     ) : ModelError("server error $status: $detail") {
+        init {
+            requireDelay(retryAfterMs)
+        }
+
         override val kind: ModelErrorKind get() = ModelErrorKind.SERVER
     }
 
@@ -125,6 +138,10 @@ public sealed class ModelError(
     ) : ModelError("bad response: $detail", cause) {
         override val kind: ModelErrorKind get() = ModelErrorKind.BAD_RESPONSE
     }
+}
+
+private fun requireDelay(retryAfterMs: Long?) {
+    require(retryAfterMs == null || retryAfterMs >= 0) { "retryAfterMs must be >= 0, got $retryAfterMs" }
 }
 
 /** Stable codes of [ModelError] subclasses, one each; [retryable] is the default retry policy. */
