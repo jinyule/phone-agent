@@ -283,6 +283,15 @@ class EntryLevelsTest {
         field.text = "Search"
         assertEquals("a hint is not content", TextEntry.Shown.Text(""), TextEntry.read(field))
 
+        field.isPassword = true
+        field.isShowingHintText = true
+        field.text = "Password"
+        assertEquals("a password field showing its hint is empty", TextEntry.Shown.Text(""), TextEntry.read(field))
+        field.isShowingHintText = false
+        field.hintText = null
+        field.text = "••••"
+        assertEquals(TextEntry.Shown.Text("••••"), TextEntry.read(field))
+
         org.robolectric.Shadows
             .shadowOf(field)
             .setRefreshReturnValue(false)

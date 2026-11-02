@@ -24,7 +24,8 @@ import org.junit.runner.RunWith
 import org.robolectric.Shadows.shadowOf
 
 /**
- * What typing reports when the field does not end up showing the request (fix list r1 B5).
+ * What typing reports when the field does not end up showing the request (fix list r1 B5) and how
+ * password fields are appended to (B7).
  */
 @RunWith(AndroidJUnit4::class)
 class TypingOutcomeTest {
@@ -135,5 +136,36 @@ class TypingOutcomeTest {
             assertEquals(ActionOutcome.Status.Ok, outcome.status)
             assertEquals(listOf("hunter2"), setTexts(field))
             assertTrue(AccessibilityAction.ACTION_IME_ENTER.id in field.log.ids)
+        }
+
+    @Test
+    fun appendingToAMaskedPasswordNeverSendsTheMask() =
+        runTest {
+            // Claude r1 p4 / Codex r1 B7.
+            val field =
+                field {
+                    isPassword = true
+                    text = "••••"
+                }
+
+            val outcome = typeInto(field, UiAction.Type(Target.Point(500, 125), "abc", append = true))
+
+            assertTrue(setTexts(field).none { it.contains("•") })
+            assertEquals(ActionOutcome.Status.Failed("a password field can only be typed as a whole"), outcome.status)
+        }
+
+    @Test
+    fun appendingToAnEmptyPasswordFieldIgnoresItsHint() =
+        runTest {
+            val field =
+                field {
+                    isPassword = true
+                    text = "Password"
+                    isShowingHintText = true
+                }
+
+            typeInto(field, UiAction.Type(Target.Point(500, 125), "abc", append = true))
+
+            assertEquals(listOf("abc"), setTexts(field))
         }
 }

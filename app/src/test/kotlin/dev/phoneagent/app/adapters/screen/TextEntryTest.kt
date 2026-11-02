@@ -243,4 +243,62 @@ class TextEntryTest {
         assertEquals("nope", Result.NotEntered("nope").explain(submitRequested = true))
         assertFalse(TextEntry.matches("1,000", "1000"))
     }
+
+    @Test
+    fun appendingToAPasswordGoesOnlyThroughTheInputConnection() =
+        runTest {
+            val field = Field("••••")
+            val levels =
+                listOf(
+                    field.level(Level.SET_TEXT, Sent.Delivered, writes = "••••••••"),
+                    field.level(Level.IME_CONNECTION, Sent.Delivered),
+                    field.level(Level.PASTE, Sent.Delivered),
+                )
+
+            val result =
+                TextEntry.enter(
+                    request("abc", before = "••••", append = true),
+                    secret = true,
+                    levels,
+                    field.read,
+                )
+
+            assertEquals(Result.Entered(Level.IME_CONNECTION, confirmed = false), result)
+            assertEquals(listOf("IME_CONNECTION"), field.log)
+        }
+
+    @Test
+    fun aPasswordThatCannotBeAppendedToIsNotReplacedEither() =
+        runTest {
+            for (before in listOf("••••", null)) {
+                val field = Field(before)
+                val levels =
+                    listOf(
+                        field.level(Level.SET_TEXT, Sent.Delivered),
+                        field.level(Level.IME_CONNECTION, Sent.Skipped("cannot place the cursor")),
+                    )
+
+                val result =
+                    TextEntry.enter(
+                        request("abc", before = before, append = true),
+                        secret = true,
+                        levels,
+                        field.read,
+                    )
+
+                assertEquals("$before", Result.NotEntered(TextEntry.WHOLE_PASSWORD), result)
+                assertEquals(listOf("IME_CONNECTION"), field.log)
+            }
+        }
+
+    @Test
+    fun anEmptyPasswordIsAppendedToLikeAnyField() =
+        runTest {
+            val field = Field("")
+            val levels = listOf(field.level(Level.SET_TEXT, Sent.Delivered))
+
+            val result = TextEntry.enter(request("abc", before = "", append = true), secret = true, levels, field.read)
+
+            assertEquals(Result.Entered(Level.SET_TEXT, confirmed = false), result)
+        }
 }

@@ -112,6 +112,9 @@ internal object TextEntry {
         }
     }
 
+    /** Why appending to a non-empty password field failed, for the model. */
+    const val WHOLE_PASSWORD: String = "a password field can only be typed as a whole"
+
     /** Longest read-back quoted to the model. */
     const val MAX_QUOTED: Int = 200
 
@@ -130,8 +133,13 @@ internal object TextEntry {
         levels: List<Pair<Level, Attempt>>,
         read: suspend (settle: Boolean) -> Shown,
     ): Result {
+        // A password field shows a mask (or nothing): SET_TEXT and paste would write the mask back
+        // or replace the password, so appending goes only through the input connection, which
+        // types at a confirmed cursor.
+        val maskedAppend = secret && request.append && request.before != ""
+        val usable = if (maskedAppend) levels.filter { it.first == Level.IME_CONNECTION } else levels
         val skipped = ArrayList<String>()
-        for ((level, attempt) in levels) {
+        for ((level, attempt) in usable) {
             val result =
                 when (val sent = attempt.send(request)) {
                     is Sent.Skipped -> {
@@ -157,7 +165,7 @@ internal object TextEntry {
             if (result != null) return result
         }
         val detail = if (skipped.isEmpty()) "" else " (${skipped.joinToString("; ")})"
-        return Result.NotEntered("the field did not accept the text$detail")
+        return Result.NotEntered(if (maskedAppend) WHOLE_PASSWORD else "the field did not accept the text$detail")
     }
 
     /**
@@ -203,10 +211,17 @@ internal object TextEntry {
             }
         }
 
-    /** What [field] shows now, refreshing it first. */
+    /** What [field] shows now, refreshing it first; a password field's mask, empty while it shows its hint. */
     fun read(field: AccessibilityNodeInfo): Shown {
         if (!field.refresh()) return Shown.Gone
-        return Shown.Text(if (field.isPassword) field.text?.toString() else NodeText.fieldText(field))
+        return Shown.Text(if (field.isPassword) maskOf(field) else NodeText.fieldText(field))
+    }
+
+    private fun maskOf(field: AccessibilityNodeInfo): String? {
+        val text = field.text?.toString()
+        val hint = field.hintText?.toString()?.trim()
+        val showsHint = field.isShowingHintText || (!hint.isNullOrEmpty() && text?.trim() == hint)
+        return if (showsHint) "" else text
     }
 }
 
