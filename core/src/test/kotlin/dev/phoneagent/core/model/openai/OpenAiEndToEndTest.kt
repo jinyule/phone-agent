@@ -102,10 +102,9 @@ class OpenAiEndToEndTest {
                 "e2e: $label model=${model.info.model} stop=${reply.stopReason} usage=${reply.usage} " +
                     "calls=${reply.toolCalls.size}",
             )
-            assertEquals(
-                reply.parts.filterIsInstance<Part.Text>().joinToString("") { it.text },
-                deltas.text,
-                "deltas add up",
+            assertTrue(
+                reply.parts.filterIsInstance<Part.Text>().joinToString("") { it.text } == deltas.text,
+                "deltas add up (values not shown)",
             )
             return reply to deltas
         } catch (e: ModelError) {
@@ -128,7 +127,7 @@ class OpenAiEndToEndTest {
             val request = Kit.request(Kit.user("Reply with the single word: pong"), tools = emptyList())
             val (reply, deltas) = call("$protocol text", chatModel(protocol), request)
             assertEquals(StopReason.END_TURN, reply.stopReason)
-            assertTrue(deltas.text.lowercase(Locale.ROOT).contains("pong"), deltas.text)
+            assertTrue(deltas.text.lowercase(Locale.ROOT).contains("pong"), "the answer says pong (value not shown)")
             assertTrue(deltas.all.count { it is Delta.Text } >= 1)
         }
 
@@ -139,9 +138,10 @@ class OpenAiEndToEndTest {
             val (first, deltas) = call("$protocol tool call", model, Kit.request(ask))
             assertEquals(StopReason.TOOL_USE, first.stopReason)
             val call = first.toolCalls.single()
-            assertEquals("get_weather", call.name)
-            assertEquals(JsonPrimitive("Paris"), (Json.parseToJsonElement(call.argsJson) as JsonObject)["city"])
-            assertEquals(call.argsJson, deltas.args(call.id))
+            assertTrue(call.name == "get_weather", "the weather tool is called (name not shown)")
+            val city = (Json.parseToJsonElement(call.argsJson) as? JsonObject)?.get("city")
+            assertTrue(city == JsonPrimitive("Paris"), "the city is Paris (arguments not shown)")
+            assertTrue(call.argsJson == deltas.args(call.id), "argument deltas add up (values not shown)")
             val result = Part.ToolResult(call.id, listOf(Part.Text("Sunny, 21 °C.")), isError = false)
             val followUp = Kit.request(ask, Message(Role.ASSISTANT, first.parts), Message(Role.TOOL, listOf(result)))
             val (second, _) = call("$protocol tool result", model, followUp)
@@ -151,6 +151,7 @@ class OpenAiEndToEndTest {
                     .filterIsInstance<Part.Text>()
                     .joinToString()
                     .contains("21"),
+                "the answer uses the tool result (value not shown)",
             )
         }
 
@@ -187,7 +188,7 @@ class OpenAiEndToEndTest {
                     .joinToString()
                     .lowercase(Locale.ROOT)
                     .contains(name),
-                redact(reply.toString()),
+                "the answer names the colour (value not shown)",
             )
         }
 

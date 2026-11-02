@@ -105,7 +105,7 @@ internal class ResponsesStream(
 
                 else -> StopReason.END_TURN
             }
-        val meta = ResponsesOutput.metadata(response, reason, diverged)
+        val meta = ResponsesOutput.metadata(response, reason, diverged, redactor)
         return ChatResponse(parts, stop, ResponsesOutput.usage(response), meta)
     }
 
@@ -351,18 +351,22 @@ internal object ResponsesOutput {
         }
     }
 
-    /** Response id, reported model, status, incomplete reason and contradicted delta channels, for the log. */
+    /**
+     * Response id, reported model, status, incomplete reason and contradicted delta channels, for
+     * the log; the provider's strings masked with [redactor].
+     */
     fun metadata(
         response: JsonObject,
         incompleteReason: String?,
         diverged: List<String>,
+        redactor: Redactor,
     ): JsonObject? {
         val meta =
             buildJsonObject {
-                response.str("id")?.let { put("id", it) }
-                response.str("model")?.let { put("model", it) }
-                response.str("status")?.let { put("status", it) }
-                incompleteReason?.let { put("incomplete_reason", it) }
+                response.str("id")?.let { put("id", redactor.text(it)) }
+                response.str("model")?.let { put("model", redactor.text(it)) }
+                response.str("status")?.let { put("status", redactor.text(it)) }
+                incompleteReason?.let { put("incomplete_reason", redactor.text(it)) }
                 if (diverged.isNotEmpty()) putJsonArray(PREVIEW_DIVERGED) { diverged.forEach { add(it) } }
             }
         return meta.takeIf { it.isNotEmpty() }

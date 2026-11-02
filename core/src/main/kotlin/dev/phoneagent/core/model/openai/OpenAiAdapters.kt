@@ -63,9 +63,17 @@ public class OpenAiAdapters internal constructor(
         capabilities: ModelCapabilities,
         blobs: BlobSource,
         wire: WireOptions = WireOptions.defaultsFor(profile),
-    ): ChatModel {
-        val info = ModelInfo(profile.id, model, profile.protocol, capabilities)
-        return when (profile.protocol) {
+    ): ChatModel = model(profile, ModelInfo(profile.id, model, profile.protocol, capabilities), blobs, wire, env)
+
+    /** The model [info] describes, on [env] (the probe's records the secrets it hands out). */
+    internal fun model(
+        profile: ProviderProfile,
+        info: ModelInfo,
+        blobs: BlobSource,
+        wire: WireOptions,
+        env: AdapterEnv,
+    ): ChatModel =
+        when (profile.protocol) {
             ModelProtocol.OPENAI_CHAT_COMPLETIONS -> {
                 ChatCompletionsModel(profile, info, wire, blobs, env)
             }
@@ -78,7 +86,6 @@ public class OpenAiAdapters internal constructor(
                 throw IllegalArgumentException("Provider ${profile.id}: Anthropic Messages is not an OpenAI protocol")
             }
         }
-    }
 
     /** "Test and save" for profiles of these protocols (model-layer §4.1). */
     public fun probe(): ProviderProbe = ProviderProbe(this)
@@ -127,6 +134,14 @@ internal class AdapterEnv(
     val clock: Clock,
     val newCallId: () -> String,
 ) {
+    /** This env, also handing every secret it gives out to [seen] (as sent: trimmed). */
+    fun observed(seen: (String) -> Unit): AdapterEnv {
+        val inner = credentials
+        val recording =
+            CredentialResolver { credential, rejected -> inner.secret(credential, rejected)?.also { seen(it.trim()) } }
+        return AdapterEnv(transport, recording, clock, newCallId)
+    }
+
     /** The secret for [credential]; refuses values HTTP headers cannot carry (without echoing them). */
     suspend fun secret(
         credential: Credential,

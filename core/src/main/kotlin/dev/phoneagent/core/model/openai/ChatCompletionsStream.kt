@@ -38,7 +38,7 @@ import kotlinx.serialization.json.putJsonArray
  * calls is recovered at the end ([LeakedToolMarkup]); the preview deltas then hold back text that
  * may still be such markup, and the end shows what they missed ([DeltaLedger.catchUp]).
  *
- * @param redactor masks credentials in provider text that goes into errors.
+ * @param redactor masks credentials in provider text that goes into errors and the reply metadata.
  */
 internal class ChatCompletionsStream(
     private val provider: ProviderId,
@@ -95,7 +95,7 @@ internal class ChatCompletionsStream(
                 addAll(toolCalls)
             }
         val diverged = ledger.catchUp(parts)
-        val meta = metadata(responseId, reportedModel, reason, recovered.map { it.id }, diverged)
+        val meta = metadata(responseId, reportedModel, reason?.let(redactor::text), recovered.map { it.id }, diverged)
         return ChatResponse(parts, stopReason(reason, toolCalls.isNotEmpty()), usage, meta)
     }
 
@@ -128,8 +128,8 @@ internal class ChatCompletionsStream(
             throw ProviderErrors.fromStream(ProviderError.of(root, redactor), plan = false)
         }
         chunks++
-        responseId = responseId ?: root.str("id")?.takeIf { it.isNotEmpty() }
-        reportedModel = reportedModel ?: root.str("model")?.takeIf { it.isNotEmpty() }
+        responseId = responseId ?: root.str("id")?.takeIf { it.isNotEmpty() }?.let(redactor::text)
+        reportedModel = reportedModel ?: root.str("model")?.takeIf { it.isNotEmpty() }?.let(redactor::text)
         val choice = root.array("choices")?.firstOrNull() as? JsonObject
         (usageOf(root.obj("usage")) ?: usageOf(choice?.obj("usage")))?.let { usage = it }
         choice?.str("finish_reason")?.takeIf { it.isNotEmpty() }?.let { finishReason = it }

@@ -9,6 +9,7 @@ import dev.phoneagent.core.model.Message
 import dev.phoneagent.core.model.ModelCapabilities
 import dev.phoneagent.core.model.ModelError
 import dev.phoneagent.core.model.ModelErrorKind
+import dev.phoneagent.core.model.ModelInfo
 import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.PromptBlock
@@ -35,6 +36,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.io.IOException
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * "Test and save" for OpenAI-style providers (model-layer §4.1): list the models, then let the
@@ -52,8 +54,12 @@ public class ProviderProbe internal constructor(
      * tool call step still checks the address. Throws [ModelError] for every other failure, and
      * [IllegalArgumentException] for header values that are not valid HTTP.
      */
-    public suspend fun listModels(profile: ProviderProfile): List<ListedModel>? {
-        val env = adapters.env
+    public suspend fun listModels(profile: ProviderProfile): List<ListedModel>? = listModels(profile, adapters.env)
+
+    private suspend fun listModels(
+        profile: ProviderProfile,
+        env: AdapterEnv,
+    ): List<ListedModel>? {
         val url = "${profile.baseUrl}/models".toHttpUrl()
         val headers = profile.httpHeaders()
         val secret = env.secret(profile.credential, rejected = false)
@@ -92,21 +98,29 @@ public class ProviderProbe internal constructor(
         token: String = "pa-" + UUID.randomUUID().toString().take(TOKEN_LENGTH),
         wire: WireOptions = WireOptions.defaultsFor(profile),
     ): ProbeResult {
+        // Every secret this run's requests used: what the results must not show.
+        val secrets = CopyOnWriteArrayList<String>()
+        val env = adapters.env.observed(secrets::add)
         val models =
             try {
-                listModels(profile)
+                listModels(profile, env)
             } catch (e: ModelError) {
-                return ProbeResult.Failed(ProbeStep.LIST_MODELS, e.kind, masked(e.message.orEmpty()))
+                return ProbeResult.Failed(ProbeStep.LIST_MODELS, e.kind, Redactor(secrets).text(e.message.orEmpty()))
             }
-        return Trial(profile, candidate, capabilities, token).run(models, wire)
+        return Trial(profile, candidate, capabilities, token, env, secrets).run(models, wire)
     }
 
-    /** The trial call of one "test and save", with the negotiation of optional fields. */
+    /**
+     * The trial call of one "test and save", with the negotiation of optional fields. Its results
+     * mask the [secrets] the run sent.
+     */
     private inner class Trial(
         val profile: ProviderProfile,
         val candidate: ModelId,
         val capabilities: ModelCapabilities,
         val token: String,
+        val env: AdapterEnv,
+        val secrets: List<String>,
     ) {
         suspend fun run(
             models: List<ListedModel>?,
@@ -119,10 +133,10 @@ public class ProviderProbe internal constructor(
                         adapters
                             .model(
                                 profile,
-                                candidate,
-                                capabilities,
+                                ModelInfo(profile.id, candidate, profile.protocol, capabilities),
                                 NO_IMAGES,
                                 options,
+                                env,
                             ).complete(trialRequest(token))
                     } catch (e: ModelError) {
                         options = WireNegotiation.without(options, profile.protocol, e) ?: return failed(e)
@@ -133,17 +147,17 @@ public class ProviderProbe internal constructor(
         }
 
         private fun failed(error: ModelError): ProbeResult =
-            ProbeResult.Failed(ProbeStep.TOOL_CALL, error.kind, masked(error.message.orEmpty()))
+            ProbeResult.Failed(ProbeStep.TOOL_CALL, error.kind, Redactor(secrets).text(error.message.orEmpty()))
 
         private fun result(
             reply: ChatResponse,
             models: List<ListedModel>?,
             wire: WireOptions,
         ): ProbeResult {
-            val problem = checkTrialCall(reply, token)
+            val problem = checkTrialCall(reply, token, Redactor(secrets))
             val verified =
                 capabilities.copy(tools = true, verified = capabilities.verified + VerifiedCapability.TOOL_CALL)
-            return problem?.let { ProbeResult.Failed(ProbeStep.TOOL_CALL, null, masked(it)) }
+            return problem?.let { ProbeResult.Failed(ProbeStep.TOOL_CALL, null, it) }
                 ?: ProbeResult.Passed(models, verified, models?.any { it.id == candidate }, wire)
         }
     }
@@ -164,13 +178,19 @@ public class ProviderProbe internal constructor(
         val entries =
             root?.array("data") ?: root?.array("models") ?: throw ModelError.BadResponse("model list has no data array")
         return entries
-            .mapNotNull { (it as? JsonObject)?.let(::listed) }
+            .mapNotNull { entry -> (entry as? JsonObject)?.let { listed(it, redactor) } }
             .distinctBy { it.id }
     }
 
-    /** One listing entry; ids that are not usable model ids are skipped. */
-    private fun listed(entry: JsonObject): ListedModel? {
-        val id = (entry.str("id") ?: entry.str("slug"))?.takeIf { it.isNotBlank() && it.length <= MAX_ID }
+    /** One listing entry, its id masked; ids that are not usable model ids are skipped. */
+    private fun listed(
+        entry: JsonObject,
+        redactor: Redactor,
+    ): ListedModel? {
+        val id =
+            (entry.str("id") ?: entry.str("slug"))
+                ?.let(redactor::text)
+                ?.takeIf { it.isNotBlank() && it.length <= MAX_ID }
         id ?: return null
         val modalities =
             entry
@@ -190,12 +210,15 @@ public class ProviderProbe internal constructor(
      * Why [reply] is not the expected trial call, or `null` when it is. Only a reply that finished
      * as a tool step ([StopReason.TOOL_USE]) verifies anything: one cut at the output limit or
      * left incomplete fails even with the right call. A call recovered from the answer text does
-     * not count either: the provider's tool channel is what is being verified.
+     * not count either: the provider's tool channel is what is being verified. What it quotes
+     * from the reply is masked with [redactor], then cut.
      */
     private fun checkTrialCall(
         reply: ChatResponse,
         token: String,
+        redactor: Redactor,
     ): String? {
+        fun quote(text: String) = redactor.text(text).take(SNIPPET)
         val call = reply.toolCalls.firstOrNull { it.name == TRIAL_TOOL }
         val stop = reply.stopReason
         return when {
@@ -205,10 +228,7 @@ public class ProviderProbe internal constructor(
 
             call == null -> {
                 "the model answered without calling the trial tool: " +
-                    reply.parts
-                        .filterIsInstance<Part.Text>()
-                        .joinToString(" ") { it.text }
-                        .take(SNIPPET)
+                    quote(reply.parts.filterIsInstance<Part.Text>().joinToString(" ") { it.text })
             }
 
             reply.providerMetadata?.array(RECOVERED_TOOL_CALLS)?.contains(JsonPrimitive(call.id.value)) == true -> {
@@ -220,7 +240,7 @@ public class ProviderProbe internal constructor(
             }
 
             else -> {
-                "the trial tool got unexpected arguments: ${call.argsJson.take(SNIPPET)}"
+                "the trial tool got unexpected arguments: ${quote(call.argsJson)}"
             }
         }
     }
@@ -255,12 +275,6 @@ public class ProviderProbe internal constructor(
 }
 
 private val NO_LISTING = setOf(404, 405, 501)
-
-/**
- * Probe messages quote model output and errors; errors are already masked with the request's
- * secrets, so a second pass for credential-shaped text is all that is left.
- */
-private fun masked(message: String): String = Redactor.SHAPES_ONLY.text(message)
 
 private val TRIAL_SCHEMA: JsonObject =
     buildJsonObject {

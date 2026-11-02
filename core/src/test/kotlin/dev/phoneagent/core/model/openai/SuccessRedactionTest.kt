@@ -1,0 +1,136 @@
+package dev.phoneagent.core.model.openai
+
+import dev.phoneagent.core.model.ModelProtocol
+import dev.phoneagent.core.model.openai.Kit.base
+import dev.phoneagent.core.model.openai.Kit.enqueueError
+import dev.phoneagent.core.model.openai.Kit.enqueueSse
+import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.JsonPrimitive
+import mockwebserver3.MockResponse
+import mockwebserver3.MockWebServer
+import mockwebserver3.junit5.StartStop
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+
+/**
+ * What a provider echoes back in a reply that succeeds is masked too (model-layer §2): probe
+ * diagnostics, listed model ids and the reply metadata the log keeps. The secret here has no
+ * credential shape, so only a redactor that knows the request's secret can mask it; text is masked
+ * before it is cut, so no prefix of the secret survives a cut. Assertions never print the secret.
+ */
+class SuccessRedactionTest {
+    @StartStop
+    private val server = MockWebServer()
+
+    private val adapters get() = Kit.adapters(Keys(ECHOED))
+
+    private fun assertClean(
+        what: String,
+        text: String,
+    ) {
+        assertFalse(text.contains(ECHOED.take(PREFIX)), "$what leaks the secret or a prefix of it (value not shown)")
+    }
+
+    private fun trialCall(args: String) =
+        Kit.sse(
+            """{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_t","function":""" +
+                """{"name":"confirm_connection","arguments":${JsonPrimitive(args)}}}]}}]}""",
+            """{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}""",
+        )
+
+    @Test
+    fun `trial arguments echoing the key are masked before they are cut`() =
+        runTest {
+            // The cut of the quoted arguments falls inside the secret.
+            val args = "{\"token\":\"" + "x".repeat(PAD) + ECHOED + "\"}"
+            server.enqueueError(404, "{}")
+            server.enqueueSse(trialCall(args))
+            val result = adapters.probe().testAndSave(Kit.profile(server.base()), Kit.MODEL, Kit.capabilities(), "t")
+            assertTrue(result is ProbeResult.Failed, "the trial fails")
+            assertClean("the probe result", result.toString())
+        }
+
+    @Test
+    fun `an answer echoing the key is masked in the probe diagnosis`() =
+        runTest {
+            server.enqueueError(404, "{}")
+            server.enqueueSse(
+                Kit.sse(
+                    """{"choices":[{"index":0,"delta":{"content":"Your key is $ECHOED."}}]}""",
+                    """{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}""",
+                ),
+            )
+            val result = adapters.probe().testAndSave(Kit.profile(server.base()), Kit.MODEL, Kit.capabilities(), "t")
+            assertTrue(result is ProbeResult.Failed, "the trial fails")
+            assertClean("the probe result", result.toString())
+        }
+
+    @Test
+    fun `listed model ids echoing the key are masked`() =
+        runTest {
+            val listing = """{"data":[{"id":"$ECHOED"},{"id":"m/$ECHOED"},{"id":"${Kit.MODEL.value}"}]}"""
+            server.enqueue(MockResponse.Builder().body(listing).build())
+            val models = adapters.probe().listModels(Kit.profile(server.base()))
+            assertClean("the listing", models.toString())
+            assertTrue(models.orEmpty().any { it.id == Kit.MODEL }, "ordinary ids stay")
+            server.enqueue(MockResponse.Builder().body(listing).build())
+            server.enqueueSse(trialCall("{\"token\":\"t\"}"))
+            val result = adapters.probe().testAndSave(Kit.profile(server.base()), Kit.MODEL, Kit.capabilities(), "t")
+            assertTrue(result is ProbeResult.Passed, "the trial passes")
+            assertClean("the probe result", result.toString())
+        }
+
+    @Test
+    fun `Chat reply metadata echoing the key is masked`() =
+        runTest {
+            server.enqueueSse(
+                Kit.sse(
+                    """{"id":"$ECHOED","model":"m/$ECHOED","choices":[{"index":0,"delta":{"content":"hi"}}]}""",
+                    """{"choices":[{"index":0,"delta":{},"finish_reason":"$ECHOED"}]}""",
+                ),
+            )
+            val profile = Kit.profile(server.base())
+            val model =
+                adapters.model(
+                    profile,
+                    Kit.MODEL,
+                    Kit.capabilities(),
+                    Kit.blobs(),
+                    WireOptions.defaultsFor(profile),
+                )
+            val reply = model.complete(Kit.request())
+            assertTrue(reply.providerMetadata != null, "metadata is kept")
+            assertClean("the metadata", reply.providerMetadata.toString())
+        }
+
+    @Test
+    fun `Responses reply metadata echoing the key is masked`() =
+        runTest {
+            server.enqueueSse(
+                "data: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"$ECHOED\",\"model\":\"m/$ECHOED\"," +
+                    "\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"$ECHOED\"},\"output\":[]}}\n\n",
+            )
+            val profile = Kit.profile(server.base(), protocol = ModelProtocol.OPENAI_RESPONSES)
+            val model =
+                adapters.model(
+                    profile,
+                    Kit.MODEL,
+                    Kit.capabilities(),
+                    Kit.blobs(),
+                    WireOptions.defaultsFor(profile),
+                )
+            val reply = model.complete(Kit.request())
+            assertTrue(reply.providerMetadata != null, "metadata is kept")
+            assertClean("the metadata", reply.providerMetadata.toString())
+        }
+
+    private companion object {
+        /** A placeholder secret without a credential shape. */
+        const val ECHOED = "plain-placeholder-0001"
+        const val PREFIX = 8
+
+        /** Probe snippets are 300 characters; `{"token":"` is 10. */
+        const val PAD = 300 - 10 - PREFIX
+    }
+}
