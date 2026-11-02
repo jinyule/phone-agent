@@ -44,14 +44,16 @@ import java.io.File
 /**
  * The accessibility ScreenPort against the real Settings app on the main display.
  *
- * Needs the service enabled first (it runs in the app process, so it is bound again after
- * `am instrument` restarts the process):
+ * Run with both APKs installed:
  * ```
- * adb -s <device> shell settings put secure enabled_accessibility_services \
- *     dev.phoneagent/dev.phoneagent.app.service.AgentAccessibilityService
  * adb -s <device> shell am instrument -w -e class dev.phoneagent.app.adapters.screen.AndroidScreenDeviceTest \
  *     dev.phoneagent.test/androidx.test.runner.AndroidJUnitRunner
  * ```
+ * The test turns on this app's accessibility service itself and touches no other: it reads
+ * `enabled_accessibility_services`, takes only this app's component out and puts it back (which
+ * binds it in the instrumented process), and afterwards restores the value it read, also when
+ * connecting fails. Check with `adb -s <device> shell settings get secure enabled_accessibility_services`.
+ *
  * Results are logged under tag `WP07`; the frame is written to the app's files dir as `wp07-frame.jpg`.
  */
 @RunWith(AndroidJUnit4::class)
@@ -65,10 +67,6 @@ class AndroidScreenDeviceTest {
             system = system,
             analyzer = TemporarySnapshotAnalyzer,
         )
-
-    private fun log(message: String) {
-        Log.i(TAG, message)
-    }
 
     private fun describe(snapshot: ScreenSnapshot?): String =
         if (snapshot == null) {
@@ -352,27 +350,73 @@ class AndroidScreenDeviceTest {
         private const val CONNECT_TIMEOUT_MS = 20_000L
 
         private const val SERVICE = "dev.phoneagent/dev.phoneagent.app.service.AgentAccessibilityService"
+        private const val ENABLED = "enabled_accessibility_services"
+
+        /** The enabled services as found before the run (`null`: the setting was unset); restored afterwards. */
+        private var found: String? = null
+        private var toRestore = false
 
         /**
          * `am instrument` force-stops the app, which the system records as a crash of its
-         * accessibility service and does not rebind. Turning the service off and on again binds it
-         * in this (instrumented) process. The UiAutomation must not suppress accessibility services.
+         * accessibility service and does not rebind. Taking only this app's service out and putting
+         * it back binds it in this (instrumented) process; other services keep their place. The
+         * UiAutomation must not suppress accessibility services.
          */
         @JvmStatic
         @BeforeClass
         fun connectTheService() {
-            if (AgentAccessibility.host.value == null) {
-                shell("settings delete secure enabled_accessibility_services")
-                shell("settings put secure enabled_accessibility_services $SERVICE")
+            found = shell("settings get secure $ENABLED").trim().takeUnless { it.isEmpty() || it == "null" }
+            toRestore = true
+            log("enabled accessibility services before the run: $found")
+            var connected = false
+            try {
+                if (AgentAccessibility.host.value == null) {
+                    val others = found?.split(':')?.filter { it.isNotBlank() && it != SERVICE }.orEmpty()
+                    putServices(others)
+                    putServices(others + SERVICE)
+                }
+                runBlocking { withTimeout(CONNECT_TIMEOUT_MS) { AgentAccessibility.host.first { it != null } } }
+                connected = true
+            } finally {
+                if (!connected) restoreServices()
             }
-            runBlocking { withTimeout(CONNECT_TIMEOUT_MS) { AgentAccessibility.host.first { it != null } } }
         }
 
-        /** Leaves the device on the launcher; the port refuses keys on this app's own screens. */
+        /**
+         * Leaves the device on the launcher (the port refuses keys on this app's own screens) and
+         * the enabled services as they were found.
+         */
         @JvmStatic
         @AfterClass
-        fun goHome() {
+        fun leaveTheDeviceAsFound() {
             shell("input keyevent KEYCODE_HOME")
+            restoreServices()
+        }
+
+        private fun putServices(services: List<String>) {
+            if (services.isEmpty()) {
+                shell("settings delete secure $ENABLED")
+            } else {
+                shell("settings put secure $ENABLED ${services.joinToString(":")}")
+            }
+        }
+
+        private fun restoreServices() {
+            if (!toRestore) return
+            toRestore = false
+            val value = found
+            if (value ==
+                null
+            ) {
+                shell("settings delete secure $ENABLED")
+            } else {
+                shell("settings put secure $ENABLED $value")
+            }
+            log("enabled accessibility services restored to: ${shell("settings get secure $ENABLED").trim()}")
+        }
+
+        private fun log(message: String) {
+            Log.i(TAG, message)
         }
 
         /** Runs [command] as the shell user; returns its output. Keeps accessibility services running. */
