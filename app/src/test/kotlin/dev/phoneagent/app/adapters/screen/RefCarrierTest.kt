@@ -165,6 +165,48 @@ class RefCarrierTest {
         assertEquals(ElementRef("e3"), second.tree[1].parent)
     }
 
+    /** An "OK" outside any row, with [around] the labels around it (`null`: nothing around it). */
+    private fun ok(around: List<String>?): TreeBuilder =
+        TreeBuilder().apply { add("OK", top = 100, role = ElementRole.BUTTON, more = More(around = around)) }
+
+    private fun ok(vararg around: String): TreeBuilder = ok(around.toList())
+
+    @Test
+    fun anElementInNoRowKeepsItsRefWhileTheLabelsAroundItFit() {
+        val first = first(ok("Delete Ada?", "OK"))
+
+        assertEquals("a line came", first.refs, first.then(ok("Delete Ada?", "Undo is not possible", "OK")).refs)
+        assertEquals("a line went", first.refs, first.then(ok("OK")).refs)
+        assertEquals("nothing around it now", first.refs, first.then(ok(null)).refs)
+        assertNotEquals("a line replaced", first.refs, first.then(ok("Delete Bob?", "OK")).refs)
+    }
+
+    @Test
+    fun anElementThatHadNothingAroundItIsComparedByItselfOnly() {
+        val first = first(ok(null))
+
+        assertEquals(first.refs, first.then(ok("Delete Bob?", "OK")).refs)
+    }
+
+    @Test
+    fun anUnreliableElementNeitherGivesNorTakesARef() {
+        val first = first(likes(100))
+
+        val unreliable =
+            TreeBuilder().apply {
+                add(
+                    "Like",
+                    100,
+                    role = ElementRole.BUTTON,
+                    more = More(reliable = false),
+                )
+            }
+        val second = first.then(unreliable)
+
+        assertNotEquals(first.refs, second.refs)
+        assertNotEquals("nor is it found again", second.refs, second.then(likes(100)).refs)
+    }
+
     @Test
     fun newRefsStayAboveEverythingHandedOutBefore() {
         val carried = RefCarrier.carry(previous = null, chats().elements, lastUsed = 41)

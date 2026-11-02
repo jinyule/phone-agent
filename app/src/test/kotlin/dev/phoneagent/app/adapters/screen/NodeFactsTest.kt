@@ -6,10 +6,13 @@ import android.view.accessibility.AccessibilityNodeInfo.RangeInfo
 import android.widget.TextView
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import dev.phoneagent.app.adapters.screen.Identities.ListKind
 import dev.phoneagent.core.ports.ElementRole
 import dev.phoneagent.core.ports.ElementState
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -84,6 +87,40 @@ class NodeFactsTest {
         assertEquals("42%", NodeText.valueOf(percent, ElementRole.OTHER))
         assertEquals("3", NodeText.valueOf(count, ElementRole.OTHER))
     }
+
+    private fun shapeOf(
+        className: String,
+        setup: AccessibilityNodeInfo.() -> Unit = {},
+    ): Identities.Shape {
+        val node = node(className, box, setup = setup)
+        return NodeFacts.shapeOf(node, NodeFacts.roleOf(node))
+    }
+
+    @Test
+    fun adapterViewsHoldItemsScrollViewsWrapThemAndOtherListsHoldThem() {
+        assertEquals(ListKind.COLLECTION, shapeOf("androidx.recyclerview.widget.RecyclerView").list)
+        assertEquals(ListKind.COLLECTION, shapeOf("androidx.viewpager2.widget.ViewPager2") { isScrollable = true }.list)
+        assertEquals(
+            ListKind.COLLECTION,
+            shapeOf("android.view.View") { collectionInfo = AccessibilityNodeInfo.CollectionInfo(3, 1, false) }.list,
+        )
+        assertEquals(ListKind.WRAPPED, shapeOf("android.widget.ScrollView").list)
+        assertEquals(ListKind.PLAIN, shapeOf("android.view.View") { isScrollable = true }.list)
+        assertNull(shapeOf("android.widget.LinearLayout").list)
+    }
+
+    @Test
+    fun aShapeTellsItemsAndWhatTakesClicks() {
+        val item =
+            shapeOf("android.widget.LinearLayout") {
+                collectionItemInfo = AccessibilityNodeInfo.CollectionItemInfo(0, 1, 0, 1, false)
+            }
+        assertTrue(item.item)
+        assertFalse(item.interactive)
+        assertTrue(shapeOf("android.widget.LinearLayout") { isClickable = true }.interactive)
+        assertTrue(shapeOf("android.widget.LinearLayout") { isLongClickable = true }.interactive)
+        assertTrue(shapeOf("android.widget.CheckBox") { isCheckable = true }.interactive)
+    }
 }
 
 @RunWith(AndroidJUnit4::class)
@@ -145,5 +182,30 @@ class NodeTextTest {
         val text = node("android.widget.TextView", box) { this.text = "y".repeat(600) }
 
         assertEquals(NodeText.MAX_TEXT + 1, NodeText.nameOf(text, ElementRole.TEXT)?.length)
+    }
+
+    @Test
+    fun whatTellsElementsApartIsTheWholeLabel() {
+        val text = node("android.widget.TextView", box) { this.text = "y".repeat(600) + "Ada" }
+        val field =
+            node("android.widget.EditText", box) {
+                isEditable = true
+                this.text = "secret"
+            }
+
+        assertEquals("y".repeat(600) + "Ada", NodeText.identityLabel(text))
+        assertNull("never a field's content", NodeText.identityLabel(field))
+    }
+
+    @Test
+    fun aClickableContainerHasNoNameOfItsOwnInItsIdentity() {
+        val title = node("android.widget.TextView", box) { text = "Alice" }
+        val row = node("android.widget.LinearLayout", box) { isClickable = true }.with(title)
+        val labelled = node("android.widget.EditText", box) { contentDescription = "Amount" }
+
+        assertEquals("Alice", NodeText.nameOf(row, ElementRole.BUTTON))
+        assertNull(NodeText.identityNameOf(row, ElementRole.BUTTON))
+        assertEquals("Alice", NodeText.identityNameOf(title, ElementRole.TEXT))
+        assertEquals("Amount", NodeText.identityNameOf(labelled, ElementRole.INPUT))
     }
 }

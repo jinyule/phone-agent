@@ -9,6 +9,9 @@ import dev.phoneagent.core.ports.ElementState
 internal object NodeFacts {
     private const val CHROME_ROLE = "AccessibilityNodeInfo.chromeRole"
     private val LIST_CLASSES = listOf("RecyclerView", "ListView", "GridView", "ScrollView", "ViewPager")
+
+    // Adapter views: every child is an item, however large.
+    private val COLLECTION_CLASSES = listOf("RecyclerView", "ListView", "GridView", "ViewPager", "ViewPager2")
     private val SWITCH_CLASSES = listOf("Switch", "SwitchCompat", "SwitchMaterial")
 
     /** Role from the widget class alone, or `null` when the class says nothing. */
@@ -49,6 +52,23 @@ internal object NodeFacts {
         node: AccessibilityNodeInfo,
         cls: String,
     ): Boolean = node.isScrollable || node.collectionInfo != null || LIST_CLASSES.any(cls::endsWith)
+
+    /** What [node] (of role [role]) is for rows ([Identities.of]). */
+    fun shapeOf(
+        node: AccessibilityNodeInfo,
+        role: ElementRole,
+    ): Identities.Shape {
+        val cls = node.className?.toString().orEmpty()
+        val list =
+            when {
+                role != ElementRole.LIST -> null
+                node.collectionInfo != null || COLLECTION_CLASSES.any(cls::endsWith) -> Identities.ListKind.COLLECTION
+                cls.endsWith("ScrollView") -> Identities.ListKind.WRAPPED
+                else -> Identities.ListKind.PLAIN
+            }
+        val interactive = node.isClickable || node.isLongClickable || node.isCheckable
+        return Identities.Shape(list, item = node.collectionItemInfo != null, interactive = interactive)
+    }
 
     /** Interaction states of [node]. */
     fun statesOf(node: AccessibilityNodeInfo): Set<ElementState> =
@@ -107,6 +127,16 @@ internal object NodeText {
         return ownLabel(node) ?: if (actionable && role != ElementRole.LIST) descendantLabel(node) else null
     }
 
+    /**
+     * The name [node] has in its [ElementIdentity]: [nameOf] at any length, without the text of
+     * visible descendants a clickable container borrows (it changes as they scroll out of view;
+     * the container's row holds all of them).
+     */
+    fun identityNameOf(
+        node: AccessibilityNodeInfo,
+        role: ElementRole,
+    ): String? = if (role == ElementRole.INPUT) nameOf(node, role) else identityLabel(node)
+
     /** Current text of an editable [node], or the range position of a progress or slider; `null` for passwords. */
     fun valueOf(
         node: AccessibilityNodeInfo,
@@ -145,21 +175,17 @@ internal object NodeText {
     }
 
     /** The node's own label: text, else content description; editable and password nodes only the description. */
-    fun ownLabel(node: AccessibilityNodeInfo): String? =
+    fun ownLabel(node: AccessibilityNodeInfo): String? = identityLabel(node)?.let(::cap)
+
+    /** [ownLabel] at any length: what tells elements apart (never shown, never logged). */
+    fun identityLabel(node: AccessibilityNodeInfo): String? =
         if (node.isPassword || node.isEditable) {
-            clean(node.contentDescription)
+            whole(node.contentDescription)
         } else {
-            clean(node.text) ?: clean(node.contentDescription)
+            whole(node.text) ?: whole(node.contentDescription)
         }
 
-    private fun cap(text: String): String = if (text.length > MAX_TEXT) text.take(MAX_TEXT) + "…" else text
-
-    private fun clean(text: CharSequence?): String? =
-        text
-            ?.toString()
-            ?.trim()
-            ?.takeIf { it.isNotEmpty() }
-            ?.let(::cap)
+    private fun clean(text: CharSequence?): String? = whole(text)?.let(::cap)
 
     /**
      * Text of the node labelling [node] (`android:labelFor`); API 36 allows several and deprecated
@@ -201,3 +227,20 @@ internal object NodeText {
         }
     }
 }
+
+/** [text] cut to [NodeText.MAX_TEXT], ending with an ellipsis when cut. */
+private fun cap(text: String): String =
+    if (text.length >
+        NodeText.MAX_TEXT
+    ) {
+        text.take(NodeText.MAX_TEXT) + "…"
+    } else {
+        text
+    }
+
+/** [text] trimmed, `null` when nothing is left. */
+private fun whole(text: CharSequence?): String? =
+    text
+        ?.toString()
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }

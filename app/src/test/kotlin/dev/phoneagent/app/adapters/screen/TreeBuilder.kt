@@ -7,11 +7,16 @@ import dev.phoneagent.core.ports.ElementRef
 import dev.phoneagent.core.ports.ElementRole
 import dev.phoneagent.core.ports.UiElement
 
-/** What [TreeBuilder.add] takes beyond name, place and role. */
+/**
+ * What [TreeBuilder.add] takes beyond name, place and role: [row] the labels of its row, [around]
+ * the labels around an element in no row.
+ */
 internal class More(
     val resourceId: String? = null,
     val row: List<String>? = null,
     val value: String? = null,
+    val reliable: Boolean = true,
+    val around: List<String>? = null,
 )
 
 /**
@@ -50,7 +55,16 @@ internal class TreeBuilder(
                 target = NodeTarget(AccessibilityNodeInfo(), Rect(0, top, 1000, top + 10)),
                 place = NodePlace(window, APP, parent, depth = parent?.let { elements[it].depth + 1 } ?: 0),
                 brief = true,
-                identity = ElementIdentity(window, role, more.resourceId, name, more.row),
+                identity =
+                    ElementIdentity(
+                        window,
+                        role,
+                        more.resourceId,
+                        name,
+                        more.row?.let(RowKey::of),
+                        reliable = more.reliable,
+                    ),
+                around = more.around?.let(::Around),
             )
         return index
     }

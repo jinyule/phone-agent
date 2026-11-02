@@ -5,13 +5,14 @@ import dev.phoneagent.core.ports.ElementRef
 
 /**
  * One element of a screen the port showed, as [RefCarrier] remembers it: every visible node of
- * the read, whatever the detail shown.
+ * the read, whatever the detail shown. [around] is [ReadElement.around].
  */
 internal class TreeEntry(
     val ref: ElementRef,
     val identity: ElementIdentity,
     val bounds: Bounds,
     val parent: ElementRef?,
+    val around: Around? = null,
 )
 
 /**
@@ -20,11 +21,20 @@ internal class TreeEntry(
  * names the same element.
  *
  * An element keeps its ref when the port can tell it is the same element: same [ElementIdentity]
- * (window, role, view id, name, row) under the same parent, and that combination occurs exactly
- * once in each screen; among several, only the one at the same place in both screens keeps its
- * ref (identical rows that did not move). Parents are paired first, so an element whose parent
- * got a new ref gets one too. Anything ambiguous gets a new number above all numbers handed out
+ * (window, role, view id, name, and every label of its row) under the same parent, and that
+ * combination occurs exactly once in each screen; among several, only the one at the same place in
+ * both screens keeps its ref. An element in no row keeps its ref only while the labels [around]
+ * [Around] it fit. Parents are paired first, so an element whose parent got a new ref gets one
+ * too. Anything ambiguous, and any element whose identity is not [ElementIdentity.reliable] (the
+ * read stopped inside its row or its surroundings), gets a new number above all numbers handed out
  * before, and its old ref is void: a ref never comes back for a different element.
+ *
+ * What this cannot tell: a row replaced by one holding the very same labels (rows without text of
+ * their own, a pager of photos described alike); an element in no row whose surroundings changed
+ * only in numbers ("3/10" to "4/10"); a container outside lists that is not clickable keeps its
+ * ref when what it holds is replaced (its content does not). And it renumbers rather than guess:
+ * any change of a row's text (a counter, a relative time, a countdown) gives the whole row new
+ * refs, as does any replaced label around an element in no row.
  *
  * Refs live on every visible node, so switching between BRIEF and FULL keeps them.
  */
@@ -72,7 +82,7 @@ internal object RefCarrier {
         val refs = paired.map { it ?: ElementRef("$PREFIX${++next}") }
         val tree =
             fresh.mapIndexed { i, read ->
-                TreeEntry(refs[i], read.identity, read.element.bounds, read.parent?.let(refs::get))
+                TreeEntry(refs[i], read.identity, read.element.bounds, read.parent?.let(refs::get), read.around)
             }
         return Carried(refs, tree, next)
     }
@@ -82,8 +92,9 @@ internal object RefCarrier {
         previous: List<TreeEntry>,
         fresh: List<ReadElement>,
     ): List<ElementRef?> {
-        val exactOld = previous.groupBy { Exact(Loose(it.identity, it.parent), it.bounds) }
-        val looseOld = previous.groupBy { Loose(it.identity, it.parent) }
+        val trusted = previous.filter { it.identity.reliable }
+        val exactOld = trusted.groupBy { Exact(Loose(it.identity, it.parent), it.bounds) }
+        val looseOld = trusted.groupBy { Loose(it.identity, it.parent) }
         val paired = arrayOfNulls<ElementRef>(fresh.size)
         val looseOf = { i: Int -> Loose(fresh[i].identity, fresh[i].parent?.let { paired[it] ?: Unpaired(it) }) }
         for (level in fresh.indices
@@ -94,20 +105,27 @@ internal object RefCarrier {
             val exact = level.associateWith { Exact(loose.getValue(it), fresh[it].element.bounds) }
             val looseCount = loose.values.groupingBy { it }.eachCount()
             val exactCount = exact.values.groupingBy { it }.eachCount()
-            for (i in level) {
-                paired[i] =
+            for (i in level.filter { fresh[it].identity.reliable }) {
+                val same =
                     sole(exactOld[exact.getValue(i)], exactCount[exact.getValue(i)])
                         ?: sole(looseOld[loose.getValue(i)], looseCount[loose.getValue(i)])
+                paired[i] = same?.takeIf { fits(it.around, fresh[i].around) }?.ref
             }
         }
         return paired.toList()
     }
 
-    /** The ref of the only old element, when it is also the only fresh one. */
+    /** Whether the labels around an element still fit; an element in a row has none to compare. */
+    private fun fits(
+        old: Around?,
+        fresh: Around?,
+    ): Boolean = old == null || fresh == null || old.fits(fresh)
+
+    /** The only old element, when it is also the only fresh one. */
     private fun sole(
         old: List<TreeEntry>?,
         freshCount: Int?,
-    ): ElementRef? = old?.singleOrNull()?.ref?.takeIf { freshCount == 1 }
+    ): TreeEntry? = old?.singleOrNull()?.takeIf { freshCount == 1 }
 
     private fun numberOf(entry: TreeEntry): Int =
         entry.ref.value

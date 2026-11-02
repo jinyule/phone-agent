@@ -34,6 +34,7 @@ internal class NodePlace(
  * @property place where it sits in the read.
  * @property brief whether [SnapshotDetail.BRIEF] shows it.
  * @property identity who it is, for carrying and re-matching refs.
+ * @property around for an element in no row, the labels around it ([Identities.Who.around]).
  */
 internal class ReadElement(
     val element: UiElement,
@@ -41,6 +42,7 @@ internal class ReadElement(
     val place: NodePlace,
     val brief: Boolean,
     val identity: ElementIdentity,
+    val around: Around? = null,
 ) {
     /** The node to act on. */
     val node: AccessibilityNodeInfo get() = target.node
@@ -232,7 +234,9 @@ internal object ScreenReader {
                 pkg = windowPackage
                 topWindow = window.id
             }
-            if (root != null) walker.visit(root, NodePlace(window.id, windowPackage, parent = null, depth = 0))
+            if (root != null) {
+                walker.visit(root, NodePlace(window.id, windowPackage, parent = null, depth = 0), above = null)
+            }
         }
         return TreeRead(
             elements = walker.finish(),
@@ -249,50 +253,92 @@ internal object ScreenReader {
         )
     }
 
-    /** One read's mutable state: the node budget and what was kept so far. */
+    /** One read's mutable state: the node budget, what was walked and what was kept so far. */
     private class Walker(
         private val geometry: DisplayGeometry,
     ) {
-        /** A kept node before identities are known. */
+        /** A kept node before identities are known; [base] is its identity without a row. */
         private class Kept(
             val element: UiElement,
             val target: NodeTarget,
             val place: NodePlace,
             val brief: Boolean,
-            val facts: Identities.Facts,
+            val base: ElementIdentity,
         )
 
+        /** A walked node, kept or not (clipped children still tell rows apart); [kept] indexes [Walker.kept]. */
+        private class Walked(
+            val label: String?,
+            val shape: Identities.Shape,
+            val parent: Int?,
+            val kept: Int?,
+        ) {
+            var cut = false
+        }
+
         private val kept = ArrayList<Kept>()
+        private val walked = ArrayList<Walked>()
+
+        // Indices in [walked] of the nodes being visited, outermost first.
+        private val path = ArrayList<Int>()
         private var visited = 0
         private var treeDepth = 0
         private val seen = HashSet<List<Any?>>()
 
+        /** Visits [node] at [place]; [above] is the index in [walked] of the node above it. */
         fun visit(
             node: AccessibilityNodeInfo,
             place: NodePlace,
+            above: Int?,
         ) {
-            if (treeDepth > MAX_DEPTH || visited >= MAX_NODES) return
+            if (treeDepth > MAX_DEPTH || visited >= MAX_NODES) {
+                markCut()
+                return
+            }
             visited++
-            val index = if (node.isVisibleToUser) keep(node, place) else null
+            val role = NodeFacts.roleOf(node)
+            val index = if (node.isVisibleToUser) keep(node, role, place) else null
+            val me = walked.size
+            walked += Walked(NodeText.identityLabel(node), NodeFacts.shapeOf(node, role), above, index)
             val childPlace =
                 if (index == null) place else NodePlace(place.windowId, place.windowPackage, index, place.depth + 1)
+            path += me
             treeDepth++
             for (i in 0 until node.childCount) {
-                node.getChild(i)?.let { visit(it, childPlace) }
+                node.getChild(i)?.let { visit(it, childPlace, me) }
             }
             treeDepth--
+            path.removeAt(path.lastIndex)
+        }
+
+        /** A node was not walked: the subtrees around it are incomplete, up to the nearest list. */
+        private fun markCut() {
+            for (i in path.indices.reversed()) {
+                val node = walked[path[i]]
+                if (node.shape.list != null) return
+                node.cut = true
+            }
         }
 
         /** The kept nodes with their identities. */
         fun finish(): List<ReadElement> {
-            val identities = Identities.of(kept.map { it.facts })
+            val identities =
+                Identities.of(
+                    walked.map {
+                        Identities.Facts(it.kept?.let { k -> kept[k].base }, it.label, it.shape, it.parent, it.cut)
+                    },
+                )
+            val ofKept = arrayOfNulls<Identities.Who>(kept.size)
+            walked.forEachIndexed { i, node -> node.kept?.let { ofKept[it] = identities[i] } }
             return kept.mapIndexed { i, k ->
-                ReadElement(k.element, k.target, k.place, k.brief, identities[i])
+                val who = checkNotNull(ofKept[i])
+                ReadElement(k.element, k.target, k.place, k.brief, who.identity, who.around)
             }
         }
 
         private fun keep(
             node: AccessibilityNodeInfo,
+            role: ElementRole,
             place: NodePlace,
         ): Int? {
             val pixels =
@@ -301,7 +347,6 @@ internal object ScreenReader {
                         it.height() >= MIN_SIDE_PX
                 }
             val bounds = pixels?.let(geometry::normalize)
-            val role = NodeFacts.roleOf(node)
             val name = NodeText.nameOf(node, role)
             val value = NodeText.valueOf(node, role)
             val interactive = NodeFacts.interactive(node)
@@ -326,16 +371,16 @@ internal object ScreenReader {
                     window = place.windowId,
                     resourceId = node.viewIdResourceName?.substringAfter(":id/")?.ifBlank { null },
                 )
-            val facts =
-                Identities.Facts(
-                    base = ElementIdentity(place.windowId, role, element.resourceId, name, row = null),
-                    label = NodeText.ownLabel(node),
-                    list = role == ElementRole.LIST,
-                    bounds = bounds,
-                    parent = place.parent,
+            val base =
+                ElementIdentity(
+                    place.windowId,
+                    role,
+                    element.resourceId,
+                    NodeText.identityNameOf(node, role),
+                    row = null,
                 )
             val brief = name != null || interactive || opaqueLeaf(node, pixels)
-            kept += Kept(element, NodeTarget(node, pixels), place, brief, facts)
+            kept += Kept(element, NodeTarget(node, pixels), place, brief, base)
             return index
         }
 
