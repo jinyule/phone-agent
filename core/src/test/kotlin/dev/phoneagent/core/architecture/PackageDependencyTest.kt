@@ -18,9 +18,10 @@ import org.junit.jupiter.api.Test
  *   and capabilities reference only contracts and themselves, never each other. Only the app wires
  *   capabilities together.
  *
- * References are imports (including wildcards), and fully qualified class names and function calls in
- * code, including code inside string templates (`${…}`). Comments and the text of string and char
- * literals do not count. A file without a package declaration is a violation: it cannot be placed.
+ * References are imports (including wildcards), and fully qualified class names and function calls
+ * in code, also with type arguments (`….f<A<B>>(x)`), including code inside string templates
+ * (`${…}`). Comments and the text of string and char literals do not count. A file without a
+ * package declaration is a violation: it cannot be placed.
  * Known limit: a fully qualified reference to a top-level property (`dev.phoneagent.core.x.value`,
  * not called) is not seen.
  */
@@ -46,6 +47,7 @@ class PackageDependencyTest {
                 "screen/MarksRisk.kt: capability screen must not use capability policy.rules",
                 "tools/FullyQualified.kt: capability tools must not use capability policy.rules",
                 "tools/FunctionCall.kt: capability tools must not use capability policy.rules",
+                "tools/GenericCall.kt: capability tools must not use capability policy.rules",
                 "tools/RawTemplate.kt: capability tools must not use capability storage",
             ),
             violations(scope, root),
@@ -87,6 +89,12 @@ class PackageDependencyTest {
                 "// dev.phoneagent.core.screen.F" to emptyList(),
                 "val v = dev.phoneagent.core.policy.rules.evaluate(x)" to listOf("$BASE.policy.rules"),
                 "val v = dev.phoneagent.core.policy.rules.build { }" to listOf("$BASE.policy.rules"),
+                "val v = dev.phoneagent.core.policy.rules.evaluate<Rule>(x)" to listOf("$BASE.policy.rules"),
+                "val v = dev.phoneagent.core.policy.rules.build<Map<String, List<Int?>>> { }" to
+                    listOf("$BASE.policy.rules"),
+                "val v = dev.phoneagent.core.policy.rules.run<(Int) -> Unit>(f)" to listOf("$BASE.policy.rules"),
+                "val v = dev.phoneagent.core.policy.rules\n    .evaluate < Rule >\n    (x)" to
+                    listOf("$BASE.policy.rules"),
             )
         cases.forEach { (code, expected) -> assertEquals(expected, fullyQualifiedPackages(code), code) }
     }
@@ -192,9 +200,8 @@ class PackageDependencyTest {
                 "agent" to 5,
             )
 
-        /** A qualified name ending in a class name, or in a function name that is called. */
-        val QUALIFIED =
-            Regex("""\b(dev\.phoneagent\.core(?:\.[a-z][a-z0-9_]*)*)\.(?:[A-Z]|[a-z][A-Za-z0-9_]*\s*[({])""")
+        /** A dotted name below the base package, as written (spaces around dots already removed). */
+        val QUALIFIED = Regex("""\bdev\.phoneagent\.core(?:\.[A-Za-z_][A-Za-z0-9_]*)+""")
         val HEADER_LINE = Regex("""^\s*(package|import)\s.*$""", RegexOption.MULTILINE)
 
         val AROUND_DOT = Regex("""\s*\.\s*""")
@@ -219,11 +226,65 @@ class PackageDependencyTest {
             return segments.take(end).joinToString(".")
         }
 
-        /** Packages of fully qualified references in code, also when formatted across lines. */
+        /**
+         * Packages of fully qualified references in code, also when formatted across lines: a name
+         * reaching a class (its first capitalized segment), or a function that is called, with or
+         * without type arguments (`f(…)`, `f { … }`, `f<A<B>>(…)`).
+         */
         fun fullyQualifiedPackages(text: String): List<String> {
             val code = AROUND_DOT.replace(HEADER_LINE.replace(CodeOnly(text).code(), ""), ".")
-            return QUALIFIED.findAll(code).map { it.groupValues[1] }.toList()
+            return QUALIFIED
+                .findAll(code)
+                .mapNotNull { match ->
+                    val segments = match.value.split('.')
+                    val firstType = segments.indexOfFirst { it.first().isUpperCase() }
+                    when {
+                        firstType >= 0 -> segments.take(firstType)
+                        isCalled(code, match.range.last + 1) -> segments.dropLast(1)
+                        else -> null
+                    }?.joinToString(".")
+                }.toList()
         }
+
+        /** Whether a call (`(` or `{`) follows at [from], after optional balanced type arguments. */
+        private fun isCalled(
+            code: String,
+            from: Int,
+        ): Boolean {
+            var at = skipSpaces(code, from)
+            if (code.getOrNull(at) == '<') at = skipSpaces(code, endOfTypeArguments(code, at) ?: return false)
+            return code.getOrNull(at) == '(' || code.getOrNull(at) == '{'
+        }
+
+        /** Index after the `>` closing the type arguments that open at [open], or `null` when they do not close. */
+        private fun endOfTypeArguments(
+            code: String,
+            open: Int,
+        ): Int? {
+            var depth = 0
+            var at = open
+            while (at < code.length && code[at] in TYPE_ARGUMENT_CHARS) {
+                when {
+                    code[at] == '<' -> depth++
+                    code[at] == '>' && code.getOrNull(at - 1) != '-' -> depth--
+                }
+                at++
+                if (depth == 0) return at
+            }
+            return null
+        }
+
+        private fun skipSpaces(
+            code: String,
+            from: Int,
+        ): Int {
+            var at = from
+            while (at < code.length && code[at].isWhitespace()) at++
+            return at
+        }
+
+        /** What type arguments are written with: names, nesting, nullability, projections, function types. */
+        private val TYPE_ARGUMENT_CHARS = (('a'..'z') + ('A'..'Z') + ('0'..'9') + "_.,?*<>()- \n\t@:".toList()).toSet()
     }
 }
 
