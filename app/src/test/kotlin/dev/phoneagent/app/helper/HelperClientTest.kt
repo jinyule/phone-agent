@@ -49,10 +49,10 @@ class HelperClientTest {
 
     private fun newClient() = HelperClient(HandoffNonces(store, { now }, { 7 }), { build }) { launches += it }
 
-    /** Arms a fresh nonce the way `scripts/start-helper.sh` does and returns it. */
-    private fun armed(): String =
+    /** Arms a fresh nonce on [on] the way `scripts/start-helper.sh` does and returns it. */
+    private fun armed(on: HelperClient = client): String =
         Nonces.random().also {
-            assertTrue(client.arm(Nonces.sha256Hex(it), shell).getBoolean("accepted"))
+            assertTrue(on.arm(Nonces.sha256Hex(it), shell).getBoolean("accepted"))
         }
 
     /** What a conforming helper reports; tests change single fields with `copy`. */
@@ -299,6 +299,40 @@ class HelperClientTest {
         handle.close()
         helper.die()
         assertEquals("closed listeners are not called", 1, seen.size)
+    }
+
+    @Test
+    fun aListenerOrALaunchRequestThatThrowsStopsNeitherTheReplyNorTheOtherListeners() {
+        val client =
+            HelperClient(HandoffNonces(store, { now }, { 7 }), { build }) {
+                launches += it
+                error("the launcher broke")
+            }
+        val seen = mutableListOf<HelperState>()
+        client.addListener { error("a broken listener") }
+        client.addListener { seen += it }
+        val first = FakeHelper()
+        val second = FakeHelper()
+        val third = FakeHelper(reportedIdentity = intArrayOf(shell, pid + 1))
+
+        client.offer(extras(first, armed(client)), shell, pid).accepted()
+        first.die()
+        client.offer(extras(second, armed(client)), shell, pid).accepted()
+        client.offer(extras(third, armed(client)) { copy(reportedPid = pid + 1) }, shell, pid + 1).accepted()
+
+        val died = HelperState.NeedsLaunch(HelperState.LaunchReason.HelperDied, pid)
+        assertEquals(
+            listOf(
+                HelperState.Connected(first, pid),
+                died,
+                HelperState.Connected(second, pid),
+                HelperState.Connected(third, pid + 1),
+            ),
+            seen,
+        )
+        assertEquals(listOf(died), launches)
+        assertEquals("the replaced helper is still told to stop", "shutdown", second.calls.last())
+        assertEquals(HelperState.Connected(third, pid + 1), client.state)
     }
 
     @Test

@@ -40,8 +40,10 @@ import java.util.concurrent.atomic.AtomicBoolean
  * delivered outside it, one at a time: by the thread that caused the change, or by the thread that
  * is already delivering. So listeners see every change once and in order, and the last state they
  * received is [state]. `onLaunchNeeded` runs after the listeners, and only if that NeedsLaunch is
- * still the current state (a helper admitted meanwhile makes the request moot). A listener that
- * throws stops this round; the remaining changes go out with the next one.
+ * still the current state (a helper admitted meanwhile makes the request moot). A listener or
+ * `onLaunchNeeded` that throws a RuntimeException is logged and skipped for that change: the
+ * others still receive it, later changes are still delivered, and a handoff that caused the change
+ * still replies.
  */
 class HelperClient internal constructor(
     private val nonces: HandoffNonces,
@@ -230,8 +232,10 @@ class HelperClient internal constructor(
                         }
                     }
                 if (next != null) {
-                    listeners.forEach { it(next) }
-                    if (next is HelperState.NeedsLaunch && state === next) onLaunchNeeded(next)
+                    listeners.forEach { listener -> isolated("a state listener") { listener(next) } }
+                    if (next is HelperState.NeedsLaunch && state === next) {
+                        isolated("onLaunchNeeded") { onLaunchNeeded(next) }
+                    }
                 }
             }
         } finally {
@@ -241,6 +245,22 @@ class HelperClient internal constructor(
 
     companion object {
         private const val TAG = "PhoneAgentHelperClient"
+
+        /**
+         * Runs one receiver of a change; what it throws is logged and stops neither the delivery nor the
+         * caller: a receiver's bug must not undo a committed handoff or starve the other receivers.
+         */
+        @Suppress("TooGenericExceptionCaught") // Receivers are app code of any kind; see above.
+        private fun isolated(
+            what: String,
+            receive: () -> Unit,
+        ) {
+            try {
+                receive()
+            } catch (e: RuntimeException) {
+                Log.e(TAG, "$what threw; the change still goes to the others", e)
+            }
+        }
 
         @Volatile
         private var instance: HelperClient? = null
