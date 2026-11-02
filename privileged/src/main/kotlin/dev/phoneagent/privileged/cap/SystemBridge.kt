@@ -25,6 +25,16 @@ internal class CapabilityUnavailable(
 ) : Exception(message, cause)
 
 /**
+ * The reason reported for [error], in `probe()` and wherever a capability says why it is
+ * unavailable: its message (or class name), plus the class name of its cause.
+ */
+internal fun reasonFor(error: Throwable): String {
+    val cause = error.cause
+    val detail = if (cause == null) "" else ": ${cause.javaClass.simpleName}"
+    return "${error.message.orEmpty().ifEmpty { error.javaClass.simpleName }}$detail"
+}
+
+/**
  * The hidden framework interfaces the helper reflects on. Each accessor throws
  * [CapabilityUnavailable] naming what is missing; nothing is swallowed.
  *

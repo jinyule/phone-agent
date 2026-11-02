@@ -133,7 +133,7 @@ internal class AndroidCapabilities(
     private val launcher = Launcher(platform, context, app, virtualDisplays, taskTable, ownership)
     private val watch = MainScreenWatch(bridge, taskTable)
     private val ops = SystemOps(context, app, platform.commands, platform.stateDir)
-    private val prober = Prober(virtualDisplays, taskTable, injector, watch)
+    private val prober = Prober(virtualDisplays, taskTable, injector, watch, Keyguard(bridge))
 
     override val displays: DisplayCaps =
         object : DisplayCaps {

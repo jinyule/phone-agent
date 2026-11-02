@@ -55,7 +55,7 @@ internal class Launcher(
                 StartResult.REFUSED
             }
 
-            keyguard.locked() != false -> {
+            keyguard.read() != LockState.Known(locked = false) -> {
                 Log.w(TAG, "startActivity refused: the phone is locked, or its lock state is unknown")
                 StartResult.LOCKED
             }
@@ -281,25 +281,43 @@ private class ActivityStarter(
     }
 }
 
+/** What [Keyguard.read] found. `startActivity` treats anything but `Known(false)` as locked. */
+internal sealed interface LockState {
+    /** Read from the window manager: whether the lock screen is showing. */
+    data class Known(
+        val locked: Boolean,
+    ) : LockState
+
+    /** Not readable; [reason] names the entry point and the failure, as `probe()` reports it. */
+    data class Unknown(
+        val reason: String,
+    ) : LockState
+}
+
 /**
- * Whether the phone is locked, from `IWindowManager.isKeyguardLocked()`; null when that cannot be
- * read, which callers treat as locked. `KeyguardManager` is not used: it answers false when the
- * call to the window manager fails, and `isDeviceLocked` is about credentials, not the lock screen.
+ * Whether the phone is locked, from `IWindowManager.isKeyguardLocked()`. `startActivity` and
+ * `probe()` both read it here. `KeyguardManager` is not used: it answers false when the call to
+ * the window manager fails, and `isDeviceLocked` is about credentials, not the lock screen.
  */
 internal class Keyguard(
     private val bridge: SystemBridge,
 ) {
-    fun locked(): Boolean? =
+    fun read(): LockState =
         try {
-            val wm = bridge.windowManager
-            reflecting("IWindowManager.isKeyguardLocked") {
-                bridge.method(wm, "isKeyguardLocked", 0).invoke(wm) as? Boolean
-                    ?: throw CapabilityUnavailable("IWindowManager.isKeyguardLocked returned no boolean")
-            }
+            LockState.Known(locked())
         } catch (e: CapabilityUnavailable) {
             Log.w(TAG, "cannot read the lock state", e)
-            null
+            LockState.Unknown(reasonFor(e))
         }
+
+    /** Throws [CapabilityUnavailable] when the method is missing, fails, or answers no boolean. */
+    private fun locked(): Boolean {
+        val wm = bridge.windowManager
+        return reflecting("IWindowManager.isKeyguardLocked") {
+            bridge.method(wm, "isKeyguardLocked", 0).invoke(wm) as? Boolean
+                ?: throw CapabilityUnavailable("IWindowManager.isKeyguardLocked returned no boolean")
+        }
+    }
 
     private companion object {
         const val TAG = "PhoneAgentHelper"

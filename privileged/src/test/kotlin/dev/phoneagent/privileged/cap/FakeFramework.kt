@@ -149,6 +149,20 @@ internal class WindowManagerWithoutImeGetter(
     }
 }
 
+/** An `IWindowManager` of a ROM that dropped `isKeyguardLocked`; the rest is [wm]. */
+internal class WindowManagerWithoutKeyguard(
+    private val wm: FakeWindowManager,
+) {
+    fun setDisplayImePolicy(
+        displayId: Int,
+        imePolicy: Int,
+    ) {
+        wm.setDisplayImePolicy(displayId, imePolicy)
+    }
+
+    fun getDisplayImePolicy(displayId: Int): Any = wm.getDisplayImePolicy(displayId)
+}
+
 /** Stands in for `InputManagerGlobal`. */
 internal class FakeInputManager {
     var injected = 0

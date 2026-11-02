@@ -27,15 +27,16 @@ public object StartResult {
 
     /**
      * Refused by the helper: not its own display, another user, a malformed intent, or (protocol
-     * 2) an intent that may carry another intent (an extra of a type not on the helper's list),
-     * has several handlers, or names an activity the app itself could not start (not exported,
-     * or guarded by a permission the app lacks).
+     * 2) an intent that may carry another intent (from protocol 4: any extra of a type not on the
+     * helper's list), has several handlers, or names an activity the app itself could not start
+     * (not exported, or guarded by a permission the app lacks).
      */
     public const val REFUSED: Int = 6
 
     /**
      * The phone is locked, or the helper could not tell whether it is: nothing is started while
-     * the user is away (protocol 2).
+     * the user is away (protocol 2). From protocol 4, `probe()` reports the second case under
+     * [ProbeKeys.Step.LOCK].
      */
     public const val LOCKED: Int = 7
 }
@@ -50,7 +51,9 @@ public object DisplayResult {
 
     /**
      * The platform refused to create the display, or (protocol 3) its keyboard would have opened
-     * on the user's screen and it was released again.
+     * on the user's screen, or (protocol 4) its IME policy could not be read back. Such a display
+     * is released again; if that release fails it waits for `releaseAll` and no capability
+     * accepts it.
      */
     public const val FAILED: Int = -1
 }
@@ -73,7 +76,7 @@ public object GrantResult {
  * [RESULT_OK] or a one-line reason why that capability is unavailable on this device.
  */
 public object ProbeKeys {
-    /** Every step succeeded. */
+    /** Every step succeeded; from protocol 4 this includes reading the lock state ([Step.LOCK]). */
     public const val OK: String = "ok"
 
     /** Names of the steps that ran, in order. */
@@ -101,6 +104,12 @@ public object ProbeKeys {
 
         /** Watching the main screen. */
         public const val MAIN_SCREEN: String = "mainScreen"
+
+        /**
+         * Reading whether the phone is locked (protocol 4). Locked or not is `ok`; only a lock
+         * state that cannot be read fails, because `startActivity` then answers [StartResult.LOCKED].
+         */
+        public const val LOCK: String = "lock"
 
         /** Releasing the virtual display again. */
         public const val RELEASE: String = "release"

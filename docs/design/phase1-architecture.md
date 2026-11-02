@@ -313,23 +313,23 @@ interface IPrivilegedCore {
   - `startActivity` → `StartResult`：0 已启动、1 用户正在主屏用它、2 没有页面能接、3 出错、4 冷启动被降级（它在别处还有任务）、5 被 agent 的另一块屏占用、6 助手拒绝（不是它的屏、别的用户、intent 不合规）、7 锁屏中（读不到锁屏状态也算，协议 2 起）；
   - `createDisplay` → 非负是 displayId，`DisplayResult.REFUSED`(-2) 是参数不合规或 API 34 以下，`DisplayResult.FAILED`(-1) 是系统拒绝，或者 IME 策略设不成 LOCAL、回读不是 LOCAL、回读不了（屏已被释放，释放失败时进待清理集合；后几条协议 3 起，"回读不了"协议 4 起）；
   - `grantSelf` → `GrantResult`：0 已授予、1 不在白名单、2 失败；
-  - `probe` → `ProbeKeys`：`steps`/`results` 两个平行数组，每项是 `ok` 或失败原因，外加 `ok` 总判定；
+  - `probe` → `ProbeKeys`：`steps`/`results` 两个平行数组，每项是 `ok` 或失败原因，外加 `ok` 总判定；协议 4 起多一步 `lock`，锁屏状态读得到就是 `ok`（锁没锁都算），读不到写原因、`ok` 为 false；
   - `mainArrivals` → `ArrivalKeys`：任务、包名、页面、用户、时间、来自哪块屏、是否同一任务、是否普通页面、此刻在哪块屏（Bundle 里没有对象列表，所以用平行数组）。
 
 **助手自己保证的几条**（无论 App 传什么，WP12 B 段）：
 - 只往自己建的屏启动、注入；主屏和别人的屏一律拒绝。
 - 用户在主屏**可见**地用着的 App 不启动（`StartResult.IN_USE_ON_MAIN`）；看不清任务列表时也不启动。
 - 只启动 App 自己的 uid 也能启动的 Activity：解析成唯一的 Activity，要求它已导出（或属于本 App）、它要求的权限 App 已获得，并且只启动检查过的这一个；解析不出是 `NOT_FOUND`，多个候选、未导出、缺权限是 `REFUSED`。
-- 可能夹带 intent 的请求一律拒绝（`StartResult.REFUSED`）：`ACTION_CHOOSER`、selector、带 intent 的 ClipData 条目；extras 按允许清单检查，清单外的类型一律拒绝，读不出来的 extras 也拒绝。允许的只有：null、primitive 及其数组；String、CharSequence、Uri 及其数组和 ArrayList（ArrayList 也可以是装箱整数）；值也在清单内的 Bundle；值只能是前两类叶子的 ContentValues 组成的 ArrayList（联系人插入的 `Insert.DATA`）。其他 Parcelable、Parcelable 数组、SparseArray、Map、Serializable、ClipData、IBinder 都拒绝；要放行新类型，必须连同"检查它里面装了什么"一起加进清单（`NestedIntents`）。所有容器共用一个嵌套深度上限。
+- 可能夹带 intent 的请求一律拒绝（`StartResult.REFUSED`）：`ACTION_CHOOSER`、selector、带 intent 的 ClipData 条目；extras 按允许清单检查（协议 4 起），清单外的类型一律拒绝，读不出来的 extras 也拒绝。允许的只有：null、primitive 及其数组；String、CharSequence、Uri 及其数组和 ArrayList（ArrayList 也可以是装箱整数）；值也在清单内的 Bundle；值只能是前两类叶子的 ContentValues 组成的 ArrayList（联系人插入的 `Insert.DATA`）。其他 Parcelable、Parcelable 数组、SparseArray、Map、Serializable、ClipData、IBinder 都拒绝；要放行新类型，必须连同"检查它里面装了什么"一起加进清单（`NestedIntents`）。所有容器共用一个嵌套深度上限。
 - 进命令行的包名（`setAudioMuted` 的 `appops`、冷启动的 `am force-stop`）先校验：Java 包名格式（至少两段、每段以字母开头），并且已经安装；UID、`u0aNN`、`--` 开头的选项一律拒绝。
 - 解除静音只恢复本助手账本里记过的包；没记过的包什么都不做，也不执行 `appops`。静音前的原模式写不进账本文件就不静音；启动时恢复账本只认格式合法的行。
-- 锁屏时什么都不启动（`StartResult.LOCKED`）。锁屏状态读自 `IWindowManager.isKeyguardLocked()`，读不到就当作锁屏；不用 `KeyguardManager`，它在调用失败时会回答"没锁"。
+- 锁屏时什么都不启动（`StartResult.LOCKED`）。锁屏状态读自 `IWindowManager.isKeyguardLocked()`，读不到就当作锁屏，`probe()` 的 lock 一项报出原因（协议 4 起）；不用 `KeyguardManager`，它在调用失败时会回答"没锁"。
 - 冷启动只在"这个 App 的任务全在这块屏上"时才 force-stop，否则降级为普通启动并返回 `COLD_IGNORED`。
 - `moveTask` 只认 agent 自己启动的任务，以及盯主屏期间冒上来的任务（跳出回收）；用户自己的任务不会被拉进后台屏。
 - `injectKey` 只放行导航和编辑键；音量、电源、Home、最近任务、助手、相机、媒体键作用于整机，一律拒绝。
 - `injectStroke` 校验点数、时间单调、总时长和坐标是否在本屏内。
 - `grantSelf` 只接受 `WRITE_SECURE_SETTINGS`，写完回读确认。
-- `releaseAll` 逐个资源尽力释放（静音、屏、任务归属）：一个失败只记日志，不挡其余的，失败的留到下一次再试；它本身不抛。释放失败的屏（包括 IME 不是 LOCAL、释放又失败的新屏）只在"待清理"集合里等 `releaseAll`，任何能力都不再接受它。
+- `releaseAll` 逐个资源尽力释放（静音、屏、任务归属）：一个失败只记日志，不挡其余的，失败的留到下一次再试；它本身不抛。释放失败的屏（包括 IME 不是 LOCAL、释放又失败的新屏）只在"待清理"集合里等 `releaseAll`，任何能力都不再接受它（协议 4 起）。
 - 隐藏接口全部反射调用，缺失时报出具体原因（logcat + `probe()`），不静默失败；`moveRootTaskToDisplay`、`startActivityAsUser` 有 `am` 命令兜底。
 
 **刻意不提供**任意命令执行的接口。setup 需要的命令（授权、写无障碍列表）在助手内部写死成白名单方法，程序名也有白名单（`am`/`pm`/`appops`/`input`），参数由助手自己拼。这是针对 Mika `phone_system_command` 的教训。
