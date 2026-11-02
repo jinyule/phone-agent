@@ -177,9 +177,9 @@ internal class Launcher(
 }
 
 /**
- * The three ways to put an activity on a display, in order of preference: the hidden
+ * The two ways to put an activity on a display, in order of preference: the hidden
  * `startActivityAsUser` with `ActivityOptions.setLaunchDisplayId`, then `am start --display` with
- * the component, then with the action. [Launcher] has already decided that starting is allowed.
+ * the intent spelled out as arguments. [Launcher] has already decided that starting is allowed.
  */
 private class ActivityStarter(
     private val bridge: SystemBridge,
@@ -221,28 +221,48 @@ private class ActivityStarter(
         return started != null && started >= 0
     }
 
+    /**
+     * `am start` with the whole intent: component, action (unless MAIN), data, type, categories
+     * and flags, so it starts what `startActivityAsUser` would have. Extras have no faithful
+     * spelling here yet, so an intent with extras is not started this way (false).
+     */
     private fun amStart(
         displayId: Int,
         intent: Intent,
     ): Boolean {
-        val target = intent.component?.flattenToShortString() ?: return amStartAction(displayId, intent)
-        return commands.run("am", "start", "--display", "$displayId", "-n", target).ok
+        val component = intent.component
+        val action = intent.action?.takeUnless { it == Intent.ACTION_MAIN && component != null }
+        val problem =
+            when {
+                intent.extras?.isEmpty == false -> "am start cannot carry its extras"
+                component == null && action == null -> "it names neither a component nor an action"
+                else -> null
+            }
+        if (problem != null) {
+            Log.w(TAG, "not falling back to am start for $intent: $problem")
+            return false
+        }
+        return commands.run(amArguments(displayId, intent, action)).ok
     }
 
-    private fun amStartAction(
+    /** `am start` arguments for [intent], whose [action] (null for MAIN with a component) is given. */
+    private fun amArguments(
         displayId: Int,
         intent: Intent,
-    ): Boolean {
-        val action = intent.action ?: return false
-        val arguments =
-            buildList {
-                addAll(listOf("am", "start", "--display", "$displayId", "-a", action))
-                intent.dataString?.let { addAll(listOf("-d", it)) }
-                intent.type?.let { addAll(listOf("-t", it)) }
-                intent.`package`?.let { addAll(listOf("-p", it)) }
-            }
-        return commands.run(arguments).ok
-    }
+        action: String?,
+    ): List<String> =
+        buildList {
+            val component = intent.component
+            addAll(listOf("am", "start", "--display", "$displayId"))
+            component?.let { addAll(listOf("-n", it.flattenToShortString())) }
+            action?.let { addAll(listOf("-a", it)) }
+            intent.dataString?.let { addAll(listOf("-d", it)) }
+            intent.type?.let { addAll(listOf("-t", it)) }
+            intent.categories?.forEach { addAll(listOf("-c", it)) }
+            if (component == null) intent.`package`?.let { addAll(listOf("-p", it)) }
+            // Decimal: am reads the flags with Integer.decode, which takes no hex above 0x7fffffff.
+            if (intent.flags != 0) addAll(listOf("-f", "${intent.flags}"))
+        }
 
     private companion object {
         const val TAG = "PhoneAgentHelper"
