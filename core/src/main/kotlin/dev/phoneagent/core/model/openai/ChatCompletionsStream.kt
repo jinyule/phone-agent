@@ -289,10 +289,12 @@ internal class StreamedText(
 
 /**
  * Tool calls of one streamed reply, assembled from `delta.tool_calls` fragments. Some gateways
- * split the name over fragments, so a call is announced ([Delta.ToolCallStarted]) only once its
- * name is complete: when its arguments start (calls before it are complete then too), or at the
- * end of the reply ([DeltaLedger.catchUp]). Its id is the provider's, or a fresh one when the
- * provider sends none.
+ * split the name over fragments, so a call's name counts as complete only once its own arguments
+ * start; another call's fragments say nothing about it. Calls are announced
+ * ([Delta.ToolCallStarted]) in order: each one once its name is complete and every call before it
+ * is announced, the rest at the end of the reply ([DeltaLedger.catchUp]). Arguments that arrive
+ * before a call is announced come with the announcement. Its id is the provider's, or a fresh one
+ * when the provider sends none.
  */
 internal class ToolCallAssembler(
     private val newCallId: () -> String,
@@ -305,6 +307,9 @@ internal class ToolCallAssembler(
         var id: String? = null
         val name = StringBuilder()
         val args = StringBuilder()
+
+        /** The name is complete: this call's own arguments have started. */
+        var named = false
         var started = false
     }
 
@@ -322,9 +327,11 @@ internal class ToolCallAssembler(
         }
         val args = argumentsOf(function?.get("arguments"))
         slot.args.append(args)
-        when {
-            slot.started -> ledger.args(ToolCallId(checkNotNull(slot.id)), args)
-            args.isNotEmpty() && slot.name.isNotEmpty() -> startThrough(slot)
+        if (slot.started) {
+            ledger.args(ToolCallId(checkNotNull(slot.id)), args)
+        } else if (args.isNotEmpty() && slot.name.isNotEmpty()) {
+            slot.named = true
+            startReady()
         }
     }
 
@@ -345,10 +352,9 @@ internal class ToolCallAssembler(
             }
         }
 
-    /** Announces [slot] and the named calls before it that are not announced yet, in order. */
-    private fun startThrough(slot: Slot) {
-        slots.takeWhile { it !== slot }.filter { !it.started && it.name.isNotEmpty() }.forEach(::start)
-        start(slot)
+    /** Announces, in order, the calls not announced yet up to the first whose name may still grow. */
+    private fun startReady() {
+        slots.takeWhile { it.named }.filter { !it.started }.forEach(::start)
     }
 
     private fun start(slot: Slot) {
