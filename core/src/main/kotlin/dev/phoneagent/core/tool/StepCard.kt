@@ -41,12 +41,19 @@ public enum class StepState {
     /** Finished OK. */
     SUCCEEDED,
 
-    /** Finished with a failure status. */
+    /**
+     * Finished with a failure status that leaves no doubt it did not take effect as asked:
+     * ERROR, INVALID_ARGS, SKIPPED, NOT_STARTED (it never ran).
+     */
     FAILED,
 
     /** Refused by the policy or the user. */
     REFUSED,
 
-    /** Outcome unknown (repair). */
+    /**
+     * The outcome is uncertain and the call may have taken effect: OUTCOME_UNKNOWN, and a call
+     * that was stopped (CANCELLED) or timed out (TIMEOUT). A call cancelled before it ran is shown
+     * so too, the safe side for a user who might otherwise do it again.
+     */
     UNKNOWN,
 }

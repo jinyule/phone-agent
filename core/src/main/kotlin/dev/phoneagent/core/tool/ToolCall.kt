@@ -98,7 +98,10 @@ public enum class ToolStatus {
     /** Arguments did not parse or did not match the schema. */
     INVALID_ARGS,
 
-    /** The tool did not finish within its timeout. */
+    /**
+     * The tool did not finish within its timeout. It may have taken effect: its card shows
+     * `StepState.UNKNOWN`.
+     */
     TIMEOUT,
 
     /**
@@ -111,6 +114,8 @@ public enum class ToolStatus {
      * | no `tool/started` | CANCELLED | it did not run |
      * | `tool/started`, no result | CANCELLED | it may have taken effect: observe, then decide on a retry |
      * | a `tool/result` already | that result | no second result |
+     *
+     * The card of a CANCELLED call shows `StepState.UNKNOWN` in both rows: it may have taken effect.
      */
     CANCELLED,
 
