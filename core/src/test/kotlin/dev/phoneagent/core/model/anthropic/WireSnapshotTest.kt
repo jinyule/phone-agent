@@ -5,6 +5,7 @@ import dev.phoneagent.core.ids.ProviderId
 import dev.phoneagent.core.model.Credential
 import dev.phoneagent.core.model.ImageMode
 import dev.phoneagent.core.model.ModelCapabilities
+import dev.phoneagent.core.model.ModelError
 import dev.phoneagent.core.model.ProviderProfile
 import dev.phoneagent.core.model.ReasoningLevel
 import dev.phoneagent.core.model.WireProfile
@@ -18,6 +19,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 
 /**
  * [AnthropicWire.snapshot] is the pure function "profile + model + capabilities + level → complete
@@ -102,6 +104,51 @@ class WireSnapshotTest {
             assertFalse("parallel_tool_calls" in body, "$inputs")
             assertEquals(inputs.level?.let { JsonPrimitive(AnthropicWire.effortOf(it)) }, effortOf(body), "$inputs")
         }
+    }
+
+    @Test
+    fun `settings the model or the endpoint cannot take are refused when the snapshot is made`() {
+        val official = Kit.profile()
+        val gateway = Kit.profile("https://gateway.example.com")
+        val opusSettings = AnthropicSettings.defaultsFor(official, AnthropicPresets.MAIN_MODEL)
+
+        fun refused(
+            profile: ProviderProfile,
+            model: ModelId,
+            settings: AnthropicSettings,
+        ): String? =
+            assertThrows<ModelError.InvalidRequest> {
+                AnthropicWire.snapshot(profile, model, Kit.CAPABILITIES, ReasoningLevel.LOW, settings)
+            }.param
+        // Claude Haiku 5.5 has no server-side fallback (a `fallbacks` field is a 400 there).
+        assertEquals("settings.serverFallback", refused(official, AnthropicPresets.LIGHT_MODEL, opusSettings))
+        assertEquals("settings.serverFallback", refused(official, ModelId("claude-unknown-9"), opusSettings))
+        // A gateway gets no Claude-API-only beta, also when the profile asks for one.
+        assertEquals("settings.serverFallback", refused(gateway, Kit.MODEL, AnthropicSettings(serverFallback = true)))
+        val mismatch = AnthropicSettings(prefixMismatch = PrefixMismatch.ERROR)
+        assertEquals("settings.prefixMismatch", refused(gateway, Kit.MODEL, mismatch))
+        assertEquals(
+            "settings.serverFallback",
+            refused(gateway, Kit.MODEL, mismatch.copy(serverFallback = true)),
+        )
+    }
+
+    @Test
+    fun `saved settings made to fit each model are what the snapshot records`() {
+        val official = Kit.profile()
+        val saved = AnthropicSettings(prefixMismatch = PrefixMismatch.ERROR, serverFallback = true, strictTools = true)
+        assertEquals(saved, saved.effectiveFor(official, AnthropicPresets.MAIN_MODEL), "Opus takes everything")
+        val haiku = saved.effectiveFor(official, AnthropicPresets.LIGHT_MODEL)
+        assertEquals(saved.copy(serverFallback = false), haiku, "Haiku has no fallback")
+        val gateway = saved.effectiveFor(Kit.profile("https://gateway.example.com"), AnthropicPresets.MAIN_MODEL)
+        assertEquals(saved.copy(serverFallback = false, prefixMismatch = null), gateway, "no Claude API betas")
+        val wire = AnthropicWire.snapshot(official, AnthropicPresets.LIGHT_MODEL, Kit.CAPABILITIES, null, haiku)
+        assertEquals(haiku.options(), wire.options)
+        assertFalse(AnthropicWire.OPT_FALLBACKS in wire.options, "the snapshot records what is sent")
+        assertEquals(
+            AnthropicSettings.defaultsFor(official, AnthropicPresets.LIGHT_MODEL),
+            AnthropicSettings(prefixMismatch = PrefixMismatch.DROP_BLOCK),
+        )
     }
 
     private fun effortOf(body: JsonObject) = body.obj("output_config")?.get("effort")

@@ -57,6 +57,10 @@ public object AnthropicWire {
      * clamped to the model (`ReasoningLevel.clampTo`), the same value the request records in
      * `ChatRequest.reasoning`; `null` sends no effort (the model's default). Images are sent inline
      * when [capabilities] say the model sees them, else as a fixed text placeholder.
+     *
+     * [settings] must fit the endpoint and the model ([AnthropicSettings.effectiveFor] makes saved
+     * settings fit): settings that do not are a configuration error, [ModelError.InvalidRequest]
+     * naming the setting, never dropped on the way. The snapshot records them as sent.
      */
     public fun snapshot(
         profile: ProviderProfile,
@@ -68,6 +72,7 @@ public object AnthropicWire {
         require(profile.protocol == ModelProtocol.ANTHROPIC_MESSAGES) {
             "Provider ${profile.id}: ${profile.protocol} is not Anthropic Messages"
         }
+        settings.requireFits(profile, model)
         return profile.wire(MAPPING_VERSION).copy(
             images = if (capabilities.vision) ImageMode.INLINE else ImageMode.PLACEHOLDER,
             reasoningEffort = reasoning?.let { WireSetting(EFFORT_FIELD, effortOf(it)) },
@@ -98,9 +103,11 @@ public object AnthropicWire {
  * @property thinkingDisplay `thinking.display`, or `null` for the model's default (`omitted` on
  *   Claude Opus 5.5); `summarized` gives readable progress (model-layer §3.3). Needs [adaptiveThinking].
  * @property prefixMismatch `thinking.block_binding.prefix_mismatch_behavior` (beta
- *   `thinking-binding-controls-2026-08-01`), or `null` to send none. Needs [adaptiveThinking].
+ *   `thinking-binding-controls-2026-08-01`; Claude API only), or `null` to send none. Needs
+ *   [adaptiveThinking].
  * @property serverFallback server-side refusal fallback: `fallbacks: "default"` (beta
- *   `server-side-fallback-2026-07-01`; Claude API only, not for Claude Haiku 5.5).
+ *   `server-side-fallback-2026-07-01`; Claude API only, and only for models known to have one:
+ *   not Claude Haiku 5.5, where the field is a 400).
  * @property eagerInputStreaming `eager_input_streaming: true` on every tool: arguments stream as
  *   they are generated, unvalidated by the server.
  * @property strictTools `strict: true` on every tool; schemas must set `additionalProperties: false`
@@ -120,6 +127,44 @@ public data class AnthropicSettings(
         require(VERSION_SHAPE.matches(apiVersion)) { "apiVersion must look like 2026-10-21, got '$apiVersion'" }
         require(adaptiveThinking || (thinkingDisplay == null && prefixMismatch == null)) {
             "thinkingDisplay and prefixMismatch need adaptiveThinking"
+        }
+    }
+
+    /**
+     * These settings for requests to [model] behind [profile]: what neither can take is turned off
+     * (a Claude-API-only beta on another endpoint, a fallback for a model without one). For a
+     * profile serving several models, saved settings go through this per model before [AnthropicWire.snapshot],
+     * which records the result.
+     */
+    public fun effectiveFor(
+        profile: ProviderProfile,
+        model: ModelId,
+    ): AnthropicSettings {
+        val official = AnthropicPresets.isOfficial(profile.baseUrl)
+        return copy(
+            prefixMismatch = prefixMismatch?.takeIf { official },
+            serverFallback = serverFallback && official && AnthropicPresets.hasServerFallback(model),
+        )
+    }
+
+    /** Refuses settings [effectiveFor] would change, naming the first one. */
+    internal fun requireFits(
+        profile: ProviderProfile,
+        model: ModelId,
+    ) {
+        val fit = effectiveFor(profile, model)
+        if (fit.serverFallback != serverFallback) {
+            invalid(
+                "settings.serverFallback",
+                "server-side fallback needs the Claude API (${AnthropicPresets.OFFICIAL_BASE_URL}) and a model " +
+                    "known to have one; ${profile.baseUrl} with $model has none",
+            )
+        }
+        if (fit.prefixMismatch != prefixMismatch) {
+            invalid(
+                "settings.prefixMismatch",
+                "prefix mismatch behavior is a Claude API beta; ${profile.baseUrl} is another endpoint",
+            )
         }
     }
 
@@ -151,13 +196,9 @@ public data class AnthropicSettings(
         public fun defaultsFor(
             profile: ProviderProfile,
             model: ModelId,
-        ): AnthropicSettings {
-            val official = AnthropicPresets.isOfficial(profile.baseUrl)
-            return AnthropicSettings(
-                prefixMismatch = if (official) PrefixMismatch.DROP_BLOCK else null,
-                serverFallback = official && AnthropicPresets.hasServerFallback(model),
-            )
-        }
+        ): AnthropicSettings = RECOMMENDED.effectiveFor(profile, model)
+
+        private val RECOMMENDED = AnthropicSettings(prefixMismatch = PrefixMismatch.DROP_BLOCK, serverFallback = true)
     }
 }
 
