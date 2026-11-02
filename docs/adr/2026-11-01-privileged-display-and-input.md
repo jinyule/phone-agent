@@ -22,15 +22,26 @@ phase1-architecture §3.5 列出了 `IPrivilegedCore` 的能力面，调研报�
    - 进命令行的包名先校验（`PackageNames`）：Java 包名格式，并且已安装；UID、`u0aNN`、`--` 开头的选项都会被命令读成别的东西，一律拒绝。`setAudioMuted` 返回 false，冷启动的目标不合格时整个启动返回 `REFUSED`。
    - 锁屏时什么都不启动（`LOCKED`，协议 2 新增）：用户不在场时，agent 不该打开任何 App。锁屏状态读不到也按锁屏处理，`probe()` 的 lock 一项会报出原因（协议 4 起，见决定 4）。
    - 冷启动只在"这个 App 的任务全在这块屏上"时才 `am force-stop`，否则降级为普通启动并返回 `COLD_IGNORED`。
-   - intent 里的 `FLAG_GRANT_*`（URI 授权）在启动前被清掉：助手是 shell 身份，不替任何人授予 URI 权限。
-   - 只启动 App 自己的 uid 也能启动的 Activity（`LaunchTargets`）：intent 先解析成唯一的 Activity，它必须已导出（或属于本 App），它要求的权限 App 的 uid 必须已获得（`checkPermission(perm, appUid)`）；启动时把 component 设成检查过的那个。解析不出来是 `NOT_FOUND`；能处理它的 Activity 不止一个、未导出、缺权限都是 `REFUSED`。例如 PhoneAgent 没有 `CALL_PHONE`，`ACTION_CALL tel:` 就被拒绝。助手以 shell 身份运行，权限远多于 App，这一条只管"调用身份的权限上限"，付款、发送这类内容判定仍归 PolicyEngine。
+   - **启动边界：助手代 App 启动的，只能是 App 自己调用 startActivity 也能启动的那个 Activity，并且不能借 shell 身份多带任何权限。** 助手以 shell 身份运行，权限远多于 App；这一条只管"调用身份的权限上限"，付款、发送这类内容判定仍归 PolicyEngine。它由代码（`LaunchTargets`、`AppGrants`）和负例矩阵（`LaunchBoundaryTest`，每一类都在直接启动、`am start` 回退以及两者的冷启动上各断言一次）守住，不靠评审：
+     - 每条启动路径都先过同一个检查：直接 `startActivityAsUser`、`am start` 回退、冷启动的 `am force-stop`，用的都是检查返回的那个 `Allowed`（component 已固定成检查过的 Activity）。启动代码只接受 `Allowed`，检查之后没有地方能换目标。
+     - intent 先解析成唯一的 Activity：解析不出来是 `NOT_FOUND`，不止一个候选是 `REFUSED`（助手问不了用户选哪个）。
+     - 然后按系统在 App 自己调用 `startActivity` 时的检查（`ActivityTaskSupervisor.checkStartAnyActivityPermission`），对 App 的 uid 逐条判断：
+       - 不属于本 App 的 Activity 必须已导出。"属于本 App"按 app id 判断，与系统一致，不按包名。
+       - 不属于本 App 时，它要求的权限 App 的 uid 必须已获得（`checkPermission(perm, appUid)`）。Activity 自己没声明权限时，要求它所在 application 的权限：PackageManager 解析清单时已经把它填进 `ActivityInfo.permission`，没填的情况助手自己补上。
+       - activity-alias 只看 alias 自己的 `exported` 和权限，不继承 target 和 application 的权限，与系统一致（"alias overrides permissions"）。
+       - 这个权限有对应的 app op 时，App 的模式必须是 `MODE_ALLOWED`。其他模式（包括 `MODE_DEFAULT`）系统也会拒绝；助手读不到模式时同样拒绝。这一条对本 App 的 Activity 也适用，与系统一致。
+       - 系统把 `ACTION_CALL`、拍照、录像（`IMAGE_CAPTURE`、`MOTION_PHOTO_CAPTURE`、`VIDEO_CAPTURE`）绑定到运行时权限：App 的清单申请了这个权限、却没有获得或 app op 不允许时拒绝；没申请时不限制，与系统一致。
+       - 例如 PhoneAgent 没有 `CALL_PHONE`，`ACTION_CALL tel:` 就被拒绝。
+     - 不借 shell 的权限：`FLAG_GRANT_READ_URI_PERMISSION`、`FLAG_GRANT_WRITE_URI_PERMISSION`、`FLAG_GRANT_PERSISTABLE_URI_PERMISSION`、`FLAG_GRANT_PREFIX_URI_PERMISSION` 在检查返回的 intent 上已经清零，每条路径启动的都是这个 intent，所以 data 和 ClipData 里的 URI 都不会以 shell 的身份授出去。`am start` 写不出 ClipData，带 ClipData 的 intent 不走回退（协议 6 起，见决定 3）。
+     - 解析和检查都在助手自己的用户里、对 App 的 uid 做；启动也固定在这个用户：`startActivityAsUser` 传助手的 userId，`am start` 带 `--user`（协议 6 起，之前传的是 `USER_CURRENT`，前台若是另一个用户就会启动到那边）。
+     - 拒绝原因有类型（`LaunchRefusal`），不靠异常文字。对 App 仍然只是 `REFUSED` 或 `NOT_FOUND`，原因写进 logcat。
    - 可能夹带 intent 的请求一律拒绝（`REFUSED`，`NestedIntents`）。嵌套的 intent 会被接收方再启动一次，助手没检查过它启动什么、用谁的权限。
      - `ACTION_CHOOSER`、selector、带 intent 的 ClipData 条目拒绝；ClipData 里的普通 URI 照旧允许。
      - extras 用**允许清单**（协议 4 起），不再去找 intent：r1a 复审实测了 6 种藏 intent 的形状（SparseArray、Map 的值、作为 extra 的 ClipData、`RunningTaskInfo.baseIntent`、`ShortcutInfo` 的 intent、`ChooserTarget` 的 Bundle 里的 `EXTRA_INTENT`），逐个补分支封不完。
      - 允许：null、primitive 及其数组；String、CharSequence、Uri 及其数组和 ArrayList（ArrayList 也可以是装箱整数，`putIntegerArrayListExtra`）；值也在清单内的 Bundle；ContentValues 组成的 ArrayList，每个值只能是前两类叶子（联系人插入的 `ContactsContract.Intents.Insert.DATA`）。
      - 其余一律拒绝：任意其他 Parcelable 和 Parcelable 数组、SparseArray、Map、Serializable、ClipData、IBinder。要放行别的类型，必须连同"检查它里面装了什么"一起加进清单；其他纯数据 Parcelable 等有实际需要时再加。
      - Bundle、数组、列表、ContentValues 共用一个嵌套深度上限；extras 读不出来也拒绝。
-   - 只支持主用户（`userId` 必须是助手自己的用户或 `USER_CURRENT`）。分身和工作资料留到以后。
+   - 只支持主用户：`userId` 必须是助手自己的用户或 `USER_CURRENT`，`USER_CURRENT` 按助手自己的用户处理（协议 6 起）。分身和工作资料留到以后。
    - `injectKey` 只放行导航和编辑键（`PressKeys`）。音量、电源、Home、最近任务、助手、相机、媒体键作用于整机而不是 agent 的屏，一律拒绝。
      `phone_key` 的 schema 仍然有 `home`（phase1 §5）：主屏模式下由无障碍的 `performGlobalAction` 实现；后台屏上由 ScreenPort（WP14）直接返回 Failed，原因"后台屏上没有桌面，请用 phone_launch 切换 App"，不调用 `injectKey`。
    - `injectStroke` 校验点数（≤1024）、时间从 0 开始且单调不减、总时长 ≤10 秒、每个点都在本屏尺寸内。
@@ -43,7 +54,7 @@ phase1-architecture §3.5 列出了 `IPrivilegedCore` 的能力面，调研报�
 
 3. **隐藏接口统一经 `SystemBridge` 反射，失败带原因**。`CapabilityUnavailable` 的消息里有缺的是什么，调用方要么回退、要么把原因报给上层：
    - `moveRootTaskToDisplay` 失败回退 `am display move-stack`；
-   - `startActivityAsUser`（12 参数）不可用时回退 `am start --display`，把 intent 完整写成参数：`-n` 组件，加上 `-a` action（MAIN 也带上，协议 5 起：MAIN+LAUNCHER 去掉 MAIN 就成了另一个 intent）、`-d` data、`-t` type、每个 `-c` category、`-f` flags（十进制，`am` 用 `Integer.decode` 读）。带 extras 的 intent 不走这条回退，返回 `ERROR`（协议 4 起）：extras 还写不成等价的参数，丢掉它们就是启动了另一个 intent（完整映射留在暂缓项）；
+   - `startActivityAsUser`（12 参数）不可用时回退 `am start --user <助手的用户> --display`，把检查过的 intent 完整写成参数：`-n` 检查过的组件，加上 `-a` action（MAIN 也带上，协议 5 起：MAIN+LAUNCHER 去掉 MAIN 就成了另一个 intent）、`-d` data、`-t` type、每个 `-c` category、`-f` flags（十进制，`am` 用 `Integer.decode` 读；URI 授权位已经清零）。带 extras（协议 4 起）或 ClipData（协议 6 起）的 intent 不走这条回退，返回 `ERROR`：它们还写不成等价的参数，丢掉就是启动了另一个 intent（完整映射留在暂缓项）；
    - `getTasks` 读不出来时，启动和挪任务一律拒绝，而不是猜；
    - `setDisplayImePolicy` 设完一定回读。设不上、回读不是 LOCAL，或者回读做不了（getter 不存在、调用失败、答复不是整数，都算"IME 未验证"，协议 4 起），就把刚建的屏释放掉，`createDisplay` 返回 `FAILED`：键盘弹到用户屏上是不能接受的，不存在"不打字就照常用"的屏。释放本身失败时，这块屏进"待清理"集合（协议 4 起）：`owns`/`sizeOf`/`ids` 和所有能力（启动、注入、移任务）都不认它，`releaseAll` 再释放它，释放成功才移出集合；失败原因写"没能释放、等待清理"，不写"已释放"。`probe()` 的 IME 一项照常报告原因；
    - API 34 以下 `createDisplay` 返回 `REFUSED`，不建屏（没有 `OWN_FOCUS`，屏会抢用户的焦点，D2）；`probe()` 在建屏之前就报告"background displays need API 34+"；
@@ -66,7 +77,9 @@ phase1-architecture §3.5 列出了 `IPrivilegedCore` 的能力面，调研报�
 
 - **助手不做任何把关，全交给 PolicyEngine**（接近 Mika 的 `phone_system_command` 思路）。一个参数写错就能打扰用户；而且助手是 uid 2000，错误代价比 App 大。现在这几条都是"不越界"而不是"判断内容"，不会和 PolicyEngine 的职责重叠。
 - **从 `phone_key` 的 schema 里去掉 `home`**（B 段最初的做法）。工具清单要保持稳定；主屏模式下 `home` 由无障碍实现，是能用的。所以 schema 保留 `home`，后台屏上由 ScreenPort 给出带原因的失败，助手照样拒绝注入 HOME。
-- **助手也做 intent 白名单**（Mika 的 `ShellLinks` / `SystemIntents`）。那会出现两份规则，而设计明确要求判定点只有一个（D8）。助手只处理与身份有关的东西：清掉 URI 授权标志，拒绝嵌套 intent。
+- **启动边界只查"已导出"和"Activity 自己声明的权限"**（r1a 的 `LaunchTargets`）。application 级权限、app op、action 绑定的运行时权限都会漏掉，"属于本 App"按包名判断也和系统不一致；am 回退和冷启动是否过了同一个检查，也只能靠评审确认。r1d 改成按系统的检查逐条复刻，并让所有启动路径只接受检查的结果（`Allowed`）。
+- **由 App 自己启动，让系统做检查**（App 进程调用 `startActivity` 带 `setLaunchDisplayId`，或交给助手一个 App 创建的 `PendingIntent`）。启动方就是 App，系统的检查原样生效，也不存在"启动方是 shell"的差别（见"后果"）。但 App 往 shell 建的虚拟屏上启动，要过系统对显示屏访问的检查，这一点没有验证；而且要改协议和 App 侧的启动流程。现在先在助手里复刻系统检查，并用矩阵钉住。
+- **助手也做 intent 白名单**（Mika 的 `ShellLinks` / `SystemIntents`）。那会出现两份规则，而设计明确要求判定点只有一个（D8）。助手只处理与身份有关的东西：启动边界（只启动 App 自己也能启动的 Activity，清掉 URI 授权标志），拒绝嵌套 intent。
 - **`moveTask` 不做归属检查**（Mika 的做法）。那样 App 一个错误的 taskId 就能把用户正在用的 App 拉进后台屏。代价是跳出回收需要 `watchMainScreen` 的窗口配合，见"后果"。
 - **用 `UiAutomation` 或无障碍手势注入**，而不是 `injectInputEvent`。无障碍手势是 WP14 的路径（`dispatchGesture` + `setDisplayId`），B 段提供的是最底层的回退；两者并存是 §3.3 "点击逐级回退"的要求。
 - **`createDisplay` 用 `VirtualDisplayConfig`**（API 34+ 的新接口，可以设更多属性）。它要求构造隐藏的 builder，收益只有几个暂时用不上的属性，不如 6 参数重载稳。
@@ -81,6 +94,10 @@ phase1-architecture §3.5 列出了 `IPrivilegedCore` 的能力面，调研报�
 - 跳出回收依赖 App 先调 `watchMainScreen`：没开窗口时冒到主屏的任务不算 `spilled`，`moveTask` 会拒绝。§7.2 的主循环本来就在每个动作前调它，WP14 实现 ScreenPort 时要保证这一点。
 - 窗口内冒到主屏的任务都可以被挪回，包括用户在这 3 秒内自己切换到的 App。窗口短、且只有 App 显式调用才会挪，但这是一个真实的权衡；要更严格的话，需要把"是不是 agent 引起的"判定（Mika 的 `MainScreenSpill`）也做进来，那属于 WP14 的 ScreenPort。
 - 只支持主用户：分身、工作资料里的 App 现在启动不了（`StartResult.REFUSED`）。
+- 启动边界复刻的是系统的检查，系统以后加了新的维度，助手要跟着补。矩阵按 `ActivityTaskSupervisor` 当前的规则写；升 compileSdk 或 targetSdk 时要对照新版本复核一遍。
+- 启动边界管的是"启动哪个 Activity、带什么权限"，管不到两点：
+  - 目标 Activity 看到的启动方是 shell（uid 2000），不是 App。用 `startActivityAsUser` 或 `am start` 启动时，这一点改不了；要让启动方变成 App，需要换启动方式（见 Alternatives 第二条），这属于协议层面的改动。
+  - 时机：App 在后台时自己启动不了 Activity，助手可以。后台屏本来就要这样用。
 - 有多个 App 能处理的链接（比如装了两个浏览器）会被拒绝：助手问不了用户选哪个。WP14 要先在 App 侧解析出用户的默认处理者，再把明确的 component 传进来。
 - WP14 的 ScreenPort 要在后台屏上把 `phone_key home` 直接变成 Failed（原因见决定 1），不能交给 `injectKey`：助手的拒绝只是一个 false，模型看不到原因。
 - 只在 API 36 模拟器上验证过。API 30–33 没有 `OWN_FOCUS`，虚拟屏会抢主屏焦点，这正是 D2 "后台屏要求 API 34+"的原因，所以协议 3 起这些版本上直接拒绝建屏；API 34/35 的行为未实测。
