@@ -48,6 +48,15 @@ class WireProfileTest {
     private val base = profile.wire(mappingVersion = 1)
 
     @Test
+    fun `the snapshot copies the profile's headers instead of sharing them`() {
+        val live = mutableMapOf("x-team" to "a")
+        val snapshot = profile.copy(headers = live).wire(mappingVersion = 1)
+        live["x-team"] = "b"
+        live["x-extra"] = "c"
+        assertEquals(mapOf("x-team" to "a"), snapshot.headers, "a later change of the live map reaches no snapshot")
+    }
+
+    @Test
     fun `the profile part of the snapshot is the non-secret wire settings of the profile`() {
         assertEquals(
             WireProfile(

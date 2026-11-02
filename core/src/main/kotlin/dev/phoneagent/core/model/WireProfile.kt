@@ -15,9 +15,9 @@ import kotlinx.serialization.Serializable
  * only says which kind of authentication is sent.
  *
  * Fields named after wire fields use the adapter's own spelling (for example
- * `max_completion_tokens`); `null` means nothing is sent for it. Which values a provider needs is
- * decided by the adapter's rules (WP03) when the header is written; [ProviderProfile.wire] fills
- * the part that comes from the profile.
+ * `max_completion_tokens`); `null` means nothing is sent for it. The adapter produces the whole
+ * snapshot in [ChatModel.prepare], by its own rules (WP03, WP04); [ProviderProfile.wire] fills the
+ * part that comes from the profile.
  *
  * @property mappingVersion version of the adapter's mapping rules (neutral request plus this
  *   snapshot to wire bytes), >= 1. An adapter bumps it whenever the same inputs would produce
@@ -124,14 +124,15 @@ public val Credential.kind: CredentialKind
 
 /**
  * The part of the wire snapshot that comes from this profile (credential kind, headers,
- * reasoning field and echo), for adapter rules of [mappingVersion]; adapters set the rest.
- * The endpoint and the secret reference are not part of it.
+ * reasoning field and echo), for adapter rules of [mappingVersion]; a helper for adapters
+ * implementing [ChatModel.prepare], which set the rest. The headers are a copy, so a later change
+ * of a live map reaches no snapshot. The endpoint and the secret reference are not part of it.
  */
 public fun ProviderProfile.wire(mappingVersion: Int): WireProfile =
     WireProfile(
         mappingVersion = mappingVersion,
         credential = credential.kind,
-        headers = headers,
+        headers = headers.toMap(),
         reasoningField = reasoningField,
         echoReasoning = echoReasoning,
     )
@@ -140,7 +141,7 @@ public fun ProviderProfile.wire(mappingVersion: Int): WireProfile =
  * The level to request from a model whose selectable levels are [supported]: this level when
  * supported, else the highest supported level below it, else the lowest supported one. `null`
  * [supported] (unknown) keeps this level; an empty list means none can be sent (`null`).
- * `request/header.reasoning` records the result.
+ * [ChatModel.prepare] clamps with it; `request/header.reasoning` records the result.
  */
 public fun ReasoningLevel.clampTo(supported: List<ReasoningLevel>?): ReasoningLevel? =
     when {

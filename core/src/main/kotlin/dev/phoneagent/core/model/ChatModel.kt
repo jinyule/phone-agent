@@ -16,15 +16,46 @@ public interface ChatModel {
     public val info: ModelInfo
 
     /**
+     * The settings of a request to this model at [reasoning]: the effective level, clamped to
+     * `info.capabilities.reasoningLevels` with [clampTo], and the wire snapshot with that level
+     * already mapped ([WireProfile.reasoningEffort]) by this adapter's rules. Clamping and mapping
+     * are one step, here; callers never compute either themselves.
+     *
+     * Callers: the agent for the main conversation (the result is recorded in `request/header`)
+     * and capability packages for side requests (recorded in `side/request`). Both put
+     * [RequestSettings.reasoning] into `ChatRequest.reasoning` and [RequestSettings.wire] into
+     * `ChatRequest.wire`. Replay takes both from the log and never calls this.
+     *
+     * Stable for the life of this instance: the same [reasoning] always gives an equal result,
+     * whatever live settings do meanwhile, and collections in the snapshot are copies. The app's
+     * `ModelRouter` freezes the profile, the capabilities and the mapping version into the
+     * instance when it binds the model to a task. Pure: no I/O, never throws.
+     */
+    public fun prepare(reasoning: ReasoningLevel?): RequestSettings
+
+    /**
      * Sends [request] and returns the complete reply. [onDelta] receives streaming fragments in
      * order, on the calling coroutine, before this returns; it must not block or throw.
-     * Cancelling the caller aborts the HTTP exchange.
+     * Cancelling the caller aborts the HTTP exchange. A request whose `wire.mappingVersion` or
+     * `wire.credential` is not what [prepare] gives fails with [ModelError.InvalidRequest] before
+     * anything is sent. The core test sources hold `ChatModelContract`, which adapter tests inherit.
      */
     public suspend fun complete(
         request: ChatRequest,
         onDelta: (Delta) -> Unit = {},
     ): ChatResponse
 }
+
+/**
+ * What [ChatModel.prepare] gives for one request.
+ *
+ * @property reasoning the effective level for `ChatRequest.reasoning`, or `null` when none is sent.
+ * @property wire the frozen wire settings for `ChatRequest.wire`, with [reasoning] mapped.
+ */
+public data class RequestSettings(
+    val reasoning: ReasoningLevel?,
+    val wire: WireProfile,
+)
 
 /**
  * Identity and capabilities of a [ChatModel].

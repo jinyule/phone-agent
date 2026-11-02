@@ -186,6 +186,8 @@ class ModelContractsTest {
                             ModelCapabilities(true, false, 1),
                         )
 
+                    override fun prepare(reasoning: ReasoningLevel?) = RequestSettings(null, TEST_WIRE)
+
                     override suspend fun complete(
                         request: ChatRequest,
                         onDelta: (Delta) -> Unit,
@@ -209,5 +211,6 @@ class ModelContractsTest {
                 StopReason.END_TURN,
                 model.complete(ChatRequest(emptyList(), emptyList(), emptyList(), TEST_WIRE)).stopReason,
             )
+            assertEquals(RequestSettings(null, TEST_WIRE), model.prepare(ReasoningLevel.HIGH))
         }
 }
