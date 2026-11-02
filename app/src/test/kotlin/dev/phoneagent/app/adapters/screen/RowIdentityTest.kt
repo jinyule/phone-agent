@@ -90,16 +90,19 @@ class RowIdentityTest {
         }
 
     @Test
-    fun aRowReplacedByAnotherThatAlsoMovedIsStale() =
+    fun aRowReplacedByAnotherThatAlsoMovedGetsNewRefs() =
         runTest {
-            // Pairing an element that moved compares every label, not the first three.
+            // Pairing an element that moved compares every label, not the first three; acting on
+            // it is refused anyway, as it is not where the model saw it.
             host.show(shop(listOf("Kettle"), top = 300))
             val port = mainPort(host)
             val s1 = port.snapshot()
             host.show(shop(listOf("Lamp"), top = 300 + ROW_PX))
 
+            val s2 = port.snapshot()
             val outcome = port.act(UiAction.Tap(Target.Ref(s1.addOf("Kettle").ref)), s1.id)
 
+            assertFalse("Lamp's button is new", s2.addOf("Lamp").ref in s1.refs())
             assertEquals(ActionOutcome.Status.StaleRef, outcome.status)
             assertFalse(adds.getValue("Lamp").clicked)
             assertTrue(host.gestures.isEmpty())
