@@ -188,16 +188,16 @@ v1 仍未发布（冻结点是第一个 M1 PR）。`session/resumed` 和 `policy
 
 - **停止没有终态**（A1，回到 D14）：`USER`、`LIMIT`、`SHUTDOWN`、`ERROR` 都只结束当前这次运行，同一个 session 可以继续。新的不变量放在 `core.session.RunRules`，`SessionInvariants` 在写入和读取两端都调用它：
   - **需要答复的调用**（B2）：每条 `assistant/message` 里的工具调用（interrupted 的消息没有调用）加上每个 `tool/call`。它们在 `step/end`、`turn/end`、`task/stopped`、`session/resumed` 之前都要有 `tool/result`。停止、崩溃修复、截断跳过和模型视图配对都用这一个集合。只在 `task/stopped` 上检查不够：崩溃修复不写 `task/stopped`，缩小了范围的修复会让之后的每个请求都被服务端拒绝。
-  - `turn/end(STOPPED)` 后面紧跟 `task/stopped`；`task/stopped` 和 `session/resumed` 时没有打开的 turn；`SHUTDOWN`、`ERROR` 之后下一条已知记录是 `session/resumed`。
+  - `turn/end(STOPPED)` 后面紧跟 `task/stopped`；`task/stopped` 和 `session/resumed` 时没有打开的 turn；`task/stopped` 之前这次运行的所有 append（录入 inbox 的也算）都已完成，之后的下一条已知记录是 `session/resumed`，四种 cause 一样。
   - **不自动续跑**（B1）：每个 `task/stopped` 和 `session/resumed` 之后进入"等待用户输入"，只有 turn 里一条 kind = USER 的 `user/message` 能结束它。等待期间可以先记后台消息（WP02 先记排着队的后台消息、再记用户的"继续"），但不能有 step、请求、回复、调用、提示、旁路请求或上下文改动。检查条件是"第一个 step 之前有 USER 输入"，不是"新 turn 的第一条输入是 USER"。
   - **半截停止**（B3）：日志可以停在 `turn/end(STOPPED)`；下一条已知记录必须是 `task/stopped`，恢复时写 `task/stopped(ERROR)`，含义是"停止收尾没有完成"，不猜原因。
   - **未知的可忽略记录对这些规则透明**（B3、A4）：store 重新打开时只从它认识的记录恢复状态，读取端如果更严，store 自己写出的日志下次就读不回来。读写两端用同一份实现，未知记录只受"第 1 条是 `task/start`"这条信封规则约束。
   - 修复写的结果跟着落盘的 `tool/started` 走：有 `tool/started` 的不能是 NOT_STARTED，没有的不能是 OUTCOME_UNKNOWN。
-  - `session/resumed` 的定义放宽为"新的 runtime 实例接管日志"（B7）：包括进程重建，也包括同一进程里停止以后由新实例继续。
+  - `session/resumed` 的定义放宽为"新的 runtime 实例接管日志"（B7）：包括进程重建，也包括同一进程里停止以后由新实例继续。停下的实例不再接受输入，所以每次停止以后都由新实例写 `session/resumed`。
 - **截断的调用**（A8）：`MAX_TOKENS` 带调用时 `assistant/message` 原样记录，每个调用补一条 `tool/result(SKIPPED)`，不写 `tool/call`：截断的参数可能解析不出合法的 `ToolCall`，而 `tool/call` 装的是校验过的调用。`OTHER` 带调用是 BadResponse。
 - **compaction 块不随推理去掉**（A9）：`ReasoningKind.isReasoning` 标出推理类；`context/reasoning-dropped` 只去掉推理类，`ANTHROPIC_COMPACTION` 保留。没有把 compaction 从 `Part.Reasoning` 拆出去：它和推理块一样是服务商私有、只回传给同一 provider 的不透明块，拆出去要多一种 Part、改所有适配器和 v1 格式，换来的只是去掉一个布尔属性。
 - **跨模型回传**（A7）：`Part.Reasoning` 只回传给同一 provider；同一 provider 换了 model 以后回不回传由该 provider 的适配器决定。Anthropic 一律原样回传，由 API 略过当前模型读不了的块。
-- **回复里出现密钥**（A11）：适配器不改写模型产生的任何内容，整条回复按 `BadResponse` 拒绝，返回固定文字。`ModelError` 加 `discardsStreamed`（只有这种 `BadResponse` 为 true）：runtime 不把已流出的前缀记成 interrupted 的 `assistant/message`，只记 `assistant/attempt`，UI 清掉已显示的片段。没有选"加一种 ModelError"：它仍是一次违反约定的回复，分类还是 BAD_RESPONSE，只是已流出的内容不能留；也没有选"改写成 `***`"：会破坏 Anthropic 的推理绑定，改写调用参数还会改掉要执行的操作。
+- **回复里出现密钥**（A11）：适配器不改写模型产生的任何内容，整条回复按 `BadResponse` 拒绝，返回固定文字。`ModelError` 加 `discardsStreamed`（只有这种 `BadResponse` 为 true）：runtime 不把已流出的前缀记成 interrupted 的 `assistant/message`，只记 `assistant/attempt`，UI 清掉已显示的片段。匹配只做精确匹配（含 JSON 转义形式），不设最短长度。没有选"加一种 ModelError"：它仍是一次违反约定的回复，分类还是 BAD_RESPONSE，只是已流出的内容不能留；也没有选"改写成 `***`"：会破坏 Anthropic 的推理绑定，改写调用参数还会改掉要执行的操作。
 - **外发免确认资格**（A2）：只认 `tool/started.verdictSeq` 那条 Allow 之前这个调用最后一张 APPROVED 的卡，并且要求它是 OUTWARD、pkg 等于那条 Allow 的 intent.pkg。
 
 ## Alternatives considered
@@ -236,6 +236,8 @@ v1 仍未发布（冻结点是第一个 M1 PR）。`session/resumed` 和 `policy
 - **只同步这次新建的目录，失败的记在内存里下次补**（B1 的另一个选项）：换一个 port 实例或进程重启就丢了；整条链每次都同步，不需要记状态。
 - **`ToolContext` 保留 `confirm`，运行时忽略工具造的卡**：工具造的卡仍然会显示给用户，而且"安全历史只认策略来源的卡"要在运行时另记来源；从类型上去掉更简单。
 - **`USER`、`LIMIT` 作为终态**（第 2 轮的做法，第 3 轮撤回）：和 D14 的"停止后说'继续'"冲突。用户每停一次都得重开任务，丢掉整段上下文；跨 turn 的续跑上限（`StopCause.LIMIT`）一到，session 也就再也不能继续。改用"等待用户输入"状态，用不变量保证不会自动续跑。
+- **`USER`、`LIMIT` 停止以后由同一个实例直接开新 turn，不写 `session/resumed`**（第 3 轮初稿的做法）：`task/stopped` 和下一个 turn 之间就能夹进 inbox 等记录，"停止之后写了什么"要按 cause 分别判断；而 WP02 的 TaskRuntime 停止以后本来就不再接受输入，继续的总是新实例。统一成"每次停止之后先 `session/resumed`"，规则和恢复路径只有一条。
+- **密钥按最短长度兜底**（短于 8 个字符视为占位值、不匹配）：任何阈值都会让短的真实凭据漏出去。不需要认证的本地服务用 `Credential.None`。
 - **`turn/end(STOPPED)` 和 `task/stopped` 之间不许出现未知记录**：store 重新打开时看不到未知记录，读写两端的判断就会不一致，停在这个位置的日志也无法恢复。
 - **只在 `task/stopped` 检查未答复的调用**：崩溃修复不写 `task/stopped`，漏补结果的修复拦不住；所以 `step/end`、`turn/end`、`session/resumed` 上也检查。
 - **截断的调用也写 `tool/call`**：`tool/call` 装的是校验过的 `ToolCall`，截断的参数可能根本不是 JSON；而且它们从未派发，写了反而让"有 `tool/call` = 派发过"不再成立。

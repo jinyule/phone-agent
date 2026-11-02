@@ -14,8 +14,8 @@ import dev.phoneagent.core.ids.BlobRef
  *   like), the whole reply fails as [ModelError.BadResponse] with a fixed text and
  *   [ModelError.discardsStreamed] set.
  * - Matching there is exact, on the secret and on its JSON-escaped form, with no fallback by
- *   shape. A secret shorter than 8 characters is taken for a placeholder and not matched (a
- *   provisional bound).
+ *   shape, and every secret is matched whatever its length. A local service that needs no
+ *   authentication uses [Credential.None], not a placeholder key.
  * - Diagnostic fields the server wrote (error bodies, refusal categories, metadata) are still
  *   rewritten to `***`, with a fallback by shape.
  */
