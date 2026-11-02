@@ -12,6 +12,7 @@ import dev.phoneagent.core.ports.ConfirmReason
 import dev.phoneagent.core.ports.ConfirmResult
 import dev.phoneagent.core.ports.HandoffKind
 import dev.phoneagent.core.ports.HandoffResult
+import dev.phoneagent.core.ports.Money
 import dev.phoneagent.core.tool.ToolCall
 import dev.phoneagent.core.tool.ToolResult
 import dev.phoneagent.core.tool.ToolStatus
@@ -37,6 +38,9 @@ object PolicyContextSamples {
 
     /** Only ever read: a derivation that counts READ calls would list it. */
     const val NEWS = "com.example.news"
+
+    /** Where a re-check moved the send to. */
+    const val MAIL = "com.example.mail"
 
     /** A log under construction; [add] returns the seq it gave. Record 1 is `task/start`. */
     private class Log {
@@ -101,10 +105,27 @@ object PolicyContextSamples {
     }
 
     private val send = ActionIntent(IntentKind.OUTWARD, CHAT)
+    private val sendMail = ActionIntent(IntentKind.OUTWARD, MAIL)
+    private val pay = ActionIntent(IntentKind.SPEND, CHAT)
     private val type = ActionIntent(IntentKind.INPUT, NOTES)
     private val look = ActionIntent(IntentKind.READ, NEWS)
 
-    private fun sendCard(id: String) = ConfirmCard(ToolCallId(id), ConfirmReason.OUTWARD, "发送消息", "张三", pkg = CHAT)
+    private fun sendCard(
+        id: String,
+        pkg: String = CHAT,
+    ) = ConfirmCard(ToolCallId(id), ConfirmReason.OUTWARD, "发送消息", "张三", pkg = pkg)
+
+    private fun payCard(id: String) =
+        ConfirmCard(ToolCallId(id), ConfirmReason.SPEND, "付款", "张三", amount = Money(1_000, "CNY"), pkg = CHAT)
+
+    /** A Confirm of [card] on [intent], asked and approved: one round of a call's checks. */
+    private fun Log.approvedRound(
+        intent: ActionIntent,
+        card: ConfirmCard,
+    ) {
+        verdict(card.callId.value, intent, Verdict.Confirm(card))
+        decide(card, ConfirmResult.APPROVED)
+    }
 
     /** An OUTWARD card for [id], approved, and the re-check's verdict on the fresh screen. */
     private fun Log.approvedSend(
@@ -167,6 +188,28 @@ object PolicyContextSamples {
                 result("c1", ToolStatus.REFUSED)
                 call("c2")
                 run("c2", verdict("c2", send, Verdict.Allow), ToolStatus.OK)
+            },
+            case("re-approved-after-the-send-moved-to-another-app", setOf(MAIL), setOf(MAIL)) {
+                call("c1")
+                approvedRound(send, sendCard("c1"))
+                approvedRound(sendMail, sendCard("c1", MAIL))
+                run("c1", verdict("c1", sendMail, Verdict.Allow), ToolStatus.OK)
+            },
+            case("outward-approval-superseded-by-a-spend-approval", setOf(CHAT), emptySet()) {
+                call("c1")
+                approvedRound(send, sendCard("c1"))
+                approvedRound(pay, payCard("c1"))
+                run("c1", verdict("c1", pay, Verdict.Allow), ToolStatus.OK)
+            },
+            case("approved-payment-executed", setOf(CHAT), emptySet()) {
+                call("c1")
+                approvedRound(pay, payCard("c1"))
+                run("c1", verdict("c1", pay, Verdict.Allow), ToolStatus.OK)
+            },
+            case("approved-card-names-another-app-than-the-execution", setOf(MAIL), emptySet()) {
+                call("c1")
+                approvedRound(send, sendCard("c1"))
+                run("c1", verdict("c1", sendMail, Verdict.Allow), ToolStatus.OK)
             },
             case("model-requested-confirmation", emptySet(), emptySet()) {
                 call("c1")

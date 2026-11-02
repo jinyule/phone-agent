@@ -129,10 +129,13 @@ public sealed interface Verdict {
  *   (`tool/started`), taking the intent of the verdict it started on (`verdictSeq`); this includes
  *   the target package of `phone_launch`. A refused or handed-off call, one waiting for or denied
  *   an approval, and one an interceptor answered never started and count nothing.
- * @property outwardConfirmedPackages the `card.pkg` of every card with reason `ConfirmReason.OUTWARD`
- *   that was `ConfirmResult.APPROVED` for a call that then started and was executed with
- *   `ToolStatus.OK` (`tool/executed` of the same call id). A `request_confirmation` card has no
- *   pkg and grants nothing.
+ * @property outwardConfirmedPackages for every call that started and was executed with
+ *   `ToolStatus.OK` (`tool/executed` of the same call id), the package the approval it ran on
+ *   names: the last card `ConfirmResult.APPROVED` for that call before the Allow its `tool/started`
+ *   points at (`verdictSeq`), and only when that card has reason `ConfirmReason.OUTWARD` and a pkg
+ *   equal to the `intent.pkg` of that Allow. A card a later `Confirm` replaced grants nothing, nor
+ *   does an approval of another reason (a payment), nor a card for another package than the one
+ *   the call ran in. A `request_confirmation` card has no pkg and grants nothing.
  * @property approved the card the user just approved for this call, during the re-check; `null` otherwise.
  */
 public data class PolicyContext(
