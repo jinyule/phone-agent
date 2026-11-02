@@ -23,9 +23,11 @@ import kotlinx.serialization.json.JsonPrimitive
  * block once more when it ends, as written and with its escapes decoded ([JsonEscapes]), valid
  * JSON or not, so escapes such as `\/` or `\u0073` hide nothing there.
  *
- * Known gaps (model-layer §2): a secret split across two members or two blocks, and one written
- * with escapes in text or thinking (literal text, which nothing downstream decodes), are not
- * detected.
+ * Content of a declined attempt is checked as well, though its unknown blocks reach no exit
+ * (deltas, reply, log, diagnostics, next request): stricter than the exit rule of model-layer §2,
+ * which only asks for what reaches one. Known gaps (same section): a secret split across two
+ * members or two blocks, and one written with escapes, spaces or another encoding in text or
+ * thinking (literal text, which nothing downstream decodes), are not detected.
  *
  * The same rule and windows as the OpenAI adapters' guard (WP03), kept in step by hand.
  */
