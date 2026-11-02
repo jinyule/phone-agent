@@ -176,11 +176,9 @@ public class ProviderProbe internal constructor(
         val root =
             try {
                 Json.parseToJsonElement(body) as? JsonObject
-            } catch (e: SerializationException) {
-                throw ModelError.BadResponse(
-                    "model list is not JSON: ${redactor.text(body).take(SNIPPET)}",
-                    redactor.cause(e),
-                )
+            } catch (ignoredQuotingParseError: SerializationException) {
+                // Its message quotes the input cut at a fixed width, which can split a secret before it is masked.
+                throw ModelError.BadResponse("model list is not JSON: ${redactor.text(body).take(SNIPPET)}")
             }
         val entries =
             root?.array("data") ?: root?.array("models") ?: throw ModelError.BadResponse("model list has no data array")

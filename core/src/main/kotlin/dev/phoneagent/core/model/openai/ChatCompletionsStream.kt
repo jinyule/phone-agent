@@ -128,8 +128,9 @@ internal class ChatCompletionsStream(
     private fun parse(data: String): JsonObject =
         try {
             Json.parseToJsonElement(data) as? JsonObject ?: throw ModelError.BadResponse("chunk is not a JSON object")
-        } catch (e: SerializationException) {
-            throw ModelError.BadResponse("chunk is not JSON: ${redactor.text(data).take(SNIPPET)}", redactor.cause(e))
+        } catch (ignoredQuotingParseError: SerializationException) {
+            // Its message quotes the input cut at a fixed width, which can split a secret before it is masked.
+            throw ModelError.BadResponse("chunk is not JSON: ${redactor.text(data).take(SNIPPET)}")
         }
 
     private fun chunk(
