@@ -95,6 +95,9 @@ class RecheckTest {
         assertEquals("李四", other.target)
         val draft = card(recheck(tap("e1"), approved, chat(draft = "转我1000", id = "s2")))
         assertEquals("转我1000", draft.content)
+        // The whole card counts, the action the user read included.
+        val described = approved.copy(action = "发给李四")
+        assertEquals(approved, card(recheck(tap("e1"), described, chat(id = "s2"))))
     }
 
     @Test

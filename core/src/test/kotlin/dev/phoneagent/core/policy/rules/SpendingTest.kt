@@ -62,6 +62,8 @@ class SpendingTest {
             "已选1件，合计¥39.90 | 3990",
             "合计 2 件 ¥20 | 2000",
             "合计 3 items ¥12.50 | 1250",
+            // A bare number after the label loses to an amount with a currency mark.
+            "合计(2) ¥20.00 | 2000",
         ],
     )
     fun `the amount is the one after the total label, and counts are not money`(
