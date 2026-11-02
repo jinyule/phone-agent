@@ -14,6 +14,7 @@ import dev.phoneagent.app.debug.TemporarySnapshotAnalyzer
 import dev.phoneagent.app.service.AgentAccessibility
 import dev.phoneagent.core.ports.ActionOutcome
 import dev.phoneagent.core.ports.Direction
+import dev.phoneagent.core.ports.ElementRef
 import dev.phoneagent.core.ports.ElementRole
 import dev.phoneagent.core.ports.LaunchTarget
 import dev.phoneagent.core.ports.ScreenFlag
@@ -131,17 +132,38 @@ class AndroidScreenDeviceTest {
             val again = screen.snapshot()
             val rowAgain = again.find { it.name?.startsWith("Network & internet") == true }
 
+            // A short drag moves the rows without paging them all away (Scroll pages a whole screen).
+            val dragged = screen.act(UiAction.Swipe(Target.Point(500, 800), Target.Point(500, 600), DRAG_MS), again.id)
+            log("drag up by a fifth: ${dragged.describe()}")
+            assertEquals(ActionOutcome.Status.Ok, dragged.status)
+            assertEquals(ActionOutcome.Effect.CHANGED, dragged.effect)
+            val bars = systemBarWindows()
+            log("status and navigation bar windows: $bars")
+            assertTrue("the device has a status bar", bars.isNotEmpty())
+            assertTrue(
+                "the bars are not part of the screen",
+                (again.elements + dragged.after!!.elements).none { it.window in bars },
+            )
+            // Checked on the JVM too, where they fail without carried refs (ScrollChecksMirrorTest).
+            val moved = movedRows(again, dragged.after!!)
+            log(
+                "rows the drag moved: ${moved.map { (was, now) ->
+                    "${was.name}: @${was.ref.value} top ${was.bounds.top} -> @${now.ref.value} top ${now.bounds.top}"
+                }}",
+            )
+            assertTrue("some named row stayed on screen and moved", moved.isNotEmpty())
+            moved.forEach { (was, now) -> assertEquals("ref of '${was.name}'", was.ref, now.ref) }
+
             val scrolled = screen.act(UiAction.Scroll(null, Direction.DOWN), on = null)
             log("scroll down: ${scrolled.describe()}")
             assertEquals(ActionOutcome.Status.Ok, scrolled.status)
             assertEquals(ActionOutcome.Effect.CHANGED, scrolled.effect)
             assertNotNull("diffed against the screen read before", scrolled.diff)
-            val kept =
-                scrolled.after!!.elements.filter { moved ->
-                    moved.name != null && again.elements.any { it.ref == moved.ref && it.name == moved.name }
-                }
-            log("refs kept across the scroll: ${kept.map { "@${it.ref.value} ${it.name}" }}")
-            assertTrue("rows still on screen keep their refs", kept.isNotEmpty())
+            val vanished = vanishedRefs(dragged.after!!, scrolled.after!!)
+            log("refs of rows scrolled away: ${vanished.map { it.value }}")
+            assertTrue("some named row scrolled away", vanished.isNotEmpty())
+            assertTrue("no ref of a row scrolled away is reused", scrolled.after!!.elements.none { it.ref in vanished })
+            assertTrue("the bars are not part of the screen", scrolled.after!!.elements.none { it.window in bars })
 
             // The row planned on the screen before scrolling has moved: refused without touching the device.
             val stale = screen.act(UiAction.Tap(Target.Ref(rowAgain.ref)), again.id)
@@ -179,6 +201,22 @@ class AndroidScreenDeviceTest {
 
             val submitted = screen.act(UiAction.Type(null, "battery", submit = true), on = null)
             log("type 'battery' and submit: ${submitted.describe()}")
+            assertEquals(ActionOutcome.Status.Ok, submitted.status)
+            assertEquals("battery", submitted.after!!.find { it.role == ElementRole.INPUT }.value)
+
+            // Submitting hid the keyboard, and a field without it has no editor action: tap it first.
+            val searchField = submitted.after!!.find { it.role == ElementRole.INPUT }
+            val refocused = screen.act(UiAction.Tap(Target.Ref(searchField.ref)), submitted.after!!.id)
+            log("tap the search field again: ${refocused.describe()}")
+            assertEquals(ActionOutcome.Status.Ok, refocused.status)
+            val retyped = screen.act(UiAction.Type(null, "display"), on = null)
+            log("type 'display' into the focused field: ${retyped.describe()}")
+            assertEquals(ActionOutcome.Status.Ok, retyped.status)
+            // An explicit ENTER; Ok means the editor action was sent (the search then hides the keyboard).
+            val entered = screen.act(UiAction.Key(SystemKey.ENTER), on = null)
+            log("ENTER: ${entered.describe()}")
+            assertEquals(ActionOutcome.Status.Ok, entered.status)
+            assertEquals("display", entered.after!!.find { it.role == ElementRole.INPUT }.value)
             screen.act(UiAction.Key(SystemKey.BACK), on = null)
         }
 
@@ -237,6 +275,51 @@ class AndroidScreenDeviceTest {
             )
             assertTrue(changed)
         }
+
+    /** Ids of the status and navigation bar windows on the main display. */
+    private fun systemBarWindows(): Set<Int> {
+        val host = AgentAccessibility.host.value!!
+        val size = host.displaySize(Display.DEFAULT_DISPLAY)!!
+        return host
+            .windowsOn(Display.DEFAULT_DISPLAY)
+            .filter { ScreenReader.isSystemBar(it, DisplayGeometry(size.width, size.height)) }
+            .map { it.id }
+            .toSet()
+    }
+
+    /**
+     * Named elements on both screens, unique by name and role on each, with the same height (not
+     * cut by the list's edge) and another top: the rows the scroll moved, before and after.
+     */
+    private fun movedRows(
+        before: ScreenSnapshot,
+        after: ScreenSnapshot,
+    ): List<Pair<UiElement, UiElement>> {
+        fun ScreenSnapshot.unique(): Map<Pair<String, ElementRole>, UiElement> =
+            elements
+                .filter { it.name != null }
+                .groupBy { it.name!! to it.role }
+                .filterValues { it.size == 1 }
+                .mapValues { it.value.single() }
+        val now = after.unique()
+        return before.unique().mapNotNull { (key, was) ->
+            now[key]
+                ?.takeIf {
+                    it.bounds.top != was.bounds.top &&
+                        it.bounds.bottom - it.bounds.top == was.bounds.bottom - was.bounds.top
+                }?.let { was to it }
+        }
+    }
+
+    /** Refs of the named elements of [before] whose name is nowhere on [after]. */
+    private fun vanishedRefs(
+        before: ScreenSnapshot,
+        after: ScreenSnapshot,
+    ): Set<ElementRef> =
+        before.elements
+            .filter { it.name != null && after.elements.none { now -> now.name == it.name } }
+            .map { it.ref }
+            .toSet()
 
     /** The latest screen once [pkg] is in front; waits on changes, not on time. */
     private suspend fun inFront(pkg: String): ScreenSnapshot =
@@ -348,6 +431,7 @@ class AndroidScreenDeviceTest {
         private const val CHANGE_TIMEOUT_MS = 5_000L
         private const val NANOS_PER_MS = 1_000_000
         private const val CONNECT_TIMEOUT_MS = 20_000L
+        private const val DRAG_MS = 1_000L
 
         private const val SERVICE = "dev.phoneagent/dev.phoneagent.app.service.AgentAccessibilityService"
         private const val ENABLED = "enabled_accessibility_services"
