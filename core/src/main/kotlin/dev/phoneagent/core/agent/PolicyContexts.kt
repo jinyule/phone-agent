@@ -56,10 +56,7 @@ import dev.phoneagent.core.tool.ToolStatus
  */
 internal fun latestSnapshot(records: List<SessionRecord>): ScreenSnapshot? {
     val answered = records.mapNotNullTo(HashSet()) { (it.event as? ToolResultRecorded)?.callId }
-    val acting =
-        startsOf(records)
-            .filter { (_, verdict) -> verdict.intent.kind != IntentKind.READ }
-            .mapTo(HashSet()) { (started, _) -> started.callId }
+    val acting = actingCalls(records)
     val seen = records.asReversed().firstNotNullOfOrNull { seenSnapshot(it.event, answered, acting) }
     return (seen as? Seen.Screen)?.snapshot
 }
@@ -116,6 +113,16 @@ private fun readBack(
     after: ScreenSnapshot?,
     answered: Boolean,
 ): Seen = after?.takeIf { answered }?.let(Seen::Screen) ?: Seen.Hidden
+
+/**
+ * The calls that may have changed the phone: those with a `tool/started` on a non-READ verdict
+ * (the intent of the verdict at its `verdictSeq`, not the tool's declared risk), from that record
+ * on, whatever followed.
+ */
+internal fun actingCalls(records: List<SessionRecord>): Set<ToolCallId> =
+    startsOf(records)
+        .filter { (_, verdict) -> verdict.intent.kind != IntentKind.READ }
+        .mapTo(HashSet()) { (started, _) -> started.callId }
 
 /**
  * Every `tool/started` with the verdict it started on, in log order; the log's invariants make

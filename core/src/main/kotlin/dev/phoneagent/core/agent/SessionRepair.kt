@@ -44,8 +44,9 @@ internal class Repair(
  * What closes everything an abnormal end left open in [records] (phase1 §3.7, D14), in this order:
  * - every prompt without a result gets `prompt/withdrawn`;
  * - every tool call of a reply without a `tool/result` gets one, decided by the log alone. With a
- *   `tool/started` it may have run: `CANCELLED` when stopped, else `OUTCOME_UNKNOWN`, both telling
- *   the model to observe first. Without one it never ran: `CANCELLED` when stopped, else
+ *   `tool/started` it may have run: `CANCELLED` when stopped, else `OUTCOME_UNKNOWN`; when it
+ *   started on a non-READ verdict ([actingCalls]) it may have changed the phone, so both add
+ *   [LoopTexts.mayHaveTakenEffect]. Without one it never ran: `CANCELLED` when stopped, else
  *   `NOT_STARTED`. A call that handed off with no screen recorded after ([screenLostAfterHandoff])
  *   also gets [LoopTexts.screenUnknown]. The result's source is the call's `tool/call`, else the
  *   reply;
@@ -63,6 +64,7 @@ internal fun repairOf(
     val answered = records.mapNotNullTo(HashSet()) { (it.event as? ToolResultRecorded)?.callId }
     val dispatched = records.mapNotNull { r -> (r.event as? ToolCallRecorded)?.let { it.call.id to r.seq } }.toMap()
     val started = records.mapNotNullTo(HashSet()) { (it.event as? ToolStarted)?.callId }
+    val acting = actingCalls(records)
     val closed = records.mapNotNullTo(HashSet()) { closedPrompt(it.event) }
     val repairs =
         records
@@ -74,7 +76,8 @@ internal fun repairOf(
         val calls = (record.event as? AssistantMessage)?.parts.orEmpty().filterIsInstance<Part.ToolCall>()
         for (call in calls.filter { it.id !in answered }) {
             val callSeq = dispatched[call.id]
-            val missing = missingResult(cause, call.id in started, texts)
+            val effect = if (call.id in acting) texts.mayHaveTakenEffect else ""
+            val missing = missingResult(cause, call.id in started, effect, texts)
             val result = if (screenLostAfterHandoff(records, call.id)) missing.noted(texts.screenUnknown) else missing
             repairs += Repair(ToolResultRecorded(call.id, call.name, result), listOf(callSeq ?: record.seq))
         }
@@ -91,15 +94,17 @@ internal fun repairOf(
     return repairs
 }
 
+/** The missing result of a call that [mayHaveRun]; [effect] follows its text when it did. */
 private fun missingResult(
     cause: RepairCause,
     mayHaveRun: Boolean,
+    effect: String,
     texts: LoopTexts,
 ): ToolResult =
     when (cause) {
         RepairCause.STOPPED -> {
             if (mayHaveRun) {
-                ToolResult.failure(ToolStatus.CANCELLED, "${texts.stoppedWhileRunning}${texts.mayHaveTakenEffect}")
+                ToolResult.failure(ToolStatus.CANCELLED, "${texts.stoppedWhileRunning}$effect")
             } else {
                 ToolResult.failure(ToolStatus.CANCELLED, texts.stoppedBeforeRun)
             }
@@ -107,7 +112,7 @@ private fun missingResult(
 
         RepairCause.FAILED -> {
             if (mayHaveRun) {
-                ToolResult.failure(ToolStatus.OUTCOME_UNKNOWN, texts.outcomeUnknown)
+                ToolResult.failure(ToolStatus.OUTCOME_UNKNOWN, "${texts.outcomeUnknown}$effect")
             } else {
                 ToolResult.failure(ToolStatus.NOT_STARTED, texts.notStarted)
             }

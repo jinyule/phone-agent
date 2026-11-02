@@ -13,7 +13,7 @@ invalidJson: 未执行：参数不是合法的 JSON：
 maxTokens: 未执行：这条回复达到了输出长度上限，其中的工具调用已被丢弃。
 mayHaveTakenEffect: 这个操作可能已经生效：请先调用 phone_observe 确认，再做决定。
 notStarted: 未执行：这一步在调用开始之前就失败了。
-outcomeUnknown: 这一步在调用运行期间失败了，结果未知。这个操作可能已经生效：请先调用 phone_observe 确认，再做决定。
+outcomeUnknown: 这一步在调用运行期间失败了，结果未知。
 rejected: 未执行：用户拒绝了这个操作。除非用户要求，不要再重复。
 screenUnknown: 交接之后还没有读到屏幕：请先调用 phone_observe。
 skipped: 未执行：每条回复只执行第一个工具调用（每步一个动作）。如果仍然需要，请在之后的步骤里再调用。

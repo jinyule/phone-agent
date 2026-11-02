@@ -139,7 +139,7 @@ class AgentLoopFailureTest {
             advanceUntilIdle()
             val unknown = after.events().only<ToolResultRecorded>().single()
             assertEquals(ToolStatus.OUTCOME_UNKNOWN, unknown.result.status)
-            assertEquals(texts.outcomeUnknown, unknown.result.text())
+            assertEquals("${texts.outcomeUnknown}${texts.mayHaveTakenEffect}", unknown.result.text())
             assertEquals(1, tool.calls.size)
             val dispatched = after.records().single { it.event is ToolCallRecorded }.seq
             assertEquals(listOf(dispatched), after.records().single { it.event is ToolResultRecorded }.sources)

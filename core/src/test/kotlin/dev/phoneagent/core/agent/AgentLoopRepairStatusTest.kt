@@ -51,7 +51,7 @@ class AgentLoopRepairStatusTest {
         assertTrue(events.only<ToolExecuted>().isEmpty(), "no tool/executed with a repair-only status")
         val result = events.only<ToolResultRecorded>().single().result
         assertEquals(ToolStatus.OUTCOME_UNKNOWN, result.status)
-        assertEquals(texts.outcomeUnknown, (result.content.single() as Part.Text).text)
+        assertEquals("${texts.outcomeUnknown}${texts.mayHaveTakenEffect}", (result.content.single() as Part.Text).text)
         assertEquals(StepOutcome.FAILED, events.only<StepEnded>().single().outcome)
         val ended = events.only<TurnEnded>().single()
         assertEquals(TurnEndReason.FAILED, ended.reason)

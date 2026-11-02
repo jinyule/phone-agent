@@ -17,7 +17,6 @@ import dev.phoneagent.core.session.ToolCallRecorded
 import dev.phoneagent.core.session.ToolExecuted
 import dev.phoneagent.core.session.ToolResultRecorded
 import dev.phoneagent.core.session.ToolStarted
-import dev.phoneagent.core.tool.RiskClass
 import dev.phoneagent.core.tool.Tool
 import dev.phoneagent.core.tool.ToolArguments
 import dev.phoneagent.core.tool.ToolCall
@@ -47,7 +46,8 @@ import kotlinx.serialization.json.jsonPrimitive
  *    waiting for the user excluded). The chain's end runs the judged call only, once, and writes
  *    the execution facts around it ([ExecutionEnd]): `tool/started` is flushed before the tool
  *    runs, READ tools included. A failed flush stops the task before the tool runs; the log
- *    already says it started, so repair gives it OUTCOME_UNKNOWN;
+ *    already says it started, so repair gives it OUTCOME_UNKNOWN. A timed-out or faulted call
+ *    that started on a non-READ verdict adds [LoopTexts.mayHaveTakenEffect], as the repair does;
  * 4. a prompt the call asked and left open gets `prompt/withdrawn`, as a repair would write it (a
  *    wait the call cut off is closed at once by [Prompts]; this catches one an unexpected failure
  *    left open); a call that handed off and whose screen could not be read afterwards gets
@@ -174,18 +174,12 @@ internal class Calls(
         val end = ExecutionEnd(judged, verdictSeq)
         val chain = interceptors.toolExecute.chain(end::run)
         val result = budget.run { chain.proceed(judged) }
-        val mayHaveRun = end.started && tool.risk != RiskClass.READ
-        return when {
-            end.faulted -> ToolResult.failure(ToolStatus.ERROR, withEffect(loop.texts.interceptorFault, mayHaveRun))
-            result == null -> ToolResult.failure(ToolStatus.TIMEOUT, withEffect(loop.texts.timeout, mayHaveRun))
-            else -> result
-        }
+        if (result != null && !end.faulted) return result
+        val text = if (end.faulted) loop.texts.interceptorFault else loop.texts.timeout
+        // As the repair says it, from the log: only a call started on a non-READ verdict may have acted.
+        val effect = if (call.id in actingCalls(loop.log.records())) loop.texts.mayHaveTakenEffect else ""
+        return ToolResult.failure(if (end.faulted) ToolStatus.ERROR else ToolStatus.TIMEOUT, "$text$effect")
     }
-
-    private fun withEffect(
-        text: String,
-        mayHaveRun: Boolean,
-    ): String = if (mayHaveRun) "$text${loop.texts.mayHaveTakenEffect}" else text
 
     /**
      * The end of the `toolExecute` chain: runs [judged] (the recorded, judged call with its own
@@ -198,15 +192,13 @@ internal class Calls(
      * `Tool.execute`, then `tool/executed` with the status it returned (ERROR when it threw),
      * before `toolPostExecute`. A cancelled or timed-out execute gets no `tool/executed`. A stop or
      * timeout that arrives while `tool/started` is written or flushed runs nothing; the log still
-     * says the call started, so its result says it may have taken effect.
+     * says the call started, so its result says it may have taken effect (on a non-READ verdict).
      */
     private inner class ExecutionEnd(
         private val judged: ExecuteInput,
         private val verdictSeq: Long,
     ) {
         private var used = false
-        var started = false
-            private set
         var faulted = false
             private set
 
@@ -221,7 +213,6 @@ internal class Calls(
             }
             val id = judged.call.id
             loop.log.append(ToolStarted(id, verdictSeq))
-            started = true
             loop.log.flush()
             // The flush finishes even when a stop or the budget cancels it meanwhile: then run nothing.
             currentCoroutineContext().ensureActive()

@@ -443,7 +443,7 @@ interface TaskRuntime {
 - **turn-stopping 续跑上限**：每个 turn 默认 3 次（`maxContinuationsPerTurn`）→ `LIMIT`。
 
 **取消与超时契约**：
-- 单一超时真相源：工具超时（`Tool.timeoutMs`）包住整条 `toolExecute` 链（包装器也算在内），工具层先作答。等待用户的时间不计入工具超时。超时的结果是 `TIMEOUT`；非 READ 的调用还要附上"可能已生效"。
+- 单一超时真相源：工具超时（`Tool.timeoutMs`）包住整条 `toolExecute` 链（包装器也算在内），工具层先作答。等待用户的时间不计入工具超时。超时的结果是 `TIMEOUT`。"可能已经生效"（`LoopTexts.mayHaveTakenEffect`）只附给可能改变手机的调用：执行已经开始（有 `tool/started`），并且开始时依据的那条 verdict（`verdictSeq`）的意图不是 READ，不看工具声明的风险类别。超时、扩展篡改调用（`ERROR`）和下面修复补的结果都按这一条。
 - **刷盘**：每次模型请求前；每个要执行的调用（READ 也算）在写 `tool/started` 之后、调 `Tool.execute` 之前。请求前刷盘失败就不发请求，执行前刷盘失败就不执行，任务都以 `ERROR` 停止。后一种情况 `tool/started` 已经在日志里，修复只看日志，所以调用记 `OUTCOME_UNKNOWN`。
 - **执行事实写进日志**：每个要执行的调用（包括 READ）都先有 Allow 的 `policy/verdict`，没有免判的快路径。真正调用 `Tool.execute` 之前写 `tool/started(callId, verdictSeq)` 并刷盘（verdictSeq 是这个调用最新的 verdict，必须是 Allow）；写入或刷盘期间来的停止或超时，刷盘照样做完，但工具不再执行（日志有 `tool/started`、没有 `tool/executed`，结果按"已开始"处理）；execute 返回后、`toolPostExecute` 之前写 `tool/executed(callId, status)`，记原始状态（抛异常记 `ERROR`；超时或被取消的 execute 没有返回，不写）。`NOT_STARTED` 和 `OUTCOME_UNKNOWN` 只由修复写，`tool/executed` 拒绝它们：工具返回其中之一属于工具 bug，`tool/executed` 写不进去，turn 记 `FAILED`，这个调用已经有 `tool/started`，由修复记 `OUTCOME_UNKNOWN`。工具抛出的异常，结果正文只有固定文字加异常类名，不带 message、cause 或 `toString`：它们可能引用屏幕文字、输入内容或凭据，而结果会进日志、也会发给模型。日志里其他记异常的地方也一样，不直接写 Throwable：拦截器或派发失败时 `turn/end` 的 detail、挪动任务失败时 `handoff/end` 的 detail，都只写固定文字加异常类名。拒绝、转交、等待或被拒的审批、拦截器短路都不写 `tool/started`。
 - 确认之后、执行之前，按 §3.8 的 `toolPreExecute` 在新屏幕上复核一次。
@@ -456,7 +456,7 @@ interface TaskRuntime {
 - **去掉 thinking 重试**：签名失效等情况下，`requestError` 先写 `context/reasoning-dropped(upToSeq)`，之后的请求不再带 seq ≤ upToSeq 的 `Part.Reasoning`，文字、工具调用和工具结果不变。多条去掉记录累加；只剩推理的回复整条不进；upToSeq 之后的推理照常带上。
 - **异常结束要修复日志**：停止、step 失败、进程被杀后恢复，三种情况用同一个对日志的纯函数（`repairOf`）推导修复内容，按顺序写入：
   1. 未作答的提示写 `prompt/withdrawn`；
-  2. 缺结果的调用补 `tool/result`，是否执行过只看有没有 `tool/started`。有的（可能已经生效）：停止时记 `CANCELLED`，失败或恢复时记 `OUTCOME_UNKNOWN`，两种都附"可能已经生效，先 `phone_observe` 核实再决定"。没有的（没执行过）：停止时记 `CANCELLED`，否则记 `NOT_STARTED`；
+  2. 缺结果的调用补 `tool/result`，是否执行过只看有没有 `tool/started`。有的（执行已经开始）：停止时记 `CANCELLED`，失败或恢复时记 `OUTCOME_UNKNOWN`；只对可能改变手机的调用（上一条的口径）附"可能已经生效，先 `phone_observe` 核实再决定"，READ 调用状态照旧，只是不附这句。没有的（没执行过）：停止时记 `CANCELLED`，否则记 `NOT_STARTED`；
   3. 写 `step/end` 和 `turn/end`：停止时是 `CANCELLED` / `STOPPED`，否则是 `FAILED`。
 - **停止的顺序**（`stop` 和外部 scope 被取消（`SHUTDOWN`）相同，收尾都在 `NonCancellable` 里进行）：
   1. 取消驱动协程（在途请求、正在执行的工具、待答提示的等待都随之取消），停止接受输入，取消并 join 录入协程。录入协程停在两条记录之间（每条命令先完整记录、再移除）。从这里起，收尾者是唯一还会写日志的协程；

@@ -114,7 +114,10 @@ public data class LoopTexts(
     val screenUnknown: String = "交接之后还没有读到屏幕：请先调用 phone_observe。",
     /** The tool did not finish in time. */
     val timeout: String = "工具没有在限定时间内完成，已被取消。",
-    /** Appended to [timeout] and [stoppedWhileRunning] for calls that may change the phone. */
+    /**
+     * Appended to [timeout], [interceptorFault], [stoppedWhileRunning] and [outcomeUnknown] only
+     * for calls that may change the phone: those with a `tool/started` on a non-READ verdict.
+     */
     val mayHaveTakenEffect: String = "这个操作可能已经生效：请先调用 phone_observe 确认，再做决定。",
     /** The tool threw; followed by the exception's class name only (never its message). */
     val toolError: String = "工具执行出错，异常类型：",
@@ -127,7 +130,5 @@ public data class LoopTexts(
     /** Repair: the step failed before the call was dispatched. */
     val notStarted: String = "未执行：这一步在调用开始之前就失败了。",
     /** Repair: the call was dispatched but no result was recorded. */
-    val outcomeUnknown: String =
-        "这一步在调用运行期间失败了，结果未知。" +
-            "这个操作可能已经生效：请先调用 phone_observe 确认，再做决定。",
+    val outcomeUnknown: String = "这一步在调用运行期间失败了，结果未知。",
 )

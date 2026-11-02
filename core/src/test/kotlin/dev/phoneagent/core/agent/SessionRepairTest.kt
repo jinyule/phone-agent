@@ -6,6 +6,11 @@ import dev.phoneagent.core.agent.LogRecords.log
 import dev.phoneagent.core.agent.LogRecords.reply
 import dev.phoneagent.core.ids.PromptId
 import dev.phoneagent.core.ids.ToolCallId
+import dev.phoneagent.core.model.Part
+import dev.phoneagent.core.policy.ActionIntent
+import dev.phoneagent.core.policy.IntentKind
+import dev.phoneagent.core.policy.SecurityLevel
+import dev.phoneagent.core.policy.Verdict
 import dev.phoneagent.core.ports.AskResult
 import dev.phoneagent.core.ports.ConfirmResult
 import dev.phoneagent.core.ports.HandoffKind
@@ -15,6 +20,7 @@ import dev.phoneagent.core.session.ApprovalAsked
 import dev.phoneagent.core.session.ApprovalDecided
 import dev.phoneagent.core.session.HandoffEnded
 import dev.phoneagent.core.session.HandoffStarted
+import dev.phoneagent.core.session.PolicyVerdictRecorded
 import dev.phoneagent.core.session.PromptWithdrawn
 import dev.phoneagent.core.session.QuestionAnswered
 import dev.phoneagent.core.session.QuestionAsked
@@ -42,6 +48,14 @@ class SessionRepairTest {
     ): List<Repair> = repairOf(log(*events), cause, "why", texts)
 
     private fun prompt(n: Int) = PromptId("prompt-$n")
+
+    /** The Allow [id] starts on, judged as [kind]. */
+    private fun allowed(
+        id: String,
+        kind: IntentKind,
+    ) = PolicyVerdictRecorded(ToolCallId(id), SecurityLevel.STANDARD, ActionIntent(kind, pkg = null), Verdict.Allow)
+
+    private fun Repair.text(): String = ((event as ToolResultRecorded).result.content.single() as Part.Text).text
 
     @Test
     fun `a finished log needs no repair`() {
@@ -91,7 +105,8 @@ class SessionRepairTest {
                 StepStarted(1, 1),
                 reply("ran", "queued", "never", "done"),
                 dispatched("ran"),
-                ToolStarted(ToolCallId("ran"), verdictSeq = 4),
+                allowed("ran", IntentKind.INPUT),
+                ToolStarted(ToolCallId("ran"), verdictSeq = 5),
                 dispatched("queued"),
                 dispatched("done"),
                 answered("done"),
@@ -111,12 +126,12 @@ class SessionRepairTest {
             ),
             results.map {
                 it.result.content.single().let { part ->
-                    (part as dev.phoneagent.core.model.Part.Text).text
+                    (part as Part.Text).text
                 }
             },
         )
         assertEquals(
-            listOf(listOf(4L), listOf(6L), listOf(3L)),
+            listOf(listOf(4L), listOf(7L), listOf(3L)),
             stopped.take(3).map { it.sources },
             "call record, else reply",
         )
@@ -134,6 +149,29 @@ class SessionRepairTest {
             listOf(StepEnded(1, 1, StepOutcome.FAILED), TurnEnded(1, TurnEndReason.FAILED, "why")),
             failed.drop(3).map { it.event },
         )
+    }
+
+    @Test
+    fun `a call that started on a READ verdict keeps its status, without may-have-taken-effect`() {
+        for ((kind, effect) in listOf(IntentKind.READ to "", IntentKind.NAVIGATE to texts.mayHaveTakenEffect)) {
+            val events =
+                arrayOf(
+                    TurnStarted(1),
+                    StepStarted(1, 1),
+                    reply("c1"),
+                    dispatched("c1"),
+                    allowed("c1", kind),
+                    ToolStarted(ToolCallId("c1"), verdictSeq = 5),
+                )
+            val stopped = repair(RepairCause.STOPPED, *events).first()
+            val failed = repair(RepairCause.FAILED, *events).first()
+
+            assertEquals(ToolStatus.CANCELLED, (stopped.event as ToolResultRecorded).result.status)
+            assertEquals("${texts.stoppedWhileRunning}$effect", stopped.text(), "stopped, judged $kind")
+            assertEquals(ToolStatus.OUTCOME_UNKNOWN, (failed.event as ToolResultRecorded).result.status)
+            assertEquals(effect.isNotEmpty(), texts.mayHaveTakenEffect in failed.text(), "failed, judged $kind")
+            assertEquals("${texts.outcomeUnknown}$effect", failed.text(), "failed, judged $kind")
+        }
     }
 
     @Test
