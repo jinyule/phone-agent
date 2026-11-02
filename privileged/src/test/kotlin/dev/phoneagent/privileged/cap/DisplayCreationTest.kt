@@ -111,6 +111,24 @@ class DisplayCreationTest {
         assertUnverifiedImeFails(h)
     }
 
+    /** The probe's display step for a display whose keyboard would open on the user's screen. */
+    private fun refusedDisplayReason(releaseFails: Boolean): String {
+        val h = helper(36)
+        h.bridge.wm.imeAccepted = false
+        h.releaseFails = releaseFails
+        return probe(h)[ProbeKeys.Step.DISPLAY].orEmpty()
+    }
+
+    @Test
+    fun theProbeSaysWhetherARefusedDisplayWasReleasedOrWaitsForCleanup() {
+        val released = refusedDisplayReason(releaseFails = false)
+        assertTrue(released, released.contains("was released"))
+        close()
+        val waiting = refusedDisplayReason(releaseFails = true)
+        assertTrue(waiting, waiting.contains("could not be released and waits for cleanup by releaseAll"))
+        assertFalse(waiting, waiting.contains("was released"))
+    }
+
     @Test
     fun belowApi34NoDisplayIsCreated() {
         val h = helper(33)
