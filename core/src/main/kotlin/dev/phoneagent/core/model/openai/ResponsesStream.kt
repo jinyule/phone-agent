@@ -466,11 +466,23 @@ internal object ResponsesOutput {
             throw ModelError.BadResponse("function_call without call_id or name: $shown")
         }
         return try {
-            Part.ToolCall(ToolCallId(id), name, item.str("arguments")?.ifEmpty { null } ?: "{}")
+            Part.ToolCall(ToolCallId(id), name, argumentsOf(item["arguments"]))
         } catch (e: IllegalArgumentException) {
             throw ModelError.BadResponse("unusable call_id '${redactor.text(id).take(SNIPPET)}'", redactor.cause(e))
         }
     }
+
+    /**
+     * A call's argument text: a string as it is; absent, `null` or empty is `{}`; any other JSON
+     * value (an object, or a number, boolean or array for the tool layer's check to refuse) as its
+     * JSON text, never replaced.
+     */
+    private fun argumentsOf(raw: JsonElement?): String =
+        when (raw) {
+            null, JsonNull -> "{}"
+            is JsonPrimitive -> if (raw.isString) raw.content.ifEmpty { "{}" } else raw.toString()
+            is JsonObject, is JsonArray -> raw.toString()
+        }
 
     private fun isRefusal(item: JsonObject): Boolean =
         item.str("type") == "message" &&

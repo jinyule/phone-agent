@@ -156,7 +156,7 @@ data class WireProfile(
 
 ### 3.1 Chat Completions 兼容（DeepSeek、通义、Kimi、GLM、豆包、硅基流动、OpenRouter、Ollama、LM Studio …）
 
-- **工具调用**：`tools[].function` + `tool_choice:"auto"`。主循环每轮只执行一个调用，所以服务商支持时适配器在 `prepare` 里设 `wire.disableParallelToolCalls = true`，线路上发 `parallel_tool_calls:false`。如果模型仍然返回多个调用，第一个之外的每个都要配一条结果"已跳过：每步只执行一个动作"，否则下一次请求会被拒。
+- **工具调用**：`tools[].function` + `tool_choice:"auto"`。主循环每轮只执行一个调用，所以服务商支持时适配器在 `prepare` 里设 `wire.disableParallelToolCalls = true`，线路上发 `parallel_tool_calls:false`。如果模型仍然返回多个调用，第一个之外的每个都要配一条结果"已跳过：每步只执行一个动作"，否则下一次请求会被拒。调用的 `arguments` 不是字符串时不静默改写（Chat 和 Responses 相同）：缺省或 `null` 记成 `{}`；对象原样序列化（有的网关发对象）；数字、布尔、数组按原始 JSON 文本保留为 argsJson，交给工具层的边界校验给模型反馈"参数无效"。这些参数和字符串参数一样经过回显检查。
 - **流式**：`stream:true` + `stream_options.include_usage`；要兼容某些网关返回 `usage:null` 的情况。
 - **连接复用**（OpenAI 适配器的 HTTP 客户端，Responses 也用它）：默认不复用空闲连接，每个 attempt 新建连接（`HttpTimeouts.idleConnectionKeepAlive`，默认 `Duration.ZERO`，加载时校验，范围 0 到 5 分钟）。原因：服务端可以不打招呼（不带 `Connection: close`）关掉空闲的 keep-alive 连接，而 OkHttp 只对空闲满 10 秒的连接做健康检查；连接失败重试又是关着的（保住"一个 attempt 只发一个请求"），所以复用一条已经被关掉的连接，这次请求一定失败，白白占掉 `requestError` 的一次重试和一段退避。常见的本地服务（uvicorn、Node http、cpp-httplib）空闲超时在 5 秒左右，正好落在两步之间的间隔里。多一次 TCP/TLS 握手，和模型的延迟比可以忽略。**什么时候可以调大**：已经知道服务端的空闲超时比这个值长时（比如自己部署、配置可查的服务）。**调大以后仍然会碰到**：服务端的超时比这个值短，或者服务端在超时之前因为别的原因（重启、负载均衡切换）关掉连接时，下一次请求照样失败一次；这个剩下的竞争窗口交给 `requestError` 重试，不打开 OkHttp 的连接失败重试。
 - **结束原因**（`finish_reason` → `stopReason`）：`length` / `max_tokens` → `MAX_TOKENS`；`content_filter`、`sensitive` 和 `refusal` 报 `Refusal`，带不带调用都一样。正常结束（`stop`、`end_turn`、`eos`、`tool_calls`、`function_call` 或没有原因）时，带调用就是 `TOOL_USE`（Ollama 带调用时也报 `stop`），不带调用就是 `END_TURN`（`tool_calls` / `function_call` 不带调用是 `OTHER`）。不认识的值一律 `OTHER`，带着的调用不执行。

@@ -367,7 +367,7 @@ internal class ToolCallAssembler(
         }
     }
 
-    /** The finished calls, in order; empty arguments become `{}`. */
+    /** The finished calls, in order; arguments that are empty (absent or `null` in every fragment) become `{}`. */
     fun parts(): List<Part.ToolCall> =
         slots.map { slot ->
             if (slot.name.isEmpty()) {
@@ -414,14 +414,16 @@ internal class ToolCallAssembler(
         return existing ?: Slot(index).also { slots += it }
     }
 
+    /**
+     * The argument text of one fragment: a string as it is; absent or `null` adds nothing; any other
+     * JSON value as its JSON text, never replaced. A few gateways send an object; a number, boolean
+     * or array is kept for the tool layer's own check to refuse.
+     */
     private fun argumentsOf(raw: JsonElement?): String =
         when (raw) {
-            is JsonPrimitive -> if (raw.isString) raw.content else ""
-
-            // A few gateways send the arguments as an object instead of a string.
+            null, JsonNull -> ""
+            is JsonPrimitive -> if (raw.isString) raw.content else raw.toString()
             is JsonObject, is JsonArray -> raw.toString()
-
-            null -> ""
         }
 
     private companion object {
