@@ -214,7 +214,8 @@ private fun cut(
  * Keeps OkHttp from resending a 503 on its own: its follow-up logic retries a 503 whose
  * `Retry-After` is 0 whatever the client's retry settings say. As a network interceptor it moves
  * the header under [NAME] before that logic sees the response; [HttpReply.headers] moves it back,
- * so error mapping reads `Retry-After` as the server sent it.
+ * so error mapping reads `Retry-After` as the server sent it. Values move unchecked: one HTTP does
+ * not allow (non-ASCII) stays as it is, and error mapping finds no wait in it.
  */
 internal object RetryAfterStash : Interceptor {
     const val NAME: String = "PhoneAgent-Retry-After"
@@ -238,7 +239,8 @@ internal object RetryAfterStash : Interceptor {
         to: String,
     ): Headers {
         val builder = headers.newBuilder().removeAll(from)
-        headers.values(from).forEach { builder.add(to, it) }
+        // Not add(): its check of the value throws with the value quoted, and the value is the server's.
+        headers.values(from).forEach { builder.addUnsafeNonAscii(to, it) }
         return builder.build()
     }
 }
@@ -247,6 +249,9 @@ internal object RetryAfterStash : Interceptor {
  * Runs blocking I/O on [io]. An `IOException` becomes [ModelError.Network], unless the caller was
  * cancelled meanwhile (the cancelled call is what failed the read), in which case cancellation
  * propagates. Exception text can quote the server (status lines), so it is masked with [redactor].
+ * An `IllegalArgumentException` (OkHttp rejecting a value the server sent) becomes
+ * [ModelError.BadResponse] with fixed text and no cause; [HttpTransport.send] then cancels the call
+ * and closes the response it holds.
  */
 private suspend fun <T> blocking(
     io: CoroutineDispatcher,
@@ -258,4 +263,10 @@ private suspend fun <T> blocking(
     } catch (e: IOException) {
         currentCoroutineContext().ensureActive()
         throw ModelError.Network(redactor.text("${e::class.simpleName}: ${e.message}"), redactor.cause(e))
+    } catch (ignoredQuotingValidation: IllegalArgumentException) {
+        // OkHttp's validation errors quote the rejected value whole, and the value is the server's.
+        throw ModelError.BadResponse(INVALID_HTTP)
     }
+
+/** What a response OkHttp rejected fails with. */
+private const val INVALID_HTTP = "the server sent a response HTTP does not allow"
