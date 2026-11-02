@@ -83,6 +83,7 @@ class HelperRetireTest {
     }
 
     /** Collects garbage until a garbage collection has cleared a weakly reachable object. */
+    @Suppress("ExplicitGarbageCollectionCall") // What a collection keeps is what the test is about.
     private fun collectGarbage() {
         val probe = WeakReference(Any())
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(WAIT_SECONDS)
