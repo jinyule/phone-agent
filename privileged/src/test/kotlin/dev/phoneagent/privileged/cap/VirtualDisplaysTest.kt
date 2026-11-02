@@ -42,24 +42,27 @@ class VirtualDisplaysTest {
         val third = newDisplay()
         failing += second
         assertEquals("the failure does not stop the others", 2, displays.releaseAll())
-        assertEquals(setOf(second), displays.ids())
-        assertFalse(displays.owns(first) || displays.owns(third))
+        assertEquals("none is usable", emptySet<Int>(), displays.ids())
+        assertEquals("the failed one waits for cleanup", setOf(second), displays.pendingCleanup)
+        assertFalse(displays.owns(first) || displays.owns(second) || displays.owns(third))
 
         failing.clear()
         assertEquals(1, displays.releaseAll())
-        assertEquals(emptySet<Int>(), displays.ids())
+        assertEquals(emptySet<Int>(), displays.pendingCleanup)
     }
 
     @Test
-    fun aSingleReleaseThatFailsKeepsTheDisplayForReleaseAll() {
+    fun aSingleReleaseThatFailsKeepsTheDisplayForReleaseAllButNotForUse() {
         val id = newDisplay()
         failing += id
         displays.release(id)
-        assertTrue("still ours, so releaseAll retries it", displays.owns(id))
+        assertFalse("the app asked for its release; it is no longer usable", displays.owns(id))
+        assertEquals(null, displays.sizeOf(id))
+        assertEquals("releaseAll retries it", setOf(id), displays.pendingCleanup)
 
         failing.clear()
         assertEquals(1, displays.releaseAll())
-        assertFalse(displays.owns(id))
+        assertEquals(emptySet<Int>(), displays.pendingCleanup)
     }
 
     @Test

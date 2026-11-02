@@ -181,8 +181,20 @@ internal class CapabilityHarness(
 ) {
     val context: Context = ApplicationProvider.getApplicationContext()
     val bridge = FakeBridge(context)
-    internal val capabilities =
-        AndroidCapabilities.create(context, ServedApp(APP, APP_UID), Platform(bridge, sdkInt, commands, stateDir))
+
+    /** While true, `VirtualDisplay.release` throws, as it does when the system server is gone. */
+    var releaseFails = false
+
+    /** Display ids whose release was attempted, in order, whether it worked or not. */
+    val releaseAttempts = mutableListOf<Int>()
+
+    private val platform =
+        Platform(bridge, sdkInt, commands, stateDir) { display ->
+            releaseAttempts += display.display.displayId
+            check(!releaseFails) { "releasing display ${display.display.displayId} failed" }
+            display.release()
+        }
+    internal val capabilities = AndroidCapabilities.create(context, ServedApp(APP, APP_UID), platform)
     private val readers = mutableListOf<ImageReader>()
 
     val wire = OverTheWire(PrivilegedCore(APP_UID, capabilities) {})

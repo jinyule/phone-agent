@@ -45,7 +45,7 @@ phase1-architecture §3.5 列出了 `IPrivilegedCore` 的能力面，调研报�
    - `moveRootTaskToDisplay` 失败回退 `am display move-stack`；
    - `startActivityAsUser`（12 参数）失败回退 `am start --display`（先按 component，再按 action）；
    - `getTasks` 读不出来时，启动和挪任务一律拒绝，而不是猜；
-   - `setDisplayImePolicy` 设完回读（有 getter 时）。设不上或回读不是 LOCAL，就把刚建的屏释放掉，`createDisplay` 返回 `FAILED`：键盘弹到用户屏上是不能接受的，不存在"不打字就照常用"的屏。`probe()` 的 IME 一项照常报告原因；
+   - `setDisplayImePolicy` 设完回读（有 getter 时）。设不上或回读不是 LOCAL，就把刚建的屏释放掉，`createDisplay` 返回 `FAILED`：键盘弹到用户屏上是不能接受的，不存在"不打字就照常用"的屏。释放本身失败时，这块屏进"待清理"集合：`owns`/`sizeOf`/`ids` 和所有能力（启动、注入、移任务）都不认它，`releaseAll` 再释放它，释放成功才移出集合；失败原因写"没能释放、等待清理"，不写"已释放"。`probe()` 的 IME 一项照常报告原因；
    - API 34 以下 `createDisplay` 返回 `REFUSED`，不建屏（没有 `OWN_FOCUS`，屏会抢用户的焦点，D2）；`probe()` 在建屏之前就报告"background displays need API 34+"；
    - 整个能力层构建失败时降级成 `NoCapabilities`：交接照常，每个能力返回失败值，`probe()` 和 `mainArrivals()` 抛带原因的 `NOT_IMPLEMENTED`。
 
@@ -82,5 +82,5 @@ phase1-architecture §3.5 列出了 `IPrivilegedCore` 的能力面，调研报�
 - 有多个 App 能处理的链接（比如装了两个浏览器）会被拒绝：助手问不了用户选哪个。WP14 要先在 App 侧解析出用户的默认处理者，再把明确的 component 传进来。
 - WP14 的 ScreenPort 要在后台屏上把 `phone_key home` 直接变成 Failed（原因见决定 1），不能交给 `injectKey`：助手的拒绝只是一个 false，模型看不到原因。
 - 只在 API 36 模拟器上验证过。API 30–33 没有 `OWN_FOCUS`，虚拟屏会抢主屏焦点，这正是 D2 "后台屏要求 API 34+"的原因，所以协议 3 起这些版本上直接拒绝建屏；API 34/35 的行为未实测。
-- `releaseAll` 会解除静音、释放所有屏、清掉任务归属，屏上的任务随之销毁（`DESTROY_CONTENT_ON_REMOVAL`）。三类资源分开释放，每类里的每个资源（每块屏、每个被静音的包）也单独释放：某一个抛异常只记日志，其余照常释放，失败的那个留到下一次 `releaseAll` 再试；`releaseAll` 本身不抛（与 A 段 `HeldResource` 的语义一致，代码在 `cap/Release.kt`）。单独的 `releaseDisplay` 失败时，屏也留在助手手里，由下一次 `releaseAll` 重试。App 死后的宽限期语义不变（A 段 ADR），所以 App 重启后虚拟屏上的任务不会保留。要让任务跨 App 重启存活，需要新的协议方法，见 A 段 ADR 的"后果"。
+- `releaseAll` 会解除静音、释放所有屏、清掉任务归属，屏上的任务随之销毁（`DESTROY_CONTENT_ON_REMOVAL`）。三类资源分开释放，每类里的每个资源（每块屏、每个被静音的包）也单独释放：某一个抛异常只记日志，其余照常释放，失败的那个留到下一次 `releaseAll` 再试；`releaseAll` 本身不抛（与 A 段 `HeldResource` 的语义一致，代码在 `cap/Release.kt`）。单独的 `releaseDisplay` 失败时，屏同样进"待清理"集合：App 已经要求释放，它不再可用，只由下一次 `releaseAll` 重试。App 死后的宽限期语义不变（A 段 ADR），所以 App 重启后虚拟屏上的任务不会保留。要让任务跨 App 重启存活，需要新的协议方法，见 A 段 ADR 的"后果"。
 - `probe()` 会建一块小屏并注入一次点击，大约几百毫秒；它只在 onboarding 和诊断时调用。

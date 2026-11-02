@@ -40,14 +40,22 @@ internal class VirtualDisplays(
     )
 
     private val lock = Any()
+
+    /** Verified displays the app may use; guarded by [lock]. */
     private val displays = LinkedHashMap<Int, Held>()
 
-    /** Display ids the helper owns. */
+    /** Displays whose release failed: never used again, released again by [releaseAll]; guarded by [lock]. */
+    private val pending = LinkedHashMap<Int, VirtualDisplay>()
+
+    /** Display ids the helper owns and the app may use; displays waiting for cleanup are not among them. */
     fun ids(): Set<Int> = synchronized(lock) { displays.keys.toSet() }
+
+    /** Displays the helper still has to release. No capability accepts them; [releaseAll] retries them. */
+    val pendingCleanup: Set<Int> get() = synchronized(lock) { pending.keys.toSet() }
 
     fun owns(displayId: Int): Boolean = sizeOf(displayId) != null
 
-    /** Size of a display the helper owns, or null. */
+    /** Size of a display the helper owns and the app may use, or null. */
     fun sizeOf(displayId: Int): Pair<Int, Int>? =
         synchronized(lock) { displays[displayId]?.let { it.width to it.height } }
 
@@ -64,8 +72,10 @@ internal class VirtualDisplays(
         ) : Opened
 
         /**
-         * No display is left: the platform refused, or the one it made was released again because
-         * its keyboard would open on the user's screen ([ime] says why the IME policy failed).
+         * No usable display: the platform refused, or the one it made would open its keyboard on
+         * the user's screen ([ime] says why the IME policy failed). That one was released again, or,
+         * when the release failed, set aside for cleanup ([pendingCleanup]): no capability accepts
+         * it, and [releaseAll] releases it. [reason] says which.
          */
         data class Failed(
             val reason: String,
@@ -141,14 +151,17 @@ internal class VirtualDisplays(
         dpi: Int,
     ): Opened {
         val id = display.display.displayId
-        val held = Held(display, width, height)
         val imeProblem = ime.problem(id)
         if (imeProblem != null) {
-            // One whose release throws is kept as ours, so releaseAll tries again.
-            releaseHeld(listOf(id to held))
-            return Opened.Failed("display $id was released: its keyboard would open on the user's screen", imeProblem)
+            val outcome =
+                if (releaseOrSetAside(listOf(id to display)).isEmpty()) {
+                    "display $id was released"
+                } else {
+                    "display $id could not be released and waits for cleanup by releaseAll, unused"
+                }
+            return Opened.Failed("$outcome: its keyboard would open on the user's screen", imeProblem)
         }
-        synchronized(lock) { displays[id] = held }
+        synchronized(lock) { displays[id] = Held(display, width, height) }
         Log.i(TAG, "display $id: ${width}x$height @ ${dpi}dpi, flags 0x${flags.toString(HEX)}")
         return Opened.Display(id)
     }
@@ -164,29 +177,38 @@ internal class VirtualDisplays(
         } ?: throw CapabilityUnavailable("createVirtualDisplay returned no display (flags refused?)")
 
     /**
-     * Releases one display; tasks on it are destroyed with it. A display whose release throws is
-     * logged and stays ours, so the next [releaseAll] tries again.
+     * Releases one display; tasks on it are destroyed with it. From this call on the display is
+     * not usable; one whose release throws is logged and waits for cleanup by [releaseAll].
      */
     fun release(displayId: Int) {
-        val held = synchronized(lock) { displays.remove(displayId) }
-        if (held == null) {
+        val display = synchronized(lock) { displays.remove(displayId)?.display ?: pending.remove(displayId) }
+        if (display == null) {
             Log.w(TAG, "releaseDisplay($displayId): not ours")
             return
         }
-        if (releaseHeld(listOf(displayId to held)).isEmpty()) Log.i(TAG, "display $displayId released")
+        if (releaseOrSetAside(listOf(displayId to display)).isEmpty()) Log.i(TAG, "display $displayId released")
     }
 
-    /** Releases every display, each on its own (see [releaseEach]); returns how many were released. */
+    /**
+     * Releases every display, usable or waiting for cleanup, each on its own (see [releaseEach]);
+     * returns how many were released.
+     */
     fun releaseAll(): Int {
-        val held = synchronized(lock) { displays.toList().also { displays.clear() } }
-        return held.size - releaseHeld(held).size
+        val all =
+            synchronized(lock) {
+                (displays.map { (id, held) -> id to held.display } + pending.toList()).also {
+                    displays.clear()
+                    pending.clear()
+                }
+            }
+        return all.size - releaseOrSetAside(all).size
     }
 
-    /** Releases [held]; the ones that throw go back into [displays] and are returned. */
-    private fun releaseHeld(held: List<Pair<Int, Held>>): List<Pair<Int, Held>> {
-        val kept = releaseEach(held, { (id, _) -> "display $id" }) { (_, it) -> releaseDisplay(it.display) }
-        synchronized(lock) { kept.forEach { (id, it) -> displays.putIfAbsent(id, it) } }
-        return kept
+    /** Releases [all]; the ones that throw wait in [pending] and are returned. */
+    private fun releaseOrSetAside(all: List<Pair<Int, VirtualDisplay>>): List<Pair<Int, VirtualDisplay>> {
+        val failed = releaseEach(all, { (id, _) -> "display $id" }) { (_, display) -> releaseDisplay(display) }
+        synchronized(lock) { failed.forEach { (id, display) -> pending.putIfAbsent(id, display) } }
+        return failed
     }
 
     private val flags: Int get() = DisplaySpec.flagsFor(sdkInt)

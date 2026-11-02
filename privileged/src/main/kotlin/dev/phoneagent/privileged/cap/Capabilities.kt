@@ -2,6 +2,7 @@ package dev.phoneagent.privileged.cap
 
 import android.content.Context
 import android.content.Intent
+import android.hardware.display.VirtualDisplay
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
@@ -110,6 +111,8 @@ internal class Platform(
     val commands: CommandRunner = ShellCommands.runner,
     /** Where state that must outlive the helper is kept; the shell user can write here. */
     val stateDir: File = File("/data/local/tmp"),
+    /** `VirtualDisplay.release`; a test makes it throw the way a dead system server does. */
+    val releaseDisplay: (VirtualDisplay) -> Unit = VirtualDisplay::release,
 )
 
 /**
@@ -123,7 +126,7 @@ internal class AndroidCapabilities(
     platform: Platform = Platform(SystemBridge(context)),
 ) : Capabilities {
     private val bridge = platform.bridge
-    private val virtualDisplays = VirtualDisplays(bridge, platform.sdkInt)
+    private val virtualDisplays = VirtualDisplays(bridge, platform.sdkInt, releaseDisplay = platform.releaseDisplay)
     private val taskTable = TaskTable(bridge, platform.commands)
     private val ownership = TaskOwnership()
     private val injector = InputInjector(bridge, virtualDisplays)

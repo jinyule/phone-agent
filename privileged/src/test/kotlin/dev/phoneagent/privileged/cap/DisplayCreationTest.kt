@@ -1,10 +1,15 @@
 package dev.phoneagent.privileged.cap
 
+import android.content.Intent
 import android.hardware.display.DisplayManager
+import android.provider.Settings
+import android.view.KeyEvent
 import dev.phoneagent.privileged.DisplayResult
 import dev.phoneagent.privileged.ProbeKeys
+import dev.phoneagent.privileged.StartResult
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -46,6 +51,37 @@ class DisplayCreationTest {
         h.bridge.wm.imeAccepted = false
         assertEquals(DisplayResult.FAILED, h.display())
         assertEquals("the display was released again", emptyList<String>(), agentDisplays(h))
+    }
+
+    @Test
+    fun aRefusedDisplayWhoseReleaseFailsIsNotUsableAndReleaseAllRetriesIt() {
+        val h = helper(36)
+        h.install("com.android.settings", filter = CapabilityHarness.filter(Settings.ACTION_SETTINGS))
+        h.bridge.wm.imeAccepted = false
+        h.releaseFails = true
+
+        assertEquals(DisplayResult.FAILED, h.display())
+        val id =
+            h.context
+                .getSystemService(DisplayManager::class.java)
+                .displays
+                .single { it.name.startsWith("phoneagent") }
+                .displayId
+        assertEquals("the release was tried and failed", listOf(id), h.releaseAttempts)
+
+        h.bridge.wm.imeAccepted = true
+        assertEquals(StartResult.REFUSED, h.core.startActivity(id, Intent(Settings.ACTION_SETTINGS), 0, false))
+        assertFalse("key", h.core.injectKey(id, KeyEvent.KEYCODE_BACK))
+        assertFalse("stroke", h.core.injectStroke(id, intArrayOf(10, 20), intArrayOf(10, 20), longArrayOf(0, 50)))
+        assertEquals("nothing started", emptyList<Pair<Intent, Int>>(), h.bridge.atm.started)
+        assertEquals("nothing injected", 0, h.bridge.input.injected)
+
+        h.releaseFails = false
+        h.core.releaseAll()
+        assertEquals("releaseAll tried again", listOf(id, id), h.releaseAttempts)
+        assertEquals(emptyList<String>(), agentDisplays(h))
+        h.core.releaseAll()
+        assertEquals("released, so not tried a third time", listOf(id, id), h.releaseAttempts)
     }
 
     @Test
