@@ -342,7 +342,8 @@ sealed interface Phase { data object Idle : Phase; data class Running(val turn: 
 
 **停止条件**（turn 怎么结束）：
 - 自然结束：模型回复里没有工具调用，或者调用了 `end_not_done`；
-- 回复没有正常结束（带完整工具调用的正常结束由适配器报 `TOOL_USE`；契约见 `ChatResponse.stopReason`）：
+- 带调用的正常结束：`TOOL_USE` 或 `END_TURN` 且带完整调用，调用照常执行，turn 继续。适配器应该把它归一化成 `TOOL_USE`，但网关可能在调用旁边给 stop / end_turn，主循环不能因为 `END_TURN` 就拒绝执行；
+- 回复没有正常结束（契约见 `ChatResponse.stopReason`）：
   - `MAX_TOKENS` 且带调用：`assistant/message` 原样记录，调用也留着（历史只追加）。下一个请求之前，给每个调用写 `tool/result(SKIPPED)`（isError）和一段固定文字，告诉模型这次调用没有执行、它看到的参数（可能是 `{}`）不完整、不是它原本要发的那一份，请重新发起。这些调用不经过 PolicyEngine，没有 `tool/call`，也没有 `tool/started`；turn 以 `MAX_TOKENS` 结束；
   - `OTHER` 且带调用：按 BadResponse 重试，只记录已经流出的前缀（interrupted，不含调用）和这次 attempt，不执行任何调用；
   - `OTHER` 而且只有文字：照常算最终答案；

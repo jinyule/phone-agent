@@ -11,14 +11,16 @@ import kotlinx.serialization.json.JsonObject
  * @property stopReason why generation stopped. Adapter obligation: a reply that ended normally
  *   with complete tool calls is [StopReason.TOOL_USE]; a reply cut off at the output cap is
  *   [StopReason.MAX_TOKENS]; one that ended for a reason the adapter does not map is
- *   [StopReason.OTHER]. What the loop does with a reply that did not end normally (phase1 §3.7):
+ *   [StopReason.OTHER]. What the loop does with each outcome (phase1 §3.7):
+ *   - TOOL_USE or END_TURN with tool calls: a normal end, and the calls run. A gateway may report
+ *     END_TURN beside complete calls, so the loop never refuses them for that.
  *   - MAX_TOKENS with tool calls: the reply is recorded as it came, calls included (the history
  *     stays append-only). Before the next request every call gets a `tool/result` with
  *     `ToolStatus.SKIPPED` (an error) and a fixed text telling the model that the call did not
  *     run, that the arguments it sees (possibly `{}`) are incomplete and not what it meant to
  *     send, and to issue the call again. No policy verdict, no `tool/started`; the turn ends
  *     `TurnEndReason.MAX_TOKENS`.
- *   - OTHER with tool calls: a [ModelError.BadResponse], retried. Only the streamed prefix (an
+ *   - OTHER with tool calls: the loop treats it as a [ModelError.BadResponse] and retries. Only the streamed prefix (an
  *     interrupted `assistant/message`, which holds no calls) and the attempt are recorded; no
  *     call runs.
  *   - OTHER with text only: a final answer, like [StopReason.END_TURN].
