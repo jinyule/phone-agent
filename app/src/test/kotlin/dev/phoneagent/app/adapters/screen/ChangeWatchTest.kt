@@ -60,6 +60,49 @@ class ChangeWatchTest {
         }
 
     @Test
+    fun aChangeIsTheFirstRelevantEventAndThenTheDisplaySettles() =
+        runTest {
+            // Fix list r2 S4: the first relevant event at 200 (100 is not), more until 1_000.
+            emitAt(100, event = A11yEvent(0, AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, APP, null, windowId = 9))
+            emitAt(
+                200,
+                400,
+                600,
+                800,
+                1_000,
+                event = A11yEvent(0, AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, APP, null, 1),
+            )
+
+            val came = ChangeWatch.watching(events, 0, timings) { it.awaitChange(300) { e -> e.windowId == 1 } }
+
+            assertTrue(came)
+            assertEquals("settled after the last event, not cut at 300", 1_000 + 300, currentTime)
+        }
+
+    @Test
+    fun aChangeIsGivenUpOnWhenNoRelevantEventCameInTime() =
+        runTest {
+            emitAt(100, event = A11yEvent(0, AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, APP, null, windowId = 9))
+            emitAt(400, event = A11yEvent(0, AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, APP, null, 1))
+
+            val came = ChangeWatch.watching(events, 0, timings) { it.awaitChange(300) { e -> e.windowId == 1 } }
+
+            assertFalse(came)
+            assertEquals(300, currentTime)
+        }
+
+    @Test
+    fun aBusyDisplayAfterAChangeIsCappedAfterThatChange() =
+        runTest {
+            emitAt(*LongArray(60) { 100L + it * 100 })
+
+            val came = ChangeWatch.watching(events, 0, timings) { it.awaitChange(300) { true } }
+
+            assertTrue(came)
+            assertEquals(100 + 3_000, currentTime)
+        }
+
+    @Test
     fun aBusyDisplayIsCappedAfterTheFirstEvent() =
         runTest {
             emitAt(*LongArray(60) { 100L + it * 100 })

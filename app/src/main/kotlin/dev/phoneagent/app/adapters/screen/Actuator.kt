@@ -208,7 +208,10 @@ internal interface ClickProbe {
     /** Milliseconds on a monotonic clock. */
     fun nowMs(): Long
 
-    /** Waits a short while for the display to change; whether it did (it has then settled). */
+    /**
+     * Waits a short while for a change the click made (not just anything on the display); once
+     * one came, also for the display to settle. Whether one came.
+     */
     suspend fun changed(): Boolean
 }
 

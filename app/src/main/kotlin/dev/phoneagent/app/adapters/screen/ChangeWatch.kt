@@ -56,6 +56,32 @@ internal class ChangeWatch private constructor(
     }
 
     /**
+     * Waits up to [firstWithinMs] for an event that [relevant] accepts (other events pass by);
+     * after one came, waits for the display to settle as [awaitSettled] does, counting every
+     * event: [quietMs] without one, at most [settleCapMs] after the relevant one. Returns whether
+     * a relevant event came.
+     */
+    suspend fun awaitChange(
+        firstWithinMs: Long,
+        relevant: (A11yEvent) -> Boolean,
+    ): Boolean {
+        val came =
+            withTimeoutOrNull(firstWithinMs) {
+                while (!relevant(next())) {
+                    // Not this change; keep waiting for one.
+                }
+            } != null
+        if (came) {
+            withTimeoutOrNull(settleCapMs) {
+                while (withTimeoutOrNull(quietMs) { next() } != null) {
+                    // Another event inside the quiet window: keep waiting.
+                }
+            }
+        }
+        return came
+    }
+
+    /**
      * Suspends until an event satisfies [predicate] or [timeoutMs] passes; checks [predicate]
      * once before waiting. Returns whether it was satisfied.
      */

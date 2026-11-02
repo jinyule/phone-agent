@@ -1,5 +1,6 @@
 package dev.phoneagent.app.adapters.screen
 
+import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import dev.phoneagent.core.ports.ActionOutcome
 import dev.phoneagent.core.ports.ScreenSnapshot
@@ -118,9 +119,21 @@ internal class ActionRun(
         watch: ChangeWatch,
     ): Actuator.Result =
         when (aim) {
-            is Aim.AtElement -> actuator.tap(aim.element.target, action.long, WatchProbe(watch, parts.system, timings))
-            is Aim.AtPixel -> actuator.tapAt(aim.pixel, action.long)
-            Aim.Anywhere -> error("a tap always has a target")
+            is Aim.AtElement -> {
+                actuator.tap(
+                    aim.element.target,
+                    action.long,
+                    WatchProbe(watch, parts.system, timings, aim.element.place.windowId),
+                )
+            }
+
+            is Aim.AtPixel -> {
+                actuator.tapAt(aim.pixel, action.long)
+            }
+
+            Aim.Anywhere -> {
+                error("a tap always has a target")
+            }
         }
 
     private fun container(aim: Aim): NodeTarget? =
@@ -273,13 +286,23 @@ internal class ActionRun(
     }
 }
 
-/** [ClickProbe] over the action's open [watch]: a change within [ScreenTimings.quietMs] counts. */
+/**
+ * [ClickProbe] over the action's open [watch]: within [ScreenTimings.quietMs], an event of the
+ * clicked element's [window], or a window opening, closing or switching (the click may have
+ * opened a dialog or another app), counts as the click's change; events of other windows do not.
+ */
 private class WatchProbe(
     private val watch: ChangeWatch,
     private val system: ScreenSystem,
     private val timings: ScreenTimings,
+    private val window: Int,
 ) : ClickProbe {
     override fun nowMs(): Long = system.uptimeMs()
 
-    override suspend fun changed(): Boolean = watch.awaitSettled(timings.quietMs)
+    override suspend fun changed(): Boolean =
+        watch.awaitChange(timings.quietMs) { event ->
+            event.windowId == window ||
+                event.type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+                event.type == AccessibilityEvent.TYPE_WINDOWS_CHANGED
+        }
 }
