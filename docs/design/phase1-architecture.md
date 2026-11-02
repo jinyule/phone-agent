@@ -321,7 +321,7 @@ interface IPrivilegedCore {
 - 只启动 App 自己的 uid 也能启动的 Activity：解析成唯一的 Activity，要求它已导出（或属于本 App）、它要求的权限 App 已获得，并且只启动检查过的这一个；解析不出是 `NOT_FOUND`，多个候选、未导出、缺权限是 `REFUSED`。
 - 带嵌套 intent 的请求一律拒绝（`StartResult.REFUSED`）：extras 里任何一层的 Intent / Intent[] / Intent 列表、`ACTION_CHOOSER`、selector、带 intent 的 ClipData 条目，以及读不出来的 extras。
 - 进命令行的包名（`setAudioMuted` 的 `appops`、冷启动的 `am force-stop`）先校验：Java 包名格式（至少两段、每段以字母开头），并且已经安装；UID、`u0aNN`、`--` 开头的选项一律拒绝。
-- 解除静音只恢复本助手账本里记过的包；没记过的包什么都不做，也不执行 `appops`。
+- 解除静音只恢复本助手账本里记过的包；没记过的包什么都不做，也不执行 `appops`。静音前的原模式写不进账本文件就不静音；启动时恢复账本只认格式合法的行。
 - 锁屏时什么都不启动（`StartResult.LOCKED`）。锁屏状态读自 `IWindowManager.isKeyguardLocked()`，读不到就当作锁屏；不用 `KeyguardManager`，它在调用失败时会回答"没锁"。
 - 冷启动只在"这个 App 的任务全在这块屏上"时才 force-stop，否则降级为普通启动并返回 `COLD_IGNORED`。
 - `moveTask` 只认 agent 自己启动的任务，以及盯主屏期间冒上来的任务（跳出回收）；用户自己的任务不会被拉进后台屏。

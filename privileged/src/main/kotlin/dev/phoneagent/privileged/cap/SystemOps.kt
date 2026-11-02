@@ -51,14 +51,17 @@ internal class SystemOps(
         return synchronized(lock) { if (muted) mute(checkNotNull(pkg)) else unmute(checkNotNull(pkg)) }
     }
 
-    private fun mute(pkg: String): Boolean {
-        if (pkg !in ledger) {
-            val before = appops("get", pkg)
-            // Without the earlier mode there is nothing to restore later, so do not mute at all.
-            if (!before.ok) return false
-            ledger.put(pkg, AudioMuteLedger.parseMode(before.output))
-        }
-        return appops("set", pkg, "ignore").ok
+    private fun mute(pkg: String): Boolean = recorded(pkg) && appops("set", pkg, "ignore").ok
+
+    /**
+     * Whether the mode [pkg] had before is in the ledger, reading and saving it first when it is
+     * not. Without it there would be nothing to restore later, so the caller does not mute at all.
+     */
+    private fun recorded(pkg: String): Boolean {
+        if (pkg in ledger) return true
+        val before = appops("get", pkg)
+        val mode = AudioMuteLedger.parseMode(before.output)
+        return before.ok && AudioMuteLedger.isMode(mode) && ledger.put(pkg, mode)
     }
 
     /**

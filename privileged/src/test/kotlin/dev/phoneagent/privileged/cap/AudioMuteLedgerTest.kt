@@ -2,12 +2,10 @@ package dev.phoneagent.privileged.cap
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import java.io.IOException
 
 // Robolectric: a restore that throws is logged.
 @RunWith(RobolectricTestRunner::class)
@@ -20,10 +18,11 @@ class AudioMuteLedgerTest {
 
         override fun read(): String = text
 
-        override fun write(text: String) {
+        override fun write(text: String): Boolean {
             writes++
-            if (failWrites) throw IOException("read-only")
+            if (failWrites) return false
             this.text = text
+            return true
         }
     }
 
@@ -106,11 +105,10 @@ class AudioMuteLedgerTest {
     }
 
     @Test
-    fun aStoreThatCannotWriteIsTheStoresProblem() {
-        // MuteFile swallows and logs its own IO errors; the ledger lets them through.
+    fun aMuteThatCannotBeSavedIsNotRecorded() {
         val ledger = AudioMuteLedger(FakeStore(failWrites = true))
-        assertThrows(IOException::class.java) { ledger.put("a.b", "ignore") }
-        assertEquals("the in-memory ledger still mutes", "ignore", ledger["a.b"])
+        assertFalse(ledger.put("a.b", "ignore"))
+        assertFalse("nothing is recorded that a restarted helper would not know", "a.b" in ledger)
     }
 
     @Test

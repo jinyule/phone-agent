@@ -12,6 +12,7 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.io.File
 
 /** Muting, through the Proxy, PrivilegedCore and SystemOps, with `appops` recorded instead of run. */
 @RunWith(RobolectricTestRunner::class)
@@ -22,10 +23,7 @@ class SystemOpsTest {
 
     @Before
     fun setUp() {
-        helper = CapabilityHarness(stateDir = folder.root)
-        helper.commands.answer = { command ->
-            if (command.getOrNull(1) == "get") CommandResult(0, "PLAY_AUDIO: allow") else CommandResult(0, "")
-        }
+        helper = CapabilityHarness(stateDir = folder.root, commands = appops())
         helper.install(MUSIC)
     }
 
@@ -77,6 +75,48 @@ class SystemOpsTest {
             helper.commands.of("appops"),
         )
     }
+
+    @Test
+    fun nothingIsMutedWhenTheLedgerCannotBeSaved() {
+        helper.close()
+        val unwritable = folder.newFile("not-a-directory")
+        helper = CapabilityHarness(stateDir = unwritable, commands = appops())
+        helper.install(MUSIC)
+        assertFalse("a mute that could not be recorded could never be undone", helper.core.setAudioMuted(MUSIC, true))
+        val writes = helper.commands.of("appops").filter { it[1] == "set" }
+        assertEquals("PLAY_AUDIO was never set", emptyList<List<String>>(), writes)
+    }
+
+    @Test
+    fun onlyWellFormedLedgerEntriesAreRestoredAtStartup() {
+        helper.close()
+        val dir = folder.newFolder("state")
+        val ledger =
+            listOf(
+                "$MUSIC ignore",
+                "10123 allow",
+                "--user ignore",
+                "u0a55 deny",
+                "com.example.radio bogus_mode",
+                "com.example.video foreground",
+            )
+        File(dir, "phoneagent_audio_mute_0").writeText(ledger.joinToString("\n", postfix = "\n"))
+        helper = CapabilityHarness(stateDir = dir, commands = appops())
+        assertEquals(
+            listOf(
+                listOf("appops", "set", "--user", "0", MUSIC, "PLAY_AUDIO", "ignore"),
+                listOf("appops", "set", "--user", "0", "com.example.video", "PLAY_AUDIO", "foreground"),
+            ),
+            helper.commands.of("appops"),
+        )
+    }
+
+    private fun appops(): RecordingCommands =
+        RecordingCommands().apply {
+            answer = { command ->
+                if (command.getOrNull(1) == "get") CommandResult(0, "PLAY_AUDIO: allow") else CommandResult(0, "")
+            }
+        }
 
     @Test
     fun aColdStartNeverForceStopsAnInvalidPackageName() {

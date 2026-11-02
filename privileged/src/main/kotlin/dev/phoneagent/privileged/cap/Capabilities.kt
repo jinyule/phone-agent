@@ -245,8 +245,14 @@ internal class AndroidCapabilities(
             context: Context,
             appPackage: String,
             appUid: Int,
-        ): AndroidCapabilities =
-            AndroidCapabilities(context, ServedApp(appPackage, appUid)).apply { ops.recoverMutes() }
+        ): AndroidCapabilities = create(context, ServedApp(appPackage, appUid), Platform(SystemBridge(context)))
+
+        /** [create] on [platform]. */
+        fun create(
+            context: Context,
+            app: ServedApp,
+            platform: Platform,
+        ): AndroidCapabilities = AndroidCapabilities(context, app, platform).apply { ops.recoverMutes() }
     }
 }
 

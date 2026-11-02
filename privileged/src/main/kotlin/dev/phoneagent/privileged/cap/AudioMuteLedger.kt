@@ -12,14 +12,12 @@ import android.util.Log
 import java.io.File
 import java.io.IOException
 
-/**
- * Where the ledger survives a helper restart. Implementations report their own failures: the
- * ledger keeps working from memory, and only a helper restart would lose it.
- */
+/** Where the ledger survives a helper restart. Implementations log their own failures. */
 internal interface MuteStore {
     fun read(): String
 
-    fun write(text: String)
+    /** Replaces the stored ledger with [text]; false when it could not be written. */
+    fun write(text: String): Boolean
 }
 
 /**
@@ -43,15 +41,21 @@ internal class AudioMuteLedger(
 
     fun packages(): List<String> = modes.keys.toList()
 
-    /** Records that [packageName] had [mode] before it was muted. */
+    /**
+     * Records that [packageName] had [mode] before it was muted. False, and nothing recorded, when
+     * the ledger could not be saved: a mute that a restarted helper could not undo must not happen.
+     */
     fun put(
         packageName: String,
         mode: String,
-    ) {
+    ): Boolean {
         modes[packageName] = mode
-        save()
+        if (save()) return true
+        modes.remove(packageName)
+        return false
     }
 
+    /** Forgets [packageName]. If the store cannot be written, a later helper restores it once more. */
     fun remove(packageName: String) {
         if (modes.remove(packageName) != null) save()
     }
@@ -69,16 +73,21 @@ internal class AudioMuteLedger(
         return modes.isEmpty()
     }
 
-    private fun save() {
-        store?.write(format(modes))
-    }
+    private fun save(): Boolean = store?.write(format(modes)) ?: true
 
     companion object {
-        private val LINE = Regex("""([A-Za-z0-9_.]+) ([a-z_]+)""")
+        private const val TAG = "PhoneAgentHelper"
+        private val LINE = Regex("""(\S+) (\S+)""")
         private val PLAY_AUDIO_MODE = Regex("""PLAY_AUDIO:\s*([a-z_]+)""")
 
         /** Mode reported when the package has no `PLAY_AUDIO` op set. */
         const val DEFAULT = "default"
+
+        /** The app-op modes `appops set` accepts. */
+        private val MODES = setOf("allow", "ignore", "deny", DEFAULT, "foreground")
+
+        /** Whether [mode] is an app-op mode `appops set` accepts. */
+        fun isMode(mode: String): Boolean = mode in MODES
 
         /**
          * What to write back when unmuting. An explicit earlier mode is restored as it was; a
@@ -92,11 +101,22 @@ internal class AudioMuteLedger(
 
         fun format(modes: Map<String, String>): String = modes.entries.joinToString("") { "${it.key} ${it.value}\n" }
 
+        /**
+         * The ledger in [text]. Only lines of a package name ([PackageNames.wellFormed]) and a
+         * mode ([isMode]) count; anything else is dropped and logged, never handed to `appops`.
+         */
         fun parse(text: String): Map<String, String> =
             text
                 .lineSequence()
-                .mapNotNull { LINE.matchEntire(it.trim())?.destructured }
-                .associate { (pkg, mode) -> pkg to mode }
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .mapNotNull { line -> entry(line).also { if (it == null) Log.w(TAG, "dropping ledger line '$line'") } }
+                .toMap()
+
+        private fun entry(line: String): Pair<String, String>? {
+            val (pkg, mode) = LINE.matchEntire(line)?.destructured ?: return null
+            return if (PackageNames.wellFormed(pkg) && isMode(mode)) pkg to mode else null
+        }
     }
 }
 
@@ -115,12 +135,14 @@ internal class MuteFile(
             ""
         }
 
-    override fun write(text: String) {
+    override fun write(text: String): Boolean {
         try {
             replace(text)
         } catch (e: IOException) {
             Log.w(TAG, "cannot persist the audio-mute ledger to $file", e)
+            return false
         }
+        return true
     }
 
     private fun replace(text: String) {

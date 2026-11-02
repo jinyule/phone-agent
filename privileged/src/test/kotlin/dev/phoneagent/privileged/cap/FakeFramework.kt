@@ -119,12 +119,13 @@ internal class RecordingCommands : CommandRunner {
 internal class CapabilityHarness(
     sdkInt: Int = 36,
     val stateDir: File,
+    /** Answers the commands, including those the helper runs while it starts. */
+    val commands: RecordingCommands = RecordingCommands(),
 ) {
     val context: Context = ApplicationProvider.getApplicationContext()
     val bridge = FakeBridge(context)
-    val commands = RecordingCommands()
     internal val capabilities =
-        AndroidCapabilities(context, ServedApp(APP, APP_UID), Platform(bridge, sdkInt, commands, stateDir))
+        AndroidCapabilities.create(context, ServedApp(APP, APP_UID), Platform(bridge, sdkInt, commands, stateDir))
     private val readers = mutableListOf<ImageReader>()
 
     /** The helper as the app sees it. */
