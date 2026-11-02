@@ -208,6 +208,23 @@ class RefCarrierTest {
     }
 
     @Test
+    fun anElementUnreliableOnBothScreensGetsANewRef() {
+        val unreliable = {
+            TreeBuilder().apply {
+                add(
+                    "Like",
+                    100,
+                    role = ElementRole.BUTTON,
+                    more = More(reliable = false),
+                )
+            }
+        }
+        val first = first(unreliable())
+
+        assertNotEquals(first.refs, first.then(unreliable()).refs)
+    }
+
+    @Test
     fun newRefsStayAboveEverythingHandedOutBefore() {
         val carried = RefCarrier.carry(previous = null, chats().elements, lastUsed = 41)
 
