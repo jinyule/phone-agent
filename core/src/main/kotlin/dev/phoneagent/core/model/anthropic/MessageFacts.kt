@@ -76,7 +76,9 @@ internal class MessageFacts(
 
     /**
      * `providerMetadata`: identity, the model asked for and the one that served, stop details,
-     * server-side edits and any fallback. Strings from the server are masked like an error body.
+     * server-side edits and any fallback. A field holding a string that masking would change (a
+     * request secret or a credential shape, as in an error body) is left out whole, never half
+     * masked.
      */
     fun metadata(
         reason: String,
@@ -103,7 +105,7 @@ internal class MessageFacts(
                     )
                 }
             }
-        return protocol.mask(metadata)
+        return JsonObject(metadata.filterValues { !protocol.masks(it) })
     }
 
     /**

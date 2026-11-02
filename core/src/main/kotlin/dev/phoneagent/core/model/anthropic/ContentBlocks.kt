@@ -14,43 +14,20 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.longOrNull
 
 /**
- * Reports protocol violations as [ModelError.BadResponse] and masks what the server echoed, both
- * with the request's [redactor].
+ * Reports protocol violations as [ModelError.BadResponse] with the request's [redactor] masking
+ * what the server echoed, and tells which server values masking would change.
  */
 internal class Protocol(
     private val redactor: Redactor,
 ) {
     fun bad(detail: String): Nothing = throw ModelError.BadResponse(redactor.text(detail))
 
-    /**
-     * Rejects a reply that repeats this request's credential where it cannot be masked (a block
-     * echoed verbatim): the message is fixed, so nothing of the reply is in it (model-layer §2).
-     */
-    fun echoed(): Nothing = throw ModelError.BadResponse(ECHO_REJECTED)
-
-    /** [echoed] when a string or key anywhere in [block] holds a request secret. */
-    fun requireUnechoed(block: JsonObject) {
-        if (echoes(block)) echoed()
-    }
-
-    private fun echoes(value: JsonElement): Boolean =
+    /** Whether masking would change a string in [value] (keys are protocol names, kept as they are). */
+    fun masks(value: JsonElement): Boolean =
         when (value) {
-            is JsonObject -> value.any { (key, member) -> redactor.echoes(key) || echoes(member) }
-            is JsonArray -> value.any(::echoes)
-            is JsonPrimitive -> value.isString && redactor.echoes(value.content)
-        }
-
-    /** A [Redactor.Window] over this request's secrets. */
-    fun window(json: Boolean = false): Redactor.Window = redactor.window(json)
-
-    /** [value] with every string in it masked; structure, keys and other values are kept. */
-    fun mask(value: JsonObject): JsonObject = JsonObject(value.mapValues { (_, member) -> masked(member) })
-
-    private fun masked(value: JsonElement): JsonElement =
-        when (value) {
-            is JsonObject -> mask(value)
-            is JsonArray -> JsonArray(value.map(::masked))
-            is JsonPrimitive -> if (value.isString) JsonPrimitive(redactor.text(value.content)) else value
+            is JsonObject -> value.values.any(::masks)
+            is JsonArray -> value.any(::masks)
+            is JsonPrimitive -> value.isString && redactor.text(value.content) != value.content
         }
 
     /**
@@ -94,13 +71,20 @@ internal fun interface Bind {
  * the contract). Blocks come one after another with growing indexes, and the `tool_use` and
  * `server_tool_use` ids of one reply are distinct; anything else is a protocol violation, not
  * something to sort or deduplicate. Each block takes only its own delta types.
+ *
+ * Every block start and delta passes the [guard] before anything of it is shown: each string
+ * member through a window per block and member name (a start's `text` and its deltas' `text` are
+ * one channel), anything else whole, and a call's arguments once more as parsed at its stop. Only
+ * the `type` members are left out (protocol, not content).
  */
 internal class ContentBlocks(
     private val protocol: Protocol,
+    private val guard: EchoGuard,
     onDelta: (Delta) -> Unit,
 ) {
     private val blocks = mutableListOf<Block>()
     private val toolIds = mutableSetOf<String>()
+    private val windows = HashMap<Pair<Int, String>, EchoGuard.Window>()
     private val shown = Shown(onDelta)
 
     /** `content_block_start`. */
@@ -112,6 +96,7 @@ internal class ContentBlocks(
             if (!last.closed) protocol.bad("block $index starts while block ${last.index} is open")
         }
         val start = event.obj("content_block") ?: protocol.bad("block $index without content_block")
+        start.forEach { (key, value) -> if (key != TYPE) screen(index, key, value) }
         val block = Block.of(index, start, protocol)
         block.toolId?.let { if (!toolIds.add(it)) protocol.bad("block $index repeats tool id $it") }
         blocks += block
@@ -124,6 +109,7 @@ internal class ContentBlocks(
         val block = block(event, "content_block_delta")
         if (block.closed) protocol.bad("delta for block ${block.index} after its content_block_stop")
         val delta = event.obj("delta") ?: protocol.bad("content_block_delta without a delta")
+        delta.forEach { (key, value) -> if (key != TYPE) screen(block.index, key, value) }
         val type = delta.str("type")
         if (!block.apply(type, delta, shown, protocol)) protocol.bad("unexpected $type for a ${block.type} block")
     }
@@ -146,12 +132,10 @@ internal class ContentBlocks(
     /**
      * The reply parts, in order. A mid-output fallback drops the declined attempts' thinking, tool
      * calls and unknown blocks before the last `fallback` block (model-migration: echoing fallback
-     * turns); `fallback` blocks are only markers. A request secret in any block that would be echoed
-     * verbatim, dropped or not, rejects the reply; so does an unknown block anywhere else, or a kept
-     * thinking block without a signature.
+     * turns); `fallback` blocks are only markers. An unknown block anywhere else rejects the reply,
+     * as does a kept thinking block without a signature.
      */
     fun assemble(bind: Bind): Assembled {
-        blocks.forEach { block -> block.verbatim()?.let(protocol::requireUnechoed) }
         val boundary = blocks.indexOfLast { it is Block.Fallback }
         val (dropped, kept) = blocks.withIndex().partition { (at, block) -> at < boundary && block.declinedAttempt }
         val fallbacks = blocks.filterIsInstance<Block.Fallback>()
@@ -167,7 +151,21 @@ internal class ContentBlocks(
     private fun close(block: Block) {
         if (block.closed) protocol.bad("content_block_stop twice for one block")
         block.closed = true
+        if (block is Block.ToolUse) guard.arguments(block.arguments)
         block.stopped(shown)
+    }
+
+    /** One member of a block's start or delta: a string joined to that member's earlier fragments, else whole. */
+    private fun screen(
+        index: Int,
+        key: String,
+        value: JsonElement,
+    ) {
+        if (value is JsonPrimitive && value.isString) {
+            windows.getOrPut(index to key) { guard.Window() }.next(value.content)
+        } else {
+            guard.json(value)
+        }
     }
 
     private fun block(
@@ -261,9 +259,8 @@ internal class Shown(
     }
 }
 
-/** The message of a reply rejected for repeating the request's credential ([Protocol.echoed]). */
-internal const val ECHO_REJECTED: String =
-    "the reply repeats this request's credential in a block that must be echoed verbatim"
+/** The member naming a block's or a delta's type: protocol, not content. */
+private const val TYPE = "type"
 
 /** Where a kotlinx.serialization parse error starts quoting its input. */
 private const val QUOTED_INPUT = "JSON input:"

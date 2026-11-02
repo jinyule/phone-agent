@@ -10,8 +10,8 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
 /**
- * One content block being assembled ([ContentBlocks]). What it shows goes through `Shown`; text and
- * arguments are masked on the way ([Redactor.Window]), so the shown text and the part agree.
+ * One content block being assembled ([ContentBlocks]). What it shows goes through `Shown`, as it
+ * comes; its content is never rewritten (a request secret in it rejects the reply: [EchoGuard]).
  */
 internal sealed class Block(
     /** The `index` of its `content_block_start`. */
@@ -38,11 +38,8 @@ internal sealed class Block(
         protocol: Protocol,
     ): Boolean = false
 
-    /** Shows what only the stop makes complete, including text held back by a [Redactor.Window]. */
+    /** Shows what only the stop makes complete. */
     open fun stopped(shown: Shown) = Unit
-
-    /** What would be echoed verbatim (no masking possible), or `null` for none. */
-    open fun verbatim(): JsonObject? = null
 
     /** What `providerMetadata` records of it when a fallback drops it: never its content. */
     open fun audit(): JsonObject =
@@ -60,12 +57,11 @@ internal sealed class Block(
     class Text(
         index: Int,
         start: JsonObject,
-        private val window: Redactor.Window,
     ) : Block(index, "text") {
-        private val first = start.str("text").orEmpty()
         private val value = StringBuilder()
+        private val first = start.str("text").orEmpty()
 
-        override fun started(shown: Shown) = show(shown, window.push(first))
+        override fun started(shown: Shown) = show(shown, first)
 
         override fun apply(
             type: String?,
@@ -74,18 +70,16 @@ internal sealed class Block(
             protocol: Protocol,
         ): Boolean {
             if (type != "text_delta") return false
-            show(shown, window.push(delta.str("text") ?: protocol.bad("text_delta without text")))
+            show(shown, delta.str("text") ?: protocol.bad("text_delta without text"))
             return true
         }
 
-        override fun stopped(shown: Shown) = show(shown, window.finish())
-
         private fun show(
             shown: Shown,
-            visible: String,
+            fragment: String,
         ) {
-            value.append(visible)
-            shown.text(visible)
+            value.append(fragment)
+            shown.text(fragment)
         }
 
         override fun part(
@@ -94,25 +88,19 @@ internal sealed class Block(
         ): Part? = value.toString().takeIf { it.isNotEmpty() }?.let(Part::Text)
     }
 
-    /**
-     * Thinking is echoed verbatim with its signature, so a secret in it cannot be masked: the
-     * preview holds back what could be the start of one, and a secret that completes rejects the
-     * reply before any of it is shown.
-     */
+    /** Thinking, echoed verbatim with its signature; its text is shown as reasoning. */
     class Thinking(
         index: Int,
         private val start: JsonObject,
-        private val protocol: Protocol,
     ) : Block(index, "thinking") {
         val text = StringBuilder(start.str("thinking").orEmpty())
         private var signature: String? = start.str("signature")
-        private val preview = protocol.window()
 
         override val declinedAttempt: Boolean get() = true
 
         override fun started(shown: Shown) {
             shown.newReasoningSection()
-            show(shown, preview.push(text.toString()))
+            shown.reasoning(text.toString())
         }
 
         override fun apply(
@@ -125,7 +113,7 @@ internal sealed class Block(
                 "thinking_delta" -> {
                     val fragment = delta.str("thinking") ?: protocol.bad("thinking_delta without thinking")
                     text.append(fragment)
-                    show(shown, preview.push(fragment))
+                    shown.reasoning(fragment)
                 }
 
                 "signature_delta" -> {
@@ -139,17 +127,7 @@ internal sealed class Block(
             return true
         }
 
-        override fun stopped(shown: Shown) = show(shown, preview.finish())
-
-        private fun show(
-            shown: Shown,
-            visible: String,
-        ) {
-            if (preview.found) protocol.echoed()
-            shown.reasoning(visible)
-        }
-
-        override fun verbatim(): JsonObject {
+        private fun verbatim(): JsonObject {
             val fields = LinkedHashMap(start)
             fields["thinking"] = JsonPrimitive(text.toString())
             signature?.let { fields["signature"] = JsonPrimitive(it) }
@@ -171,8 +149,6 @@ internal sealed class Block(
         private val start: JsonObject,
     ) : Block(index, "redacted_thinking") {
         override val declinedAttempt: Boolean get() = true
-
-        override fun verbatim(): JsonObject = start
 
         override fun part(
             bind: Bind,
@@ -202,26 +178,25 @@ internal sealed class Block(
             return true
         }
 
-        override fun verbatim(): JsonObject = JsonObject(fields)
-
         override fun part(
             bind: Bind,
             protocol: Protocol,
-        ): Part = bind.reasoning(ReasoningKind.ANTHROPIC_COMPACTION, verbatim(), null)
+        ): Part = bind.reasoning(ReasoningKind.ANTHROPIC_COMPACTION, JsonObject(fields), null)
     }
 
     /**
-     * A client tool call. Its arguments are the raw `input_json_delta` text, or without deltas the
-     * start's `input` (`{}` when there is none), masked by a JSON-aware [Redactor.Window].
+     * A client tool call. Its [arguments] are the raw `input_json_delta` text, or without deltas the
+     * start's `input` (`{}` when there is none).
      */
     class ToolUse(
         index: Int,
         val id: ToolCallId,
         val name: String,
         private val startInput: JsonElement?,
-        private val window: Redactor.Window,
     ) : Block(index, "tool_use") {
         private val args = StringBuilder()
+
+        val arguments: String get() = args.toString()
 
         override val declinedAttempt: Boolean get() = true
 
@@ -236,22 +211,21 @@ internal sealed class Block(
             protocol: Protocol,
         ): Boolean {
             if (type != "input_json_delta") return false
-            show(shown, window.push(delta.str("partial_json") ?: protocol.bad("input_json_delta without partial_json")))
+            show(shown, delta.str("partial_json") ?: protocol.bad("input_json_delta without partial_json"))
             return true
         }
 
         /** A call whose input came whole in its start shows it now, so argument deltas still add up. */
         override fun stopped(shown: Shown) {
-            show(shown, window.finish())
-            if (args.isEmpty()) show(shown, window.push(startInput?.orNull()?.toString() ?: "{}") + window.finish())
+            if (args.isEmpty()) show(shown, startInput?.orNull()?.toString() ?: "{}")
         }
 
         private fun show(
             shown: Shown,
-            visible: String,
+            fragment: String,
         ) {
-            args.append(visible)
-            shown.args(id, visible)
+            args.append(fragment)
+            shown.args(id, fragment)
         }
 
         override fun audit(): JsonObject =
@@ -325,8 +299,8 @@ internal sealed class Block(
             protocol: Protocol,
         ): Block =
             when (val type = start.str("type")) {
-                "text" -> Text(index, start, protocol.window())
-                "thinking" -> Thinking(index, start, protocol)
+                "text" -> Text(index, start)
+                "thinking" -> Thinking(index, start)
                 "redacted_thinking" -> Redacted(index, start)
                 "compaction" -> Compaction(index, start)
                 "tool_use" -> toolUse(index, start, protocol)
@@ -342,7 +316,7 @@ internal sealed class Block(
             val id = start.str("id")?.takeIf { it.isNotBlank() } ?: protocol.bad("tool_use block $index without an id")
             val name =
                 start.str("name")?.takeIf { it.isNotBlank() } ?: protocol.bad("tool_use block $index without a name")
-            return ToolUse(index, ToolCallId(id), name, start["input"], protocol.window(json = true))
+            return ToolUse(index, ToolCallId(id), name, start["input"])
         }
     }
 }

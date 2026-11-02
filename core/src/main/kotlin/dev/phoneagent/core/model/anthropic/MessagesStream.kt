@@ -23,10 +23,13 @@ import kotlinx.serialization.json.put
  *   parsed here) or, without deltas, the start's `input`. Schema validation happens where the
  *   call is built (`dev.phoneagent.core.tool.ToolCall`); [StopReason.MAX_TOKENS] tells the loop to
  *   run nothing.
- * - The request's secrets never get into the reply (model-layer §2): in text and arguments they
- *   are masked, also when split across deltas, and the deltas show the masked text; in a block
- *   echoed verbatim they reject the reply with a fixed [ModelError.BadResponse], before any
- *   preview shows them. A refusal category is masked like an error message.
+ * - The request's secrets never get into the reply (model-layer §2). Content the model produced
+ *   is never rewritten: a secret anywhere in it (text, tool calls, thinking and its signature,
+ *   redacted thinking, compaction, blocks this adapter does not know, a declined attempt's too)
+ *   rejects the whole reply with [CredentialEcho.error], also when it is split across deltas
+ *   ([EchoGuard]). Deltas are not held back: the fragment that completes the secret is not shown,
+ *   those before it were. What the server wrote is masked instead: a refusal category like an
+ *   error message; a `providerMetadata` field that masking would change is left out.
  * - Text deltas add up exactly to the reply's text. Reasoning deltas add up to its thinking
  *   summaries joined by a blank line, call announcements (once each, with the complete name) to
  *   its calls, argument deltas to each call's arguments; the one exception is a mid-output server
@@ -51,7 +54,7 @@ internal class MessagesStream(
     onDelta: (Delta) -> Unit,
 ) {
     private val protocol = Protocol(redactor)
-    private val blocks = ContentBlocks(protocol, onDelta)
+    private val blocks = ContentBlocks(protocol, redactor.guard(), onDelta)
     private val facts = MessageFacts(protocol)
     private val bind = Bind { kind, opaque, summary -> Part.Reasoning(provider, model, kind, opaque, summary) }
     private var started = false

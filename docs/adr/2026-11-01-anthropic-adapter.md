@@ -11,7 +11,7 @@
 
 - **每次尝试只发一个 HTTP 请求**。重试归主循环（phase1 §3.7），适配器和 HTTP 客户端都不能自己重发、跟随重定向或做认证 follow-up。
 - **线路设置只从 `request.wire` 快照读**。请求体是"日志 + 快照"的纯函数，要能做逐字节金样（AGENTS.md §3 铁律 1）。
-- 服务端回显的密钥在任何出口上都要打码，错误路径和成功回复的诊断信息（`providerMetadata`）都算；取消时要释放响应和连接。
+- 服务端回显的密钥在任何出口上都不能漏：错误路径和成功回复的诊断信息（`providerMetadata`）打码；模型产生的内容里出现密钥，整条回复拒绝。取消时要释放响应和连接。
 - thinking / redacted_thinking / compaction 块原样保存、原样回传；beta 字段要能表达：`fallbacks`、`thinking.block_binding`、`context_management`。
 - `core` 保持纯 JVM，不增加依赖面。
 
@@ -96,9 +96,9 @@
   - SSE 的行结尾认 LF、CRLF 和单独的 CR。
   - `Retry-After` 只接受有限、非负的值。
   - 取消时取消 Call，并释放响应和连接。
-  - 服务端回显的内容一律用含本次密钥的 redactor 处理：错误体、流内 error 事件、协议违例的描述，以及成功回复 `providerMetadata` 里的每个字符串。
+  - 服务端写的诊断一律用含本次密钥的 redactor 打码：错误体、流内 error 事件、协议违例的描述、拒答 category。成功回复的 `providerMetadata` 里，打码会改动的字段整项省略，不写半截打码的值。
   - 错误体先脱敏再截断：多读"最长密钥减 1"个字节，正文没读完时去掉末尾可能是密钥开头的部分，再按字符截断。做法和 WP03 的 `maskedText` 相同。
-  - 回复内容里的密钥（正文、参数、要原样回传的块、拒答 category）按 model-layer §2 处理。
+  - 模型产生的内容不改写，出现本次请求的密钥就整条拒绝（`EchoGuard`，model-layer §2）。
 - **请求**：`POST {baseUrl}/v1/messages`，请求头如下：
   - `anthropic-version`：默认 `2026-10-21`；
   - `anthropic-beta`：用逗号拼接；
@@ -122,7 +122,7 @@
   - 内容块原样拼装。块一个接一个来，`index` 必须比之前的都大；同一条回复里 `tool_use` 和 `server_tool_use` 的 id 不能重复。违反就报 `BadResponse`，不靠排序或去重掩盖。
   - 正文增量拼起来和最终正文完全一致。推理、调用通告和参数的预览只在服务端降级时可能和最终回复不一致，这时 `preview_diverged` 记下通道。工具调用在名字完整后只通告一次。
   - 中途降级时，最后一个 `fallback` 块之前的 thinking、redacted_thinking、tool_use 和未知内部块都不进回复。
-    - `providerMetadata.fallback_discarded` 只记下是哪几个块：序号、类型，调用的 id 和名字。不记内容，和下一轮要回传的内容分开，字符串照样脱敏。
+    - `providerMetadata.fallback_discarded` 只记下是哪几个块：序号、类型，调用的 id 和名字。不记内容，和下一轮要回传的内容分开；打码会改动它时整项省略。
     - `requested_model` 和 `served_model` 分开记。`served_model` 依次取：最后一个 fallback 块的 `to.model`；`usage.iterations` 里最后一个 `fallback_message`；`message_start` 的 model。
   - **未知块类型**：不发 delta，先缓存，到组装时按最后一个 `fallback` 块决定。
     - 在它之前的，属于被放弃的尝试，按资料省略。
@@ -147,7 +147,8 @@ SDK 的源码和 claude-api 文档只作为线路格式的参考（字段名、b
   - 两种 JSON 类型：thinking、redacted_thinking、compaction 块要原样进日志、原样回传，每轮都要在 Jackson 的 `JsonValue` 和 kotlinx 的 `JsonElement` 之间转换，"逐字节一致"要靠两套序列化的行为一致来保证。
   - 头和请求体：`X-Stainless-*` 头默认就带。请求体要逐字节可控，可 SDK 的 builder 要经过 Jackson 序列化，拿它做金样比直接构造 JSON 更绕。
 - **只用 SDK 的模型类和 accumulator，传输自己做**（用 `anthropic-java-core` 加自定义 `HttpClient`）。体积大头正好在 `com.anthropic.models`、Jackson 和 `kotlin.reflect`，所以这样省不下多少。另外两套 JSON 栈（Jackson 和 kotlinx.serialization）会并存。
-- **和 OpenAI 系适配器共用 `HttpTransport`、`Sse`、`Redactor`**。现行规则是 capability 包之间不能互相引用。所以先复制一份，在 KDoc 里注明"keep them in step"。把它们提成契约层的公共包，需要另一个 WP 先改依赖规则。
+- **模型内容里的密钥打码，而不是整条拒绝**（r1 修复的前半曾这样实现）。不采用：Anthropic 把 thinking 绑定到它之前的整段对话，改写已经返回的正文或 `tool_use.input`，下一次请求就会报 prefix mismatch，在 `prefixMismatch=ERROR` 下是不可重试的 400；改写调用参数还会改掉要执行的操作。为了打码而扣住"可能是密钥开头"的增量，又会让预览卡顿。所以按两个适配器的统一规则：整条拒绝，增量不推迟。
+- **和 OpenAI 系适配器共用 `HttpTransport`、`Sse`、`Redactor`、`EchoGuard`**。现行规则是 capability 包之间不能互相引用。所以先复制一份，在 KDoc 里注明"keep them in step"。把它们提成契约层的公共包，需要另一个 WP 先改依赖规则。
 
 ## 后果
 
@@ -160,7 +161,7 @@ SDK 的源码和 claude-api 文档只作为线路格式的参考（字段名、b
   - 服务端 compaction。
 
   本机网关（gpt-6-luna）的 e2e 只证明线路格式能通。
-- `HttpTransport`、`Sse`、`Redactor` 有两份副本，改一处要同步另一处，直到有公共包。
+- `HttpTransport`、`Sse`、`Redactor`、`EchoGuard` 有两份副本，改一处要同步另一处，直到有公共包。
 - **后续项**：WP03 和 WP04 都合入以后，单独开一个改动，把公共传输层（`HttpTransport`、`Sse`、`Redactor`，以及 3xx、`Retry-After` 这些共同的映射规则）抽到一个中立的包里，两个适配器都改为引用它。这要先改包依赖规则，所以不放在本 WP 里做。
 - **什么情况下重新评估**：
   - SDK 去掉 Jackson 或 kotlin-reflect 这类运行时反射依赖，体积降到和 direct 同一量级；

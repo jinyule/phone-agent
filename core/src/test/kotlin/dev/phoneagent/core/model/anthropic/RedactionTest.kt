@@ -14,8 +14,9 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 
 /**
- * Keys a server echoes never reach a [ModelError] (not its message, cause chain or stack trace) or
- * the `providerMetadata` of a successful reply.
+ * Keys a server echoes never reach a [ModelError] (not its message, cause chain or stack trace),
+ * where they are masked, or the `providerMetadata` of a successful reply, where a field masking
+ * would change is left out.
  * The key used here has no credential shape, so only the request-secret layer can catch it.
  */
 class RedactionTest {
@@ -136,7 +137,7 @@ class RedactionTest {
         }
 
     @Test
-    fun `a successful reply whose metadata echoes the key`() =
+    fun `a metadata field that echoes the key is left out whole, not half masked`() =
         runTest {
             val stream =
                 Kit.sse(
@@ -153,10 +154,10 @@ class RedactionTest {
                 )
             server.enqueueSse(stream)
             val reply = model().complete(Kit.request())
-            val printed = reply.providerMetadata.toString()
-            assertFalse(printed.contains(key), "the key leaked into providerMetadata (value not shown)")
-            assertEquals(5, Regex(Regex.escape(Redactor.MASK)).findAll(printed).count(), "every echo is masked")
-            assertEquals("\"stop_sequence\"", reply.providerMetadata!!["stop_reason"].toString(), "the rest is kept")
+            val metadata = reply.providerMetadata!!
+            assertFalse(metadata.toString().contains(Redactor.MASK), "no half-masked value: $metadata")
+            assertEquals(setOf("requested_model", "stop_reason"), metadata.keys, "every echoing field is left out")
+            assertEquals("\"stop_sequence\"", metadata["stop_reason"].toString(), "the rest is kept")
             assertEquals(listOf<Part>(Part.Text("ok")), reply.parts)
         }
 

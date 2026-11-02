@@ -119,11 +119,13 @@ fun interface BlobSource {              // 读当前会话 BlobStore 里 Part.Im
   - **服务端写的诊断字段**（错误正文、拒答 category、metadata）：本次密钥的原样和标准转义形式改写成 `***`，其余说明保留；宽松解码改动了文字、解码以后才现形的本次密钥或者 `sk-`、JWT 形状，整段换成固定说明（`Redactor.WITHHELD`），不留半截；没有可解码的转义时，形状在原文上打码，`Bearer` 字样只打码后面的 token，都不触发整段替换。OpenAI 适配器的具体顺序见上面"诊断不引用原文"第二类。
 - **流式增量**：`Delta.Text` 依次拼起来一定是最终正文的前缀；推理和工具调用的预览不作保证，服务端降级时可能不出现在最终回复里，界面以最终的 `ChatResponse` 为准重新渲染。
 - blob 按会话存放：每个会话建一个 ChatModel，或者用会话感知的 `BlobSource`，组装时决定。
-- **回复内容里的密钥**（Anthropic 适配器）：我们从不把密钥放进上下文，所以模型输出里出现本次请求的密钥，本身就说明出了问题。
-  - 正文和工具参数里的密钥换成 `***`。流式时每个块保留一个尾部窗口，只扣住"可能是密钥开头"的那一小段，所以拆在几个片段里的密钥也认得出来。增量拼起来和最终回复一致，展示的就是打码后的文字。参数还认密钥在 JSON 字符串里的转义写法。
-  - thinking、redacted_thinking 和 compaction 块要原样回传，改一个字签名就失效，没法打码。所以只要其中任何字段（包括 `signature`）出现本次请求的密钥，**整条回复就拒绝**，报固定文字的 `BadResponse`，宁可失败也不落盘。被放弃的尝试里的块也算。推理预览在密钥完整之前就扣住，不会先漏出去。
-  - 拒答的 `category` 和错误消息一样脱敏。
-  - 这里只认本次请求的密钥。`sk-…`、JWT 这类形状只在诊断文字里兜底，不改回复内容。
+- **模型产生的内容里出现本次请求的密钥，整条回复按 `BadResponse` 拒绝，不改写**（Anthropic 适配器，`core.model.anthropic.EchoGuard`；和 OpenAI 适配器同一条规则，WP01 A11 写进契约）。
+  - 模型产生的内容包括正文、工具调用（id、名字、参数）、thinking 的文字和 `signature`、redacted_thinking、compaction，以及 `server_tool_use` 和其他不认识的块。被放弃的尝试里的块也算。
+  - 为什么不改写：thinking 绑定在它之前的整段对话上，改写已经返回的正文或 `tool_use.input`，下一次请求就会报 prefix mismatch；改写参数还会改掉要执行的操作。我们从不把密钥放进上下文，模型输出里出现密钥本身就说明出了问题，宁可失败，也不落盘。
+  - 只做精确匹配：原样的和 JSON 转义后的形式都算，调用参数在块结束时再按解析后的字符串查一遍（`\/` 这类转义藏不住），不设最短长度，不按形状兜底。不需要认证的本地服务用 `Credential.None`；填了占位 key 的话，它出现在回复里会让整条回复被拒。
+  - 增量边发边查，不推迟发布：每个块的每个字符串字段保留一个"最长形式减 1"的尾部窗口，凑出密钥的那一片不发出，之前的片段照常即时显示。
+  - 拒绝用固定文字，带"已流出内容不保留"的标记：runtime 不把这次 attempt 已经流出的前缀记成 interrupted 的消息，界面上已经显示的片段由 UI 清掉。WP01 的 `discardsStreamed` 合入之前，适配器用 `CredentialEcho.discardsStreamed` 占位。
+  - 服务端写的诊断照旧打码成 `***`，并按形状兜底：错误体、流内 error 事件、拒答的 `category`。`providerMetadata` 里打码会改动的字段整项省略，不写半截打码的值。
 
 **线路快照**（`core.model.WireProfile`，随 `ChatRequest.wire` 传给适配器，冻结在 `request/header` 和 `side/request` 里）：
 
@@ -241,7 +243,7 @@ data class WireProfile(
   - `Retry-After` 只接受有限、非负的值。
   - 取消时释放响应和连接。
   - 回显的密钥在错误和成功回复的 `providerMetadata` 里都打码。错误体先脱敏、再截断，做法和 OpenAI 适配器相同（§2）。
-  - 回复内容里的密钥：正文和参数里的打码，要原样回传的块里的整条拒绝，拒答 `category` 也脱敏（§2"回复内容里的密钥"）。
+  - 模型产生的内容里出现本次请求的密钥，整条回复拒绝；拒答 `category` 打码，`providerMetadata` 里打码会改动的字段整项省略（§2）。
 - **默认模型**：主模型 `claude-opus-5-5`，可选 `claude-sonnet-5-5`；轻量模型 `claude-haiku-5-5`；看图模型默认用主模型。模型清单以服务端 `/v1/models` 返回的为准，本地只做初值。
 - **思考**：
   - Opus 5.5 的思考始终开启：不发 `thinking`，或者发 `{type:"adaptive"}`。**`budget_tokens` 和 `disabled` 都会被拒（400）**。
