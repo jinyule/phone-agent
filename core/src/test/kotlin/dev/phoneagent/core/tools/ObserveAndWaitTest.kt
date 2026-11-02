@@ -10,6 +10,7 @@ import dev.phoneagent.core.ports.ScreenUnavailableException
 import dev.phoneagent.core.ports.SnapshotDetail
 import dev.phoneagent.core.ports.SnapshotOptions
 import dev.phoneagent.core.ports.TreeQuality
+import dev.phoneagent.core.screen.ScreenComponents
 import dev.phoneagent.core.screen.ScreenFormatter
 import dev.phoneagent.core.testing.FakeContext
 import dev.phoneagent.core.testing.FakeScreen
@@ -67,10 +68,9 @@ class ObserveAndWaitTest {
             vision: Boolean = true,
         ): Pair<ToolResult, FakeContext> {
             val ctx = FakeContext(screen)
-            return tools(
-                ToolsConfig(vision = vision),
-            ).getValue("phone_observe").execute(call("phone_observe", args), ctx) to
-                ctx
+            val presenter = ScreenFormatter(lexicon = Screens.LEXICON, vision = vision)
+            val observe = PhaseOneTools.create(presenter).single { it.def.name == "phone_observe" }
+            return observe.execute(call("phone_observe", args), ctx) to ctx
         }
 
         @Test
@@ -178,7 +178,7 @@ class ObserveAndWaitTest {
     fun `without vision no hint points to screenshots`() =
         runTest {
             val presenter = ScreenFormatter(lexicon = Screens.LEXICON, vision = false)
-            val blind = PhaseOneTools.create(presenter, ToolsConfig(vision = false)).associateBy { it.def.name }
+            val blind = PhaseOneTools.create(presenter).associateBy { it.def.name }
             for (snapshot in listOf(
                 Samples.sparse,
                 Samples.sparse.copy(elements = emptyList(), quality = TreeQuality.EMPTY),
@@ -191,6 +191,27 @@ class ObserveAndWaitTest {
                 assertFalse(result.text().contains("image=true"), result.text())
                 assertFalse(result.text().contains("看截图"), result.text())
                 assertTrue(result.text().contains("hand_to_user"), result.text())
+            }
+        }
+
+    @Test
+    fun `the vision the screen components are assembled with decides both the notes and the frame`() =
+        runTest {
+            val sparse = Screens.CHAT.copy(quality = TreeQuality.SPARSE)
+            for (vision in listOf(true, false)) {
+                val presenter = ScreenComponents(lexicon = Screens.LEXICON, vision = vision).presenter
+                val observe = PhaseOneTools.create(presenter).single { it.def.name == "phone_observe" }
+                for ((args, snapshot) in listOf("{}" to sparse, """{"image":true}""" to Screens.CHAT)) {
+                    val screen = FakeScreen(snapshot)
+                    val result = observe.execute(call("phone_observe", args), FakeContext(screen))
+                    val text = result.text()
+                    val case = "vision=$vision $args: $text"
+                    assertEquals(vision, screen.frames.isNotEmpty(), case)
+                    assertEquals(vision, result.content.any { it is Part.Image }, case)
+                    assertEquals(vision, text.contains("附图：带编号框的截图"), case)
+                    assertEquals(!vision, text.endsWith("（当前模型不看图，没有附截图）"), case)
+                    assertEquals(vision && snapshot == sparse, text.contains("看截图"), case)
+                }
             }
         }
 

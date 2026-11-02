@@ -12,6 +12,13 @@ import dev.phoneagent.core.ports.SnapshotDetail
  * must reproduce it byte for byte.
  */
 public interface ScreenPresenter {
+    /**
+     * Whether the main model reads images; the one place this capability is configured. Without it
+     * no page note suggests a screenshot, and `phone_observe` never attaches a frame (it says so
+     * instead), so the notes and the frames always agree.
+     */
+    public val vision: Boolean
+
     /** [snapshot] as one page at [detail] (header, zones, OCR text; folded to the format's budget). */
     public fun page(
         snapshot: ScreenSnapshot,

@@ -29,14 +29,14 @@ import dev.phoneagent.core.tool.ScreenPresenter
  * screen was read without OCR after one with OCR lines ([ScreenDiff.ocrUnverified]), either form
  * says that those lines were not checked again.
  *
- * [vision] is whether the main model reads images (the same capability the tools are assembled
- * with, `ToolsConfig.vision`): without it no note suggests a screenshot. Built only by
- * [ScreenComponents], with the [config] its analyzer reads lines with.
+ * [vision] is whether the main model reads images: without it no note suggests a screenshot, and
+ * the tools read it here to decide on frames. Built only by [ScreenComponents], with the [config]
+ * its analyzer reads lines with.
  */
 public class ScreenFormatter internal constructor(
     private val config: ScreenFormatConfig = ScreenFormatConfig(),
     private val lexicon: RiskLexicon = RiskLexicon { _, _ -> null },
-    vision: Boolean = true,
+    override val vision: Boolean = true,
 ) : ScreenPresenter {
     private val briefLines = ElementLines(config, SnapshotDetail.BRIEF)
     private val fullLines = ElementLines(config, SnapshotDetail.FULL)

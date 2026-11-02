@@ -12,8 +12,8 @@ import dev.phoneagent.core.tool.ScreenPresenter
  * model cannot see and miss ones it can; their classes are therefore built only here.
  *
  * @param lexicon decides which actionable elements the presenter marks `⚠` (the policy's lexicon).
- * @param vision whether the main model reads images; the same value as `ToolsConfig.vision`, so no
- *   note suggests a screenshot the model cannot read.
+ * @param vision whether the main model reads images. This is its only source: the presenter
+ *   follows it in its notes and hands it to the tools as [ScreenPresenter.vision].
  */
 public class ScreenComponents(
     format: ScreenFormatConfig = ScreenFormatConfig(),

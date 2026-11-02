@@ -16,7 +16,7 @@ public object PhaseOneTools {
     ): List<Tool> {
         val mask = presenter::mask
         return listOf(
-            PhoneObserveTool(presenter, config.vision, config.observeTimeoutMs),
+            PhoneObserveTool(presenter, config.observeTimeoutMs),
             PhoneAppsTool(presenter, config.appsTimeoutMs),
             PhoneWaitTool(presenter, config.stableQuietMs, config.waitReadIntervalMs, config.waitTimeoutMs),
             PhoneTapTool(presenter, config.actionTimeoutMs),

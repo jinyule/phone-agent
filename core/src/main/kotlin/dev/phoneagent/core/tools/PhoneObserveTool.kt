@@ -22,13 +22,13 @@ import kotlinx.serialization.json.put
 /**
  * `phone_observe(detail?, image?)` (phase1 §5): reads the screen as one page. A frame with
  * Set-of-Mark boxes is attached when `image=true`, or when `image` is absent and the tree is not
- * [TreeQuality.GOOD]; never when [vision] is off or the page is FLAG_SECURE (the text says why).
- * The description is one text whatever [vision] is (tool definitions are part of the cached
+ * [TreeQuality.GOOD]; never when the main model reads no images ([ScreenPresenter.vision], the
+ * same capability the page notes follow) or the page is FLAG_SECURE (the text says why). The
+ * description is one text whatever the capability is (tool definitions are part of the cached
  * prompt prefix): it states the condition instead.
  */
 internal class PhoneObserveTool(
     private val presenter: ScreenPresenter,
-    private val vision: Boolean,
     override val timeoutMs: Long,
 ) : PhaseOneTool(
         name = "phone_observe",
@@ -82,7 +82,7 @@ internal class PhoneObserveTool(
         val skipped =
             when {
                 !wanted -> ""
-                !vision -> "\n（当前模型不看图，没有附截图）"
+                !presenter.vision -> "\n（当前模型不看图，没有附截图）"
                 ScreenFlag.SECURE in snapshot.flags -> "\n（这一页禁止截屏，没有附截图）"
                 else -> null
             }
