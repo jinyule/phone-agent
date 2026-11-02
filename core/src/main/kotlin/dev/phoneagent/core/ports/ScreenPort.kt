@@ -9,7 +9,10 @@ import kotlinx.serialization.Serializable
  *
  * Failure contract: expected per-action failures are values in [ActionOutcome]; a surface that
  * cannot be used at all throws [ScreenUnavailableException]. Methods are cancellable; a cancelled
- * [act] may or may not have reached the device (the caller records OUTCOME_UNKNOWN).
+ * [act] may or may not have reached the device, and the call's result says so for each way it can
+ * end (the call has its `tool/started`): a stop gives CANCELLED with a text that it may have taken
+ * effect and must be observed first; the call's timeout gives TIMEOUT, likewise; a crash leaves no
+ * result, and repair writes OUTCOME_UNKNOWN.
  * Calls are serialized by the caller: the screen is a shared resource (`Tool.concurrencySafe`).
  */
 public interface ScreenPort {

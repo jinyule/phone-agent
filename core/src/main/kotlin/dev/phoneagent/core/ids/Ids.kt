@@ -44,7 +44,11 @@ public value class SessionId(
 @Serializable
 @JvmInline
 public value class ToolCallId(
-    /** Opaque, non-blank; unique within a session. */
+    /**
+     * Opaque, non-blank. Unique within a session: the main loop guarantees it at the boundary (a
+     * reply that repeats or reuses an id is a bad response) and never renumbers ids, which
+     * stateful protocols refer to.
+     */
     public val value: String,
 ) {
     init {

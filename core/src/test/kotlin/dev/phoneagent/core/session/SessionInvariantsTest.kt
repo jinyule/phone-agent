@@ -112,51 +112,19 @@ class SessionInvariantsTest {
         }
 
     @Test
-    fun `a stop by the user or a limit ends the log, a shutdown or an error may be resumed`() =
-        runTest {
-            StopCause.entries.forEach { cause ->
-                val store =
-                    SessionStore.create(
-                        SessionFiles(storage, StoragePath("sessions/stop-$cause")),
-                        SessionSamples.session,
-                        SessionSamples.task,
-                        SessionSamples.start,
-                        Clock { 0 },
-                    )
-                store.append(TaskStopped(cause))
-                val resume = suspend { store.append(SessionResumed(droppedTailBytes = 0)) }
-                when (cause) {
-                    StopCause.USER, StopCause.LIMIT -> {
-                        assertThrows<IllegalArgumentException>("$cause is final") { resume() }
-                        assertEquals(2, store.lastSeq)
-                    }
-
-                    StopCause.SHUTDOWN, StopCause.ERROR -> {
-                        resume()
-                        store.append(TurnStarted(2))
-                    }
-                }
-            }
-        }
-
-    @Test
-    fun `reopening keeps track of started and executed calls and of a final stop`() =
+    fun `reopening keeps track of started and executed calls`() =
         runTest {
             val store = newStore()
             store.append(ToolCallRecorded(call("c1")))
             val allowed = store.append(verdict("c1")).seq
             store.append(started("c1", allowed))
             store.append(executed("c1"))
-            store.append(TaskStopped(StopCause.SHUTDOWN))
             store.close()
             val reopened = SessionStore.open(files, Clock { 0 }).store
             assertThrows<IllegalArgumentException> { reopened.append(started("c1", allowed)) }
             assertThrows<IllegalArgumentException> { reopened.append(executed("c1")) }
-            reopened.append(SessionResumed(0))
-            reopened.append(TaskStopped(StopCause.USER))
-            reopened.close()
-            val final = SessionStore.open(files, Clock { 0 }).store
-            assertThrows<IllegalArgumentException> { final.append(TurnStarted(3)) }
+            assertThrows<IllegalArgumentException> { reopened.append(result("c1", ToolStatus.NOT_STARTED)) }
+            reopened.append(result("c1", ToolStatus.OUTCOME_UNKNOWN))
         }
 
     @Test
@@ -316,7 +284,6 @@ class SessionInvariantsTest {
                     record(4, result("c1")),
                     record(5, executed("c1")),
                 ),
-            "a record after a user stop" to listOf(record(1, TaskStopped(StopCause.USER)), record(2, user)),
         )
 
     @Test

@@ -25,8 +25,9 @@ import kotlinx.serialization.Serializable
  * so the re-check reaches the same verdict. The model has not seen this screen, so outside the
  * re-check it never becomes `PolicyContext.screen`.
  *
- * @property callId the tool call that observed, or `null` when the runtime observed on its own
- *   (after resume or handoff, or the re-check after approval).
+ * @property callId the tool call that observed. A screen the runtime reads on its own is recorded
+ *   under the call it reads for: the handed-off call once the handoff ended. `null` only for a
+ *   screen that belongs to no call: the re-check after approval (above) and a read after resume.
  * @property snapshot what was seen (secret values already absent).
  */
 @Serializable

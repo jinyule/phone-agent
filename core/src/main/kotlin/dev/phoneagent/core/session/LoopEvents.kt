@@ -34,15 +34,24 @@ public data class TaskLevelChanged(
 ) : SessionEvent
 
 /**
- * `task/stopped`: the task stopped before finishing. Written last when a stop is handled: the
- * results of pending calls (CANCELLED), `prompt/withdrawn` and `turn/end` come before it. Not
- * ignorable: whether the log may continue depends on it.
+ * `task/stopped`: the current run of the task stopped before finishing (`TaskRuntime.stop`). Written
+ * last when a stop is handled, once nothing else may append: the results of the calls still
+ * without one (CANCELLED, see `ToolStatus.CANCELLED`), `prompt/withdrawn`, `step/end(CANCELLED)`
+ * and `turn/end(STOPPED)` come before it, and it comes with no turn open and no call that needs a
+ * result without one (`SessionInvariants`). Not ignorable: the run rules depend on it.
  *
- * Resume: [StopCause.USER] and [StopCause.LIMIT] are final. No record may follow (the store
- * refuses the append; a log with one is corrupt), so such a task is never resumed and its log
- * stays readable as it is. After [StopCause.SHUTDOWN] or [StopCause.ERROR] the runtime may resume
- * the task explicitly: repair, then `session/resumed`. When writing the log itself failed, the
- * record may be missing and the log ends like a crashed one.
+ * No cause ends the session (D14). Every cause ends this run only, and the task then waits for
+ * the user: nothing runs until the user's own input (`user/message` of kind USER) is recorded in
+ * a new turn, never on its own. After [StopCause.SHUTDOWN] and [StopCause.ERROR] the log is
+ * resumed first: `session/resumed` is the next record. After [StopCause.USER] and
+ * [StopCause.LIMIT] the next turn may start directly; a new runtime instance that takes the log
+ * over writes `session/resumed` first, as always.
+ *
+ * Unfinished stop: when the process ended between `turn/end(STOPPED)` and this record, the log
+ * ends with the `turn/end`, and the cause was never written. Recovery writes this record with
+ * [StopCause.ERROR], meaning "the stop was not finished" (the cause is not guessed), then
+ * `session/resumed`. When writing the log itself failed, the record may be missing altogether
+ * and the log is recovered like a crashed one.
  *
  * @property cause why it stopped.
  */
@@ -52,19 +61,27 @@ public data class TaskStopped(
     val cause: StopCause,
 ) : SessionEvent
 
-/** Why a task was stopped (`TaskRuntime.stop`, [TaskStopped]). */
+/** Why a run of a task was stopped (`TaskRuntime.stop`, [TaskStopped]). None ends the session. */
 @Serializable
 public enum class StopCause {
-    /** The user pressed stop. Final. */
+    /** The user pressed stop. The user's next input continues the task. */
     USER,
 
-    /** The app or service is shutting down. Resumable. */
+    /** The app or service is shutting down. The log is resumed before the task continues. */
     SHUTDOWN,
 
-    /** The step or continuation limit was reached. Final. */
+    /**
+     * An app-level limit across turns was reached (for example the task's total steps). The per-turn
+     * limits (steps per turn, continuations) end only their turn, with [TurnEndReason.LIMIT], and
+     * write no [TaskStopped].
+     */
     LIMIT,
 
-    /** An unrecoverable error (e.g. the session log could not be flushed). Resumable. */
+    /**
+     * An unrecoverable error (e.g. the session log could not be flushed), or a stop whose
+     * `task/stopped` was never written (recovery of an unfinished stop). The log is resumed before
+     * the task continues.
+     */
     ERROR,
 }
 
@@ -108,16 +125,22 @@ public enum class TurnEndReason {
     /** A tool result carried `ToolControl.EndTurn` (`end_not_done`); detail is its summary. */
     END_NOT_DONE,
 
-    /** The reply hit the output cap; its tool calls were discarded. */
+    /**
+     * The reply hit the output cap. It stays recorded as it came, tool calls included, and each of
+     * its calls was answered with a SKIPPED result that was never run (`ChatResponse.stopReason`).
+     */
     MAX_TOKENS,
 
     /** A `preStep` interceptor refused the step. */
     PRE_STEP_REFUSED,
 
-    /** The step limit or the continuation limit was reached. */
+    /** The per-turn step limit or continuation limit was reached; ends this turn only, no `task/stopped`. */
     LIMIT,
 
-    /** The task was stopped. */
+    /**
+     * The task was stopped. Followed by `task/stopped` (the log may end before it: an unfinished
+     * stop); the next turn starts only with the user's own input.
+     */
     STOPPED,
 
     /** A step failed (model error after retries, interceptor failure, flush failure). */
@@ -138,7 +161,7 @@ public data class StepStarted(
     }
 }
 
-/** `step/end`. */
+/** `step/end`: every call the step's replies asked for has its `tool/result` before it (`SessionInvariants`). */
 @Serializable
 @SerialName("step/end")
 public data class StepEnded(
@@ -160,10 +183,10 @@ public enum class StepOutcome {
     /** Model replied and every requested call has a result. */
     COMPLETED,
 
-    /** Failed; repair fills in missing tool results. */
+    /** Failed; repair writes the missing tool results before this record. */
     FAILED,
 
-    /** Cancelled by stop or steer. */
+    /** Cancelled by stop or steer; the missing tool results come before this record. */
     CANCELLED,
 }
 
@@ -229,9 +252,16 @@ public enum class InboxEntryKind {
 }
 
 /**
- * `session/resumed`: the log was reopened after the process ended, possibly by a crash.
- * Written by the runtime after repair; the model must observe the screen again before acting.
- * Never after a final [TaskStopped] (USER, LIMIT): the store refuses it.
+ * `session/resumed`: a new runtime instance took the log over: after the process ended (a
+ * restart, possibly after a crash), or within the process when a new instance continues a task
+ * whose runtime stopped. Written by that instance after repair, before anything else it writes:
+ * no turn is open and every call that needs a result has one (`SessionInvariants`). It is the
+ * record right after a `task/stopped` with SHUTDOWN or ERROR. Like a stop, it leaves the task
+ * waiting for the user: nothing runs until the user's own input is recorded in a new turn, and the
+ * model must observe the screen again before acting. Not ignorable: the run rules depend on it.
+ *
+ * Before writing it, the runtime decides what to repair from the whole log, not from the last
+ * stop alone (`SessionStore.open`).
  *
  * @property droppedTailBytes bytes of a torn last line that were discarded (0 when the log was clean).
  */

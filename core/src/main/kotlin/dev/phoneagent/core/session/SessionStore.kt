@@ -184,9 +184,26 @@ public class SessionStore private constructor(
          * (atomic rewrite of the valid prefix) and reported in [Opened.log]. Acquiring the appender
          * is the last step. Throws what [read]
          * throws, [UnsupportedSessionVersionException] for a log not in [SessionCodec.currentVersion],
-         * and [SessionWriteException] when the repair or opening fails. A log that ends with a final
-         * `task/stopped` (USER, LIMIT) still opens and reads, but every append is refused, so such a
-         * task is never resumed.
+         * and [SessionWriteException] when the repair or opening fails.
+         *
+         * No stop is final: every readable log can be continued. The store continues from the state
+         * the log left, under the rules of `SessionInvariants` (`RunRules`): after a log that ends
+         * with `turn/end(STOPPED)` it accepts only `task/stopped` next, after a SHUTDOWN or ERROR
+         * stop only `session/resumed`, and after any stop or resume nothing that runs before the
+         * user's input.
+         *
+         * Recovery (the runtime's, phase1 §3.7) decides what to write before `session/resumed` from
+         * the whole of [Opened.log], never from the last stop's cause alone (a SHUTDOWN may already
+         * have been resumed; a USER stop may have been followed by a new run that then crashed):
+         * - the last `task/stopped`, and whether a `session/resumed` came after it;
+         * - whether a new run started after it, a turn the user's input opened, and was cut;
+         * - an unfinished stop (the log ends with `turn/end(STOPPED)`): write `task/stopped(ERROR)`;
+         * - an open step or turn: close it (`step/end`, `turn/end`);
+         * - calls that need a result and have none (the tool calls of every `assistant/message`
+         *   and every `tool/call`): NOT_STARTED without a `tool/started`, OUTCOME_UNKNOWN with one;
+         *
+         * then `session/resumed`, after which the task waits for the user's input. [Opened.log] is
+         * what was read; later appends do not change it.
          */
         public suspend fun open(
             files: SessionFiles,

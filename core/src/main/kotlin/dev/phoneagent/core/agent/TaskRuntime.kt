@@ -33,8 +33,12 @@ public interface TaskRuntime {
     public fun inject(context: ContextInput)
 
     /**
-     * Stops this task only, for [cause]; clears the inbox. Pending tool calls end CANCELLED, and
-     * `task/stopped` is recorded last (it says whether the task may be resumed).
+     * Stops this task's current run only, for [cause]; clears the inbox, so continuing takes a new
+     * command of the user. Pending tool calls end CANCELLED (`ToolStatus.CANCELLED` says what the
+     * model is told), and `task/stopped` is recorded last, once everything that may still append
+     * was cancelled and joined. No cause ends the session (D14): the task continues when the
+     * user's next input opens a new turn, never on its own, and after [StopCause.SHUTDOWN] or
+     * [StopCause.ERROR] only once the log was resumed (`session/resumed`).
      */
     public fun stop(cause: StopCause)
 

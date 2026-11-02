@@ -121,7 +121,10 @@ public class SessionCodec(
         return SessionLog(header, reader.records, reader.skipped, tail)
     }
 
-    /** Collects decoded lines, checking seq order and the rules that span records. */
+    /**
+     * Collects decoded lines, checking seq order and the rules that span records with the same
+     * `SessionInvariants` the store appends with (an unknown ignorable record included).
+     */
     private class LogReader {
         val records = mutableListOf<SessionRecord>()
         val skipped = mutableListOf<SkippedRecord>()
@@ -145,7 +148,8 @@ public class SessionCodec(
                 }
 
                 is DecodedLine.Skipped -> {
-                    if (seq == 1L) throw SessionCorruptedException(lineNumber, "a log starts with task/start")
+                    val violation = invariants.skippedViolation(seq)
+                    if (violation != null) throw SessionCorruptedException(lineNumber, "seq $seq: $violation")
                     skipped += decoded.record
                 }
             }

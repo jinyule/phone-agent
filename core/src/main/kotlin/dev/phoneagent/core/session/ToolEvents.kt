@@ -19,12 +19,17 @@ import kotlinx.serialization.Serializable
 
 /**
  * `tool/call`: dispatch of a validated call began (before `toolPreExecute`). Sources: the
- * `assistant/message` that requested it.
+ * `assistant/message` that requested it. Calls that are never dispatched (invalid arguments,
+ * skipped, cut off at the output cap) have none.
  *
- * Repair (D14) gives every call without a `tool/result` one, decided by [ToolStarted]:
- * NOT_STARTED when the call has no `tool/started`, OUTCOME_UNKNOWN when it has one (it may have
- * taken effect: observe first). A call ended by a stop is CANCELLED instead, as `TaskRuntime.stop`
- * says, whether it started or not.
+ * The calls that need a result are every tool call of an `assistant/message` (an interrupted one
+ * has none), dispatched or not, and every dispatched call. Stop handling, crash repair, the
+ * output-cap skip and the model view all use this one set, and each call in it has its
+ * `tool/result` before its step ends (`SessionInvariants`). For a call still without one:
+ * - a stop (any `StopCause`) writes CANCELLED, with a text decided by [ToolStarted]: without
+ *   one, it did not run; with one, it may have taken effect, observe first (`ToolStatus.CANCELLED`);
+ * - repair (D14) writes NOT_STARTED without a `tool/started` and OUTCOME_UNKNOWN with one;
+ * - a call that already has a result keeps it.
  */
 @Serializable
 @SerialName("tool/call")

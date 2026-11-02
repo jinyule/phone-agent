@@ -101,15 +101,32 @@ public enum class ToolStatus {
     /** The tool did not finish within its timeout. */
     TIMEOUT,
 
-    /** The task was stopped while the call was pending or running. */
+    /**
+     * The task was stopped (any `StopCause`) while the call had no result yet. The model sees only
+     * the text and the error flag, so the text tells the cases apart, decided by the persisted
+     * `tool/started`, not by whether the call was dispatched:
+     *
+     * | at the stop | result | text the model sees |
+     * |---|---|---|
+     * | no `tool/started` | CANCELLED | it did not run |
+     * | `tool/started`, no result | CANCELLED | it may have taken effect: observe, then decide on a retry |
+     * | a `tool/result` already | that result | no second result |
+     */
     CANCELLED,
 
-    /** Not run: only the first call of a reply is executed (phase1 §5). */
+    /**
+     * Not run, never dispatched (no `tool/call`, no policy verdict): only the first call of a reply
+     * is executed (phase1 §5), or the reply was cut off at the output cap and its arguments may be
+     * incomplete (`ChatResponse.stopReason`).
+     */
     SKIPPED,
 
-    /** Repair: the step failed before this call was dispatched (D14). */
+    /**
+     * Repair (D14): the call needed a result and had none, and it has no `tool/started`, so it did
+     * not run; dispatched or not.
+     */
     NOT_STARTED,
 
-    /** Repair: dispatched but no result was recorded; it may have taken effect (D14). Observe first. */
+    /** Repair (D14): the call has a `tool/started` but no result; it may have taken effect. Observe first. */
     OUTCOME_UNKNOWN,
 }

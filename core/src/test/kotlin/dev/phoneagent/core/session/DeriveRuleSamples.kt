@@ -158,6 +158,7 @@ object DeriveRuleSamples {
                     stopPrefix.alone,
                     StepEnded(1, 1, StepOutcome.CANCELLED).alone,
                     TurnEnded(1, TurnEndReason.STOPPED).alone,
+                    TaskStopped(StopCause.USER).alone,
                     TurnStarted(2).alone,
                     goOn.alone,
                     StepStarted(2, 1).alone,
@@ -167,9 +168,9 @@ object DeriveRuleSamples {
                 ),
             views =
                 listOf(
-                    View(8, listOf(user(ask))),
-                    View(10, listOf(user(ask), assistant(stopPrefix), user(goOn))),
-                    View(14, listOf(user(ask), assistant(stopPrefix), user(goOn), assistant(resumed))),
+                    View(9, listOf(user(ask))),
+                    View(11, listOf(user(ask), assistant(stopPrefix), user(goOn))),
+                    View(15, listOf(user(ask), assistant(stopPrefix), user(goOn), assistant(resumed))),
                 ),
         )
 
@@ -509,6 +510,7 @@ object DeriveRuleSamples {
                     stoppedAfterThinking.alone,
                     StepEnded(1, 1, StepOutcome.CANCELLED).alone,
                     TurnEnded(1, TurnEndReason.STOPPED).alone,
+                    TaskStopped(StopCause.USER).alone,
                     TurnStarted(2).alone,
                     resumeAfterStop.alone,
                     StepStarted(2, 1).alone,
@@ -518,9 +520,9 @@ object DeriveRuleSamples {
                 ),
             views =
                 listOf(
-                    View(8, listOf(user(ask))),
+                    View(9, listOf(user(ask))),
                     View(
-                        14,
+                        15,
                         listOf(
                             user(ask),
                             withoutReasoning(stoppedAfterThinking),

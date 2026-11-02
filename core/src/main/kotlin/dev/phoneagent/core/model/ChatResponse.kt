@@ -9,9 +9,19 @@ import kotlinx.serialization.json.JsonObject
  *
  * @property parts reply content: [Part.Text], [Part.ToolCall] and [Part.Reasoning] only.
  * @property stopReason why generation stopped. Adapter obligation: a reply that ended normally
- *   with complete tool calls is [StopReason.TOOL_USE]; an incomplete reply (cut off, or ended for
- *   a reason the adapter does not map) is [StopReason.MAX_TOKENS] or [StopReason.OTHER], and the
- *   loop then discards its tool calls.
+ *   with complete tool calls is [StopReason.TOOL_USE]; a reply cut off at the output cap is
+ *   [StopReason.MAX_TOKENS]; one that ended for a reason the adapter does not map is
+ *   [StopReason.OTHER]. What the loop does with a reply that did not end normally (phase1 §3.7):
+ *   - MAX_TOKENS with tool calls: the reply is recorded as it came, calls included (the history
+ *     stays append-only). Before the next request every call gets a `tool/result` with
+ *     `ToolStatus.SKIPPED` (an error) and a fixed text telling the model that the call did not
+ *     run, that the arguments it sees (possibly `{}`) are incomplete and not what it meant to
+ *     send, and to issue the call again. No policy verdict, no `tool/started`; the turn ends
+ *     `TurnEndReason.MAX_TOKENS`.
+ *   - OTHER with tool calls: a [ModelError.BadResponse], retried. Only the streamed prefix (an
+ *     interrupted `assistant/message`, which holds no calls) and the attempt are recorded; no
+ *     call runs.
+ *   - OTHER with text only: a final answer, like [StopReason.END_TURN].
  * @property usage token counts, or `null` when the provider reported none.
  * @property providerMetadata provider-reported facts that are not model-visible (e.g. response id,
  *   Anthropic `input_transformations`); recorded in the log, never sent back.
@@ -42,12 +52,12 @@ public enum class StopReason {
     /** Stopped to have tools run; the reply's tool calls are complete. */
     TOOL_USE,
 
-    /** Hit the output cap; the loop discards tool calls of such a reply (phase1 §3.7). */
+    /** Hit the output cap; tool calls of such a reply are answered SKIPPED, never run ([ChatResponse.stopReason]). */
     MAX_TOKENS,
 
     /**
-     * Any other provider reason; the adapter keeps the raw value in `providerMetadata`. The loop
-     * treats the reply as incomplete and discards its tool calls.
+     * Any other provider reason; the adapter keeps the raw value in `providerMetadata`. With tool
+     * calls the reply is a bad response; with text only, a final answer ([ChatResponse.stopReason]).
      */
     OTHER,
 }
