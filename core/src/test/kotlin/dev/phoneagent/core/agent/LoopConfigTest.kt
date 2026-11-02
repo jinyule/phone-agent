@@ -20,6 +20,7 @@ class LoopConfigTest {
                 { LoopConfig(questionTimeoutMs = 0) } to "questionTimeoutMs must be > 0, got 0",
                 { LoopConfig(handoffTimeoutMs = 0) } to "handoffTimeoutMs must be > 0, got 0",
                 { LoopConfig(recheckScreenTimeoutMs = 0) } to "recheckScreenTimeoutMs must be > 0, got 0",
+                { LoopConfig(takeBackTimeoutMs = 0) } to "takeBackTimeoutMs must be > 0, got 0",
             )
         for ((build, message) in bad) {
             assertEquals(message, assertThrows<IllegalArgumentException> { build() }.message)

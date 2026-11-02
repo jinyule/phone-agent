@@ -14,6 +14,8 @@ package dev.phoneagent.core.agent
  * @property handoffTimeoutMs how long a handed-off step waits for the user, > 0.
  * @property recheckScreenTimeoutMs how long the runtime waits for a fresh screen of its own (the
  *   re-check after approval, the look after a handoff); a slower read counts as no screen, > 0.
+ * @property takeBackTimeoutMs how long the runtime waits to take the task back from the user after
+ *   a call cut its own handoff off; slower counts as failed (the call then ends with an error), > 0.
  * @property texts model-visible feedback the loop writes into tool results.
  */
 public data class LoopConfig(
@@ -24,6 +26,7 @@ public data class LoopConfig(
     val questionTimeoutMs: Long = DEFAULT_QUESTION_TIMEOUT_MS,
     val handoffTimeoutMs: Long = DEFAULT_HANDOFF_TIMEOUT_MS,
     val recheckScreenTimeoutMs: Long = DEFAULT_RECHECK_SCREEN_TIMEOUT_MS,
+    val takeBackTimeoutMs: Long = DEFAULT_TAKE_BACK_TIMEOUT_MS,
     val texts: LoopTexts = LoopTexts(),
 ) {
     init {
@@ -34,6 +37,7 @@ public data class LoopConfig(
         require(questionTimeoutMs > 0) { "questionTimeoutMs must be > 0, got $questionTimeoutMs" }
         require(handoffTimeoutMs > 0) { "handoffTimeoutMs must be > 0, got $handoffTimeoutMs" }
         require(recheckScreenTimeoutMs > 0) { "recheckScreenTimeoutMs must be > 0, got $recheckScreenTimeoutMs" }
+        require(takeBackTimeoutMs > 0) { "takeBackTimeoutMs must be > 0, got $takeBackTimeoutMs" }
     }
 
     /** Defaults (phase1 §3.7, §7.2). */
@@ -58,6 +62,9 @@ public data class LoopConfig(
 
         /** A fresh screen the runtime reads itself takes at most 5 seconds. */
         public const val DEFAULT_RECHECK_SCREEN_TIMEOUT_MS: Long = 5_000L
+
+        /** Taking a cut-off handoff's task back takes at most 5 seconds. */
+        public const val DEFAULT_TAKE_BACK_TIMEOUT_MS: Long = 5_000L
     }
 }
 

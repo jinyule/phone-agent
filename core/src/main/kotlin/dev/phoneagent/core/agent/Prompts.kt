@@ -7,18 +7,26 @@ import dev.phoneagent.core.ports.ConfirmCard
 import dev.phoneagent.core.ports.ConfirmResult
 import dev.phoneagent.core.ports.HandoffKind
 import dev.phoneagent.core.ports.HandoffResult
+import dev.phoneagent.core.ports.HandoffTicket
 import dev.phoneagent.core.ports.Question
+import dev.phoneagent.core.ports.ScreenUnavailableException
+import dev.phoneagent.core.ports.SurfaceManager
 import dev.phoneagent.core.ports.UserInteraction
 import dev.phoneagent.core.session.ApprovalAsked
 import dev.phoneagent.core.session.ApprovalDecided
 import dev.phoneagent.core.session.HandoffEnded
 import dev.phoneagent.core.session.HandoffStarted
+import dev.phoneagent.core.session.PromptWithdrawn
 import dev.phoneagent.core.session.QuestionAnswered
 import dev.phoneagent.core.session.QuestionAsked
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.job
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicReference
@@ -32,6 +40,8 @@ import kotlin.coroutines.resume
  */
 internal class Prompts(
     private val loop: LoopContext,
+    /** Whether the task is stopping (a stop or a shutdown): then cut-off prompts are left to the repair. */
+    private val stopping: () -> Boolean,
 ) {
     private val lock = Mutex()
     private val pending = AtomicReference<Pending<*>?>(null)
@@ -66,8 +76,16 @@ internal class Prompts(
                     if (loop.unattended) {
                         AskResult.Unavailable
                     } else {
-                        wait.paused { awaitReply(id, WaitReason.USER, loop.config.questionTimeoutMs, ::fitQuestion) }
-                            ?: AskResult.Expired
+                        closing(id) {
+                            wait.paused {
+                                awaitReply(
+                                    id,
+                                    WaitReason.USER,
+                                    loop.config.questionTimeoutMs,
+                                    ::fitQuestion,
+                                )
+                            }
+                        } ?: AskResult.Expired
                     }
                 loop.log.append(QuestionAnswered(id, result))
                 result
@@ -82,7 +100,8 @@ internal class Prompts(
                     if (loop.unattended) {
                         ConfirmResult.UNAVAILABLE
                     } else {
-                        wait.paused { awaitReply(id, WaitReason.USER, timeout, ::fitCard) } ?: ConfirmResult.EXPIRED
+                        closing(id) { wait.paused { awaitReply(id, WaitReason.USER, timeout, ::fitCard) } }
+                            ?: ConfirmResult.EXPIRED
                     }
                 loop.log.append(ApprovalDecided(id, result))
                 result
@@ -104,24 +123,58 @@ internal class Prompts(
             }
 
         /**
-         * Moves the task to the user and back when there is a [dev.phoneagent.core.ports.SurfaceManager];
-         * without one (main-display mode) the user acts where the task already is. Moving failures
+         * Moves the task to the user and back when there is a [SurfaceManager]; without one
+         * (main-display mode) the user acts where the task already is. Moving failures
          * ([IOException], as the ports report device trouble) end the handoff as FAILED with a
          * detail naming the move and the exception's class only (its text may quote the screen).
-         * A stop while handed over leaves the app with the user.
+         * A handoff the call cuts off itself is taken back at once ([Moves.giveBack]); a stop while
+         * handed over leaves the app with the user.
          */
         private suspend fun handOver(
             id: PromptId,
             kind: HandoffKind,
         ): Pair<HandoffResult, String?> {
-            val surfaces = loop.setup.surfaces ?: return awaitHandoff(id) to null
-            return moving("hand over") { surfaces.handToUser(loop.setup.taskId, kind) }.fold(
-                onSuccess = { ticket ->
-                    val result = awaitHandoff(id)
-                    moving("take back") { surfaces.takeBack(ticket) }.fold({ result to null }, ::failed)
-                },
-                onFailure = ::failed,
-            )
+            val surfaces = loop.setup.surfaces ?: return closing(id) { awaitHandoff(id) } to null
+            val moves = Moves(surfaces)
+            return closing(id, moves::giveBack) { moves.handOver(id, kind) }
+        }
+
+        /** The moves of one handoff over [surfaces]: its ticket is taken back at most once. */
+        private inner class Moves(
+            private val surfaces: SurfaceManager,
+        ) {
+            private var held: HandoffTicket? = null
+
+            suspend fun handOver(
+                id: PromptId,
+                kind: HandoffKind,
+            ): Pair<HandoffResult, String?> =
+                moving("hand over") { surfaces.handToUser(loop.setup.taskId, kind) }.fold(
+                    onSuccess = { ticket ->
+                        held = ticket
+                        val result = awaitHandoff(id)
+                        held = null
+                        moving("take back") { surfaces.takeBack(ticket) }.fold({ result to null }, ::failed)
+                    },
+                    onFailure = ::failed,
+                )
+
+            /**
+             * Takes the task back after the call cut its handoff off, unless the app is not with
+             * the user (never handed over) or taking it back already began. Waits at most
+             * [LoopConfig.takeBackTimeoutMs]; failing or slower throws [ScreenUnavailableException]
+             * naming the move and the exception's class only, so the call ends with an error rather
+             * than go on without its screen.
+             */
+            suspend fun giveBack() {
+                val ticket = held ?: return
+                held = null
+                val back =
+                    withTimeoutOrNull(loop.config.takeBackTimeoutMs) {
+                        moving("take back") { surfaces.takeBack(ticket) }
+                    } ?: throw ScreenUnavailableException("take back failed: timed out")
+                back.getOrThrow()
+            }
         }
 
         private suspend fun <T> moving(
@@ -131,7 +184,7 @@ internal class Prompts(
             try {
                 Result.success(move())
             } catch (failure: IOException) {
-                Result.failure(IOException("$what failed: ${failure.javaClass.name}"))
+                Result.failure(ScreenUnavailableException("$what failed: ${failure.javaClass.name}"))
             }
 
         private fun failed(failure: Throwable): Pair<HandoffResult, String?> = HandoffResult.FAILED to failure.message
@@ -142,6 +195,39 @@ internal class Prompts(
     }
 
     private fun nextId(): PromptId = PromptId("prompt-${loop.log.lastSeq + 1}")
+
+    /**
+     * Runs [wait] for prompt [id]. A wait the call cuts off itself (its budget, a timeout or a
+     * cancellation inside the tool) while the task goes on is closed at once, before the next
+     * prompt may open: `prompt/withdrawn`, then [giveBack], both under NonCancellable; then the
+     * cancellation propagates (or what a failed [giveBack] throws). So is a wait that returns only
+     * after the cut (a move that finishes despite it): its answer can no longer be recorded. When
+     * the task is [stopping], the repair withdraws the prompt and a handed-over app stays with the
+     * user.
+     */
+    private suspend fun <T> closing(
+        id: PromptId,
+        giveBack: suspend () -> Unit = {},
+        wait: suspend () -> T,
+    ): T {
+        try {
+            return wait()
+        } finally {
+            closeIfCut(id, giveBack)
+        }
+    }
+
+    private suspend fun closeIfCut(
+        id: PromptId,
+        giveBack: suspend () -> Unit,
+    ) {
+        // Only a cancellation cuts: a failure leaves the prompt to Calls, a stop to the repair.
+        if (!currentCoroutineContext().job.isCancelled || stopping()) return
+        withContext(NonCancellable) {
+            loop.log.append(PromptWithdrawn(id))
+            giveBack()
+        }
+    }
 
     /** Waits for a fitting answer to [id]; `null` when [timeoutMs] passed. Shows [Phase.Waiting] meanwhile. */
     private suspend fun <T : Any> awaitReply(

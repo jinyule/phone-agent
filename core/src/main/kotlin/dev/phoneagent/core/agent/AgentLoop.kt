@@ -116,9 +116,11 @@ public class AgentLoop private constructor(
     private val inbox = Inbox.restore(records) { log.append(it) }
     private val loop =
         LoopContext(setup, log, inbox, phaseFlow, eventFlow, settingsOf(records).unattended)
-    private val prompts = Prompts(loop)
+
+    // Stopping: stop() claimed a cause, or the scope was cancelled (SHUTDOWN, claimed later).
+    private val prompts: Prompts = Prompts(loop) { driver.stopped || driverJob.isCancelled }
     private val intake = Intake(inbox, { log.append(it) }) { stop(StopCause.ERROR) }
-    private val driver =
+    private val driver: Driver =
         Driver(
             loop,
             prompts,
