@@ -6,12 +6,21 @@ import dev.phoneagent.core.ids.ProviderId
 /** Runs [ChatModelContract] on a minimal adapter, so the contract itself is known to pass and to fail. */
 class FakeChatModelContractTest : ChatModelContract() {
     override fun subject(): Subject {
-        val model = FakeChatModel()
-        return Subject(model) { model.sent }
+        val live = mutableMapOf("x-client" to "fake")
+        val model = FakeChatModel(live)
+        return Subject(model, { model.sent }) {
+            live["x-client"] = "edited"
+            live["x-extra"] = "added"
+        }
     }
 
-    /** Maps reasoning to `reasoning_effort`, refuses foreign wire settings, answers "ok". */
-    private class FakeChatModel : ChatModel {
+    /**
+     * Maps reasoning to `reasoning_effort`, refuses foreign wire settings, answers "ok". Freezes the
+     * live headers it is built from, as `ModelRouter` freezes a profile.
+     */
+    private class FakeChatModel(
+        live: Map<String, String>,
+    ) : ChatModel {
         var sent = 0
 
         override val info =
@@ -27,7 +36,7 @@ class FakeChatModelContractTest : ChatModelContract() {
                 ),
             )
 
-        private val headers = mutableMapOf("x-client" to "fake")
+        private val headers = live.toMap()
 
         override fun prepare(reasoning: ReasoningLevel?): RequestSettings {
             val effective = reasoning?.clampTo(info.capabilities.reasoningLevels)
@@ -36,7 +45,7 @@ class FakeChatModelContractTest : ChatModelContract() {
                 WireProfile(
                     mappingVersion = MAPPING_VERSION,
                     credential = CredentialKind.API_KEY,
-                    headers = headers.toMap(),
+                    headers = headers,
                     reasoningEffort = effective?.let { WireSetting("reasoning_effort", it.name.lowercase()) },
                     maxTokensField = "max_tokens",
                 ),
