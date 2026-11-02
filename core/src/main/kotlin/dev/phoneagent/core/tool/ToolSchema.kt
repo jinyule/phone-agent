@@ -24,7 +24,8 @@ import kotlinx.serialization.json.longOrNull
  * - `boolean`: nothing else.
  *
  * Counts and lengths are integers >= 0, a minimum is not above its maximum, and an `enum` is a
- * non-empty list of distinct values. The top level is an `object` schema with `properties`.
+ * non-empty list of distinct values. Integer bounds and counts are compared exactly (64-bit
+ * integers, also above 2^53); number bounds as doubles. The top level is an `object` schema with `properties`.
  * Everything else is refused, for example the `null` type, `pattern`, `format`, `default`,
  * `title`, `const`, `oneOf` / `anyOf` / `allOf` and `$ref`.
  */
@@ -66,8 +67,8 @@ internal object ToolSchema {
             OBJECT -> objectProblems(schema, path)
             "array" -> arrayProblems(schema, path)
             "string" -> (count(schema, "minLength", "maxLength") + enum(schema, ::isString)).map { "$path: $it" }
-            "integer" -> (bounds(schema, ::isInteger) + enum(schema, ::isInteger)).map { "$path: $it" }
-            "number" -> (bounds(schema, ::isNumber) + enum(schema, ::isNumber)).map { "$path: $it" }
+            "integer" -> (bounds(schema, ::isInteger, exact = true) + enum(schema, ::isInteger)).map { "$path: $it" }
+            "number" -> (bounds(schema, ::isNumber, exact = false) + enum(schema, ::isNumber)).map { "$path: $it" }
             else -> emptyList()
         }
 
@@ -143,19 +144,20 @@ internal object ToolSchema {
                 val value = (schema[key] as? JsonPrimitive)?.takeUnless { it.isString }?.longOrNull
                 if (value == null || value < 0) add("\"$key\" must be an integer >= 0")
             }
-            if (number(schema[min]) > number(schema[max])) add("\"$min\" is above \"$max\"")
+            if (above(schema[min], schema[max], exact = true)) add("\"$min\" is above \"$max\"")
         }
 
-    /** `minimum`/`maximum` of the property's own type, minimum not above maximum. */
+    /** `minimum`/`maximum` of the property's own type, minimum not above maximum ([exact] for integers). */
     private fun bounds(
         schema: JsonObject,
         valid: (JsonElement) -> Boolean,
+        exact: Boolean,
     ): List<String> =
         buildList {
             listOf("minimum", "maximum").forEach { key ->
                 schema[key]?.let { if (!valid(it)) add("\"$key\" must be a value of the property's type") }
             }
-            if (number(schema["minimum"]) > number(schema["maximum"])) add("\"minimum\" is above \"maximum\"")
+            if (above(schema["minimum"], schema["maximum"], exact)) add("\"minimum\" is above \"maximum\"")
         }
 
     private fun enum(
@@ -194,9 +196,24 @@ internal object ToolSchema {
 private fun descriptionProblem(schema: JsonObject): String? =
     schema["description"]?.takeUnless(::isString)?.let { "\"description\" must be a string" }
 
-/** A bound's value for comparing, or NaN (never above anything) when absent or invalid. */
-private fun number(element: JsonElement?): Double =
-    (element as? JsonPrimitive)?.takeUnless { it.isString }?.doubleOrNull ?: Double.NaN
+/**
+ * Whether the bound [min] is above [max]; `false` when either is absent or not a number. [exact]
+ * compares 64-bit integers (a Double cannot tell integers above 2^53 apart), else doubles.
+ */
+private fun above(
+    min: JsonElement?,
+    max: JsonElement?,
+    exact: Boolean,
+): Boolean {
+    val low = (min as? JsonPrimitive)?.takeUnless { it.isString }
+    val high = (max as? JsonPrimitive)?.takeUnless { it.isString }
+    return if (exact) greater(low?.longOrNull, high?.longOrNull) else greater(low?.doubleOrNull, high?.doubleOrNull)
+}
+
+private fun <T : Comparable<T>> greater(
+    a: T?,
+    b: T?,
+): Boolean = a != null && b != null && a > b
 
 private fun isString(element: JsonElement) = element is JsonPrimitive && element.isString
 
