@@ -20,6 +20,10 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
  * One `complete()` is exactly one HTTP request, and nothing about it depends on earlier calls: an
  * API key is not refreshed, so a 401 is [ModelError.Auth]; every failure goes to the caller
  * (`requestError`), including a stale thinking signature ([ModelError.PrefixBindingMismatch]).
+ *
+ * A snapshot whose Claude API betas (server fallback, prefix mismatch behavior) [profile]'s
+ * endpoint does not take, because it was made for another one, is refused before anything is
+ * sent rather than sent with fields left out: what goes out must follow from the logged snapshot.
  */
 internal class MessagesModel(
     private val profile: ProviderProfile,
@@ -29,12 +33,20 @@ internal class MessagesModel(
 ) : ChatModel {
     private val endpoint = "${profile.baseUrl}/v1/messages".toHttpUrl()
     private val wire = MessagesWire(profile.id, info.model)
+    private val official = AnthropicPresets.isOfficial(profile.baseUrl)
 
     override suspend fun complete(
         request: ChatRequest,
         onDelta: (Delta) -> Unit,
     ): ChatResponse {
         val rules = WireRules.of(request, profile.credential.kind)
+        if ((rules.fallbacks || rules.prefixMismatch != null) && !official) {
+            invalid(
+                "wire.options",
+                "the snapshot was made for another endpoint: it sends Claude API betas (server fallback, " +
+                    "prefix mismatch behavior) this endpoint does not take; make a new snapshot for it",
+            )
+        }
         val images = if (rules.inlineImages) ImageData.load(request, blobs) else ImageData.NONE
         val body = wire.body(request, rules, images)
         val secret = env.secret(profile.credential)

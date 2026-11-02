@@ -35,6 +35,7 @@ import kotlinx.serialization.json.putJsonObject
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import mockwebserver3.RecordedRequest
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -86,11 +87,11 @@ internal object Kit {
             headers = headers,
         )
 
-    /** The snapshot a request to [profile] carries, with official-endpoint defaults unless [settings] say otherwise. */
+    /** The snapshot a request to [profile] carries, with that profile's defaults unless [settings] say otherwise. */
     fun wire(
         profile: ProviderProfile = profile(),
         reasoning: ReasoningLevel? = ReasoningLevel.HIGH,
-        settings: AnthropicSettings = AnthropicSettings.defaultsFor(profile(), MODEL),
+        settings: AnthropicSettings = AnthropicSettings.defaultsFor(profile, MODEL),
         capabilities: ModelCapabilities = CAPABILITIES,
     ): WireProfile = AnthropicWire.snapshot(profile, MODEL, capabilities, reasoning, settings)
 
@@ -117,7 +118,7 @@ internal object Kit {
         tools: List<ToolDef> = listOf(WEATHER),
         system: List<String> = listOf("你是手机助手。", "每步只做一个动作。"),
         reasoning: ReasoningLevel? = ReasoningLevel.HIGH,
-        wire: WireProfile = wire(reasoning = reasoning),
+        wire: WireProfile = wire(MOCK, reasoning = reasoning),
         cache: CacheLayout = CacheLayout.DEFAULT,
         contextEdits: ContextEditPolicy = ContextEditPolicy.ClientSide,
         maxOutputTokens: Int? = null,
@@ -146,6 +147,37 @@ internal object Kit {
         credentials: CredentialResolver = Keys(),
         blobs: BlobSource = blobs(),
     ): ChatModel = adapters(credentials).model(profile(server.base(), credential), MODEL, CAPABILITIES, blobs)
+
+    /**
+     * A model whose profile is the Claude API itself, with every request rerouted to [server] by
+     * an application interceptor (before anything of the adapter's client sees it).
+     */
+    fun official(server: MockWebServer): ChatModel {
+        val target = server.base().toHttpUrl()
+        val client =
+            AnthropicTimeouts()
+                .client()
+                .newBuilder()
+                .addInterceptor { chain ->
+                    val url =
+                        chain
+                            .request()
+                            .url
+                            .newBuilder()
+                            .scheme(target.scheme)
+                            .host(target.host)
+                            .port(target.port)
+                            .build()
+                    chain.proceed(
+                        chain
+                            .request()
+                            .newBuilder()
+                            .url(url)
+                            .build(),
+                    )
+                }.build()
+        return adapters(client = client).model(profile(), MODEL, CAPABILITIES, blobs())
+    }
 
     /** Blobs from a map; unknown refs fail like a missing file. */
     fun blobs(vararg entries: Pair<BlobRef, ByteArray>): BlobSource {
@@ -262,6 +294,12 @@ internal object Kit {
      * other one would get the request).
      */
     const val LOOPBACK = "127.0.0.1"
+
+    /**
+     * What [model]'s profile is to the snapshot: an endpoint other than the Claude API (the port
+     * changes nothing). [request]'s default snapshot is made for it.
+     */
+    val MOCK: ProviderProfile get() = profile("http://$LOOPBACK")
 
     /** A started mock server listening on [LOOPBACK] only; the test closes it. */
     fun loopbackServer(): MockWebServer = MockWebServer().apply { start(InetAddress.getByName(LOOPBACK), 0) }

@@ -130,7 +130,7 @@ class MessagesWireTest {
         val betas =
             wire.betas(
                 Kit.request(contextEdits = ContextEditPolicy.ServerSide(null, 0, 9)),
-                WireRules.of(Kit.request(), CredentialKind.API_KEY),
+                WireRules.of(Kit.request(wire = Kit.wire()), CredentialKind.API_KEY),
             )
         assertEquals(listOf(MessagesWire.BETA_FALLBACK, MessagesWire.BETA_BINDING, MessagesWire.BETA_COMPACT), betas)
     }

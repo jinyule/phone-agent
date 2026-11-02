@@ -47,7 +47,7 @@ class MessagesModelTest {
         runTest {
             server.enqueueSse(Kit.TEXT_REPLY)
             val deltas = Deltas()
-            val reply = Kit.model(server).complete(Kit.request(), deltas)
+            val reply = Kit.official(server).complete(Kit.request(wire = Kit.wire()), deltas)
             val sent = server.next()
             assertEquals("/v1/messages", sent.url.encodedPath)
             assertEquals("POST", sent.method)
@@ -59,7 +59,7 @@ class MessagesModelTest {
             assertEquals("text/event-stream", sent.headers["Accept"])
             assertTrue(sent.headers["Content-Type"]!!.startsWith("application/json"))
             sent.assertKey(Kit.FAKE_KEY)
-            val request = Kit.request()
+            val request = Kit.request(wire = Kit.wire())
             val expected =
                 MessagesWire(
                     Kit.PROVIDER,
@@ -148,6 +148,26 @@ class MessagesModelTest {
             val auth = assertThrows<ModelError.Auth> { badKey.complete(Kit.request()) }
             assertFalse(auth.message!!.contains("newline"), "the key is not echoed")
             assertEquals(0, server.requestCount)
+        }
+
+    @Test
+    fun `a snapshot made for the Claude API is refused on another endpoint instead of sending its betas`() =
+        runTest {
+            val official =
+                listOf(
+                    AnthropicSettings(serverFallback = true),
+                    AnthropicSettings(prefixMismatch = PrefixMismatch.DROP_BLOCK),
+                )
+            for (settings in official) {
+                server.enqueueSse(Kit.TEXT_REPLY) // would be consumed if the request were sent
+                val wire = Kit.wire(settings = settings)
+                val error =
+                    assertThrows<ModelError.InvalidRequest> { Kit.model(server).complete(Kit.request(wire = wire)) }
+                assertEquals("wire.options", error.param, settings.toString())
+                assertTrue(error.detail.contains("made for another endpoint"), error.detail)
+                assertFalse(error.retryable, "the same snapshot is refused again")
+            }
+            assertEquals(0, server.requestCount, "nothing was sent")
         }
 
     @Test

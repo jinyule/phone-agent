@@ -96,7 +96,8 @@ class WireGoldenTest {
         )
 
     @Test
-    fun `official defaults with tools, effort and every breakpoint`() = golden("official-defaults", Kit.request())
+    fun `official defaults with tools, effort and every breakpoint`() =
+        golden("official-defaults", Kit.request(wire = Kit.wire()))
 
     @Test
     fun `thinking is echoed verbatim and only to its own model`() =
@@ -111,6 +112,7 @@ class WireGoldenTest {
                     Part.Text("巴黎晴，22°C。"),
                 ),
                 Kit.user("谢谢"),
+                wire = Kit.wire(),
                 cache = CacheLayout(tools = true, system = true, recentMessages = 2),
             ),
         )
@@ -125,6 +127,7 @@ class WireGoldenTest {
                 Kit.tool(Kit.result("toolu_01", Part.Text("点击失败"), image(), isError = true)),
                 Kit.user("（运行时上下文）当前界面：设置"),
                 Message(Role.USER, listOf(image())),
+                wire = Kit.wire(),
             ),
         )
 
@@ -149,6 +152,7 @@ class WireGoldenTest {
                 Kit.assistant(Kit.call("toolu_01", """{"city":"巴"""), Kit.call("toolu_02", "[1]")),
                 Kit.tool(Kit.result("toolu_01", Part.Text("参数无效")), Kit.result("toolu_02")),
                 reasoning = ReasoningLevel.LOW,
+                wire = Kit.wire(reasoning = ReasoningLevel.LOW),
                 maxOutputTokens = 4096,
             ),
         )
@@ -165,6 +169,7 @@ class WireGoldenTest {
                         compactAboveTokens = 150_000,
                     ),
                 reasoning = ReasoningLevel.MINIMAL,
+                wire = Kit.wire(reasoning = ReasoningLevel.MINIMAL),
             ),
         )
 
