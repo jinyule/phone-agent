@@ -221,11 +221,18 @@ class FileStoragePortTest {
     fun `a relative root that does not exist yet works for atomic writes`() =
         runTest {
             withRelativeRoot { relative ->
-                val storage = FileStoragePort(relative, StandardTestDispatcher(testScheduler))
+                val ops = RecordingOps()
+                val storage = FileStoragePort(relative, StandardTestDispatcher(testScheduler), ops)
                 storage.writeAtomically(StoragePath("f.bin"), byteArrayOf(1))
                 storage.writeAtomically(StoragePath("d/g.bin"), byteArrayOf(2))
                 assertArrayEquals(byteArrayOf(1), storage.read(StoragePath("f.bin")))
                 assertArrayEquals(byteArrayOf(2), Files.readAllBytes(relative.resolve("d/g.bin")))
+                val absolute = relative.toAbsolutePath().normalize()
+                assertEquals(
+                    listOf(absolute, absolute.parent, absolute.resolve("d"), absolute, absolute.parent),
+                    ops.synced,
+                    "the chain is absolute and still reaches the root's parent (the working directory)",
+                )
             }
         }
 
@@ -233,11 +240,14 @@ class FileStoragePortTest {
     fun `a relative root that does not exist yet works for appenders`() =
         runTest {
             withRelativeRoot { relative ->
-                val storage = FileStoragePort(relative, StandardTestDispatcher(testScheduler))
+                val ops = RecordingOps()
+                val storage = FileStoragePort(relative, StandardTestDispatcher(testScheduler), ops)
                 val appender = storage.openAppender(StoragePath("log.jsonl"))
                 appender.append("x\n".encodeToByteArray())
                 appender.close()
                 assertEquals("x\n", storage.read(StoragePath("log.jsonl"))?.decodeToString())
+                val absolute = relative.toAbsolutePath().normalize()
+                assertEquals(listOf(absolute, absolute.parent), ops.synced, "absolute, up to the working directory")
             }
         }
 
