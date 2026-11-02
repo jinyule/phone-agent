@@ -1,5 +1,6 @@
 package dev.phoneagent.core.session
 
+import dev.phoneagent.core.ids.ToolCallId
 import dev.phoneagent.core.model.CacheLayout
 import dev.phoneagent.core.model.ChatRequest
 import dev.phoneagent.core.model.ChatResponse
@@ -264,6 +265,308 @@ object DeriveRuleSamples {
                 ),
         )
 
+    private fun thinking(signature: String) =
+        p.reasoning.copy(
+            opaque =
+                buildJsonObject {
+                    put("type", "thinking")
+                    put("signature", signature)
+                },
+            summary = "thought $signature",
+        )
+
+    private fun tap(id: String) =
+        Part.ToolCall(ToolCallId(id), "phone_tap", """{"screen":"s1","ref":"e2","reason":"r"}""")
+
+    private fun dispatch(id: String) =
+        ToolCallRecorded(
+            ToolCall(ToolCallId(id), p.task, p.session, "phone_tap", buildJsonObject { put("ref", "e2") }, "r"),
+        )
+
+    private fun done(id: String) =
+        ToolResultRecorded(ToolCallId(id), "phone_tap", ToolResult(ToolStatus.OK, listOf(Part.Text("done $id"))))
+
+    private fun tool(result: ToolResultRecorded) = Message(Role.TOOL, listOf(result.result.toPart(result.callId)))
+
+    private fun withoutReasoning(event: AssistantMessage) =
+        Message(Role.ASSISTANT, event.parts.filterNot { it is Part.Reasoning })
+
+    private val mismatch =
+        AssistantAttempt(1, ModelErrorKind.PREFIX_BINDING_MISMATCH, "invalid thinking signature", 400)
+
+    private val firstLook = reply(1, thinking("A"), tap("t1"), stop = StopReason.TOOL_USE)
+    private val onlyThinking = reply(1, thinking("B"), stop = StopReason.MAX_TOKENS)
+    private val goOnAfterCap = UserMessage(UserMessageKind.USER, listOf(Part.Text("继续")))
+    private val secondLook = reply(1, thinking("C"), Part.Text("点发送"), tap("t2"), stop = StopReason.TOOL_USE)
+    private val afterDrop = reply(2, thinking("D"), Part.Text("已发送"))
+
+    private val dropBySeq =
+        Case(
+            name = "reasoning-dropped-by-seq",
+            rule =
+                "context/reasoning-dropped(upToSeq) removes the Part.Reasoning of replies with seq <= upToSeq only: " +
+                    "a reply after upToSeq keeps it (also one before the drop record), a reply after the drop keeps " +
+                    "it, and a reply left without parts is left out.",
+            records =
+                records(
+                    p.start.alone,
+                    TurnStarted(1).alone,
+                    ask.alone,
+                    StepStarted(1, 1).alone,
+                    header.alone,
+                    firstLook.alone,
+                    dispatch("t1") from listOf(6),
+                    done("t1") from listOf(7),
+                    StepEnded(1, 1, StepOutcome.COMPLETED).alone,
+                    StepStarted(1, 2).alone,
+                    onlyThinking.alone,
+                    StepEnded(1, 2, StepOutcome.COMPLETED).alone,
+                    TurnEnded(1, TurnEndReason.MAX_TOKENS).alone,
+                    TurnStarted(2).alone,
+                    goOnAfterCap.alone,
+                    StepStarted(2, 1).alone,
+                    secondLook.alone,
+                    dispatch("t2") from listOf(17),
+                    done("t2") from listOf(18),
+                    StepEnded(2, 1, StepOutcome.COMPLETED).alone,
+                    StepStarted(2, 2).alone,
+                    mismatch.alone,
+                    ReasoningDropped(upToSeq = 11).alone,
+                    RequestRetry(2, 0, ModelErrorKind.PREFIX_BINDING_MISMATCH).alone,
+                    afterDrop.alone,
+                    StepEnded(2, 2, StepOutcome.COMPLETED).alone,
+                    TurnEnded(2, TurnEndReason.COMPLETED).alone,
+                ),
+            views =
+                listOf(
+                    View(
+                        22,
+                        listOf(
+                            user(ask),
+                            assistant(firstLook),
+                            tool(done("t1")),
+                            assistant(onlyThinking),
+                            user(goOnAfterCap),
+                            assistant(secondLook),
+                            tool(done("t2")),
+                        ),
+                    ),
+                    View(
+                        24,
+                        listOf(
+                            user(ask),
+                            withoutReasoning(firstLook),
+                            tool(done("t1")),
+                            user(goOnAfterCap),
+                            assistant(secondLook),
+                            tool(done("t2")),
+                        ),
+                    ),
+                    View(
+                        27,
+                        listOf(
+                            user(ask),
+                            withoutReasoning(firstLook),
+                            tool(done("t1")),
+                            user(goOnAfterCap),
+                            assistant(secondLook),
+                            tool(done("t2")),
+                            assistant(afterDrop),
+                        ),
+                    ),
+                ),
+        )
+
+    private val turnOne = reply(1, thinking("E"), Part.Text("第一步"))
+    private val askTwo = UserMessage(UserMessageKind.USER, listOf(Part.Text("第二步")))
+    private val turnTwo = reply(2, thinking("F"), Part.Text("第二步好了"))
+    private val askThree = UserMessage(UserMessageKind.USER, listOf(Part.Text("第三步")))
+    private val turnThree = reply(2, thinking("G"), Part.Text("第三步好了"))
+
+    private val dropsAccumulate =
+        Case(
+            name = "reasoning-drops-accumulate",
+            rule = "Every context/reasoning-dropped applies from its record on; a later one adds to an earlier one.",
+            records =
+                records(
+                    p.start.alone,
+                    TurnStarted(1).alone,
+                    ask.alone,
+                    StepStarted(1, 1).alone,
+                    header.alone,
+                    turnOne.alone,
+                    StepEnded(1, 1, StepOutcome.COMPLETED).alone,
+                    TurnEnded(1, TurnEndReason.COMPLETED).alone,
+                    TurnStarted(2).alone,
+                    askTwo.alone,
+                    StepStarted(2, 1).alone,
+                    mismatch.alone,
+                    ReasoningDropped(upToSeq = 6).alone,
+                    RequestRetry(2, 0, ModelErrorKind.PREFIX_BINDING_MISMATCH).alone,
+                    turnTwo.alone,
+                    StepEnded(2, 1, StepOutcome.COMPLETED).alone,
+                    TurnEnded(2, TurnEndReason.COMPLETED).alone,
+                    TurnStarted(3).alone,
+                    askThree.alone,
+                    StepStarted(3, 1).alone,
+                    mismatch.alone,
+                    ReasoningDropped(upToSeq = 15).alone,
+                    RequestRetry(2, 0, ModelErrorKind.PREFIX_BINDING_MISMATCH).alone,
+                    turnThree.alone,
+                    StepEnded(3, 1, StepOutcome.COMPLETED).alone,
+                    TurnEnded(3, TurnEndReason.COMPLETED).alone,
+                ),
+            views =
+                listOf(
+                    View(12, listOf(user(ask), assistant(turnOne), user(askTwo))),
+                    View(17, listOf(user(ask), withoutReasoning(turnOne), user(askTwo), assistant(turnTwo))),
+                    View(
+                        26,
+                        listOf(
+                            user(ask),
+                            withoutReasoning(turnOne),
+                            user(askTwo),
+                            withoutReasoning(turnTwo),
+                            user(askThree),
+                            assistant(turnThree),
+                        ),
+                    ),
+                ),
+        )
+
+    /** An interrupted reply cut by steer, then the steer input and the reopened step's reply. */
+    private fun steered(
+        name: String,
+        rule: String,
+        prefix: AssistantMessage,
+        shown: List<Message>,
+    ): Case {
+        val input = UserMessage(UserMessageKind.USER, listOf(Part.Text("换个说法")))
+        val next = reply(2, Part.Text("好的"))
+        return Case(
+            name = name,
+            rule = rule,
+            records =
+                records(
+                    p.start.alone,
+                    TurnStarted(1).alone,
+                    ask.alone,
+                    StepStarted(1, 1).alone,
+                    header.alone,
+                    prefix.alone,
+                    InboxSpliced(InboxQueue.NEXT_STEP, 0, listOf(InboxEntry(InboxEntryKind.STEER, input.parts))).alone,
+                    InboxSpliced(InboxQueue.NEXT_STEP, 1).alone,
+                    input.alone,
+                    next.alone,
+                    StepEnded(1, 1, StepOutcome.COMPLETED).alone,
+                    TurnEnded(1, TurnEndReason.COMPLETED).alone,
+                ),
+            views =
+                listOf(
+                    View(6, listOf(user(ask))),
+                    View(12, listOf(user(ask)) + shown + listOf(user(input), assistant(next))),
+                ),
+        )
+    }
+
+    private val cutThinkingOnly = reply(1, thinking("H"), stop = null)
+    private val cutAfterThinking = reply(1, thinking("I"), Part.Text("我先打"), stop = null)
+
+    private val interruptedThinkingOnly =
+        steered(
+            "interrupted-reasoning-only",
+            "An interrupted prefix joins the model view without its Part.Reasoning; with nothing else it is left out.",
+            cutThinkingOnly,
+            emptyList(),
+        )
+
+    private val interruptedThinkingAndText =
+        steered(
+            "interrupted-reasoning-and-text",
+            "A thinking block that was complete before the text was cut stays in the log for the UI, but only the " +
+                "text of the prefix joins the model view.",
+            cutAfterThinking,
+            listOf(withoutReasoning(cutAfterThinking)),
+        )
+
+    private val stoppedAfterThinking = reply(1, thinking("J"), Part.Text("正在打开"), stop = null)
+    private val resumeAfterStop = UserMessage(UserMessageKind.USER, listOf(Part.Text("接着做")))
+    private val resumedReply = reply(1, Part.Text("继续打开"))
+
+    private val stoppedThinkingAndText =
+        Case(
+            name = "stopped-after-complete-reasoning",
+            rule =
+                "A prefix cut by stop after a complete thinking block joins the next turn's view with its text " +
+                    "only.",
+            records =
+                records(
+                    p.start.alone,
+                    TurnStarted(1).alone,
+                    ask.alone,
+                    StepStarted(1, 1).alone,
+                    header.alone,
+                    stoppedAfterThinking.alone,
+                    StepEnded(1, 1, StepOutcome.CANCELLED).alone,
+                    TurnEnded(1, TurnEndReason.STOPPED).alone,
+                    TurnStarted(2).alone,
+                    resumeAfterStop.alone,
+                    StepStarted(2, 1).alone,
+                    resumedReply.alone,
+                    StepEnded(2, 1, StepOutcome.COMPLETED).alone,
+                    TurnEnded(2, TurnEndReason.COMPLETED).alone,
+                ),
+            views =
+                listOf(
+                    View(8, listOf(user(ask))),
+                    View(
+                        14,
+                        listOf(
+                            user(ask),
+                            withoutReasoning(stoppedAfterThinking),
+                            user(resumeAfterStop),
+                            assistant(resumedReply),
+                        ),
+                    ),
+                ),
+        )
+
+    private val erroredAfterThinking = reply(1, thinking("K"), Part.Text("我先"), stop = null)
+    private val retriedAfterThinking = reply(2, thinking("L"), Part.Text("我先看看屏幕"))
+
+    private val supersededWithThinking =
+        Case(
+            name = "interrupted-reasoning-superseded-by-retry",
+            rule = "A prefix with reasoning that a retry of the same step supersedes stays out of the view entirely.",
+            records =
+                records(
+                    p.start.alone,
+                    TurnStarted(1).alone,
+                    ask.alone,
+                    StepStarted(1, 1).alone,
+                    header.alone,
+                    erroredAfterThinking.alone,
+                    RequestRetry(2, 500, ModelErrorKind.NETWORK).alone,
+                    retriedAfterThinking.alone,
+                    StepEnded(1, 1, StepOutcome.COMPLETED).alone,
+                    TurnEnded(1, TurnEndReason.COMPLETED).alone,
+                ),
+            views = listOf(View(10, listOf(user(ask), assistant(retriedAfterThinking)))),
+        )
+
     /** Every case. */
-    val cases: List<Case> = listOf(supersededByRetry, keptBySteer, keptAfterStop, reasoningDropped, sideRequests)
+    val cases: List<Case> =
+        listOf(
+            supersededByRetry,
+            keptBySteer,
+            keptAfterStop,
+            reasoningDropped,
+            sideRequests,
+            dropBySeq,
+            dropsAccumulate,
+            interruptedThinkingOnly,
+            interruptedThinkingAndText,
+            stoppedThinkingAndText,
+            supersededWithThinking,
+        )
 }

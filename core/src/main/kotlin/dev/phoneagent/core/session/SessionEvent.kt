@@ -20,11 +20,13 @@ import kotlinx.serialization.Serializable
  *   error and superseded by a retry of the same step is UI-only (the retry resends the request
  *   that produced it), a prefix cut by steer stays (the steer input follows it in the reopened
  *   step), and a prefix cut by stop or a final failure joins the view with the next user input.
+ *   A prefix that counts joins without its `Part.Reasoning`s (they stay in the log for the UI),
+ *   and is left out when nothing else remains.
  * - [ToolResultRecorded] → a `Role.TOOL` message holding `result.toPart(callId)`.
  * - [CompactionSummary] / [CompactionPrune] replace what their `SurfaceOp.Replace` range
  *   contributes (on the Anthropic path only in the UI projection, model-layer §5).
- * - [ReasoningDropped] removes the `Part.Reasoning`s of earlier replies, as it documents; a
- *   message left without parts is left out.
+ * - [ReasoningDropped] removes the `Part.Reasoning`s of replies with seq <= its `upToSeq`, from
+ *   its own record on; several drops add up. A message left without parts is left out.
  * - Every other type, [SideRequest] and [SideResponse] included, contributes nothing.
  *
  * Rule samples ("given these records, these messages") are in the core test sources

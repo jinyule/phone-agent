@@ -118,7 +118,8 @@ public data class RequestRetry(
 /**
  * `context/reasoning-dropped`: from this record on, the model view leaves out every [Part.Reasoning]
  * of `assistant/message` records with seq <= [upToSeq]; their text and tool calls, and all tool
- * results, stay as they were. Written by the `requestError` interceptor that recovers from
+ * results, stay as they were, and a reply left without parts is left out. Reasoning of later
+ * replies stays; a later drop adds to this one. Written by the `requestError` interceptor that recovers from
  * `ModelErrorKind.PREFIX_BINDING_MISMATCH` before it retries without the stale blocks (model-layer
  * §5). Not ignorable: a reader that skipped it would rebuild a different request.
  *
@@ -144,7 +145,9 @@ public data class ReasoningDropped(
  * @property provider who answered.
  * @property model which model answered.
  * @property parts [Part.Text], [Part.ToolCall] and [Part.Reasoning] only; never empty when [interrupted]
- *   (a stream cut before anything was shown is an `assistant/attempt`).
+ *   (a stream cut before anything was shown is an `assistant/attempt`). A [Part.Reasoning] is a
+ *   complete block as the provider closed it: reasoning deltas of a block the stream never
+ *   finished are not recorded as one.
  * @property stopReason why generation stopped; `null` exactly when [interrupted].
  * @property usage token counts, or `null` when not reported (always `null` when interrupted).
  * @property interrupted the stream was cut (steer, stop, error) after [parts] were delivered; such a

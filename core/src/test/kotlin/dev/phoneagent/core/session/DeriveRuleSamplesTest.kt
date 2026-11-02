@@ -66,8 +66,15 @@ class DeriveRuleSamplesTest {
                         .filter { it.seq > cut.seq && it.seq <= final.afterSeq }
                         .firstOrNull { it.event is UserMessage || it.event is AssistantMessage }
                 val visible = next?.event is UserMessage
-                val prefix = Message(Role.ASSISTANT, (cut.event as AssistantMessage).parts)
-                assertEquals(visible, prefix in final.messages, "${case.name}: seq ${cut.seq}")
+                val parts = (cut.event as AssistantMessage).parts
+                val shown = parts.filterNot { it is Part.Reasoning }
+                val prefix = Message(Role.ASSISTANT, shown)
+                assertEquals(visible && shown.isNotEmpty(), prefix in final.messages, "${case.name}: seq ${cut.seq}")
+                val withReasoning = Message(Role.ASSISTANT, parts)
+                assertTrue(
+                    shown == withReasoning.parts || withReasoning !in final.messages,
+                    "${case.name}: reasoning shown",
+                )
             }
         }
     }
@@ -103,18 +110,90 @@ class DeriveRuleSamplesTest {
     }
 
     @Test
-    fun `dropping reasoning removes only the reasoning parts of earlier replies`() {
-        val case = DeriveRuleSamples.cases.single { c -> c.records.any { it.event is ReasoningDropped } }
-        val drop = case.records.single { it.event is ReasoningDropped }
-        val before = case.views.last { it.afterSeq < drop.seq }
-        val after = case.views.first { it.afterSeq >= drop.seq }
-        val stripped = before.messages.map { Message(it.role, it.parts.filterNot { part -> part is Part.Reasoning }) }
-        assertTrue(
-            before.messages.any { m ->
-                m.parts.any { it is Part.Reasoning }
-            },
-            "the sample has reasoning to drop",
-        )
-        assertEquals(stripped, after.messages, "everything else, tool calls and results included, is unchanged")
+    fun `a reference projector of the documented rules reproduces every view`() {
+        val wrong =
+            DeriveRuleSamples.cases.flatMap { case ->
+                case.views.mapNotNull { view ->
+                    val derived = Projector().view(case.records, view.afterSeq)
+                    if (derived == view.messages) null else "${case.name} @${view.afterSeq}: $derived"
+                }
+            }
+        assertEquals(emptyList<String>(), wrong)
+    }
+
+    @Test
+    fun `the samples tell each plausible wrong projector apart`() {
+        val wrongProjectors =
+            mapOf(
+                "drops every reasoning once any drop exists" to Projector(dropAllOnceAnyDrop = true),
+                "drops reasoning of replies before the drop record, not up to upToSeq" to
+                    Projector(dropByPosition = true),
+                "applies only the first drop" to Projector(firstDropOnly = true),
+                "keeps messages left without parts" to Projector(keepEmpty = true),
+                "keeps reasoning of a visible interrupted prefix" to Projector(keepPrefixReasoning = true),
+            )
+        val undetected =
+            wrongProjectors
+                .filter { (_, projector) ->
+                    DeriveRuleSamples.cases.all { case ->
+                        case.views.all { projector.view(case.records, it.afterSeq) == it.messages }
+                    }
+                }.keys
+        assertEquals(emptySet<String>(), undetected, "wrong projectors every sample agrees with")
+    }
+
+    /**
+     * The model-view rules of the `SessionEvent` KDoc, written out for the samples (no compaction).
+     * The flags turn on one plausible mistake each.
+     */
+    private class Projector(
+        val dropAllOnceAnyDrop: Boolean = false,
+        val dropByPosition: Boolean = false,
+        val firstDropOnly: Boolean = false,
+        val keepEmpty: Boolean = false,
+        val keepPrefixReasoning: Boolean = false,
+    ) {
+        fun view(
+            records: List<SessionRecord>,
+            afterSeq: Long,
+        ): List<Message> {
+            val log = records.filter { it.seq <= afterSeq }
+            val drops = log.filter { it.event is ReasoningDropped }
+            return log.mapIndexedNotNull { index, record ->
+                when (val event = record.event) {
+                    is UserMessage -> Message(Role.USER, event.parts)
+                    is AssistantMessage -> assistant(log.drop(index + 1), record.seq, event, drops)
+                    is ToolResultRecorded -> Message(Role.TOOL, listOf(event.result.toPart(event.callId)))
+                    is CompactionSummary, is CompactionPrune -> error("compaction is not covered by this projector")
+                    else -> null
+                }
+            }
+        }
+
+        private fun assistant(
+            later: List<SessionRecord>,
+            seq: Long,
+            event: AssistantMessage,
+            drops: List<SessionRecord>,
+        ): Message? {
+            val next = later.firstOrNull { it.event is UserMessage || it.event is AssistantMessage }
+            val visible = !event.interrupted || next?.event is UserMessage
+            val dropped = dropped(seq, drops)
+            val stripPrefix = event.interrupted && !keepPrefixReasoning
+            val parts = event.parts.filterNot { it is Part.Reasoning && (dropped || stripPrefix) }
+            return if (visible && (parts.isNotEmpty() || keepEmpty)) Message(Role.ASSISTANT, parts) else null
+        }
+
+        private fun dropped(
+            seq: Long,
+            drops: List<SessionRecord>,
+        ): Boolean {
+            val applied = if (firstDropOnly) drops.take(1) else drops
+            return when {
+                dropAllOnceAnyDrop -> drops.isNotEmpty()
+                dropByPosition -> applied.any { it.seq > seq }
+                else -> applied.any { seq <= (it.event as ReasoningDropped).upToSeq }
+            }
+        }
     }
 }
