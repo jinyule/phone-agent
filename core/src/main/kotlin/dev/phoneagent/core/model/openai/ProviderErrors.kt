@@ -277,6 +277,7 @@ internal object Status {
     const val REQUEST_TIMEOUT = 408
     const val CONFLICT = 409
     const val TOO_LARGE = 413
+    const val UNPROCESSABLE = 422
     const val TOO_MANY_REQUESTS = 429
     const val INTERNAL_ERROR = 500
     const val UNAVAILABLE = 503

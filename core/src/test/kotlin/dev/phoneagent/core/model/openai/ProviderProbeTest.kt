@@ -208,6 +208,44 @@ class ProviderProbeTest {
         }
 
     @Test
+    fun `a redirect naming an optional field is not a refusal of it`() =
+        runTest {
+            server.enqueueError(404, "{}")
+            val location = server.url("/elsewhere/chat/completions?parallel_tool_calls=false&stream_options=x")
+            server.enqueue(
+                MockResponse
+                    .Builder()
+                    .code(302)
+                    .addHeader("Location", location.toString())
+                    .build(),
+            )
+            // Answers the retry the redirect must not cause.
+            server.enqueueSse(trialCall("{\"token\":\"pa-1\"}"))
+            val result = probe.testAndSave(profile, Kit.MODEL, Kit.capabilities(), token = "pa-1")
+            result as ProbeResult.Failed
+            assertEquals(ModelErrorKind.INVALID_REQUEST, result.kind)
+            assertTrue(result.message.contains("redirect"), result.message)
+            assertEquals(2, server.requestCount, "the listing and one trial, no retry without a field")
+        }
+
+    @Test
+    fun `only a 400 or 422 from the provider refuses an optional field`() =
+        runTest {
+            val names = """{"error":{"message":"stream_options is not supported","param":"stream_options"}}"""
+            server.enqueueError(404, "{}")
+            server.enqueueError(422, names)
+            server.enqueueSse(trialCall("{\"token\":\"pa-1\"}"))
+            val passed = probe.testAndSave(profile, Kit.MODEL, Kit.capabilities(), token = "pa-1")
+            assertEquals(ChatQuirks(streamUsage = false), (passed as ProbeResult.Passed).wire.chat, "a 422 counts")
+            server.enqueueError(404, "{}")
+            server.enqueueError(415, names)
+            // Answers the retry a 415 must not cause.
+            server.enqueueSse(trialCall("{\"token\":\"pa-1\"}"))
+            assertTrue(probe.testAndSave(profile, Kit.MODEL, Kit.capabilities(), token = "pa-1") is ProbeResult.Failed)
+            assertEquals(5, server.requestCount, "another 4xx naming the field is no refusal of it")
+        }
+
+    @Test
     fun `without a listing the trial call alone decides`() =
         runTest {
             server.enqueueError(404, "{}")

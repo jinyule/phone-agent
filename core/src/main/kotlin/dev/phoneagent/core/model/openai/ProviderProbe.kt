@@ -83,12 +83,15 @@ public class ProviderProbe internal constructor(
      * values; on success they come back with `tools = true` and [VerifiedCapability.TOOL_CALL].
      * [token] is what the model must pass to the trial tool (random by default).
      *
-     * [wire] is the request shape to start from. When the trial is refused (400) over an optional
-     * field the adapters send — `parallel_tool_calls`, `stream_options`, Responses `include` — the
-     * trial runs again without it, each field at most once; [ProbeResult.Passed.wire] is the shape
-     * that passed, for the app to save with the profile. A field counts as refused when the error's
-     * structured `param` names it or, without a `param`, when the provider's message names one of
-     * the Chat fields; a field turned off for a trial that then fails anyway is not reported.
+     * [wire] is the request shape to start from. When the provider refuses the trial with HTTP 400
+     * or 422 over an optional field the adapters send — `parallel_tool_calls`, `stream_options`,
+     * Responses `include` — the trial runs again without it, each field at most once;
+     * [ProbeResult.Passed.wire] is the shape that passed, for the app to save with the profile. A
+     * field counts as refused when the error's structured `param` names it or, without a `param`,
+     * when the provider's message names one of the Chat fields. Nothing else refuses a field: not
+     * another status, and not the adapters' own words (a redirect's target names no refusal, so a
+     * 3xx fails the trial at once). A field turned off for a trial that then fails anyway is not
+     * reported.
      */
     public suspend fun testAndSave(
         profile: ProviderProfile,
@@ -140,7 +143,8 @@ public class ProviderProbe internal constructor(
                                 env,
                             ).complete(trialRequest(token))
                     } catch (e: ModelError) {
-                        options = WireNegotiation.without(options, profile.protocol, e) ?: return failed(e)
+                        options =
+                            WireNegotiation.without(options, profile.protocol, e, env.statusOf(e)) ?: return failed(e)
                         null
                     }
                 if (reply != null) return result(reply, models, options)
@@ -292,13 +296,18 @@ private val TRIAL_SCHEMA: JsonObject =
 
 /** Which optional request field a refused trial names (see [ProviderProbe.testAndSave]). */
 internal object WireNegotiation {
-    /** [options] without the optional field [error] refuses, or `null` when it names none that is still sent. */
+    /**
+     * [options] without the optional field [error] refuses, or `null` when it names none that is
+     * still sent. Only the provider's own refusal counts: an [ModelError.InvalidRequest] made from
+     * an HTTP [status] in [REFUSALS].
+     */
     fun without(
         options: WireOptions,
         protocol: ModelProtocol,
         error: ModelError,
+        status: Int?,
     ): WireOptions? {
-        val refused = error as? ModelError.InvalidRequest ?: return null
+        val refused = (error as? ModelError.InvalidRequest)?.takeIf { status in REFUSALS } ?: return null
         val param = refused.param?.lowercase(Locale.ROOT)
         val message = refused.detail.lowercase(Locale.ROOT)
         return when (protocol) {
@@ -344,6 +353,8 @@ internal object WireNegotiation {
         field: String,
     ): Boolean = param == field || param.startsWith("$field.") || param.startsWith("$field[")
 
+    /** HTTP statuses of a provider refusing a request field: 400, and 422 (FastAPI-style validation). */
+    private val REFUSALS = setOf(Status.BAD_REQUEST, Status.UNPROCESSABLE)
     private const val PARALLEL_TOOL_CALLS = "parallel_tool_calls"
     private const val STREAM_OPTIONS = "stream_options"
     private const val INCLUDE = "include"

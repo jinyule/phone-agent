@@ -22,6 +22,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 
@@ -132,20 +133,35 @@ public data class HttpTimeouts(
 
 /**
  * What every adapter instance shares. A [recording] env (one per "test and save" run) also keeps
- * every secret it hands out, so that each later request of the run masks them all from the start.
+ * every secret it hands out, so that each later request of the run masks them all from the start,
+ * and the HTTP status behind each error it builds.
  */
 internal class AdapterEnv(
     val transport: HttpTransport,
     private val credentials: CredentialResolver,
     val clock: Clock,
     val newCallId: () -> String,
-    private val sent: MutableList<String>? = null,
+    private val record: Record? = null,
 ) {
-    /** A copy of this env that records the secrets it hands out ([known]). */
-    fun recording(): AdapterEnv = AdapterEnv(transport, credentials, clock, newCallId, CopyOnWriteArrayList())
+    /** What a [recording] env saw. */
+    class Record {
+        val secrets: MutableList<String> = CopyOnWriteArrayList()
+
+        /** By identity: [ModelError] keeps `Throwable`'s equality. */
+        val statuses: MutableMap<ModelError, Int> = ConcurrentHashMap()
+    }
+
+    /** A copy of this env that records the secrets it hands out ([known]) and its errors' statuses ([statusOf]). */
+    fun recording(): AdapterEnv = AdapterEnv(transport, credentials, clock, newCallId, Record())
 
     /** The secrets a [recording] env has handed out so far (as sent: trimmed); none for any other env. */
-    fun known(): List<String> = sent.orEmpty().toList()
+    fun known(): List<String> = record?.secrets.orEmpty().toList()
+
+    /**
+     * The HTTP status of the failure a [recording] env made [error] from with [AdapterEnv.error];
+     * `null` for any other error (a stream's error event, the adapter's own checks) or env.
+     */
+    fun statusOf(error: ModelError): Int? = record?.statuses?.get(error)
 
     /**
      * The redactor of a request that sends [secret]: it masks the [known] secrets as well, so every
@@ -162,7 +178,7 @@ internal class AdapterEnv(
         if (secret != null && secret.any { it < ' ' || it > '~' }) {
             throw ModelError.Auth("the stored credential contains characters an HTTP header cannot carry")
         }
-        return secret?.takeIf { it.isNotEmpty() }?.also { sent?.add(it) }
+        return secret?.takeIf { it.isNotEmpty() }?.also { record?.secrets?.add(it) }
     }
 
     /** A JSON POST to [url] with the profile's [headers] and a bearer [secret]. */
@@ -195,7 +211,14 @@ internal class AdapterEnv(
         failure: HttpFailure,
         plan: Boolean,
         redactor: Redactor,
-    ): ModelError = ProviderErrors.fromHttp(failure, plan, clock.epochMillis(), redactor)
+    ): ModelError =
+        ProviderErrors
+            .fromHttp(
+                failure,
+                plan,
+                clock.epochMillis(),
+                redactor,
+            ).also { record?.statuses?.put(it, failure.status) }
 }
 
 private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
