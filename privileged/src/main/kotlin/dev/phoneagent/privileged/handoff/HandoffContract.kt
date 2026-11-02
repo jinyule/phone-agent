@@ -89,7 +89,11 @@ public enum class HandoffReject {
     /** No Binder in the extras. */
     NO_BINDER,
 
-    /** The nonce is missing, expired, already used, or was never issued. */
+    /**
+     * The nonce is missing, expired, already used, or was never issued; or a later admission pushed
+     * it out (resume nonces are kept for one generation); or this app process already told the
+     * helper to shut down.
+     */
     BAD_NONCE,
 
     /**

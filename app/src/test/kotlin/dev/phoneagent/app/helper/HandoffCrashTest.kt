@@ -24,7 +24,11 @@ import kotlin.concurrent.thread
 /**
  * The app process dies in the middle of admitting a helper: what was saved stays, nothing after it
  * runs, and the helper never gets its reply. A new app process then starts on the same storage.
- * Whichever helper is still running, and was not told to stop, must be able to hand off again.
+ * A resuming helper comes back with the nonce it presented unless another admission was saved
+ * first, and the helper the app was connected to, holding the current resume nonce and not told to
+ * stop, comes back. The other cases are the known gap of ADR 2026-11-01-privileged-handoff
+ * (decision 3): the `knownGap…` tests pin that every helper is then refused, and are meant to flip
+ * once nonces are kept per pid (plan (a) in that ADR's Alternatives).
  */
 @RunWith(RobolectricTestRunner::class)
 class HandoffCrashTest {
@@ -207,6 +211,52 @@ class HandoffCrashTest {
 
         release.countDown()
         listOf(offeringOne, offeringTwo).forEach { it.join(TimeUnit.SECONDS.toMillis(WAIT_SECONDS)) }
+    }
+
+    /**
+     * Known gap, the simplest case (no concurrency): the app dies after saving a helper's first
+     * handoff, before the reply goes out. The helper retries with its one-time nonce, which is used
+     * up, so it is refused and nothing is connected; it then releases and exits
+     * (HelperLifecycleTest.aHelperRefusedWithBadNonceReleasesThenExitsWhetherResumingOrRetrying).
+     * Keeping nonces per pid would flip this test on purpose.
+     */
+    @Test
+    fun knownGapAFirstHandoffWhoseReplyIsLostIsRefusedOnRetry() {
+        val helper = FakeHelper()
+        val app = process()
+        val nonce = app.armed()
+        assertTrue("the app died", diesDuring(FIRST_SAVE) { app.offer(extras(helper, nonce), shell, pid) })
+
+        val restarted = process()
+        assertEquals(HandoffReject.BAD_NONCE, restarted.offer(extras(helper, nonce), shell, pid).reject())
+        assertEquals(HelperState.NotConnected, restarted.state)
+    }
+
+    /**
+     * Known gap, the order of the r4 review: the connected helper resumes to a restarted app and
+     * its reply is lost; a new helper is admitted next and the app dies right after saving it,
+     * before the resumed one was told to stop. Neither the resume nonce the old helper still holds
+     * nor the new helper's one-time nonce is live any more: both are refused and nothing is
+     * connected. Keeping nonces per pid would flip this test on purpose.
+     */
+    @Test
+    fun knownGapALostResumeReplyAndANewHelperSavedNextLockOutBoth() {
+        val old = FakeHelper()
+        val held = process().let { it.offer(extras(old, it.armed()), shell, pid).nextNonce() }
+        val app = process()
+        app.offer(extras(old, held), shell, pid).nextNonce() // The reply never reaches the old helper.
+        val new = FakeHelper(reportedIdentity = intArrayOf(shell, pid + 1))
+        val newNonce = app.armed()
+        assertTrue(
+            "the app died",
+            diesDuring(NEW_RESUME_SAVED) { app.offer(extras(new, newNonce, pid + 1), shell, pid + 1) },
+        )
+        assertFalse("the old helper was not told to stop", "shutdown" in old.calls)
+
+        val restarted = process()
+        assertEquals(HandoffReject.BAD_NONCE, restarted.offer(extras(old, held), shell, pid).reject())
+        assertEquals(HandoffReject.BAD_NONCE, restarted.offer(extras(new, newNonce, pid + 1), shell, pid + 1).reject())
+        assertEquals(HelperState.NotConnected, restarted.state)
     }
 
     @Test

@@ -33,17 +33,24 @@ import java.util.concurrent.atomic.AtomicBoolean
  * The app's end of the helper connection: admits helpers that hand off through
  * [HelperHandoffProvider] (checks in [HandoffAdmission]), holds the verified Binder and follows
  * its death. An admitted helper replaces the previous one, which is told to shut down as the last
- * step before the reply goes out: until then, if this process dies, the old helper keeps running
- * and can hand off again with the resume nonce it holds (see [HandoffNonces.admit]). Dying after
- * that step and before the reply arrives leaves neither helper able to hand off; a new launch is
- * needed.
+ * step before the reply goes out.
+ *
+ * This client cannot know whether a reply arrived: the Binder framework writes it after [offer]
+ * returns. If this process dies after saving an admission and before the reply goes out, the
+ * admitted helper never gets its next nonce. A resuming helper can still come back with the nonce
+ * it presented, unless another admission was saved before it does; a helper on its first handoff
+ * cannot, its one-time nonce is used up. Then only the helper this process was connected to,
+ * holding the current resume nonce and not told to stop, can hand off. Otherwise every helper is
+ * refused ([HandoffReject.BAD_NONCE]), releases and exits, and a new launch is needed: a known gap
+ * (ADR 2026-11-01-privileged-handoff, decision 3), pinned by HandoffCrashTest.
  *
  * Helpers are admitted one at a time: [offer] holds a lock from the decision until the replaced
- * helper was told to shut down, so at most one admission is between its save and that step, and
- * the one generation of resume nonce kept by [HandoffNonces.admit] is enough. A helper this process
- * told to shut down is refused ([HandoffReject.BAD_NONCE]) if it hands off again; a restarted
- * process does not know it, so there the old helper may come back once with the resume nonce it
- * holds, and the newer helper is then refused when it resumes.
+ * helper was told to shut down, so no two admissions in this process are between their save and
+ * that step at once. The lock does not cover a reply still on its way after [offer] returned. A
+ * helper this process told to shut down is refused ([HandoffReject.BAD_NONCE]) if it hands off
+ * again, until its Binder dies; a restarted process does not know it, so there the old helper may
+ * come back once with the resume nonce it holds, and the newer helper is then refused when it
+ * resumes.
  *
  * Listeners and `onLaunchNeeded` may run inside that lock. They must not wait for another handoff
  * (in-app launches, WP13, start the helper asynchronously): one they wait for on another thread

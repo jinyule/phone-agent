@@ -60,6 +60,26 @@ class HelperLifecycleTest {
         assertEquals(emptyList<Effect>(), l.handle(Event.AppStarted))
     }
 
+    /**
+     * A helper locked out by the known handoff gap (app HandoffCrashTest, `knownGap…`): refused
+     * with BAD_NONCE, whether it was resuming or retrying its first handoff, it releases everything
+     * and then exits.
+     */
+    @Test
+    fun aHelperRefusedWithBadNonceReleasesThenExitsWhetherResumingOrRetrying() {
+        val resuming = idle()
+        assertEquals(listOf(Effect.Deliver(resume1)), resuming.handle(Event.AppStarted))
+        assertEquals(exitOk, resuming.handle(Event.Delivered(Outcome.Rejected("BAD_NONCE"))).withoutWhy())
+        assertEquals(State.Exited, resuming.state)
+
+        val retrying = lifecycle()
+        retrying.handle(Event.Start)
+        retrying.handle(Event.Delivered(Outcome.Failed("the app died before replying")))
+        assertEquals(listOf(Effect.Deliver(launch)), retrying.handle(Event.RetryDue(1)))
+        assertEquals(exitOk, retrying.handle(Event.Delivered(Outcome.Rejected("BAD_NONCE"))).withoutWhy())
+        assertEquals(State.Exited, retrying.state)
+    }
+
     @Test
     fun firstDeliveryRetriesThenExitsUndelivered() {
         val l = lifecycle()
