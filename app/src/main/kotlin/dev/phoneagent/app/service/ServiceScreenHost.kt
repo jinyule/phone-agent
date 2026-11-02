@@ -17,6 +17,7 @@ import android.graphics.Point
 import android.hardware.display.DisplayManager
 import android.os.Build
 import android.util.Size
+import android.util.SparseArray
 import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityWindowInfo
@@ -59,7 +60,7 @@ internal class ServiceScreenHost(
 
     /** Republishes [event] for its display; called on the main thread by the service. */
     fun onEvent(event: AccessibilityEvent) {
-        val displayId = displayOf(event)
+        val displayId = displayOf(event) { service.windowsOnAllDisplays }
         if (closed || displayId == Display.INVALID_DISPLAY) return
         val copy =
             A11yEvent(
@@ -134,6 +135,8 @@ internal class ServiceScreenHost(
 
     override suspend fun screenshot(displayId: Int): Screenshot = shots.take(displayId)
 
+    override suspend fun windowScreenshot(windowId: Int): Screenshot? = shots.ofWindow(windowId)
+
     override fun imeConnection(): ImeConnection? =
         if (Build.VERSION.SDK_INT >=
             Build.VERSION_CODES.TIRAMISU
@@ -143,20 +146,24 @@ internal class ServiceScreenHost(
             null
         }
 
-    /**
-     * The display of [event]: API 33+ events carry it; before that the event's window is looked up
-     * on every display, and events without a window are dropped.
-     */
-    private fun displayOf(event: AccessibilityEvent): Int {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) return event.displayId
-        val all = service.windowsOnAllDisplays
-        val index = (0 until all.size).firstOrNull { i -> all.valueAt(i).any { it.id == event.windowId } }
-        return if (event.windowId == -1 || index == null) Display.INVALID_DISPLAY else all.keyAt(index)
-    }
-
     private companion object {
         const val EVENT_BUFFER = 256
         const val WINDOW_STATES_KEPT = 8
+
+        /**
+         * The display of [event]: API 33+ events carry it; before that the event's window is looked
+         * up in the windows of every display ([windows], a binder call), and events without a window
+         * are dropped.
+         */
+        fun displayOf(
+            event: AccessibilityEvent,
+            windows: () -> SparseArray<List<AccessibilityWindowInfo>>,
+        ): Int {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) return event.displayId
+            val all = windows()
+            val index = (0 until all.size).firstOrNull { i -> all.valueAt(i).any { it.id == event.windowId } }
+            return if (event.windowId == -1 || index == null) Display.INVALID_DISPLAY else all.keyAt(index)
+        }
     }
 }
 

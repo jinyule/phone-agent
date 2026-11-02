@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.graphics.Bitmap
 import android.graphics.ColorSpace
 import android.hardware.HardwareBuffer
+import android.os.Build
 import android.os.RemoteException
 import android.view.accessibility.AccessibilityEvent
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -37,6 +38,9 @@ class CapturingService : AccessibilityService() {
     /** Requests in order: the executor and the callback the platform would answer through. */
     val requests = ArrayList<Pair<Executor, TakeScreenshotCallback>>()
 
+    /** Window requests in order: the window and the callback. */
+    val windowRequests = ArrayList<Pair<Int, TakeScreenshotCallback>>()
+
     /** Thrown by the next request, as the platform throws when the connection is gone. */
     var failure: RuntimeException? = null
 
@@ -51,6 +55,14 @@ class CapturingService : AccessibilityService() {
     ) {
         failure?.let { throw it }
         requests += executor to callback
+    }
+
+    override fun takeScreenshotOfWindow(
+        accessibilityWindowId: Int,
+        executor: Executor,
+        callback: TakeScreenshotCallback,
+    ) {
+        windowRequests += accessibilityWindowId to callback
     }
 }
 
@@ -183,6 +195,35 @@ class ScreenshotLifecycleTest {
 
             assertTrue("the frame gave up", frame.isCompleted)
             assertNull(frame.getCompleted())
+        }
+
+    @Test
+    fun aWindowHoldingSecureContentIsSecure() =
+        runTest {
+            // Fix list r1 S1: API 34+ answers a window capture of FLAG_SECURE content with SECURE_WINDOW.
+            val shot = backgroundScope.async(start = CoroutineStart.UNDISPATCHED) { host.windowScreenshot(7) }
+            val (window, callback) = service.windowRequests.single()
+
+            callback.onFailure(AccessibilityService.ERROR_TAKE_SCREENSHOT_SECURE_WINDOW)
+            runCurrent()
+
+            assertEquals(7, window)
+            assertEquals(Screenshot.Secure, shot.getCompleted())
+        }
+
+    @Test
+    fun beforeApi34NoWindowIsCapturedAndSecureWindowMeansNothing() =
+        runTest {
+            val shots = Screenshots(service, { error("nothing is captured") }, sdk = Build.VERSION_CODES.TIRAMISU)
+
+            assertNull(shots.ofWindow(7))
+            assertTrue(service.windowRequests.isEmpty())
+            val secureWindow = AccessibilityService.ERROR_TAKE_SCREENSHOT_SECURE_WINDOW
+            assertEquals(
+                Screenshot.Failed(secureWindow),
+                Screenshots.failureOf(secureWindow, Build.VERSION_CODES.TIRAMISU),
+            )
+            assertEquals(Screenshot.Secure, Screenshots.failureOf(secureWindow, Build.VERSION_CODES.UPSIDE_DOWN_CAKE))
         }
 
     private companion object {

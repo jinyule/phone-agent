@@ -16,6 +16,7 @@ import dev.phoneagent.core.ports.ActionOutcome
 import dev.phoneagent.core.ports.Direction
 import dev.phoneagent.core.ports.ElementRole
 import dev.phoneagent.core.ports.LaunchTarget
+import dev.phoneagent.core.ports.ScreenFlag
 import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.ports.SurfaceKind
 import dev.phoneagent.core.ports.SurfaceRef
@@ -33,6 +34,7 @@ import kotlinx.coroutines.withTimeout
 import org.junit.AfterClass
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.BeforeClass
 import org.junit.Test
@@ -219,6 +221,7 @@ class AndroidScreenDeviceTest {
             log("frame ${frame.width}x${frame.height} ${frame.mime} ${frame.bytes.size} bytes -> ${file.absolutePath}")
             assertEquals("image/jpeg", frame.mime)
             assertEquals(1280, maxOf(frame.width, frame.height))
+            assertTrue("Settings is not secure", ScreenFlag.SECURE !in screen.snapshot().flags)
 
             val quietStart = System.nanoTime()
             val quiet = screen.awaitChange(QUIET_PROBE_MS)
@@ -235,6 +238,41 @@ class AndroidScreenDeviceTest {
                     "${(System.nanoTime() - start) / NANOS_PER_MS} ms",
             )
             assertTrue(changed)
+        }
+
+    /** The latest screen once [pkg] is in front; waits on changes, not on time. */
+    private suspend fun inFront(pkg: String): ScreenSnapshot =
+        withTimeout(CHANGE_TIMEOUT_MS) {
+            var shown = screen.snapshot()
+            while (shown.pkg != pkg) {
+                screen.awaitChange(CHANGE_TIMEOUT_MS)
+                shown = screen.snapshot()
+            }
+            shown
+        }
+
+    @Test
+    fun aSecurePageGivesNoFrameAndItsSnapshotsSaySecure() =
+        runBlocking<Unit> {
+            val testPackage = InstrumentationRegistry.getInstrumentation().context.packageName
+            context.startActivity(
+                Intent()
+                    .setClassName(testPackage, SecureActivity::class.java.name)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+            val before = inFront(testPackage)
+            log("secure page before a frame: ${describe(before)}")
+            assertTrue(before.elements.any { it.name == SecureActivity.LABEL })
+            assertTrue("not known before a frame is asked for", ScreenFlag.SECURE !in before.flags)
+
+            val frame = screen.frame()
+            val after = screen.snapshot()
+            log("secure page: frame=${frame?.let { "${it.width}x${it.height}" }} after: ${describe(after)}")
+            assertNull(frame)
+            assertTrue(ScreenFlag.SECURE in after.flags)
+
+            val back = screen.act(UiAction.Key(SystemKey.BACK), on = null)
+            log("back from the secure page: ${back.describe()}")
         }
 
     @Test

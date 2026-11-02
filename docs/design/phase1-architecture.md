@@ -271,6 +271,8 @@ interface AppCatalog { suspend fun apps(): List<AppEntry> }   // AppEntry(packag
 - **等界面稳定靠事件**：等到第一个无障碍事件后，再等 300ms 静默，总共最多 3s；不用固定 sleep（参考 dsh-Go 的 `EventClock`）。
 - **输入要回读**：依次尝试 SET_TEXT → 无障碍输入连接 → 自带无键盘 IME → 剪贴板粘贴（用后还原）。每一级都回读字段，字段一旦变化就停，防止重复输入（参考 DSH-Android 的 `TextInput`）。
 - **点击逐级回退**：可点击祖先的 `ACTION_CLICK` → 带 `setDisplayId` 的无障碍手势 → 助手直接注入触摸。
+- **状态栏和导航栏不算屏幕内容**：沿屏幕一边、厚度不超过 10% 的 `TYPE_SYSTEM` 窗口不读入树，它们的事件也不算"屏幕变了"（时钟每分钟跳一次）。系统对话框、选择器、通知、下拉栏照常保留。
+- **FLAG_SECURE 只报告，不决定**：API 34 起，每次 `frame()` 前先单独截一次最上层应用窗口（`takeScreenshotOfWindow`）；系统答 SECURE_WINDOW 就不出图（返回 `null`），并记住这个窗口，此后它的快照带 `SECURE`；之后单独截得到，就取消标记。要不要交给用户由 PolicyEngine 定。API 34 以下**检测不到**：截图里安全区域是黑的，快照也不带 `SECURE`。
 
 ### 3.4 后台屏管理
 

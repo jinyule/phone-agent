@@ -17,7 +17,6 @@ import dev.phoneagent.core.ports.UiAction
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -31,7 +30,12 @@ import java.util.concurrent.atomic.AtomicLong
  *   a target that no longer matches yields `StaleRef` without touching the device;
  * - after an action the display settles on accessibility events ([ChangeWatch]) and is read back
  *   at the detail of the screen the action was based on;
- * - nothing here touches this app's own windows (`Refused`).
+ * - nothing here touches this app's own windows (`Refused`);
+ * - FLAG_SECURE (API 34+): before every frame the top application window is captured alone; a
+ *   window holding secure content gives no frame and is remembered ([SecureWindows]), so its
+ *   snapshots carry `ScreenFlag.SECURE`. What to do about it is PolicyEngine's call. Below API 34
+ *   secure content is **not detected**: frames come back with it blacked out and snapshots never
+ *   carry `SECURE`.
  *
  * Calls are serialized by the caller (ScreenPort contract).
  *
@@ -128,8 +132,10 @@ internal class AndroidScreen(
         return withContext(options.io) {
             val host = host()
             geometry(host)
+            val waitMs = options.timings.screenshotWaitMs
+            if (parts.observer.secure.probe(host, host.windowsOn(displayId), waitMs)) return@withContext null
             // Set-of-Mark boxes arrive with OCR in M3; until then the frame reports som = false.
-            when (val shot = screenshotWithin(host, options.timings.screenshotWaitMs)) {
+            when (val shot = screenshotWithin(waitMs) { host.screenshot(displayId) } ?: TIMED_OUT) {
                 is Screenshot.Captured -> {
                     try {
                         FrameEncoder.encode(shot.bitmap, maxEdge)
@@ -159,18 +165,6 @@ internal class AndroidScreen(
         }
     }
 
-    /** A screenshot of the display, or [Screenshot.Failed] when none came within [waitMs]. */
-    private suspend fun screenshotWithin(
-        host: ScreenHost,
-        waitMs: Long,
-    ): Screenshot {
-        var taken: Screenshot? = null
-        val shot = withTimeoutOrNull(waitMs) { host.screenshot(displayId).also { taken = it } }
-        // The timeout may strike after the screenshot arrived: it is nobody's then, free it.
-        if (shot == null) taken?.release()
-        return shot ?: Screenshot.Failed(AccessibilityService.ERROR_TAKE_SCREENSHOT_INTERNAL_ERROR)
-    }
-
     private fun systemBarsOf(host: ScreenHost): Set<Int> {
         val geometry = geometry(host)
         return host
@@ -196,6 +190,9 @@ internal class AndroidScreen(
     }
 
     internal companion object {
+        /** What a screenshot that did not come in time counts as. */
+        private val TIMED_OUT = Screenshot.Failed(AccessibilityService.ERROR_TAKE_SCREENSHOT_INTERNAL_ERROR)
+
         /** Snapshot ids `s1`, `s2`, … starting at [first]. */
         fun sequentialSnapshotIds(first: Long = 1): () -> SnapshotId {
             val next = AtomicLong(first)

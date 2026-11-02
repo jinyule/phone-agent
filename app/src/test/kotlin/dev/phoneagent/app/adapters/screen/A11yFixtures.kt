@@ -97,6 +97,12 @@ internal class FakeHost(
 
     /** How a screenshot is answered; by default at once with [shot]. */
     var takeShot: suspend () -> Screenshot = { shot }
+
+    /** Windows captured alone, in order. */
+    val windowShots = ArrayList<Int>()
+
+    /** How a window screenshot is answered; by default as before API 34 (no such call). */
+    var takeWindowShot: suspend (Int) -> Screenshot? = { null }
     var windowStates: List<A11yEvent> = emptyList()
     var ime: ImeConnection? = null
 
@@ -126,6 +132,11 @@ internal class FakeHost(
     }
 
     override suspend fun screenshot(displayId: Int): Screenshot = takeShot()
+
+    override suspend fun windowScreenshot(windowId: Int): Screenshot? {
+        windowShots += windowId
+        return takeWindowShot(windowId)
+    }
 
     override fun imeConnection(): ImeConnection? = ime
 }

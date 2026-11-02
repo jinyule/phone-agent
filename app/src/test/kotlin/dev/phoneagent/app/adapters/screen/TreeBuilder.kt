@@ -56,6 +56,7 @@ internal class TreeBuilder {
         TreeRead(
             elements.toList(),
             APP,
+            topWindow = 1,
             keyboard = false,
             windowPackages = emptyMap(),
             windowBounds = emptyList(),

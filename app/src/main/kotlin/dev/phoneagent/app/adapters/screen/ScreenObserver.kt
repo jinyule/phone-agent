@@ -8,13 +8,17 @@ import dev.phoneagent.core.ports.SnapshotAnalyzer
 import dev.phoneagent.core.ports.SnapshotDetail
 import dev.phoneagent.core.ports.SurfaceRef
 
-/** Builds [ScreenSnapshot]s of one surface and remembers them in [history]. */
+/**
+ * Builds [ScreenSnapshot]s of one surface and remembers them in [history]; [secure] holds the
+ * windows found to show FLAG_SECURE content, whose snapshots say so.
+ */
 internal class ScreenObserver(
     private val surface: SurfaceRef,
     private val system: ScreenSystem,
     private val analyzer: SnapshotAnalyzer,
     private val snapshotIds: () -> SnapshotId,
     val history: SnapshotHistory,
+    val secure: SecureWindows = SecureWindows(),
 ) {
     // Highest ref number handed out by this port (RefCarrier never reuses one).
     private var lastRef = 0
@@ -63,6 +67,7 @@ internal class ScreenObserver(
 
     private fun flagsOf(read: TreeRead): Set<ScreenFlag> =
         buildSet {
+            if (read.topWindow != null && read.topWindow in secure) add(ScreenFlag.SECURE)
             if (read.keyboard) add(ScreenFlag.KEYBOARD)
             if (read.pkg != null && read.pkg in system.pickerPackages()) add(ScreenFlag.SYSTEM_PICKER)
             if (system.locked()) add(ScreenFlag.LOCKED)

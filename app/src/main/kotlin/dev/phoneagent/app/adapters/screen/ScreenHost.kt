@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.util.Size
 import android.view.accessibility.AccessibilityWindowInfo
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * What [AndroidScreen] needs from the accessibility service. The service implements it; tests use a
@@ -44,6 +45,13 @@ internal interface ScreenHost {
      * screenshot nobody waits for any more is freed.
      */
     suspend fun screenshot(displayId: Int): Screenshot
+
+    /**
+     * Captures window [windowId] alone, the only reliable FLAG_SECURE signal: a window holding
+     * secure content ends with [Screenshot.Secure]. `null` before API 34, which has no such call.
+     * Ends and throws as [screenshot] does.
+     */
+    suspend fun windowScreenshot(windowId: Int): Screenshot?
 
     /** The service's own input connection to the focused editor (API 33+), or `null` when there is none. */
     fun imeConnection(): ImeConnection?
@@ -114,6 +122,20 @@ internal sealed interface Screenshot {
 /** Frees what this screenshot holds (the bitmap of [Screenshot.Captured]). */
 internal fun Screenshot.release() {
     if (this is Screenshot.Captured) bitmap.recycle()
+}
+
+/**
+ * The screenshot [take] gives within [waitMs], or `null` when none came in time (or [take] gave
+ * none). One that arrives just as the time runs out is nobody's: it is released.
+ */
+internal suspend fun screenshotWithin(
+    waitMs: Long,
+    take: suspend () -> Screenshot?,
+): Screenshot? {
+    var taken: Screenshot? = null
+    val shot = withTimeoutOrNull(waitMs) { take().also { taken = it } }
+    if (shot == null) taken?.release()
+    return shot
 }
 
 /** The accessibility service's input connection to the focused editor. */

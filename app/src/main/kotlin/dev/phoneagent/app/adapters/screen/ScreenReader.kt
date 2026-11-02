@@ -48,10 +48,12 @@ internal class ReadElement(
  * @property frontPackage package of the window keys act on: the focused content window, else the
  *   top-most one (`null` when unknown).
  * @property systemBars ids of the status and navigation bar windows, which the read leaves out.
+ * @property topWindow id of the window [pkg] comes from, or `null` when there is none.
  */
 internal class TreeRead(
     val elements: List<ReadElement>,
     val pkg: String?,
+    val topWindow: Int?,
     val keyboard: Boolean,
     val windowPackages: Map<Int, String?>,
     val windowBounds: List<Pair<Int, Rect>>,
@@ -119,10 +121,18 @@ internal object ScreenReader {
         )
 
     /** Package of the top-most application window on the display, or `null` when there is none. */
-    fun topPackage(windows: List<AccessibilityWindowInfo>): String? =
+    fun topPackage(windows: List<AccessibilityWindowInfo>): String? = topApp(windows)?.second
+
+    /** The top-most application window whose package can be read, with that package. */
+    fun topApp(windows: List<AccessibilityWindowInfo>): Pair<AccessibilityWindowInfo, String>? =
         contentWindows(windows)
             .filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
-            .firstNotNullOfOrNull { it.root?.packageName?.toString() }
+            .firstNotNullOfOrNull { window ->
+                window.root
+                    ?.packageName
+                    ?.toString()
+                    ?.let { window to it }
+            }
 
     /** Content windows (no keyboard, no overlays), top-most first. */
     fun contentWindows(windows: List<AccessibilityWindowInfo>): List<AccessibilityWindowInfo> =
@@ -156,17 +166,22 @@ internal object ScreenReader {
         val packages = LinkedHashMap<Int, String?>()
         val windowBounds = ArrayList<Pair<Int, Rect>>()
         var pkg: String? = null
+        var topWindow: Int? = null
         for (window in content) {
             val root = window.root
             val windowPackage = root?.packageName?.toString()
             packages[window.id] = windowPackage
             windowBounds += window.id to Rect().also(window::getBoundsInScreen)
-            if (pkg == null && window.type == AccessibilityWindowInfo.TYPE_APPLICATION) pkg = windowPackage
+            if (pkg == null && window.type == AccessibilityWindowInfo.TYPE_APPLICATION && windowPackage != null) {
+                pkg = windowPackage
+                topWindow = window.id
+            }
             if (root != null) walker.visit(root, Walker.Place(window.id, windowPackage, parent = null, depth = 0))
         }
         return TreeRead(
             elements = walker.finish(),
             pkg = pkg,
+            topWindow = topWindow,
             keyboard = windows.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD },
             windowPackages = packages,
             windowBounds = windowBounds,
