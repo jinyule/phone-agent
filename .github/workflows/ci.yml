@@ -28,6 +28,8 @@ jobs:
         run: ./gradlew spotlessCheck detektMain detektTest verifyDetektCanary :app:lintDebug :privileged:lintDebug --continue
       - name: start-helper.sh against a fake adb
         run: bash scripts/test/start-helper-test.sh
+      - name: protocol-base-ref.sh against throwaway git repositories
+        run: bash scripts/test/protocol-base-ref-test.sh
       - name: Secret scan
         env:
           GITLEAKS_VERSION: 8.30.1
@@ -98,6 +100,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # verifyPrivilegedProtocol reads protocol-history.txt at the base commit
+          # Also makes protocol-base-ref.sh fetch a missing base anonymously: a private repo needs a token there.
           persist-credentials: false
       - uses: ./.github/actions/setup-build
       - name: Cache Robolectric android-all jars
@@ -114,8 +117,11 @@ jobs:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
         run: |
           args=(:privileged:verifyPrivilegedProtocol :privileged:assembleDebug :privileged:testDebugUnitTest --continue)
-          # Empty for workflow_dispatch, all zeros for the first push of a branch: no baseline then.
-          if [[ -n "$BASE_SHA" && ! "$BASE_SHA" =~ ^0+$ ]]; then args+=("-PprivilegedProtocolBaseRef=$BASE_SHA"); fi
+          # Pushes run on main only. BASE_SHA is empty for workflow_dispatch and all zeros for the first
+          # push of main: no baseline then. A base missing from the clone (force-pushed away) is fetched
+          # by sha; if that fails the job fails rather than checking against an empty baseline.
+          base_ref="$(bash scripts/ci/protocol-base-ref.sh)" || exit 1
+          if [[ -n "$base_ref" ]]; then args+=("$base_ref"); fi
           ./gradlew "${args[@]}"
       - name: Upload reports
         if: failure()

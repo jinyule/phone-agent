@@ -29,7 +29,8 @@ internal class GitHistory(
         if (git("rev-parse", "--verify", "--quiet", "$ref^{commit}").code != 0) {
             throw GradleException(
                 "privilegedProtocolBaseRef $ref is not a commit in this clone; fetch it first " +
-                    "(CI: actions/checkout with fetch-depth: 0).",
+                    "(`git fetch origin $ref`). A full clone may still lack it: a push's `before` that a " +
+                    "force-push removed from every branch. CI fetches that by sha (scripts/ci/protocol-base-ref.sh).",
             )
         }
         val path = "$ref:./$fileName"
