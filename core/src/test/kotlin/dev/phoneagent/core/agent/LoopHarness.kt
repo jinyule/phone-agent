@@ -58,10 +58,22 @@ internal class LoopHarness(
     val settings: TaskStarted = ATTENDED,
     val interceptors: Interceptors = Interceptors(requestError = emptyList()),
     val storage: InMemoryStoragePort = InMemoryStoragePort(),
+    strictReplay: Boolean = true,
 ) {
     val files = SessionFiles(storage, StoragePath("sessions/s1"))
+
+    /**
+     * Checks every request of [model] against the log (phase1 §3.9 rule 1); with [strictReplay] a
+     * difference fails the request (and so the test), else it is only kept in `replay.mismatches`.
+     */
+    val replay = ReplayChecker(files, strictReplay)
     val plan =
-        RequestPlan(model, TEST_WIRE, listOf(PromptBlock("identity", "You drive a phone.")), tools.map { it.def })
+        RequestPlan(
+            replay.wrap(model),
+            TEST_WIRE,
+            listOf(PromptBlock("identity", "You drive a phone.")),
+            tools.map { it.def },
+        )
     val setup: AgentSetup =
         AgentSetup(
             taskId = TASK,

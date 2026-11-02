@@ -102,9 +102,14 @@ internal class Requests(
                 plan.maxOutputTokens,
                 plan.reasoning,
             )
-        val records = loop.log.records()
-        if (records.asReversed().firstNotNullOfOrNull { it.event as? RequestHeader } != header) loop.log.append(header)
-        return header.toRequest(deriveMessages(records))
+        val latest =
+            loop.log
+                .records()
+                .asReversed()
+                .firstNotNullOfOrNull { it.event as? RequestHeader }
+        if (latest != header) loop.log.append(header)
+        // Derived after the header is in the log: its protocol decides the projection (deriveMessages).
+        return header.toRequest(deriveMessages(loop.log.records()))
     }
 
     private suspend fun attempt(
