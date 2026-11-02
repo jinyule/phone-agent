@@ -72,6 +72,13 @@ class LaunchRestrictionsTest {
     }
 
     @Test
+    fun aLockStateThatIsNoBooleanCountsAsLocked() {
+        helper.bridge.wm.keyguardAnswer = "locked"
+        assertEquals(StartResult.LOCKED, start(Intent(Settings.ACTION_SETTINGS)))
+        assertNothingStarted()
+    }
+
+    @Test
     fun anUnlockedPhoneStillStarts() {
         helper.bridge.wm.keyguardLocked = false
         assertEquals(StartResult.OK, start(Intent(Settings.ACTION_SETTINGS)))

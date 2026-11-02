@@ -88,6 +88,22 @@ class SystemOpsTest {
     }
 
     @Test
+    fun aModeThatIsNoAppOpModeIsNotMutedNorRecorded() {
+        helper.commands.answer = { command ->
+            if (command.getOrNull(1) == "get") CommandResult(0, "PLAY_AUDIO: bogus") else CommandResult(0, "")
+        }
+        assertFalse("a mode that cannot be restored is not muted", helper.core.setAudioMuted(MUSIC, true))
+        val writes = helper.commands.of("appops").filter { it[1] == "set" }
+        assertEquals("PLAY_AUDIO was never set", emptyList<List<String>>(), writes)
+        val ledger =
+            folder.root
+                .listFiles()
+                .orEmpty()
+                .filter { it.name.startsWith("phoneagent_audio_mute") }
+        assertTrue("nothing was written to the ledger: $ledger", ledger.all { it.readText().isBlank() })
+    }
+
+    @Test
     fun onlyWellFormedLedgerEntriesAreRestoredAtStartup() {
         helper.close()
         val dir = folder.newFolder("state")

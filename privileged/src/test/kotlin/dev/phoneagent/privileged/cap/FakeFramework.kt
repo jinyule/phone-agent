@@ -102,6 +102,9 @@ internal class FakeWindowManager {
     /** What `isKeyguardLocked` answers; null makes it throw, as a dead or changed service would. */
     var keyguardLocked: Boolean? = false
 
+    /** When set, what `isKeyguardLocked` answers instead: a framework whose answer changed type. */
+    var keyguardAnswer: Any? = null
+
     /** Whether `setDisplayImePolicy` takes effect. */
     var imeAccepted = true
     private val imePolicies = mutableMapOf<Int, Int>()
@@ -112,7 +115,7 @@ internal class FakeWindowManager {
     /** Makes `getDisplayImePolicy` throw, as a ROM that changed or guarded it would. */
     var imeGetterFails = false
 
-    fun isKeyguardLocked(): Boolean = keyguardLocked ?: error("IWindowManager went away")
+    fun isKeyguardLocked(): Any = keyguardAnswer ?: keyguardLocked ?: error("IWindowManager went away")
 
     fun setDisplayImePolicy(
         displayId: Int,
@@ -136,7 +139,7 @@ internal class FakeWindowManager {
 internal class WindowManagerWithoutImeGetter(
     private val wm: FakeWindowManager,
 ) {
-    fun isKeyguardLocked(): Boolean = wm.isKeyguardLocked()
+    fun isKeyguardLocked(): Any = wm.isKeyguardLocked()
 
     fun setDisplayImePolicy(
         displayId: Int,
