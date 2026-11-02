@@ -1,10 +1,9 @@
 package dev.phoneagent.core.model.anthropic
 
 import dev.phoneagent.core.model.ModelError
-import kotlinx.serialization.SerializationException
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -17,10 +16,16 @@ import kotlinx.serialization.json.JsonPrimitive
  *
  * Matching is exact, on the [Redactor]'s forms of each secret (as sent and JSON-escaped), with no
  * minimum length and no credential shapes, which ordinary output may contain. Content is checked
- * as it streams, not held back: [json] checks a block's start whole; each string a delta carries
- * goes through a [Window] of its own, one character shorter than the longest form, so a secret
- * split over fragments is caught by the fragment that completes it, before that one is shown; and
- * [arguments] checks call arguments once more as parsed, so escapes such as `\/` hide nothing.
+ * as it streams, not held back: [json] checks a block's start whole (every key and value, numbers
+ * too); each string a delta carries goes through a [Window] of its own, one character shorter
+ * than the longest form, so a secret split over fragments is caught by the fragment that
+ * completes it, before that one is shown; and [arguments] checks the whole argument text of a
+ * block once more when it ends, as written and with its escapes decoded ([JsonEscapes]), valid
+ * JSON or not, so escapes such as `\/` or `\u0073` hide nothing there.
+ *
+ * Known gaps (model-layer §2): a secret split across two members or two blocks, and one written
+ * with escapes in text or thinking (literal text, which nothing downstream decodes), are not
+ * detected.
  *
  * The same rule and windows as the OpenAI adapters' guard (WP03), kept in step by hand.
  */
@@ -46,7 +51,7 @@ internal class EchoGuard(
         if (forms.any { it in text }) throw CredentialEcho.error()
     }
 
-    /** Checks every key and string in [value]. */
+    /** Checks every key and every non-null value in [value], as parsed. */
     fun json(value: JsonElement) {
         when (value) {
             is JsonObject -> {
@@ -61,21 +66,19 @@ internal class EchoGuard(
             }
 
             is JsonPrimitive -> {
-                if (value.isString) check(value.content)
+                if (value !is JsonNull) check(value.content)
             }
         }
     }
 
-    /** Checks the strings of [argsJson] as parsed; text that is not JSON has no escapes to decode. */
-    fun arguments(argsJson: String) {
-        val parsed =
-            try {
-                Json.parseToJsonElement(argsJson)
-            } catch (ignoredNotJson: SerializationException) {
-                // Cut-off or invalid arguments: their windows already checked them as they came.
-                return
-            }
-        json(parsed)
+    /**
+     * Checks the whole argument text [raw] of one block as written and leniently decoded: cut-off
+     * or invalid JSON is still decoded downstream, and the decoded text contains every string a
+     * parse would give.
+     */
+    fun arguments(raw: String) {
+        check(raw)
+        check(JsonEscapes.lenientDecode(raw))
     }
 }
 

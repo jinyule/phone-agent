@@ -43,7 +43,9 @@ import kotlinx.serialization.json.put
  *   `error` event throws its mapped error. A body that ends before `message_stop` is
  *   [ModelError.Network] (cut off, retryable); events out of order, blocks that overlap, come with
  *   a smaller index or repeat a tool id, blocks left open, a missing `stop_reason` or unparseable
- *   JSON are [ModelError.BadResponse]. Unknown event types are ignored (the API may add some), so
+ *   JSON are [ModelError.BadResponse]. Before any of these failures reaches the caller, the call
+ *   arguments the reply left open are checked ([abandon]): a secret there is
+ *   [CredentialEcho.error] instead. Unknown event types are ignored (the API may add some), so
  *   are unknown block types before the last `fallback` block (a declined attempt's internals);
  *   anywhere else an unknown block is refused, as is an unknown delta type for a known block.
  *
@@ -86,6 +88,12 @@ internal class MessagesStream(
         facts.delta(buildJsonObject { put("delta", delta) })
         stop()
     }
+
+    /**
+     * The reply failed before it was finished: call arguments it left unchecked are checked now
+     * ([ContentBlocks.abandon]), so a secret in them fails it as [CredentialEcho.error] instead.
+     */
+    fun abandon() = blocks.abandon()
 
     /** The reply, after the body ended. */
     fun finish(): ChatResponse {

@@ -55,12 +55,24 @@ class EchoGuardTest {
     }
 
     @Test
-    fun `JSON is checked in every key and string, and arguments once more as parsed`() {
+    fun `JSON is checked in every key and non-null value`() {
         rejected { guard.json(Json.parseToJsonElement("""{"k":["x","abc\"def"]}""")) }
         rejected { guard.json(Json.parseToJsonElement("""{"abc\"def":1}""")) }
         assertDoesNotThrow { guard.json(Json.parseToJsonElement("""{"k":[1,true,null,"abc"]}""")) }
+        rejected { Redactor(listOf("123456")).guard().json(Json.parseToJsonElement("""{"pin":[123456]}""")) }
+        rejected { Redactor(listOf("true")).guard().json(Json.parseToJsonElement("""{"ok":true}""")) }
+        assertDoesNotThrow { Redactor(listOf("null")).guard().json(Json.parseToJsonElement("""{"k":null}""")) }
+    }
+
+    @Test
+    fun `arguments are checked as written and decoded, valid JSON or not`() {
+        val slashed = Redactor(listOf("a/b")).guard()
+        rejected { slashed.arguments("""{"k":"a\/b"}""") }
+        rejected { slashed.arguments("""{"k":"a\/b""") }
+        rejected { slashed.arguments("""{"k":"a\/b"}}""") }
         rejected { guard.arguments("""{"k":"abc\"def"}""") }
         assertDoesNotThrow { guard.arguments("""{"k":"abc""") }
+        assertDoesNotThrow { slashed.arguments("""{"k":"a\\/b"}""") }
     }
 
     @Test

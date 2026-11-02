@@ -74,8 +74,10 @@ internal fun interface Bind {
  *
  * Every block start and delta passes the [guard] before anything of it is shown: each string
  * member through a window per block and member name (a start's `text` and its deltas' `text` are
- * one channel), anything else whole, and a call's arguments once more as parsed at its stop. Only
- * the `type` members are left out (protocol, not content).
+ * one channel), anything else whole. The `input_json_delta` text of every block (calls,
+ * `server_tool_use`, any block this adapter does not know, a declined attempt's too) is also
+ * checked whole as call arguments ([EchoGuard.arguments]) at the block's stop, or by [abandon]
+ * when the reply fails first. Only the `type` members are left out (protocol, not content).
  */
 internal class ContentBlocks(
     private val protocol: Protocol,
@@ -85,6 +87,7 @@ internal class ContentBlocks(
     private val blocks = mutableListOf<Block>()
     private val toolIds = mutableSetOf<String>()
     private val windows = HashMap<Pair<Int, String>, EchoGuard.Window>()
+    private val arguments = HashMap<Int, StringBuilder>()
     private val shown = Shown(onDelta)
 
     /** `content_block_start`. */
@@ -111,6 +114,9 @@ internal class ContentBlocks(
         val delta = event.obj("delta") ?: protocol.bad("content_block_delta without a delta")
         delta.forEach { (key, value) -> if (key != TYPE) screen(block.index, key, value) }
         val type = delta.str("type")
+        if (type == INPUT_JSON_DELTA) {
+            delta.str(PARTIAL_JSON)?.let { arguments.getOrPut(block.index, ::StringBuilder).append(it) }
+        }
         if (!block.apply(type, delta, shown, protocol)) protocol.bad("unexpected $type for a ${block.type} block")
     }
 
@@ -125,6 +131,13 @@ internal class ContentBlocks(
         start(JsonObject(mapOf("index" to JsonPrimitive(index), "content_block" to block)))
         close(blocks.last())
     }
+
+    /**
+     * The reply failed before its end (a cut-off stream, an error event, unparseable data): checks
+     * the argument text of the blocks it left open as their stops would have, so a secret in it
+     * fails the reply as [CredentialEcho.error] and the shown fragments are discarded.
+     */
+    fun abandon() = arguments.values.forEach { guard.arguments(it.toString()) }
 
     /** The block still open, or `null`. */
     fun open(): Int? = blocks.lastOrNull()?.takeUnless { it.closed }?.index
@@ -151,7 +164,7 @@ internal class ContentBlocks(
     private fun close(block: Block) {
         if (block.closed) protocol.bad("content_block_stop twice for one block")
         block.closed = true
-        if (block is Block.ToolUse) guard.arguments(block.arguments)
+        arguments.remove(block.index)?.let { guard.arguments(it.toString()) }
         block.stopped(shown)
     }
 
@@ -261,6 +274,10 @@ internal class Shown(
 
 /** The member naming a block's or a delta's type: protocol, not content. */
 private const val TYPE = "type"
+
+/** The delta type that streams call arguments, and its member carrying them. */
+private const val INPUT_JSON_DELTA = "input_json_delta"
+private const val PARTIAL_JSON = "partial_json"
 
 /** Where a kotlinx.serialization parse error starts quoting its input. */
 private const val QUOTED_INPUT = "JSON input:"

@@ -122,7 +122,10 @@ fun interface BlobSource {              // 读当前会话 BlobStore 里 Part.Im
 - **模型产生的内容里出现本次请求的密钥，整条回复按 `BadResponse` 拒绝，不改写**（Anthropic 适配器，`core.model.anthropic.EchoGuard`；和 OpenAI 适配器同一条规则，WP01 A11 写进契约）。
   - 模型产生的内容包括正文、工具调用（id、名字、参数）、thinking 的文字和 `signature`、redacted_thinking、compaction，以及 `server_tool_use` 和其他不认识的块。被放弃的尝试里的块也算。
   - 为什么不改写：thinking 绑定在它之前的整段对话上，改写已经返回的正文或 `tool_use.input`，下一次请求就会报 prefix mismatch；改写参数还会改掉要执行的操作。我们从不把密钥放进上下文，模型输出里出现密钥本身就说明出了问题，宁可失败，也不落盘。
-  - 只做精确匹配：原样的和 JSON 转义后的形式都算，调用参数在块结束时再按解析后的字符串查一遍（`\/` 这类转义藏不住），不设最短长度，不按形状兜底。不需要认证的本地服务用 `Credential.None`；填了占位 key 的话，它出现在回复里会让整条回复被拒。
+  - 只做精确匹配：原样的和 JSON 转义后的形式都算，不设最短长度，不按形状兜底。不需要认证的本地服务用 `Credential.None`；填了占位 key 的话，它出现在回复里会让整条回复被拒。
+  - 起始块整块下发的内容（比如 `tool_use.input`）在起始块就查，早于任何 delta：每个键和每个非 null 的值都查，数字和布尔值也算。
+  - 调用参数：每个块的 `input_json_delta` 文本都累积起来，在块结束时整段再查一遍，工具调用、`server_tool_use` 和其他不认识的块都算，后来被降级丢弃的块也算。原样查一次，宽松解码以后再查一次（`JsonEscapes.lenientDecode`：从左到右还原 `\uXXXX`（包括代理对）、`\/`、`\"`、`\\`、`\n`、`\t`、`\r`、`\b`、`\f`，不认识的序列、不完整的 `\u`、落单的代理原样保留；解码结果只用来匹配）。参数被截断（`max_tokens`）或者不是合法 JSON 时，下一步照样会按 JSON 解码，所以 `\/`、`\u0073` 这类转义也藏不住密钥。
+  - 异常结束：流在块结束之前就失败（断开、error 事件、解析失败）时，先对已经累积、还没查过的参数做同样的检查，查到密钥就按下面的固定文字拒绝，不报原来的 `Network` 或 `BadResponse`。日志不受影响（中断前缀只记文字 delta），这一条是为了让 UI 撤回已经显示的参数增量。
   - 增量边发边查，不推迟发布：每个块的每个字符串字段保留一个"最长形式减 1"的尾部窗口，凑出密钥的那一片不发出，之前的片段照常即时显示。
   - 拒绝用固定文字，带"已流出内容不保留"的标记：runtime 不把这次 attempt 已经流出的前缀记成 interrupted 的消息，界面上已经显示的片段由 UI 清掉。WP01 的 `discardsStreamed` 合入之前，适配器用 `CredentialEcho.discardsStreamed` 占位。
   - 服务端写的诊断照旧打码成 `***`，并按形状兜底：错误体、流内 error 事件、拒答的 `category`。`providerMetadata` 里打码会改动的字段整项省略，不写半截打码的值。

@@ -185,7 +185,7 @@ internal sealed class Block(
     }
 
     /**
-     * A client tool call. Its [arguments] are the raw `input_json_delta` text, or without deltas the
+     * A client tool call. Its arguments are the raw `input_json_delta` text, or without deltas the
      * start's `input` (`{}` when there is none).
      */
     class ToolUse(
@@ -195,8 +195,6 @@ internal sealed class Block(
         private val startInput: JsonElement?,
     ) : Block(index, "tool_use") {
         private val args = StringBuilder()
-
-        val arguments: String get() = args.toString()
 
         override val declinedAttempt: Boolean get() = true
 
@@ -257,9 +255,10 @@ internal sealed class Block(
 
     /**
      * A block type this adapter does not know (no server tools are enabled, so also
-     * `server_tool_use`). It shows nothing and takes any delta; whether it is refused waits for
-     * the end of the reply: before the last `fallback` block it belongs to a declined attempt and
-     * is dropped, anywhere else it is a [dev.phoneagent.core.model.ModelError.BadResponse].
+     * `server_tool_use`). It shows nothing and takes any delta, though [ContentBlocks] still checks
+     * what it carries; whether it is refused waits for the end of the reply: before the last
+     * `fallback` block it belongs to a declined attempt and is dropped, anywhere else it is a
+     * [dev.phoneagent.core.model.ModelError.BadResponse].
      */
     class Internal(
         index: Int,

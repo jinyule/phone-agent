@@ -73,6 +73,10 @@ internal class MessagesModel(
         val stream = MessagesStream(profile.id, info.model, redactor, onDelta)
         return try {
             stream.read(reply)
+        } catch (e: ModelError) {
+            // A secret in arguments the failure left unchecked outranks it: the shown output is discarded.
+            stream.abandon()
+            throw e
         } catch (e: IllegalArgumentException) {
             // Provider values that break neutral-type invariants (ids, counts) are protocol violations.
             throw ModelError.BadResponse(
