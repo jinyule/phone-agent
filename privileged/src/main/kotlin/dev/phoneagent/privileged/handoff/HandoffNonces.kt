@@ -123,10 +123,19 @@ public class HandoffNonces(
      */
     @Synchronized
     public fun arm(sha256Hex: String?): String? {
-        if (sha256Hex == null || !Nonces.isWellFormed(sha256Hex)) return NOT_A_HASH
-        val current = boot() ?: return BOOT_UNKNOWN
-        store.save(store.load().copy(armedHash = sha256Hex, armedAtMs = clock(), armedBoot = current))
-        return null
+        val current = boot()
+        val refusal =
+            when {
+                sha256Hex == null || !Nonces.isWellFormed(sha256Hex) -> NOT_A_HASH
+                current == null -> BOOT_UNKNOWN
+                else -> null
+            }
+        if (refusal ==
+            null
+        ) {
+            store.save(store.load().copy(armedHash = sha256Hex, armedAtMs = clock(), armedBoot = current))
+        }
+        return refusal
     }
 
     /**
