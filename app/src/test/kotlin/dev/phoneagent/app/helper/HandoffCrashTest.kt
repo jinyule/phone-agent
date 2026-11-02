@@ -127,6 +127,40 @@ class HandoffCrashTest {
         assertEquals(HelperState.Connected(helper, pid), again.state)
     }
 
+    /**
+     * X5: a helper holds the resume nonce, its app process is gone, and the restarted one is
+     * connected to nothing. A new helper's first handoff is saved and the app dies before replying.
+     * The orphan still comes back: what counts is the nonce it holds, not a connection.
+     */
+    private fun orphaned(diesAfter: (NonceSlots, NonceSlots) -> Boolean) {
+        val orphan = FakeHelper()
+        val resume = process().let { it.offer(extras(orphan, it.armed()), shell, pid).nextNonce() }
+        val second = process()
+        assertEquals("nothing is connected to the restarted app", HelperState.NotConnected, second.state)
+        val new = FakeHelper(reportedIdentity = intArrayOf(shell, pid + 1))
+        val newNonce = second.armed()
+
+        assertTrue(
+            "the app died",
+            diesDuring(diesAfter) { second.offer(extras(new, newNonce, pid + 1), shell, pid + 1) },
+        )
+
+        val third = process()
+        assertEquals(
+            "the new helper's one-time nonce is used up",
+            HandoffReject.BAD_NONCE,
+            third.offer(extras(new, newNonce, pid + 1), shell, pid + 1).reject(),
+        )
+        assertNull("the orphan hands off again", third.offer(extras(orphan, resume), shell, pid).reject())
+        assertEquals(HelperState.Connected(orphan, pid), third.state)
+    }
+
+    @Test
+    fun anOrphanComesBackWhenTheAppDiesRightAfterSavingANewHelpersResumeNonce() = orphaned(NEW_RESUME_SAVED)
+
+    @Test
+    fun anOrphanComesBackWhenTheAppDiesAfterTheFirstSaveOfANewHelpersAdmission() = orphaned(FIRST_SAVE)
+
     @Test
     fun aReplacedHelperComesBackWhenTheAppDiesRightAfterSavingTheNewResumeNonce() = replaced(NEW_RESUME_SAVED)
 
