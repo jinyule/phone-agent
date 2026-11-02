@@ -13,6 +13,7 @@ import mockwebserver3.MockWebServer
 import mockwebserver3.junit5.StartStop
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
 
@@ -134,5 +135,24 @@ class DeltaConsistencyTest {
             assertEquals(final, text(response), "the final output is the reply")
             val flagged = response.providerMetadata?.get(PREVIEW_DIVERGED)
             assertEquals(if (contradict) JsonArray(listOf(JsonPrimitive("text"))) else null, flagged)
+        }
+
+    @Test
+    fun `a call shown on the stream that the final output drops is flagged`() =
+        runTest {
+            val item = """{"type":"function_call","id":"fc_1","call_id":"call_1","name":"tap","arguments":""}"""
+            server.enqueueSse(
+                listOf(
+                    """{"type":"response.output_item.added","output_index":0,"item":$item}""",
+                    """{"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"{}"}""",
+                    """{"type":"response.completed","response":{"status":"completed","output":""" +
+                        """[{"type":"message","content":[{"type":"output_text","text":"Done"}]}]}}""",
+                ).joinToString("") { "data: $it\n\n" },
+            )
+            val deltas = Deltas()
+            val response = responses().complete(Kit.request(), deltas)
+            assertEquals(emptyList<Part.ToolCall>(), response.toolCalls, "the final output is the reply")
+            assertEquals(listOf("call_1"), deltas.started.map { it.id.value }, "the preview showed it")
+            assertEquals(JsonArray(listOf(JsonPrimitive("calls"))), response.providerMetadata?.get(PREVIEW_DIVERGED))
         }
 }

@@ -20,6 +20,7 @@ internal class DeltaLedger(
     private val text = StringBuilder()
     private val reasoning = StringBuilder()
     private val args = LinkedHashMap<ToolCallId, StringBuilder>()
+    private val names = HashMap<ToolCallId, String>()
 
     /** Whether any reasoning was shown (a new reasoning section then needs a separator). */
     val hasReasoning: Boolean get() = reasoning.isNotEmpty()
@@ -43,6 +44,7 @@ internal class DeltaLedger(
     ) {
         if (id in args) return
         args[id] = StringBuilder()
+        names[id] = name
         onDelta(Delta.ToolCallStarted(id, name))
     }
 
@@ -59,14 +61,17 @@ internal class DeltaLedger(
 
     /**
      * Shows whatever of [parts] the deltas have not shown yet (see the class contract). Returns the
-     * channels (`text`, `reasoning`, `args`) where [parts] do not extend what was shown, in that
-     * order; empty when the deltas add up.
+     * channels where [parts] do not extend what was shown, in this order: `text`, `reasoning`,
+     * `calls` (an announced call is missing from [parts] or has another name there), `args`;
+     * empty when the deltas add up.
      */
     fun catchUp(parts: List<Part>): List<String> {
         val diverged = mutableListOf<String>()
+        val calls = parts.filterIsInstance<Part.ToolCall>().associate { it.id to it.name }
         if (!extend(text, parts.filterIsInstance<Part.Text>().joinToString("") { it.text }, ::text)) diverged += "text"
         val summaries = parts.filterIsInstance<Part.Reasoning>().mapNotNull { it.summary }
         if (!extend(reasoning, summaries.joinToString(TEXT_SEPARATOR), ::reasoning)) diverged += "reasoning"
+        if (names.any { (id, name) -> calls[id] != name }) diverged += "calls"
         for (call in parts.filterIsInstance<Part.ToolCall>()) {
             started(call.id, call.name)
             if (!extend(checkNotNull(args[call.id]), call.argsJson) { args(call.id, it) }) diverged += "args"

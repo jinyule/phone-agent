@@ -260,7 +260,17 @@ class ChatCompletionsModelTest {
             assertEquals(8, usage.inputTokens)
             assertEquals(5, usage.cacheReadTokens)
             assertEquals(0, usage.outputTokens)
-            assertEquals(JsonObject(mapOf("finish_reason" to JsonPrimitive("max_tokens"))), reply.providerMetadata)
+            // The name went on after the arguments started, so the preview announced "get_": flagged.
+            assertEquals(listOf("get_"), deltas.started.map { it.name })
+            assertEquals(
+                JsonObject(
+                    mapOf(
+                        "finish_reason" to JsonPrimitive("max_tokens"),
+                        PREVIEW_DIVERGED to JsonArray(listOf(JsonPrimitive("calls"))),
+                    ),
+                ),
+                reply.providerMetadata,
+            )
             assertEquals("r1", deltas.reasoning)
         }
 

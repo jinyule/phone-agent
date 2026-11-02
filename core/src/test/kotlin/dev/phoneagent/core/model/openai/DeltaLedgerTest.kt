@@ -47,4 +47,26 @@ class DeltaLedgerTest {
         val parts = listOf(reasoning("Other"), Part.Text("Goodbye"), Part.ToolCall(id, "tap", "{\"y\":2}"))
         assertEquals(listOf("text", "reasoning", "args"), ledger.catchUp(parts))
     }
+
+    @Test
+    fun `an announced call the reply does not have, or names differently, is a contradiction`() {
+        val ledger = DeltaLedger(Deltas())
+        ledger.started(id, "tap")
+        ledger.args(id, "{}")
+        assertEquals(listOf("calls"), ledger.catchUp(listOf(Part.Text("Done"))), "the call vanished")
+        val renamed = DeltaLedger(Deltas())
+        renamed.started(id, "tap")
+        assertEquals(listOf("calls"), renamed.catchUp(listOf(Part.ToolCall(id, "swipe", "{}"))), "another name")
+        val replaced = DeltaLedger(Deltas())
+        replaced.started(id, "tap")
+        val other = Part.ToolCall(ToolCallId("call_2"), "tap", "{}")
+        assertEquals(listOf("calls"), replaced.catchUp(listOf(other)), "another call instead")
+        val kept = DeltaLedger(Deltas())
+        kept.started(id, "tap")
+        assertEquals(
+            emptyList<String>(),
+            kept.catchUp(listOf(Part.ToolCall(id, "tap", "{}"), other)),
+            "one more is fine",
+        )
+    }
 }
