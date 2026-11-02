@@ -1,3 +1,11 @@
+/*
+ * Adapted from Mika, app/src/main/java/com/wangzan101/mika/cap/phone/a11y/ScreenAccessibility.kt
+ * (https://github.com/wangzan101/Mika, commit 9cef3750addd20b2af9e3214a8f5e56301670174),
+ * Copyright 2026 wangzan101, licensed under the Apache License, Version 2.0 (see NOTICE): the
+ * per-display window lookup, the suspending gesture dispatch and the display of an event.
+ * Modified by PhoneAgent contributors: rewritten in English behind the ScreenHost interface,
+ * strokes with their own start and duration, events copied into A11yEvent with their window.
+ */
 package dev.phoneagent.app.service
 
 import android.accessibilityservice.AccessibilityService

@@ -1,3 +1,11 @@
+/*
+ * Adapted from Mika, app/src/main/java/com/wangzan101/mika/cap/phone/a11y/ScreenAccessibility.kt
+ * (https://github.com/wangzan101/Mika, commit 9cef3750addd20b2af9e3214a8f5e56301670174),
+ * Copyright 2026 wangzan101, licensed under the Apache License, Version 2.0 (see NOTICE): the
+ * screenshot that waits out the system interval once and copies the hardware buffer into a
+ * software bitmap. Modified by PhoneAgent contributors: rewritten in English, any display, every
+ * request ended on close or cancellation with its buffer freed, a dead connection reported.
+ */
 package dev.phoneagent.app.service
 
 import android.accessibilityservice.AccessibilityService
