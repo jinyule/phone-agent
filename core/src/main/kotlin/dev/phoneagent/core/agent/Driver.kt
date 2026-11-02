@@ -143,14 +143,17 @@ internal class TurnEndings(
         repair(state, RepairCause.FAILED, "failed with ${failure.javaClass.name}")
     }
 
-    /** The log failed with [failure]: record the end on a reopened log when storage allows it. */
+    /**
+     * The log failed with [failure]: record the end on a reopened log when storage allows it. The
+     * detail names its class only, as [afterFailure] does: its message quotes the storage's.
+     */
     suspend fun afterLogFailure(
         state: TurnState,
         failure: SessionLogException,
     ) {
         if (!loop.log.reopen()) return
         try {
-            repair(state, RepairCause.FAILED, "session log failure: ${failure.message}")
+            repair(state, RepairCause.FAILED, "session log failure: ${failure.javaClass.name}")
         } catch (ignored: SessionLogException) {
             // Storage keeps failing; the next open repairs what is missing.
         }

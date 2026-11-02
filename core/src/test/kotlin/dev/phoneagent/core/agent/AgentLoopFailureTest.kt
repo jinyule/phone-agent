@@ -245,6 +245,24 @@ class AgentLoopFailureTest {
         }
 
     @Test
+    fun `a session log failure's turn end names the exception's class only`() =
+        runTest {
+            val harness = LoopHarness(this, FakeChatModel())
+            val loop = harness.start()
+            harness.storage.syncFailures = 1
+
+            loop.followup(text("go"))
+            loop.awaitStopped()
+
+            val ended = harness.events().only<TurnEnded>().single()
+            assertEquals("session log failure: ${SessionFlushException::class.java.name}", ended.detail)
+            val log =
+                harness.storage.files.values
+                    .joinToString("\n") { it.decodeToString() }
+            assertTrue("injected sync failure" !in log, "the storage's message stays out of the log")
+        }
+
+    @Test
     fun `every call is flushed before it runs, READ ones too, since it records tool-started first`() =
         runTest {
             lateinit var harness: LoopHarness
