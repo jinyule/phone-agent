@@ -39,7 +39,10 @@ internal class BlockedApps private constructor(
             return parse(url.readText(), name)
         }
 
-        /** Parses the list format; throws [IllegalArgumentException] naming the first bad line of [source]. */
+        /**
+         * Parses the list format (`#` starts a note to the end of the line); throws
+         * [IllegalArgumentException] naming the first bad line of [source].
+         */
         fun parse(
             text: String,
             source: String,
@@ -48,8 +51,9 @@ internal class BlockedApps private constructor(
                 text
                     .lines()
                     .withIndex()
-                    .filter { (_, line) -> line.isNotBlank() && !line.trimStart().startsWith("#") }
-                    .map { (index, line) -> entry("$source line ${index + 1}", line.trim()) }
+                    .map { (index, line) -> index to line.substringBefore('#').trim() }
+                    .filter { (_, line) -> line.isNotEmpty() }
+                    .map { (index, line) -> entry("$source line ${index + 1}", line) }
             val duplicate = entries.groupBy { it.first.lowercase(Locale.ROOT) }.filterValues { it.size > 1 }.keys
             require(duplicate.isEmpty()) { "$source: duplicate packages $duplicate" }
             return BlockedApps(

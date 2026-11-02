@@ -1,103 +1,129 @@
 # Apps the agent never operates (phase1 §6, hard refusal). Read by BlockedApps at startup; a bad
-# line fails loudly. Format, one app per line:
+# line fails loudly. Format, one app per line, then an optional `# ...` note:
 #
-#   <package>  <category>  <label>[|<label>...]
+#   <package>  <category>  <label>[|<label>...]  # <note>
 #
-# category: bank | broker | payment | system. Labels are matched (normalized, whole name) against
-# `phone_launch app=<name>`; the package is matched against every intent.
+# category: bank | broker | payment | system. The package is matched (case-insensitively) against
+# every intent. Labels are matched (normalized, whole name) against the app names shown on a
+# launcher icon and on the app's settings page in com.android.settings; `phone_launch` takes
+# package names only, so labels are never matched against it.
 #
-# Sources: package ids as published on the apps' Google Play pages
-# (play.google.com/store/apps/details?id=<package>) or, for apps only on Chinese stores, the
-# vendor's store listing; community lists such as gkd-kit subscription docs (docs/<package>.md)
-# help cross-check. How to update: docs/design/policy-rules.md §1 (one app per PR line, with the
-# listing as the source; run :core:test, BlockedAppsTest checks the file).
+# Every line notes where its package id was checked and when:
+#   play  play.google.com/store/apps/details?id=<package> (title and developer)
+#   mi    app.mi.com/details?id=<package> ("包名" field and developer)
+#   qq    sj.qq.com/appdetail/<package> (title and developer)
+#   aosp  the AndroidManifest.xml of the named path in AOSP (android.googlesource.com, main)
+# Lines no source confirms stay active in the last section, marked 未核实 with the reason.
+# How to update: docs/design/policy-rules.md §1 (one app per line, with its source and date;
+# run :core:test, BlockedAppsTest checks the file). Never add a package nobody can look up.
 
 # --- Payment (China) ---
-com.eg.android.AlipayGphone          payment  支付宝|Alipay
-com.unionpay                         payment  云闪付|UnionPay
-com.jd.jrapp                         payment  京东金融
-com.chinatelecom.bestpayclient       payment  翼支付
-hk.alipay.wallet                     payment  AlipayHK
+com.eg.android.AlipayGphone          payment  支付宝|Alipay               # 已核实 2026-11-02 play+qq：Alipay (Hangzhou) Technology Co. Ltd
+com.unionpay                         payment  云闪付|UnionPay             # 已核实 2026-11-02 play+qq：China UnionPay
+com.jd.jrapp                         payment  京东金融                     # 已核实 2026-11-02 mi+qq：北京京东叁佰陆拾度电子商务有限公司
+com.chinatelecom.bestpayclient       payment  翼支付                      # 已核实 2026-11-02 mi+qq：天翼支付科技有限公司
+hk.alipay.wallet                     payment  AlipayHK                 # 已核实 2026-11-02 play+qq：Alipay Payment Services (HK) Limited
 
 # --- Banks (China) ---
-com.icbc                             bank     工商银行|中国工商银行|ICBC
-com.chinamworld.main                 bank     建设银行|中国建设银行|CCB
-com.android.bankabc                  bank     农业银行|中国农业银行|农行掌上银行
-com.chinamworld.bocmbci              bank     中国银行|BOC
-com.bankcomm.Bankcomm                bank     交通银行
-cmb.pb                               bank     招商银行
-com.cmbchina.ccd.pluto.cmbActivity   bank     掌上生活
-com.yitong.mbank.psbc                bank     邮储银行|中国邮政储蓄银行
-cn.com.spdb.mobilebank.per           bank     浦发银行
-com.ecitic.bank.mobile               bank     中信银行
-cn.com.cmbc.newmbank                 bank     民生银行
-com.cebbank.mobile.cemb              bank     光大银行
-com.pingan.paces.ccms                bank     平安口袋银行
+com.icbc                             bank     工商银行|中国工商银行|ICBC         # 已核实 2026-11-02 mi+qq：中国工商银行股份有限公司
+com.chinamworld.main                 bank     建设银行|中国建设银行|CCB          # 已核实 2026-11-02 mi+qq：中国建设银行股份有限公司
+com.android.bankabc                  bank     农业银行|中国农业银行|农行掌上银行       # 已核实 2026-11-02 mi+qq：中国农业银行股份有限公司
+com.chinamworld.bocmbci              bank     中国银行|BOC                 # 已核实 2026-11-02 mi+qq：中国银行股份有限公司
+com.bankcomm.Bankcomm                bank     交通银行                     # 已核实 2026-11-02 mi+qq：交通银行股份有限公司
+cmb.pb                               bank     招商银行                     # 已核实 2026-11-02 play+qq：招商银行
+com.cmbchina.ccd.pluto.cmbActivity   bank     掌上生活                     # 已核实 2026-11-02 mi+qq：招商银行股份有限公司
+com.yitong.mbank.psbc                bank     邮储银行|中国邮政储蓄银行            # 已核实 2026-11-02 mi+qq：中国邮政储蓄银行股份有限公司
+cn.com.spdb.mobilebank.per           bank     浦发银行                     # 已核实 2026-11-02 mi+qq：上海浦东发展银行股份有限公司
+com.ecitic.bank.mobile               bank     中信银行                     # 已核实 2026-11-02 mi+qq：中信银行股份有限公司
+cn.com.cmbc.newmbank                 bank     民生银行                     # 已核实 2026-11-02 mi+qq：中国民生银行股份有限公司
+com.cebbank.mobile.cemb              bank     光大银行                     # 已核实 2026-11-02 mi+qq：中国光大银行股份有限公司
+com.pingan.paces.ccms                bank     平安口袋银行                   # 已核实 2026-11-02 mi+qq：平安银行股份有限公司
+com.cib.cibmb                        bank     兴业银行                     # 已核实 2026-11-02 mi+qq：兴业银行股份有限公司
+com.cib.xyk                          bank     兴业生活                     # 已核实 2026-11-02 mi+qq：兴业银行股份有限公司
+com.cgbchina.xpt                     bank     广发银行|广发手机银行              # 已核实 2026-11-02 mi+qq：广发银行股份有限公司
+com.cs_credit_bank                   bank     发现精彩                     # 已核实 2026-11-02 mi+qq：广发银行股份有限公司
+com.hxb.mobile.client                bank     华夏银行                     # 已核实 2026-11-02 mi+qq：华夏银行股份有限公司
+com.HuaXiaBank.HuaCard               bank     华彩生活                     # 已核实 2026-11-02 mi+qq：华夏银行股份有限公司
+com.czbank.mbank                     bank     浙商银行                     # 已核实 2026-11-02 mi+qq：浙商银行股份有限公司
+com.mybank.android.phone             bank     网商银行                     # 已核实 2026-11-02 mi+qq：浙江网商银行股份有限公司
 
 # --- Brokers and funds (China) ---
-com.hexin.plat.android               broker   同花顺
-com.eastmoney.android.berlin         broker   东方财富
-com.eastmoney.android.fund           broker   天天基金
-com.lphtsccft                        broker   涨乐财富通|华泰证券
-cn.futu.trader                       broker   富途牛牛|moomoo
-com.tigerbrokers.stock               broker   老虎证券|Tiger Trade
-com.xueqiu.android                   broker   雪球
-com.android.dazhihui                 broker   大智慧
-com.antfortune.wealth                broker   蚂蚁财富
+com.hexin.plat.android               broker   同花顺                      # 已核实 2026-11-02 mi+qq：浙江同花顺云软件有限公司
+com.eastmoney.android.berlin         broker   东方财富                     # 已核实 2026-11-02 mi+qq：东方财富信息股份有限公司
+com.eastmoney.android.fund           broker   天天基金                     # 已核实 2026-11-02 mi+qq：上海天天基金销售有限公司
+com.lphtsccft                        broker   涨乐财富通|华泰证券               # 已核实 2026-11-02 mi+qq：华泰证券股份有限公司
+cn.futu.trader                       broker   富途牛牛|moomoo              # 已核实 2026-11-02 play：深圳市富途网络科技有限公司
+com.tigerbrokers.stock               broker   老虎证券|Tiger Trade         # 已核实 2026-11-02 play：Tiger Brokers
+com.xueqiu.android                   broker   雪球                       # 已核实 2026-11-02 play+qq：雪球
+com.android.dazhihui                 broker   大智慧                      # 已核实 2026-11-02 mi+qq：上海大智慧信息科技有限公司
+com.antfortune.wealth                broker   蚂蚁财富                     # 已核实 2026-11-02 mi：蚂蚁财富（上海）科技有限公司
+com.zxscnew                          broker   中信证券|信e投                 # 已核实 2026-11-02 mi+qq：中信证券股份有限公司
+zhongxinjiantou.szkingdom.android.newphone broker 蜻蜓点金|中信建投            # 已核实 2026-11-02 mi+qq：中信建投证券股份有限公司
+com.guotai.dazhihui                  broker   国泰海通君弘|君弘                # 已核实 2026-11-02 mi：国泰海通证券股份有限公司
+com.cmschina.stock                   broker   招商证券|智远一户通               # 已核实 2026-11-02 mi+qq：招商证券股份有限公司
+com.gf.client                        broker   广发易淘金|易淘金                # 已核实 2026-11-02 mi：广发证券股份有限公司
+com.galaxy.stock                     broker   中国银河证券|银河证券              # 已核实 2026-11-02 mi+qq：中国银河证券股份有限公司
+com.guosen.android                   broker   国信金太阳                    # 已核实 2026-11-02 mi+qq：国信证券股份有限公司
+com.hundsun.winner.pazq              broker   平安证券                     # 已核实 2026-11-02 mi+qq：平安证券股份有限公司
+com.eno.xyzq.page                    broker   知己理财|兴业证券                # 已核实 2026-11-02 mi+qq：兴业证券股份有限公司
 
 # --- Payment (international) ---
-com.paypal.android.p2pmobile         payment  PayPal
-com.venmo                            payment  Venmo
-com.squareup.cash                    payment  Cash App
-com.google.android.apps.walletnfcrel payment  Google Wallet
-com.google.android.apps.nbu.paisa.user payment Google Pay
-com.samsung.android.spay             payment  Samsung Wallet|Samsung Pay
-com.zellepay.zelle                   payment  Zelle
-com.revolut.revolut                  payment  Revolut
-com.transferwise.android             payment  Wise
-com.phonepe.app                      payment  PhonePe
-net.one97.paytm                      payment  Paytm
-jp.ne.paypay.android.app             payment  PayPay
-viva.republica.toss                  payment  Toss
-com.globe.gcash.android              payment  GCash
-com.myklarnamobile                   payment  Klarna
+com.paypal.android.p2pmobile         payment  PayPal                   # 已核实 2026-11-02 play：PayPal Mobile
+com.venmo                            payment  Venmo                    # 已核实 2026-11-02 play：PayPal Mobile
+com.squareup.cash                    payment  Cash App                 # 已核实 2026-11-02 play：Block, Inc.
+com.google.android.apps.walletnfcrel payment  Google Wallet            # 已核实 2026-11-02 play：Google LLC
+com.google.android.apps.nbu.paisa.user payment Google Pay              # 已核实 2026-11-02 play：Google LLC
+com.samsung.android.spay             payment  Samsung Wallet|Samsung Pay # 已核实 2026-11-02 play：Samsung Electronics Co., Ltd.
+com.revolut.revolut                  payment  Revolut                  # 已核实 2026-11-02 play：Revolut Ltd
+com.transferwise.android             payment  Wise                     # 已核实 2026-11-02 play：Wise Payments Ltd.
+com.phonepe.app                      payment  PhonePe                  # 已核实 2026-11-02 play：PhonePe
+net.one97.paytm                      payment  Paytm                    # 已核实 2026-11-02 play：Paytm - One97 Communications Ltd.
+jp.ne.paypay.android.app             payment  PayPay                   # 已核实 2026-11-02 play：PayPay Corporation
+viva.republica.toss                  payment  Toss                     # 已核实 2026-11-02 play：Viva Republica
+com.globe.gcash.android              payment  GCash                    # 已核实 2026-11-02 play：Mynt Inc.
+com.myklarnamobile                   payment  Klarna                   # 已核实 2026-11-02 play：Klarna Bank AB (publ)
 
 # --- Banks (international) ---
-com.chase.sig.android                bank     Chase
-com.infonow.bofa                     bank     Bank of America
-com.wf.wellsfargomobile              bank     Wells Fargo
-com.citi.citimobile                  bank     Citi
-com.konylabs.capitalone              bank     Capital One
-com.americanexpress.android.acctsvcs.us bank  Amex|American Express
-uk.co.hsbc.hsbcukmobilebanking       bank     HSBC UK
-hk.com.hsbc.hsbchkmobilebanking      bank     HSBC HK
-com.barclays.android.barclaysmobilebanking bank Barclays
-com.grppl.android.shell.CMBlloydsTSB73 bank   Lloyds
-de.number26.android                  bank     N26
-co.uk.getmondo                       bank     Monzo
-com.rbc.mobile.android               bank     RBC
-com.commbank.netbank                 bank     CommBank
+com.chase.sig.android                bank     Chase                    # 已核实 2026-11-02 play：JPMorgan Chase
+com.infonow.bofa                     bank     Bank of America          # 已核实 2026-11-02 play：Bank of America
+com.wf.wellsfargomobile              bank     Wells Fargo              # 已核实 2026-11-02 play：Wells Fargo Mobile
+com.citi.citimobile                  bank     Citi                     # 已核实 2026-11-02 play：Citibank N.A.
+com.konylabs.capitalone              bank     Capital One              # 已核实 2026-11-02 play：Capital One Services, LLC
+com.americanexpress.android.acctsvcs.us bank  Amex|American Express    # 已核实 2026-11-02 play：American Express
+uk.co.hsbc.hsbcukmobilebanking       bank     HSBC UK                  # 已核实 2026-11-02 play：HSBC
+hk.com.hsbc.hsbchkmobilebanking      bank     HSBC HK                  # 已核实 2026-11-02 play：The Hongkong and Shanghai Banking Corporation Ltd
+com.barclays.android.barclaysmobilebanking bank Barclays               # 已核实 2026-11-02 play：Barclays Services Limited
+com.grppl.android.shell.CMBlloydsTSB73 bank   Lloyds                   # 已核实 2026-11-02 play：Lloyds Banking Group PLC
+de.number26.android                  bank     N26                      # 已核实 2026-11-02 play：N26 AG
+co.uk.getmondo                       bank     Monzo                    # 已核实 2026-11-02 play：Monzo
+com.rbc.mobile.android               bank     RBC                      # 已核实 2026-11-02 play：Royal Bank of Canada
+com.commbank.netbank                 bank     CommBank                 # 已核实 2026-11-02 play：Commbank Australia
+com.dbs.sg.dbsmbanking               bank     DBS digibank|DBS         # 已核实 2026-11-02 play：DBS Bank Ltd
+com.ocbc.mobile                      bank     OCBC|OCBC Singapore      # 已核实 2026-11-02 play：Oversea-Chinese Banking Corporation Limited
 
 # --- Brokers and crypto (international) ---
-com.robinhood.android                broker   Robinhood
-atws.app                             broker   IBKR
-org.dayup.stocks                     broker   Webull
-com.schwab.mobile                    broker   Schwab
-com.fidelity.android                 broker   Fidelity
-com.etrade.mobilepro.activity        broker   E*TRADE
-com.coinbase.android                 broker   Coinbase
-com.binance.dev                      broker   Binance
+com.robinhood.android                broker   Robinhood                # 已核实 2026-11-02 play：Robinhood
+atws.app                             broker   IBKR                     # 已核实 2026-11-02 play：Interactive Brokers Group
+org.dayup.stocks                     broker   Webull                   # 已核实 2026-11-02 play：Webull Technologies Pte. Ltd.
+com.schwab.mobile                    broker   Schwab                   # 已核实 2026-11-02 play：The Charles Schwab Corporation
+com.fidelity.android                 broker   Fidelity                 # 已核实 2026-11-02 play：Fidelity Investments
+com.etrade.mobilepro.activity        broker   E*TRADE                  # 已核实 2026-11-02 play：E*TRADE from Morgan Stanley
+com.coinbase.android                 broker   Coinbase                 # 已核实 2026-11-02 play：Coinbase Inc
+com.binance.dev                      broker   Binance                  # 已核实 2026-11-02 play：Binance Inc.
 
 # --- System surfaces ---
-com.android.systemui                 system   SystemUI
-com.android.packageinstaller         system   Package installer
-com.google.android.packageinstaller  system   Package installer
-com.miui.packageinstaller            system   Package installer
-com.android.permissioncontroller     system   Permission controller
-com.google.android.permissioncontroller system Permission controller
-com.miui.securitycenter              system   手机管家
-com.huawei.systemmanager             system   手机管家
-com.coloros.safecenter               system   手机管家
-com.iqoo.secure                      system   i管家
-com.vivo.permissionmanager           system   权限管理
-com.samsung.android.lool             system   Device care
+com.android.systemui                 system   SystemUI                 # 已核实 2026-11-02 aosp:frameworks/base/packages/SystemUI
+com.android.packageinstaller         system   Package installer        # 已核实 2026-11-02 aosp:frameworks/base/packages/PackageInstaller
+com.android.permissioncontroller     system   Permission controller    # 已核实 2026-11-02 aosp:packages/modules/Permission/PermissionController
+com.samsung.android.lool             system   Device care              # 已核实 2026-11-02 play：Samsung Electronics Co., Ltd.
+
+# --- 未核实（仍然生效；查到来源后移到上面对应的段） ---
+com.zellepay.zelle                   payment  Zelle                    # 未核实 2026-11-02：Google Play 页面返回 404，其他商店也没有详情页
+com.google.android.packageinstaller  system   Package installer        # 未核实 2026-11-02：预装系统组件，没有公开的商店页或源码清单
+com.miui.packageinstaller            system   Package installer        # 未核实 2026-11-02：预装系统组件，没有公开的商店页或源码清单
+com.google.android.permissioncontroller system Permission controller   # 未核实 2026-11-02：预装系统组件（Mainline 模块改名后的包），没有公开清单
+com.miui.securitycenter              system   手机管家                     # 未核实 2026-11-02：预装系统组件，没有公开的商店页或源码清单
+com.huawei.systemmanager             system   手机管家                     # 未核实 2026-11-02：预装系统组件，没有公开的商店页或源码清单
+com.coloros.safecenter               system   手机管家                     # 未核实 2026-11-02：预装系统组件，没有公开的商店页或源码清单
+com.iqoo.secure                      system   i管家                      # 未核实 2026-11-02：预装系统组件，没有公开的商店页或源码清单
+com.vivo.permissionmanager           system   权限管理                     # 未核实 2026-11-02：预装系统组件，没有公开的商店页或源码清单

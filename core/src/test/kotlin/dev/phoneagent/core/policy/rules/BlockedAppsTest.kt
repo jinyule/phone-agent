@@ -30,6 +30,33 @@ internal class BlockedAppsTest {
         assertEquals(category, list.categoryOf(pkg))
     }
 
+    @ParameterizedTest(name = "{0} -> {1}")
+    @CsvSource(
+        "com.dbs.sg.dbsmbanking, BANK",
+        "com.ocbc.mobile, BANK",
+        "com.cib.cibmb, BANK",
+        "com.cgbchina.xpt, BANK",
+        "com.hxb.mobile.client, BANK",
+        "com.czbank.mbank, BANK",
+        "com.zxscnew, BROKER",
+        "com.cmschina.stock, BROKER",
+    )
+    fun `the list covers joint-stock banks, Singapore banks and traditional brokers`(
+        pkg: String,
+        category: AppCategory,
+    ) {
+        assertEquals(category, list.categoryOf(pkg))
+    }
+
+    @Test
+    fun `every shipped line says whether, when and where its package was checked`() {
+        val url = requireNotNull(BlockedApps::class.java.getResource("blocked-apps.txt"))
+        val entries = url.readText().lines().filter { it.isNotBlank() && !it.trimStart().startsWith("#") }
+        val note = Regex("# (已核实 \\d{4}-\\d{2}-\\d{2} (play|mi|qq|aosp)|未核实 \\d{4}-\\d{2}-\\d{2}：)")
+        assertTrue(entries.size > 90, "${entries.size} entries")
+        entries.forEach { assertTrue(note.containsMatchIn(it), it) }
+    }
+
     @Test
     fun `ordinary apps are not on the list`() {
         listOf("com.tencent.mm", "com.taobao.taobao", "com.android.settings", "com.android.chrome")
@@ -53,7 +80,7 @@ internal class BlockedAppsTest {
 
     @Test
     fun `the format skips comments and blank lines`() {
-        val parsed = BlockedApps.parse("# header\n\n  # indented comment\ncom.a.B  bank  甲|A Bank\n", "test")
+        val parsed = BlockedApps.parse("# header\n\n  # indented comment\ncom.a.B  bank  甲|A Bank  # 已核实\n", "test")
         assertEquals(AppCategory.BANK, parsed.categoryOf("com.a.b"))
         assertEquals(AppCategory.BANK, parsed.categoryNamed("a bank"))
         assertEquals(AppCategory.BANK, parsed.categoryNamed("甲"))
