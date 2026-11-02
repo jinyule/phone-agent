@@ -99,6 +99,9 @@ internal data class ServedApp(
     /** The Android user the app runs as. */
     val user: Int get() = uid / PER_USER_RANGE
 
+    /** Whether [otherUid] is this app, in any user (the same app id). */
+    fun isSameApp(otherUid: Int): Boolean = otherUid % PER_USER_RANGE == uid % PER_USER_RANGE
+
     private companion object {
         const val PER_USER_RANGE = 100_000
     }

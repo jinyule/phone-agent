@@ -4,9 +4,9 @@
  * `startView` / `activitiesFor`).
  * Copyright 2026 wangzan101. Licensed under the Apache License, Version 2.0.
  *
- * Modified by PhoneAgent contributors: one entry point takes the intent the app built, URI-grant
- * flags are stripped, the launch gate is a pure function, and started tasks are recorded as the
- * agent's own.
+ * Modified by PhoneAgent contributors: one entry point takes the intent the app built, only an
+ * activity the app could start itself is started, URI-grant flags are stripped, the launch gate is
+ * a pure function, and started tasks are recorded as the agent's own.
  */
 package dev.phoneagent.privileged.cap
 
@@ -21,11 +21,13 @@ import dev.phoneagent.privileged.StartResult
  *
  * What the helper guarantees, whatever the app asks for: the target display is one of its own, the
  * app is the copy installed for the helper's user, an app the user has visible on the main screen
- * is never started, a cold start never kills a process whose tasks live elsewhere, the intent can
- * neither hand out URI permissions nor carry another intent ([NestedIntents]), and only an
- * activity the app's own uid could start is started ([LaunchTargets]). Which intents the agent
- * may send at all is decided by the app's PolicyEngine (phase1-architecture §6); the helper is not
- * a second policy.
+ * is never started, a cold start never kills a process whose tasks live elsewhere, and the intent
+ * cannot carry another intent ([NestedIntents]). Above all, it starts only the activity the app
+ * could start with `startActivity` itself, and lends it nothing of the shell's: every path (the
+ * direct start, the `am start` fallback, and the force-stop of a cold start) acts on the one
+ * [LaunchTargets.Target.Allowed] that [LaunchTargets.check] returned, in the helper's user.
+ * Which intents the agent may send at all is decided by the app's PolicyEngine
+ * (phase1-architecture §6); the helper is not a second policy.
  */
 internal class Launcher(
     platform: Platform,
@@ -51,8 +53,8 @@ internal class Launcher(
         val refusal = refuse(displayId, intent, userId)
         return when {
             refusal != null -> {
-                Log.w(TAG, "startActivity refused: $refusal")
-                StartResult.REFUSED
+                Log.w(TAG, "startActivity refused (${refusal.reason}): ${refusal.detail}")
+                refusal.reason.result
             }
 
             keyguard.read() != LockState.Known(locked = false) -> {
@@ -61,7 +63,7 @@ internal class Launcher(
             }
 
             else -> {
-                attempt(displayId, sanitize(checkNotNull(intent)), cold)
+                attempt(displayId, checkNotNull(intent), cold)
             }
         }
     }
@@ -71,13 +73,30 @@ internal class Launcher(
         displayId: Int,
         intent: Intent?,
         userId: Int,
-    ): String? =
-        when {
-            intent == null -> "no intent"
-            !displays.owns(displayId) -> "display $displayId is not one of the agent's"
-            userId != myUser && userId != USER_CURRENT -> "user $userId is not the helper's user $myUser"
-            else -> NestedIntents.find(intent)
+    ): LaunchTargets.Target.Refused? {
+        val nested = intent?.let(NestedIntents::find)
+        return when {
+            intent == null -> {
+                LaunchTargets.Target.Refused(LaunchRefusal.BAD_REQUEST, "no intent")
+            }
+
+            !displays.owns(displayId) -> {
+                LaunchTargets.Target.Refused(LaunchRefusal.BAD_REQUEST, "display $displayId is not one of the agent's")
+            }
+
+            userId != myUser && userId != USER_CURRENT -> {
+                LaunchTargets.Target.Refused(LaunchRefusal.BAD_REQUEST, "user $userId is not the helper's user $myUser")
+            }
+
+            nested != null -> {
+                LaunchTargets.Target.Refused(LaunchRefusal.NESTED_INTENT, nested)
+            }
+
+            else -> {
+                null
+            }
         }
+    }
 
     private fun attempt(
         displayId: Int,
@@ -91,20 +110,6 @@ internal class Launcher(
             StartResult.ERROR
         }
 
-    /**
-     * Drops flags that would make the helper's uid grant someone access to its URIs, and makes the
-     * activity the root of a new task on the agent display.
-     */
-    private fun sanitize(intent: Intent): Intent {
-        val stripped =
-            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
-                Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION
-        val copy = Intent(intent)
-        copy.flags = intent.flags and stripped.inv() or Intent.FLAG_ACTIVITY_NEW_TASK
-        if (intent.flags and stripped != 0) Log.i(TAG, "dropped URI-grant flags from $intent")
-        return copy
-    }
-
     private fun launch(
         displayId: Int,
         intent: Intent,
@@ -112,40 +117,38 @@ internal class Launcher(
     ): Int =
         when (val target = targets.check(intent)) {
             is LaunchTargets.Target.Refused -> {
-                Log.w(TAG, "not starting on display $displayId: ${target.reason}")
-                target.result
+                Log.w(TAG, "not starting on display $displayId (${target.reason}): ${target.detail}")
+                target.reason.result
             }
 
             is LaunchTargets.Target.Allowed -> {
-                // Start exactly the activity that was checked, not whatever resolves later.
-                gated(displayId, Intent(intent).setComponent(target.activity), cold)
+                gated(displayId, target, cold)
             }
         }
 
     private fun gated(
         displayId: Int,
-        intent: Intent,
+        target: LaunchTargets.Target.Allowed,
         cold: Boolean,
     ): Int {
-        val target = checkNotNull(intent.component).packageName
+        val pkg = target.activity.packageName
         val snapshot = tasks.rows()
-        val gate = LaunchGate.refuse(snapshot, listOf(target), displayId, displays.ids(), myUser)
+        val gate = LaunchGate.refuse(snapshot, listOf(pkg), displayId, displays.ids(), myUser)
         if (gate != null) {
-            Log.i(TAG, "not starting $target on display $displayId: StartResult $gate")
+            Log.i(TAG, "not starting $pkg on display $displayId: StartResult $gate")
             return gate
         }
-        return started(displayId, intent, cold, snapshot, target)
+        return started(displayId, target, cold, snapshot)
     }
 
     private fun started(
         displayId: Int,
-        intent: Intent,
+        target: LaunchTargets.Target.Allowed,
         cold: Boolean,
         snapshot: List<TaskRow>,
-        target: String,
     ): Int {
-        val coldDone = cold && restart(snapshot, target, displayId)
-        if (!starter.start(displayId, intent)) return StartResult.ERROR
+        val coldDone = cold && restart(snapshot, target.activity.packageName, displayId)
+        if (!starter.start(displayId, target, myUser)) return StartResult.ERROR
         ownership.remember(tasks.topTask(displayId))
         return if (cold && !coldDone) StartResult.COLD_IGNORED else StartResult.OK
     }
@@ -171,7 +174,7 @@ internal class Launcher(
     private companion object {
         const val TAG = "PhoneAgentHelper"
 
-        /** `UserHandle.USER_CURRENT`. */
+        /** `UserHandle.USER_CURRENT`: accepted, and taken as the helper's user. */
         const val USER_CURRENT = -2
     }
 }
@@ -179,17 +182,20 @@ internal class Launcher(
 /**
  * The two ways to put an activity on a display, in order of preference: the hidden
  * `startActivityAsUser` with `ActivityOptions.setLaunchDisplayId`, then `am start --display` with
- * the intent spelled out as arguments. [Launcher] has already decided that starting is allowed.
+ * the intent spelled out as arguments. Both start [LaunchTargets.Target.Allowed.intent], the intent
+ * that was checked, in the helper's user; neither looks at the request again.
  */
 private class ActivityStarter(
     private val bridge: SystemBridge,
     private val commands: CommandRunner,
 ) {
-    /** Starts [intent] on [displayId]; false when every path failed. */
+    /** Starts [target] on [displayId] in [userId]; false when every path failed. */
     fun start(
         displayId: Int,
-        intent: Intent,
+        target: LaunchTargets.Target.Allowed,
+        userId: Int,
     ): Boolean {
+        val intent = target.intent
         val options = ActivityOptions.makeBasic().setLaunchDisplayId(displayId).toBundle()
         val atm = bridge.activityTaskManager
         val answer =
@@ -208,12 +214,12 @@ private class ActivityStarter(
                         0,
                         null,
                         options,
-                        USER_CURRENT,
+                        userId,
                     )
                 }
             } catch (e: CapabilityUnavailable) {
                 Log.w(TAG, "startActivityAsUser unavailable, falling back to am start", e)
-                return amStart(displayId, intent)
+                return amStart(displayId, target, userId)
             }
         // It ran: an answer that is not a start result is a failure, never a reason to start again.
         val started = answer as? Int
@@ -222,42 +228,44 @@ private class ActivityStarter(
     }
 
     /**
-     * `am start` with the whole intent: component, action (MAIN too: MAIN with LAUNCHER and without
-     * it are different intents), data, type, categories and flags, so it starts what
-     * `startActivityAsUser` would have. Extras have no faithful spelling here yet, so an intent
-     * with extras is not started this way (false).
+     * `am start` with the whole intent: user, component, action (MAIN too: MAIN with LAUNCHER and
+     * without it are different intents), data, type, categories and flags, so it starts what
+     * `startActivityAsUser` would have. Extras and ClipData have no faithful spelling here, so an
+     * intent with either is not started this way (false).
      */
     private fun amStart(
         displayId: Int,
-        intent: Intent,
+        target: LaunchTargets.Target.Allowed,
+        userId: Int,
     ): Boolean {
+        val intent = target.intent
         val problem =
             when {
                 intent.extras?.isEmpty == false -> "am start cannot carry its extras"
-                intent.component == null && intent.action == null -> "it names neither a component nor an action"
+                intent.clipData != null -> "am start cannot carry its ClipData"
                 else -> null
             }
         if (problem != null) {
             Log.w(TAG, "not falling back to am start for $intent: $problem")
             return false
         }
-        return commands.run(amArguments(displayId, intent)).ok
+        return commands.run(amArguments(displayId, target, userId)).ok
     }
 
-    /** `am start` arguments for [intent]. */
+    /** `am start` arguments for [target]. */
     private fun amArguments(
         displayId: Int,
-        intent: Intent,
+        target: LaunchTargets.Target.Allowed,
+        userId: Int,
     ): List<String> =
         buildList {
-            val component = intent.component
-            addAll(listOf("am", "start", "--display", "$displayId"))
-            component?.let { addAll(listOf("-n", it.flattenToShortString())) }
+            val intent = target.intent
+            addAll(listOf("am", "start", "--user", "$userId", "--display", "$displayId"))
+            addAll(listOf("-n", target.activity.flattenToShortString()))
             intent.action?.let { addAll(listOf("-a", it)) }
             intent.dataString?.let { addAll(listOf("-d", it)) }
             intent.type?.let { addAll(listOf("-t", it)) }
             intent.categories?.forEach { addAll(listOf("-c", it)) }
-            if (component == null) intent.`package`?.let { addAll(listOf("-p", it)) }
             // Decimal: am reads the flags with Integer.decode, which takes no hex above 0x7fffffff.
             if (intent.flags != 0) addAll(listOf("-f", "${intent.flags}"))
         }
@@ -267,9 +275,6 @@ private class ActivityStarter(
 
         /** The package name the shell context reports; the activity manager checks it against our uid. */
         const val SHELL_PACKAGE = "com.android.shell"
-
-        /** `UserHandle.USER_CURRENT`. */
-        const val USER_CURRENT = -2
 
         /**
          * `startActivityAsUser(caller, callingPackage, callingFeatureId, intent, resolvedType,

@@ -17,7 +17,8 @@ import org.robolectric.Shadows.shadowOf
 
 /**
  * `am start`, the fallback when the hidden `startActivityAsUser` is unavailable, through the Proxy,
- * PrivilegedCore and Launcher: the command must start the same intent, not just its component.
+ * PrivilegedCore and Launcher: the command must start the same intent, not just its component, in
+ * the helper's user. Which activities it may start at all is LaunchBoundaryTest's.
  */
 @RunWith(RobolectricTestRunner::class)
 class AmFallbackTest {
@@ -62,7 +63,7 @@ class AmFallbackTest {
     private fun start(intent: Intent): Int = helper.core.startActivity(display, intent, 0, false)
 
     private fun am(vararg rest: String): List<String> =
-        listOf("am", "start", "--display", "$display", "-n", "$HANDLER/.Main") + rest
+        listOf("am", "start", "--user", "0", "--display", "$display", "-n", "$HANDLER/.Main") + rest
 
     @Test
     fun anImplicitViewKeepsItsActionAndUrl() {

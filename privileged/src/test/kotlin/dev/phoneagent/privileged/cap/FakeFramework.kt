@@ -261,26 +261,24 @@ internal class CapabilityHarness(
         ShadowBinder.reset()
     }
 
-    /** Installs [packageName] with one activity, [exported] and guarded by [permission], matching [filter]. */
+    /**
+     * Adds [activity] to [packageName], installing the package first if needed: the app's own
+     * package gets [APP_UID], any other [OTHER_UID]. The activity is [exported], guarded by
+     * [permission], matching [filter]; [appPermission] is the application's permission (set on
+     * first install) and [targetActivity] makes it an activity-alias of that activity. One
+     * parameter per manifest attribute the launch checks read, hence the LongParameterList.
+     */
+    @Suppress("LongParameterList")
     fun install(
         packageName: String,
         activity: String = "$packageName.Main",
         exported: Boolean = true,
         permission: String? = null,
         filter: IntentFilter? = null,
+        appPermission: String? = null,
+        targetActivity: String? = null,
     ): ComponentName {
-        val app =
-            ApplicationInfo().apply {
-                this.packageName = packageName
-                uid = OTHER_UID
-            }
-        val packages = shadowOf(context.packageManager)
-        packages.installPackage(
-            PackageInfo().apply {
-                this.packageName = packageName
-                applicationInfo = app
-            },
-        )
+        val app = installed(packageName, appPermission)
         val component = ComponentName(packageName, activity)
         packages.addOrUpdateActivity(
             ActivityInfo().apply {
@@ -289,10 +287,39 @@ internal class CapabilityHarness(
                 applicationInfo = app
                 this.exported = exported
                 this.permission = permission
+                this.targetActivity = targetActivity
             },
         )
         if (filter != null) packages.addIntentFilterForActivity(component, filter)
         return component
+    }
+
+    /** Makes the app's manifest request [permissions] (granted or not, as [grantApp] decides). */
+    fun appRequests(vararg permissions: String) {
+        installed(APP, appPermission = null)
+        packages.getInternalMutablePackageInfo(APP).requestedPermissions = arrayOf(*permissions)
+    }
+
+    private val packages get() = shadowOf(context.packageManager)
+
+    private fun installed(
+        packageName: String,
+        appPermission: String?,
+    ): ApplicationInfo {
+        packages.getInternalMutablePackageInfo(packageName)?.let { return it.applicationInfo!! }
+        val app =
+            ApplicationInfo().apply {
+                this.packageName = packageName
+                uid = if (packageName == APP) APP_UID else OTHER_UID
+                permission = appPermission
+            }
+        packages.installPackage(
+            PackageInfo().apply {
+                this.packageName = packageName
+                applicationInfo = app
+            },
+        )
+        return app
     }
 
     /** Grants [permission] to the app's uid, as the package manager would. */
