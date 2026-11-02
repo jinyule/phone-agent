@@ -50,9 +50,10 @@ internal enum class LaunchRefusal(
  * (`ActivityTaskSupervisor.checkStartAnyActivityPermission`), for the app's uid:
  * - the activity, as the package manager reports it, is the app's own (same app id) or exported.
  *   For an activity-alias that is the alias itself, with its own `exported` and permission;
- * - another app's activity requires no permission, or one the app's uid holds. An activity that
- *   declares none requires its application's permission; the package manager fills that in, and
- *   this falls back to it where it did not. An alias requires only its own, as on the platform;
+ * - another app's activity requires no permission, or one the app's uid holds. The permission is
+ *   `ActivityInfo.permission` as the package manager resolved it, the one the activity manager
+ *   checks: an activity that declares none has its application's, one that declares an empty one
+ *   (`android:permission=""`) has none, and an alias has only its own;
  * - the app op of that permission, if it has one, is allowed for the app (`MODE_ALLOWED`; the
  *   activity manager refuses any other mode too, `MODE_DEFAULT` included). An op the helper may
  *   not read refuses;
@@ -117,7 +118,7 @@ internal class LaunchTargets(
     ): Target.Refused? {
         val component = ComponentName(activity.packageName, activity.name)
         val own = activity.applicationInfo?.uid?.let(app::isSameApp) == true
-        val permission = requiredPermission(activity)
+        val permission = activity.permission
         val actionPermission = ACTION_PERMISSIONS[action]?.takeIf(grants::requests)
         // A cold start names the package on the `am force-stop` command line.
         val nameProblem = PackageNames.problem(context, activity.packageName)
@@ -166,10 +167,6 @@ internal class LaunchTargets(
             flags = intent.flags and URI_GRANTS.inv() or Intent.FLAG_ACTIVITY_NEW_TASK
         }
     }
-
-    /** The activity's permission, else its application's; an alias has only its own. */
-    private fun requiredPermission(activity: ActivityInfo): String? =
-        activity.permission ?: activity.applicationInfo?.permission?.takeIf { activity.targetActivity == null }
 
     /**
      * The named component, or whatever resolves; a package with no matching activity may still

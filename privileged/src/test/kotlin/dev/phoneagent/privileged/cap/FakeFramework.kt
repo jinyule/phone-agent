@@ -286,10 +286,13 @@ internal class CapabilityHarness(
 
     /**
      * Adds [activity] to [packageName], installing the package first if needed: the app's own
-     * package gets [APP_UID], any other [OTHER_UID]. The activity is [exported], guarded by
-     * [permission], matching [filter]; [appPermission] is the application's permission (set on
-     * first install) and [targetActivity] makes it an activity-alias of that activity. One
-     * parameter per manifest attribute the launch checks read, hence the LongParameterList.
+     * package gets [APP_UID], any other [OTHER_UID]. The activity is [exported] and matches
+     * [filter]; [appPermission] is the application's permission (set on first install) and
+     * [targetActivity] makes it an activity-alias of that activity. [permission] is the manifest's
+     * `android:permission`, resolved as the package manager resolves it (`ParsedActivityUtils`):
+     * an activity that does not declare one (null) gets its application's, an alias gets only its
+     * own, and an empty one (`android:permission=""`) is none. One parameter per manifest
+     * attribute the launch checks read, hence the LongParameterList.
      */
     @Suppress("LongParameterList")
     fun install(
@@ -303,13 +306,14 @@ internal class CapabilityHarness(
     ): ComponentName {
         val app = installed(packageName, appPermission)
         val component = ComponentName(packageName, activity)
+        val declared = permission ?: app.permission.takeIf { targetActivity == null }
         packages.addOrUpdateActivity(
             ActivityInfo().apply {
                 name = activity
                 this.packageName = packageName
                 applicationInfo = app
                 this.exported = exported
-                this.permission = permission
+                this.permission = declared?.ifEmpty { null }
                 this.targetActivity = targetActivity
             },
         )

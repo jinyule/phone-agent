@@ -27,7 +27,7 @@ phase1-architecture §3.5 列出了 `IPrivilegedCore` 的能力面，调研报�
      - intent 先解析成唯一的 Activity：解析不出来是 `NOT_FOUND`，不止一个候选是 `REFUSED`（助手问不了用户选哪个）。
      - 然后按系统在 App 自己调用 `startActivity` 时的检查（`ActivityTaskSupervisor.checkStartAnyActivityPermission`），对 App 的 uid 逐条判断：
        - 不属于本 App 的 Activity 必须已导出。"属于本 App"按 app id 判断，与系统一致，不按包名。
-       - 不属于本 App 时，它要求的权限 App 的 uid 必须已获得（`checkPermission(perm, appUid)`）。Activity 自己没声明权限时，要求它所在 application 的权限：PackageManager 解析清单时已经把它填进 `ActivityInfo.permission`，没填的情况助手自己补上。
+       - 不属于本 App 时，它要求的权限 App 的 uid 必须已获得（`checkPermission(perm, appUid)`）。要求的权限以系统解析后的 `ActivityInfo.permission` 为准，也就是系统启动检查用的那个值：Activity 没声明权限时，PackageManager 解析清单时已经把它所在 application 的权限填进去；显式写空（`android:permission=""`）时就没有权限。助手不再自己回退到 application 的权限，否则会把系统允许的启动拒掉。
        - activity-alias 只看 alias 自己的 `exported` 和权限，不继承 target 和 application 的权限，与系统一致（"alias overrides permissions"）。
        - 这个权限有对应的 app op 时，App 的模式必须是 `MODE_ALLOWED`。其他模式（包括 `MODE_DEFAULT`）系统也会拒绝；助手读不到模式时同样拒绝。这一条对本 App 的 Activity 也适用，与系统一致。
        - 系统把 `ACTION_CALL`、拍照、录像（`IMAGE_CAPTURE`、`MOTION_PHOTO_CAPTURE`、`VIDEO_CAPTURE`）绑定到运行时权限：App 的清单申请了这个权限、却没有获得或 app op 不允许时拒绝；没申请时不限制，与系统一致。

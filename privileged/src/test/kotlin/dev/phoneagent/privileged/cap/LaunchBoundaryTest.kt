@@ -231,6 +231,12 @@ class LaunchBoundaryTest(
     }
 
     @Test
+    fun anActivityThatClearsItsApplicationsPermissionStarts() {
+        val open = helper.install(OTHER, permission = "", appPermission = GUARD)
+        assertStarts("android:permission=\"\" under an application permission", component(open), open)
+    }
+
+    @Test
     fun aHeldPermissionWhoseAppOpIsNotAllowedIsRefused() {
         installDialer(guarded = true)
         helper.grantApp(Manifest.permission.CALL_PHONE)
