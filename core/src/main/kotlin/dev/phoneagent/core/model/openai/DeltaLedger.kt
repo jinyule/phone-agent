@@ -15,7 +15,10 @@ import dev.phoneagent.core.model.openai.WireSupport.TEXT_SEPARATOR
  * taken back, so [catchUp] reports it and the reply records it under [PREVIEW_DIVERGED].
  *
  * Everything is checked with [guard] before it is shown: a delta that completes a request secret
- * fails the reply ([CredentialEcho]) and is not shown.
+ * fails the reply ([CredentialEcho]) and is not shown. The argument text shown for each call is
+ * also checked whole ([showsSecretInArguments]): at the end, and when the reply fails before it,
+ * a secret only the whole text reveals (behind an escape) makes the failure an echo, so the UI
+ * takes the shown fragments back.
  */
 internal class DeltaLedger(
     private val onDelta: (Delta) -> Unit,
@@ -72,6 +75,14 @@ internal class DeltaLedger(
         argsWindows.getValue(id).next(fragment)
         shown.append(fragment)
         onDelta(Delta.ToolCallArgs(id, fragment))
+    }
+
+    /** Whether the argument text shown for some call, taken whole, holds a secret ([EchoGuard.holdsSecret]). */
+    fun showsSecretInArguments(): Boolean = args.values.any { guard.holdsSecret(it.toString()) }
+
+    /** Throws [CredentialEcho.error] when [showsSecretInArguments]. */
+    fun checkShownArguments() {
+        if (showsSecretInArguments()) throw CredentialEcho.error()
     }
 
     /**

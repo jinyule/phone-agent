@@ -14,7 +14,8 @@ import java.util.IdentityHashMap
  * (`Bearer …`, `sk-…`, JWTs) is masked whether or not this request used it. Error codes and
  * parameter names never match these shapes, so the diagnosis survives. JSON that may escape a
  * secret in other ways (`\/`, `\u0073`) is masked after it is written back in the standard
- * escaping ([json]).
+ * escaping, and text meant as JSON that does not parse is not quoted at all when its escapes hide
+ * a credential ([json]).
  *
  * Every secret is matched exactly, however short: a length threshold would let a short real
  * credential through, and the shapes do not recognize values such as `test`. A local service that
@@ -67,18 +68,30 @@ internal class Redactor(
      * [json] (text that should be JSON, such as call arguments) with every credential masked as
      * [text] masks it, after JSON that parses is written back in the standard escaping. Standard
      * escaping goes character by character, so a string (or key) that holds a secret then holds
-     * its escaped form: masking the strings one by one would mask nothing more.
+     * its escaped form: masking the strings one by one would mask nothing more. Text that does not
+     * parse (cut or broken) still has escapes: when its lenient decoding
+     * ([JsonEscapes.lenientDecode]) needs masking it is not quoted at all ([WITHHELD]), since
+     * masking it as written would miss a secret behind an escape and leave the rest readable.
      */
     fun json(json: String): String {
         val parsed =
             try {
                 Json.parseToJsonElement(json)
             } catch (ignoredNotJson: SerializationException) {
-                // Not JSON: no escapes to decode, the text is all there is to mask.
+                // Cut or broken: read leniently below.
                 null
             }
-        return text(parsed?.toString() ?: json)
+        return if (parsed != null) text(parsed.toString()) else unparsed(json)
     }
+
+    private fun unparsed(json: String): String =
+        if (verbatim(JsonEscapes.lenientDecode(json)) ==
+            null
+        ) {
+            WITHHELD
+        } else {
+            text(json)
+        }
 
     /**
      * The length of the end of [masked] (what [text] returned for text a read limit cut off) that
@@ -146,6 +159,9 @@ internal class Redactor(
     companion object {
         /** What a masked credential reads as. */
         const val MASK: String = "***"
+
+        /** What [json] gives for text that is not JSON and hides a credential behind its escapes. */
+        const val WITHHELD: String = "(not shown: it holds a credential)"
 
         private const val MAX_DEPTH = 8
 

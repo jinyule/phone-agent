@@ -18,6 +18,11 @@ import kotlinx.serialization.json.Json
  * caught by the fragment that completes it, before that one is shown. [parts] checks what the
  * reply keeps: text, call ids, names and arguments (recovered calls too), reasoning summaries and
  * the opaque reasoning (encrypted content included).
+ *
+ * Call arguments are checked whole ([arguments]) in three forms: as sent, written back in the
+ * standard escaping when they parse, and leniently decoded ([JsonEscapes.lenientDecode]) whether
+ * or not they parse, since the tool layer decodes the escapes of cut or broken arguments too.
+ * Other text (answer, reasoning, markup left in the answer) is literal and is matched as sent only.
  */
 internal class EchoGuard(
     private val forms: List<String>,
@@ -39,7 +44,7 @@ internal class EchoGuard(
 
     /** Throws [CredentialEcho.error] when [text] holds a form of a secret. */
     fun check(text: String) {
-        if (forms.any { it in text }) throw CredentialEcho.error()
+        if (holds(text)) throw CredentialEcho.error()
     }
 
     /** Checks every value of [parts] that is recorded and sent back with the next request. */
@@ -53,8 +58,7 @@ internal class EchoGuard(
                 is Part.ToolCall -> {
                     check(part.id.value)
                     check(part.name)
-                    check(part.argsJson)
-                    rewritten(part.argsJson)?.let(::check)
+                    arguments(part.argsJson)
                 }
 
                 // Written back in the standard escaping, where every string that holds a secret holds a form of it.
@@ -70,12 +74,27 @@ internal class EchoGuard(
         }
     }
 
+    /** Throws [CredentialEcho.error] when the whole call arguments [raw] hold a secret ([holdsSecret]). */
+    fun arguments(raw: String) {
+        if (holdsSecret(raw)) throw CredentialEcho.error()
+    }
+
+    /**
+     * Whether the whole call arguments [raw] hold a form of a secret: as sent, written back in the
+     * standard escaping when they parse, or leniently decoded (escapes such as `\u0070` and `\/`
+     * decoded even in arguments that were cut or are broken).
+     */
+    fun holdsSecret(raw: String): Boolean =
+        holds(raw) || rewritten(raw)?.let(::holds) == true || holds(JsonEscapes.lenientDecode(raw))
+
+    private fun holds(text: String): Boolean = forms.any { it in text }
+
     /** [json] written back in the standard escaping (escapes such as `\/` decoded), or `null` when it is not JSON. */
     private fun rewritten(json: String): String? =
         try {
             Json.parseToJsonElement(json).toString()
         } catch (ignoredNotJson: SerializationException) {
-            // Arguments that are not JSON have no escapes to decode; the raw check covered them.
+            // Not JSON (cut or broken): the lenient decoding in holdsSecret reads its escapes instead.
             null
         }
 

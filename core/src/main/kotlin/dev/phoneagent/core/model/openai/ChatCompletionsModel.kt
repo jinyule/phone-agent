@@ -66,17 +66,27 @@ public class ChatCompletionsModel internal constructor(
         onDelta: (Delta) -> Unit,
     ): ChatResponse {
         val stream = ChatCompletionsStream(profile.id, info.model, reading(request), env.newCallId, redactor, onDelta)
-        try {
-            reply.readEvents(stream::accept, stream::acceptJson)
-            return stream.finish()
+        return try {
+            stream.readAll(reply)
+        } catch (e: ModelError) {
+            // Argument text shown before the failure may hold a secret only the whole text reveals.
+            throw stream.failed(e)
         } catch (e: IllegalArgumentException) {
             // Provider values that break neutral-type invariants (ids, counts) are protocol violations.
-            throw ModelError.BadResponse(
-                redactor.text("reply violates a model invariant: ${e.message}"),
-                redactor.cause(e),
+            throw stream.failed(
+                ModelError.BadResponse(
+                    redactor.text("reply violates a model invariant: ${e.message}"),
+                    redactor.cause(e),
+                ),
             )
         }
     }
+}
+
+/** Reads the whole body of [reply] into this stream and returns its reply. */
+private suspend fun ChatCompletionsStream.readAll(reply: HttpReply): ChatResponse {
+    reply.readEvents(::accept, ::acceptJson)
+    return finish()
 }
 
 /** Fields probed when the profile names none (DeepSeek/Qwen/Kimi style, then Ollama/OpenRouter style). */

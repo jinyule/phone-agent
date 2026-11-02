@@ -41,7 +41,10 @@ import kotlinx.serialization.json.putJsonArray
  * reply stops with [StopReason.MAX_TOKENS] or [StopReason.OTHER] (a content filter is a
  * [ModelError.Refusal]); on the ChatGPT plan only `response.completed` succeeds.
  * `response.failed` and `error` events become [ModelError]s. A reply whose content holds a
- * request secret fails as [CredentialEcho] ([EchoGuard]), the deltas checked as they are shown.
+ * request secret fails as [CredentialEcho] ([EchoGuard]), the deltas checked as they are shown and
+ * the argument text shown for each call checked whole at the end (the final output may replace
+ * it). A reply that fails otherwise after showing argument text that holds a secret fails as
+ * [CredentialEcho] too ([failed]).
  */
 internal class ResponsesStream(
     private val provider: ProviderId,
@@ -76,6 +79,13 @@ internal class ResponsesStream(
         final = ResponsesOutput.terminal(root, event = null, redactor)
     }
 
+    /**
+     * What a reply that failed with [error] fails with: [CredentialEcho.error] when the argument
+     * text shown before the failure holds a secret ([DeltaLedger.showsSecretInArguments]), so the
+     * UI takes it back; else [error].
+     */
+    fun failed(error: ModelError): ModelError = if (ledger.showsSecretInArguments()) CredentialEcho.error() else error
+
     /** The reply; throws [ModelError] for cut streams, refusals and malformed replies. */
     fun finish(): ChatResponse {
         val last = final ?: throw ModelError.Network("stream ended before response.completed")
@@ -86,6 +96,7 @@ internal class ResponsesStream(
         val rawFirst = reasoningChannel == RAW_REASONING_DELTA
         val parts = ResponsesOutput.parts(output, provider, model, redactor, rawFirst)
         guard.parts(parts)
+        ledger.checkShownArguments()
         val hasCalls = parts.any { it is Part.ToolCall }
         ResponsesOutput.checkRefusal(output, parts, incomplete && reason == "content_filter")
         if (incomplete && plan) {

@@ -39,7 +39,9 @@ import kotlinx.serialization.json.putJsonArray
  * may still be such markup, and the end shows what they missed ([DeltaLedger.catchUp]).
  *
  * A reply whose content holds a request secret fails as [CredentialEcho] ([EchoGuard]): each delta
- * is checked before it is shown, and the reply's parts before the end shows what the deltas missed.
+ * is checked before it is shown, and the reply's parts and the argument text shown for each call
+ * before the end shows what the deltas missed. A reply that fails otherwise after showing argument
+ * text that holds a secret fails as [CredentialEcho] too ([failed]).
  *
  * @param redactor masks credentials in provider text that goes into errors; reply metadata fields
  *   that hold one are left out ([Redactor.verbatim]).
@@ -78,6 +80,13 @@ internal class ChatCompletionsStream(
         done = true
     }
 
+    /**
+     * What a reply that failed with [error] fails with: [CredentialEcho.error] when the argument
+     * text shown before the failure holds a secret ([DeltaLedger.showsSecretInArguments]), so the
+     * UI takes it back; else [error].
+     */
+    fun failed(error: ModelError): ModelError = if (ledger.showsSecretInArguments()) CredentialEcho.error() else error
+
     /** The reply; throws [ModelError] for cut streams, refusals and malformed replies. */
     fun finish(): ChatResponse {
         checkComplete()
@@ -100,6 +109,7 @@ internal class ChatCompletionsStream(
                 addAll(toolCalls)
             }
         guard.parts(parts)
+        ledger.checkShownArguments()
         val diverged = ledger.catchUp(parts)
         val meta =
             metadata(

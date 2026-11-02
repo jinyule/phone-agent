@@ -93,7 +93,23 @@ class RedactorTest {
         )
         // Assembled at run time so secret scanners do not take the placeholder for a real key.
         assertEquals("""{"token":"***"}""", Redactor.SHAPES_ONLY.json("{\"token\":\"\\u0073k-" + "abcdefghijkl\"}"))
-        assertEquals("not json *** {", redactor.json("not json $slashed {"))
+        assertEquals("not json {", redactor.json("not json {"), "text that is not JSON and holds nothing is kept")
+    }
+
+    @Test
+    fun `text that is not JSON is not quoted when it holds a credential, escaped or not`() {
+        val slashed = "placeholder/with-slash-00001"
+        val redactor = Redactor(listOf(slashed))
+        val backslash = Char(92)
+        for (escape in listOf("$backslash/", "${backslash}u002F")) {
+            val cut = """{"token":"pa-1","note":"placeholder${escape}with-slash-00001"""
+            assertEquals(Redactor.WITHHELD, redactor.json(cut), "a cut argument text")
+            assertEquals(Redactor.WITHHELD, redactor.json("$cut\"}}"), "a broken argument text")
+        }
+        assertEquals(Redactor.WITHHELD, redactor.json("not json $slashed {"), "the secret as sent")
+        // Assembled at run time so secret scanners do not take the placeholder for a real key.
+        val shaped = "s${backslash}u006b-" + "abcdefghijkl"
+        assertEquals(Redactor.WITHHELD, Redactor.SHAPES_ONLY.json("""{"note":"$shaped"""), "a credential shape")
     }
 
     @Test

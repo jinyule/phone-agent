@@ -222,7 +222,8 @@ public class ProviderProbe internal constructor(
      * left incomplete fails even with the right call. A call recovered from the answer text does
      * not count either: the provider's tool channel is what is being verified. What it quotes
      * from the reply is masked with [redactor], then cut; arguments are masked as JSON
-     * ([Redactor.json]), so escapes cannot hide a secret.
+     * ([Redactor.json]): written back in the standard escaping when they parse, and not quoted at
+     * all when they do not and their lenient decoding holds a credential.
      */
     private fun checkTrialCall(
         reply: ChatResponse,
@@ -261,7 +262,7 @@ public class ProviderProbe internal constructor(
             try {
                 Json.parseToJsonElement(argsJson) as? JsonObject
             } catch (ignoredNotJson: SerializationException) {
-                // Reported by the caller with the raw text, which is what the user needs to see.
+                // Reported by the caller, which quotes the text through Redactor.json.
                 null
             }
         return (args?.get("token") as? JsonPrimitive)?.contentOrNull?.trim()
