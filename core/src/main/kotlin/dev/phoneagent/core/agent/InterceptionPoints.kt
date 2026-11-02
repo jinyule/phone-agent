@@ -80,9 +80,11 @@ public interface StepLog {
     public suspend fun appendRuntimeContext(parts: List<Part>): Boolean
 
     /**
-     * Appends a context event (e.g. `compaction/…` with a [SurfaceOp.Replace]). Not for loop
-     * structure (`turn/…`, `step/…`, `inbox/…`, `assistant/…`, `tool/…`, `request/…`), which only
-     * the loop writes.
+     * Appends a context event: `compaction/…` (a summary or prune with its [SurfaceOp.Replace]),
+     * `context/reasoning-dropped`, or a `user/message` of kind `RUNTIME_CONTEXT`. Anything else is
+     * a loop fact (turns, steps, inbox, user input, replies, requests, calls, results, prompts,
+     * screen facts, task settings) and throws [IllegalArgumentException] before anything is
+     * written.
      */
     public suspend fun append(
         event: SessionEvent,

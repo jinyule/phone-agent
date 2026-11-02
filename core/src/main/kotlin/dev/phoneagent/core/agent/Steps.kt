@@ -1,16 +1,13 @@
 package dev.phoneagent.core.agent
 
-import dev.phoneagent.core.ids.TaskId
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.StopReason
 import dev.phoneagent.core.session.AssistantMessage
 import dev.phoneagent.core.session.InboxEntryKind
-import dev.phoneagent.core.session.SessionEvent
 import dev.phoneagent.core.session.SessionRecord
 import dev.phoneagent.core.session.StepEnded
 import dev.phoneagent.core.session.StepOutcome
 import dev.phoneagent.core.session.StepStarted
-import dev.phoneagent.core.session.SurfaceOp
 import dev.phoneagent.core.session.TurnEndReason
 import dev.phoneagent.core.session.UserMessage
 import dev.phoneagent.core.session.UserMessageKind
@@ -152,29 +149,4 @@ internal class Steps(
             loop.log.append(UserMessage(kind, entry.parts, entry.source))
         }
     }
-}
-
-/** The [StepLog] `preStep` interceptors get. */
-private class LoopStepLog(
-    private val loop: LoopContext,
-) : StepLog {
-    override val taskId: TaskId get() = loop.setup.taskId
-
-    override suspend fun records(): List<SessionRecord> = loop.log.records()
-
-    override suspend fun appendRuntimeContext(parts: List<Part>): Boolean {
-        val latest =
-            loop.log.records().asReversed().firstNotNullOfOrNull { record ->
-                (record.event as? UserMessage)?.takeIf { it.kind == UserMessageKind.RUNTIME_CONTEXT }
-            }
-        if (latest?.parts == parts) return false
-        loop.log.append(UserMessage(UserMessageKind.RUNTIME_CONTEXT, parts))
-        return true
-    }
-
-    override suspend fun append(
-        event: SessionEvent,
-        surfaceOp: SurfaceOp,
-        sources: List<Long>,
-    ): SessionRecord = loop.log.append(event, surfaceOp, sources)
 }

@@ -421,7 +421,7 @@ class AgentLoopTest {
                 Interceptor<PreStepInput, PreStepResult> { input, chain ->
                     assertEquals(LoopHarness.TASK, input.log.taskId)
                     seen = input.log.records().size
-                    input.log.append(UserMessage(UserMessageKind.INJECTED, listOf(Part.Text("note")), "memo"))
+                    input.log.append(UserMessage(UserMessageKind.RUNTIME_CONTEXT, listOf(Part.Text("note"))))
                     chain.proceed(input)
                 }
             val model = FakeChatModel().answers("ok")

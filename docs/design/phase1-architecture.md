@@ -469,7 +469,7 @@ fun interface Chain<I, O> { suspend fun proceed(input: I): O }   // 不调用 pr
 
 | 拦截点 | 时机 | 输入 → 输出 | 能做什么 | 第一阶段的使用者 |
 |---|---|---|---|---|
-| `preStep` | 每个 step 之前（本 step 的输入已写入日志） | `PreStepInput(turn, step, log)` → `Proceed` / `Refuse(detail)` | **拒绝本 step**；追加 runtime-context（前台 App、时间、知识提示）；压缩 | RuntimeContext、Compaction |
+| `preStep` | 每个 step 之前（本 step 的输入已写入日志） | `PreStepInput(turn, step, log)` → `Proceed` / `Refuse(detail)` | **拒绝本 step**；追加 runtime-context（前台 App、时间、知识提示）；压缩。`log` 只能写上下文事件（`compaction/*`、`context/reasoning-dropped`、runtime-context），其他事件在写入之前抛 `IllegalArgumentException` | RuntimeContext、Compaction |
 | `request` | 每次 attempt 之前 | `RequestPlan` → `RequestPlan` | 为主请求选模型、线路快照、推理档位、缓存断点；`RequestPlan` 只服务主对话，看图和轻量请求走旁路（`side/*`）；**不能改消息** | ModelRouter |
 | `requestError` | attempt 失败后（step 仍打开；回复没过边界校验也算，按 `BadResponse`） | `RequestFailure(error, attempt, retries)` → `Retry(delayMs)` / `Fail` | 决定是否重试；每次重试记 `request/retry` | `RetryInterceptor`（默认）、OverflowCompaction、ImageOffload |
 | `toolPreExecute` | 每个通过校验的调用，已写 `tool/call` | `PreExecuteInput(call, tool)` → `Verdict` | allow / refuse / confirm / handoff | **PolicyEngine**（固定排在链后，不可重排、无法绕过） |
