@@ -27,6 +27,12 @@ public object StartResult {
 
     /** Refused by the helper: not its own display, another user, or a malformed intent. */
     public const val REFUSED: Int = 6
+
+    /**
+     * The phone is locked, or the helper could not tell whether it is: nothing is started while
+     * the user is away (protocol 2).
+     */
+    public const val LOCKED: Int = 7
 }
 
 /**

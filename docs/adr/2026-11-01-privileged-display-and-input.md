@@ -19,6 +19,7 @@ phase1-architecture §3.5 列出了 `IPrivilegedCore` 的能力面，调研报�
 1. **助手只保证"不越界"，不替 PolicyEngine 做内容判断**。助手不看 intent 的语义（哪个 App、什么链接、是不是付款），那是 App 侧 PolicyEngine 的事。助手只保证下面这些，无论 App 传什么：
    - 只往自己建的屏启动和注入；主屏、别人的屏一律拒绝（`StartResult.REFUSED` / false）。
    - 用户在主屏**可见**地用着的 App 不启动（`IN_USE_ON_MAIN`）；agent 的另一块屏正在用它也不启动（`IN_USE_BY_AGENT`）；任务列表读不出来时同样不启动。
+   - 锁屏时什么都不启动（`LOCKED`，协议 2 新增）：用户不在场时，agent 不该打开任何 App。锁屏状态读不到也按锁屏处理。
    - 冷启动只在"这个 App 的任务全在这块屏上"时才 `am force-stop`，否则降级为普通启动并返回 `COLD_IGNORED`。
    - intent 里的 `FLAG_GRANT_*`（URI 授权）在启动前被清掉：助手是 shell 身份，不替任何人授予 URI 权限。
    - 只支持主用户（`userId` 必须是助手自己的用户或 `USER_CURRENT`）。分身和工作资料留到以后。

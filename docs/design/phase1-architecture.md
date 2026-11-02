@@ -309,7 +309,7 @@ interface IPrivilegedCore {
 - 每个 IPrivilegedCore 方法（事务号 FIRST..LAST_CALL_TRANSACTION）只接受助手为之启动的那个 App uid，其他调用方收到 `SecurityException`。框架的系统事务不经过这个守卫，也不暴露任何能力；其中 `DUMP_TRANSACTION`、`SHELL_COMMAND_TRANSACTION` 也纳入守卫，`INTERFACE_TRANSACTION` 放行。以后重写 `dump` 或 `onShellCommand`，必须做同样的 uid 检查。
 - 还没实现的方法抛 `UnsupportedOperationException`，消息以 `NOT_IMPLEMENTED` 开头（`PrivilegedError.isNotImplemented` 判定），不占用各方法自己的返回值或错误码。Binder 原生就能跨进程传这个异常；`ServiceSpecificException` 不在公开 SDK 里，所以不用它。
 - 返回值是常量，不是裸数字（`dev.phoneagent.privileged.CapabilityContract.kt`）：
-  - `startActivity` → `StartResult`：0 已启动、1 用户正在主屏用它、2 没有页面能接、3 出错、4 冷启动被降级（它在别处还有任务）、5 被 agent 的另一块屏占用、6 助手拒绝（不是它的屏、别的用户、intent 不合规）；
+  - `startActivity` → `StartResult`：0 已启动、1 用户正在主屏用它、2 没有页面能接、3 出错、4 冷启动被降级（它在别处还有任务）、5 被 agent 的另一块屏占用、6 助手拒绝（不是它的屏、别的用户、intent 不合规）、7 锁屏中（读不到锁屏状态也算，协议 2 起）；
   - `createDisplay` → 非负是 displayId，`DisplayResult.REFUSED`(-2) 是参数不合规，`DisplayResult.FAILED`(-1) 是系统拒绝；
   - `grantSelf` → `GrantResult`：0 已授予、1 不在白名单、2 失败；
   - `probe` → `ProbeKeys`：`steps`/`results` 两个平行数组，每项是 `ok` 或失败原因，外加 `ok` 总判定；
@@ -318,6 +318,7 @@ interface IPrivilegedCore {
 **助手自己保证的几条**（无论 App 传什么，WP12 B 段）：
 - 只往自己建的屏启动、注入；主屏和别人的屏一律拒绝。
 - 用户在主屏**可见**地用着的 App 不启动（`StartResult.IN_USE_ON_MAIN`）；看不清任务列表时也不启动。
+- 锁屏时什么都不启动（`StartResult.LOCKED`）。锁屏状态读自 `IWindowManager.isKeyguardLocked()`，读不到就当作锁屏；不用 `KeyguardManager`，它在调用失败时会回答"没锁"。
 - 冷启动只在"这个 App 的任务全在这块屏上"时才 force-stop，否则降级为普通启动并返回 `COLD_IGNORED`。
 - `moveTask` 只认 agent 自己启动的任务，以及盯主屏期间冒上来的任务（跳出回收）；用户自己的任务不会被拉进后台屏。
 - `injectKey` 只放行导航和编辑键；音量、电源、Home、最近任务、助手、相机、媒体键作用于整机，一律拒绝。

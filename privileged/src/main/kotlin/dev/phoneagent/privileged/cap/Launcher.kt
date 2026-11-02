@@ -38,6 +38,7 @@ internal class Launcher(
     private val myUser = app.user
     private val commands = platform.commands
     private val starter = ActivityStarter(platform.bridge, commands)
+    private val keyguard = Keyguard(platform.bridge)
 
     /** Starts [intent] on [displayId]; see [StartResult]. */
     fun start(
@@ -45,17 +46,24 @@ internal class Launcher(
         intent: Intent?,
         userId: Int,
         cold: Boolean,
-    ): Int =
-        when (val refusal = refuse(displayId, intent, userId)) {
-            null -> {
-                attempt(displayId, sanitize(checkNotNull(intent)), cold)
-            }
-
-            else -> {
+    ): Int {
+        val refusal = refuse(displayId, intent, userId)
+        return when {
+            refusal != null -> {
                 Log.w(TAG, "startActivity refused: $refusal")
                 StartResult.REFUSED
             }
+
+            keyguard.locked() != false -> {
+                Log.w(TAG, "startActivity refused: the phone is locked, or its lock state is unknown")
+                StartResult.LOCKED
+            }
+
+            else -> {
+                attempt(displayId, sanitize(checkNotNull(intent)), cold)
+            }
         }
+    }
 
     /** Why the helper will not even look at this request, or null. */
     private fun refuse(
@@ -265,5 +273,30 @@ private class ActivityStarter(
          * resultTo, resultWho, requestCode, flags, profilerInfo, options, userId)`.
          */
         const val START_PARAMETERS = 12
+    }
+}
+
+/**
+ * Whether the phone is locked, from `IWindowManager.isKeyguardLocked()`; null when that cannot be
+ * read, which callers treat as locked. `KeyguardManager` is not used: it answers false when the
+ * call to the window manager fails, and `isDeviceLocked` is about credentials, not the lock screen.
+ */
+internal class Keyguard(
+    private val bridge: SystemBridge,
+) {
+    fun locked(): Boolean? =
+        try {
+            val wm = bridge.windowManager
+            reflecting("IWindowManager.isKeyguardLocked") {
+                bridge.method(wm, "isKeyguardLocked", 0).invoke(wm) as? Boolean
+                    ?: throw CapabilityUnavailable("IWindowManager.isKeyguardLocked returned no boolean")
+            }
+        } catch (e: CapabilityUnavailable) {
+            Log.w(TAG, "cannot read the lock state", e)
+            null
+        }
+
+    private companion object {
+        const val TAG = "PhoneAgentHelper"
     }
 }

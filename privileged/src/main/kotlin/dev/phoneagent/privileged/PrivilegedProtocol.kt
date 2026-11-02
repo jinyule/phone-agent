@@ -11,7 +11,7 @@ package dev.phoneagent.privileged
  */
 public object PrivilegedProtocol {
     /** Current protocol version; strictly increasing. */
-    public const val VERSION: Int = 1
+    public const val VERSION: Int = 2
 }
 
 /**

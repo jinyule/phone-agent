@@ -45,7 +45,8 @@ interface IPrivilegedCore {
 
     void releaseDisplay(int displayId) = 12;
 
-    // Does not start an app the user is currently using on the main screen.
+    // Does not start an app the user is currently using on the main screen, nor anything while
+    // the phone is locked; see StartResult.
     int startActivity(int displayId, in Intent intent, int userId, boolean cold) = 13;
 
     int topTask(int displayId) = 14;
