@@ -55,7 +55,7 @@ phone-agent/
 │   tools/       第一阶段工具（§5）与系统提示 SystemPrompt；屏幕文字只经 ScreenPresenter 拿，不引用 screen
 │   guard/       LoopGuard、OutwardPacing、效果判定
 │   ports/       ScreenPort / SurfaceManager / StoragePort / Clock 等接口
-│   adb/         无线调试配对与 ADB 连接（纯 Kotlin，可 JVM 测）
+│   adb/         无线调试配对与 ADB 连接，只跑 App 写死的命令（纯 Kotlin，可 JVM 测；隔离，见下）
 │   protocol/    MCP / JSON-RPC 类型
 │   testFixtures FakeChatModel、ScriptedScreen、ReplayChatModel/ReplayScreen、金样工具
 ├─ privileged/   shell 助手：PrivilegedCore + HelperMain（经 app_process 加载，依赖尽量少）
@@ -74,6 +74,7 @@ phone-agent/
 
 - **契约包**：`ids`、`model`、`ports`、`tool`、`policy`、`session`、`agent`，分层排列，只能引用更低的层；
 - **能力包**：其余所有包，例如 `model.openai`、`model.anthropic`、`policy.rules`、`screen`、`tools`、`storage`。能力包只引用契约包和自己。
+- **隔离能力包**：`adb`（内置无线 ADB 客户端）。它是 App 的设置代码，只用来配对、连接，并运行 App 写死的命令（拉起助手、自检），永远不是工具（AGENTS.md §3.4）。所以它和别的包互不引用：core 里其他包都不能用它，它自己也不引用任何契约包（包括 `tool`，免得被实现成工具）。公开 API 里没有交互式 shell，也没有任意 adb 服务，只有 `AdbSession.run(AdbCommand)`：跑完一条命令，返回输出和退出码。`PackageDependencyTest` 守住这两个方向，并带反例。
 
 分层和理由见 ADR `2026-11-01-core-contracts`。
 
@@ -93,7 +94,7 @@ phone-agent/
 │ 建虚拟屏 · 跨屏启动 · 注入输入 · 挪任务 · 主屏监视 · appops 静音             │
 │ App 死后不退出：超时后 releaseAll（释放屏、解除静音），等 App 回来重新交接     │
 └───────────────▲─────────────────────────────────────────────────────────────┘
-                │ 拉起方式：① 内置 ADB 客户端经 adbd 的 exec: 服务
+                │ 拉起方式：① 内置 ADB 客户端经 adbd 的 shell,v2（没有时用 exec:）服务
                 │          ② Shizuku UserService  ③ 开发者在 USB 下运行启动脚本
 ```
 
@@ -633,7 +634,7 @@ screen s12 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · 坐标 0–
         ① 开发者选项（引导去"关于手机"连点版本号；读系统设置自动打勾）
         ② 打开无线调试（要求连着 Wi-Fi；第一次在某个网络上要勾"始终允许"）
         ③ 配对码：用高优先级通知里的内联输入框填 6 位码（分屏也不需要）
-        ④ 内置 ADB：mDNS 发现端口 → SPAKE2 配对 → TLS 连接 → exec 拉起助手
+        ④ 内置 ADB：mDNS 发现端口 → SPAKE2 配对 → TLS 连接 → 运行固定命令拉起助手
         ⑤ 助手交接 Binder → grantSelf(WRITE_SECURE_SETTINGS)
         ⑥ 自动开启无障碍服务 → 能力探针（建小屏 + 注入一次无害点击）
         ⑦ 完成（失败时指出最可能要回去重做的一步）
