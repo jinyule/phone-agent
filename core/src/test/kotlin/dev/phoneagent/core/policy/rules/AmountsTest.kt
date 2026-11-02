@@ -39,7 +39,6 @@ class AmountsTest {
             "US$ 3|300|USD",
             "HK$88|8800|HKD",
             "NT$100|10000|TWD",
-            "€9,99 nope; €9|900|EUR",
             "£4.5|450|GBP",
             "100 JPY|10000|JPY",
             "JPY ¥100|10000|JPY",
@@ -65,12 +64,18 @@ class AmountsTest {
     @ParameterizedTest(name = "{0}")
     @ValueSource(
         strings = [
-            "39.90", "共 3 件", "3 items", "12.345元", "1,2345元", "1234,567元", "订单号 1234567890123", "account5", "",
-            "¥",
+            "39.90", "共 3 件", "3 items", "订单号 1234567890123", "account5", "", "¥",
         ],
     )
     fun `a label holds an amount only with a currency mark and a sound shape`(text: String) {
         assertNull(Prices.inLabel(text), text)
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = ["12.345元", "1,2345元", "1234,567元", "¥20.000", "€9,99 nope; €9", "¥12,34"])
+    fun `an amount in a form that cannot be read is unclear, not absent`(text: String) {
+        assertEquals(Price.Unclear, Prices.inLabel(text), text)
+        assertEquals(Price.Unclear, Prices.stated(text), text)
     }
 
     @Test

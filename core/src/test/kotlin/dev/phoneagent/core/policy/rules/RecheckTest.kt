@@ -195,6 +195,18 @@ class RecheckTest {
     }
 
     @Test
+    fun `an amount in a form that cannot be read never passes the re-check`() {
+        for ((shown, changed) in listOf("¥20.000" to "¥99.000", "¥12,34" to "¥99,99", "12,34" to "99,99")) {
+            val approved = ask(tap("e1"), checkout(shown))
+            assertEquals(ConfirmReason.SPEND, approved.reason, shown)
+            assertNull(approved.amount, shown)
+            for (fresh in listOf(checkout(shown, id = "s2"), checkout(changed, id = "s2"))) {
+                assertInstanceOf(Verdict.Confirm::class.java, recheck(tap("e1"), approved, fresh), shown)
+            }
+        }
+    }
+
+    @Test
     fun `an amount that cannot be told is never taken as unchanged`() {
         // Two prices and no total: which one is paid cannot be told, so null == null proves nothing.
         val cart = { id: String ->

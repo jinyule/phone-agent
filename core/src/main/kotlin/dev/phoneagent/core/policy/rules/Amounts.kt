@@ -14,7 +14,7 @@ internal sealed interface Price {
     /** No amount is shown: there is nothing to bind. */
     data object Absent : Price
 
-    /** Amounts are shown, but which one is paid cannot be told (several, or too large to hold). */
+    /** Amounts are shown, but which one is paid cannot be told: several, too large, or written in a form not read. */
     data object Unclear : Price
 }
 
@@ -34,14 +34,18 @@ internal val Price.money: Money?
  * limits and the unclear case. See NOTICE.
  */
 internal object Prices {
-    /** One amount as written; [minor] is `null` when it has more than [MAX_DIGITS] integer digits or does not fit. */
+    /**
+     * One amount as written; [minor] is `null` when it cannot be read: thousands separators not in
+     * groups of three ("12,34"), more than two decimals ("20.000"), more than [MAX_DIGITS] integer
+     * digits, or too large to fit.
+     */
     data class Found(
         val minor: Long?,
         val currency: String?,
         val marked: Boolean,
     )
 
-    /** Integer digits beyond this are not read as an amount but as unclear. */
+    /** Integer digits beyond this are read as an unclear amount. */
     private const val MAX_DIGITS = 15
     private const val MAX_FRACTION = 2
     private const val GROUP = 3
@@ -102,7 +106,7 @@ internal object Prices {
         return AMOUNT
             .findAll(spaced)
             .filterNot { charBefore(spaced, it.range.first) in DISCOUNT_BEFORE || counted(spaced, it.range.last + 1) }
-            .mapNotNull(::found)
+            .map(::found)
             .toList()
     }
 
@@ -139,18 +143,15 @@ internal object Prices {
         return COUNTS.any { text.startsWith(it, i) }
     }
 
-    private fun found(match: MatchResult): Found? {
+    /** A number in a form this cannot read is still an amount: unclear, never "no amount". */
+    private fun found(match: MatchResult): Found {
         val g = match.groupValues
         val groups = g[INT].trimEnd(',').split(',')
         val grouped = groups.size == 1 || (groups[0].length <= GROUP && groups.drop(1).all { it.length == GROUP })
         val digits = groups.joinToString("")
-        val currency = currency(g)
-        val marked = g[CODE].isNotEmpty() || g[SYMBOL].isNotEmpty() || g[SUFFIX].isNotEmpty()
-        return when {
-            !grouped || g[FRACTION].length > MAX_FRACTION -> null
-            digits.length > MAX_DIGITS -> Found(null, currency, marked)
-            else -> Found(minor(digits, g[FRACTION], g[WAN].isNotEmpty()), currency, marked)
-        }
+        val readable = grouped && g[FRACTION].length <= MAX_FRACTION && digits.length <= MAX_DIGITS
+        val minor = if (readable) minor(digits, g[FRACTION], g[WAN].isNotEmpty()) else null
+        return Found(minor, currency(g), g[CODE].isNotEmpty() || g[SYMBOL].isNotEmpty() || g[SUFFIX].isNotEmpty())
     }
 
     private fun currency(g: List<String>): String? {

@@ -186,6 +186,16 @@ class SpendingTest {
     }
 
     @Test
+    fun `an amount written in a form that cannot be read is unclear, not absent`() {
+        for (shown in listOf("¥20.000", "¥12,34", "12,34", "¥1,2345.00")) {
+            assertEquals(Price.Unclear, Prices.price(Prices.scan("实付 $shown").single()), shown)
+        }
+        val verdict = decide(tap("e1"), on(bar("实付 ¥20.000")))
+        assertEquals(ConfirmReason.SPEND, card(verdict).reason)
+        assertNull(card(verdict).amount)
+    }
+
+    @Test
     fun `request_confirmation reads its own amount argument`() {
         val ask =
             call(
