@@ -167,6 +167,28 @@ class AgentLoopReplyTest {
         }
 
     @Test
+    fun `calls in a reply that ended END_TURN run like those of a TOOL_USE reply`() =
+        runTest {
+            val tap = FakeTool("tap", RiskClass.WRITE)
+            val model =
+                FakeChatModel()
+                    .calls(call("c1", "tap"), stopReason = StopReason.END_TURN)
+                    .calls(call("c2", "tap"), stopReason = StopReason.TOOL_USE)
+                    .answers("好了")
+            val harness = LoopHarness(this, model, tools = listOf(tap))
+            val loop = harness.start()
+            loop.followup(text("go"))
+            advanceUntilIdle()
+
+            val events = harness.events()
+            assertEquals(Phase.Done, loop.phase.value)
+            assertEquals(listOf("c1", "c2"), tap.calls.map { it.id.value })
+            assertEquals(listOf("c1", "c2"), events.only<ToolCallRecorded>().map { it.call.id.value })
+            assertEquals(emptyList<AssistantAttempt>(), events.only<AssistantAttempt>(), "not a bad response")
+            assertEquals(listOf(TurnEndReason.COMPLETED), events.only<TurnEnded>().map { it.reason })
+        }
+
+    @Test
     fun `tool calls in a reply that ended for another reason are a bad response and do not run`() =
         runTest {
             val tap = FakeTool("tap", RiskClass.WRITE)

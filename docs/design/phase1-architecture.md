@@ -434,7 +434,7 @@ interface TaskRuntime {
 
 **停止条件**（turn 的结束原因）：
 - 最终回答（没有工具调用、有非空白文字）→ `turnStopping` → `COMPLETED`；`end_not_done` → `END_NOT_DONE`；
-- 只执行正常结束的回复里的调用。max-tokens：回复照记，工具调用全部记 `SKIPPED`、不执行 → `MAX_TOKENS`。以其他原因结束（`StopReason.OTHER`：incomplete、被过滤、原因不明）又带着调用的回复过不了边界校验，当 `BadResponse`，同样不执行；
+- 只执行正常结束的回复里的调用：`TOOL_USE`，以及带调用的 `END_TURN`（和 `TOOL_USE` 一样执行；各协议的结束原因由适配器归一化）。max-tokens：回复照记，工具调用全部记 `SKIPPED`、不执行 → `MAX_TOKENS`。以其他原因结束（`StopReason.OTHER`：incomplete、被过滤、原因不明）又带着调用的回复过不了边界校验，当 `BadResponse`，同样不执行；
 - `preStep` 拒绝 → `PRE_STEP_REFUSED`；
 - **步数上限**：每个 turn 默认 80（`LoopConfig.maxStepsPerTurn`）→ `LIMIT`；
 - **turn-stopping 续跑上限**：每个 turn 默认 3 次（`maxContinuationsPerTurn`）→ `LIMIT`。
