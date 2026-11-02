@@ -78,7 +78,7 @@ public sealed interface Verdict {
     @SerialName("allow")
     public data object Allow : Verdict
 
-    /** Ask the user first; consent is one-off and bound to the card's call, target and amount. */
+    /** Ask the user first; consent is one-off and bound to the whole card. */
     @Serializable
     @SerialName("confirm")
     public data class Confirm(
@@ -115,9 +115,10 @@ public sealed interface Verdict {
  *
  * Re-check after approval: once the user approves a card and before the call runs, the runtime
  * resolves and evaluates the call again on a fresh screen with [approved] set. The engine returns
- * `Allow` only when the card it computes now matches [approved] in `callId`, `reason`, `target`,
- * `amount` and `pkg`; otherwise it returns a new `Confirm`. So "one approval is bound to this
- * target and amount" is also decided only here.
+ * `Allow` only when the card it computes now equals [approved] as a whole, every [ConfirmCard]
+ * field included (`callId`, `reason`, `action`, `target`, `content`, `amount`, `pkg`). Otherwise it
+ * returns a new `Confirm`, or `HandOff` / `Refuse` when the fresh screen calls for that. So "one
+ * approval is bound to exactly this card" is also decided only here.
  *
  * @property taskId the task.
  * @property level user-selected security level.

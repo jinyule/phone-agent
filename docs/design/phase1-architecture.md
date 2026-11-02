@@ -289,7 +289,7 @@ data class ActionIntent(            // 执行前从"动作 + 目标元素 + 当�
 )
 sealed interface Verdict {
     data object Allow : Verdict
-    data class Confirm(val card: ConfirmCard) : Verdict            // 一次性同意，与目标和金额绑定；ConfirmCard、Money 在 core.ports
+    data class Confirm(val card: ConfirmCard) : Verdict            // 一次性同意，与整张卡绑定；ConfirmCard、Money 在 core.ports
     data class HandOff(val kind: HandoffKind, val hint: String) : Verdict
     data class Refuse(val reason: String, val hintForModel: String) : Verdict
 }
@@ -310,7 +310,7 @@ data class PolicyContext(
 - **安全判定只在 policy**：runtime 的 policy guard 先 `resolve` 再 `evaluate`；工具少报效果也绕不过去。
   - 声明为 SPEND 的工具一定解析成 SPEND；
   - 写类工具的参数解析不了，或者不认识的工具名且不是 READ，都按保守处理。
-- **批准后复核**：用户批准之后、执行之前，runtime 用新的一屏再 `resolve` 和 `evaluate` 一次，传入 `approved`。只有新算出的卡与它的 callId、reason、target、amount、pkg 全部一致才 Allow，否则返回新的 Confirm。
+- **批准后复核**：用户批准之后、执行之前，runtime 用新的一屏再 `resolve` 和 `evaluate` 一次，传入 `approved`。只有新算出的卡与批准的卡完全相同（`ConfirmCard` 的全部字段：callId、reason、action、target、content、amount、pkg）才 Allow；否则返回新的 Confirm，新屏要求转交或拒绝时返回 HandOff 或 Refuse。
 
 ### 3.7 任务运行时（turn/step 状态机 + 双队列 inbox，参考 dsh）
 

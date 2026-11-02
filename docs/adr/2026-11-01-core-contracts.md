@@ -135,7 +135,7 @@ M1/M2 的主循环、OpenAI 系适配器、Anthropic 适配器、PolicyEngine、
 - **`core.policy.IntentResolver`**：`resolve(call, risk, screen): ActionIntent`，纯函数、不抛异常，`risk` 是下限。
   - "这次调用会干什么"也在 policy 里判定，工具少报效果绕不过去。
   - 代价是 policy 和工具各解析一遍 phase1 §5 的参数，由装配时的集成测试防止两边走样。
-- **`PolicyContext.approved`**：批准后复核时传入刚批准的卡，"一次同意只绑定这个目标和金额"也只在 PolicyEngine 里判定。
+- **`PolicyContext.approved`**：批准后复核时传入刚批准的卡，新算出的卡与它完全相同（全部字段）才放行，"一次同意只绑定这张卡"也只在 PolicyEngine 里判定。
   - KDoc 写明 `operatedPackages` 和 `outwardConfirmedPackages` 怎么从日志算出来；
   - `PolicyContext` 本身仍不序列化，但必须能从日志推导。
 - **`core.model.CredentialResolver` / `BlobSource`**：构造适配器时注入。`ChatModel.complete` 的签名不变，密钥和 blob 字节都不进请求以外的地方。

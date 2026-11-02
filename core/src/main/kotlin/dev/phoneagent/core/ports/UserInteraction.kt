@@ -132,8 +132,8 @@ public enum class HandoffResult {
 }
 
 /**
- * Content of a confirmation card (phase1 §6). The approval applies to exactly [callId]; a
- * different call, target or amount needs a new card.
+ * Content of a confirmation card (phase1 §6). The approval applies to exactly this card: a card
+ * that differs in any field, [callId] included, needs a new approval.
  *
  * @property callId the call being approved.
  * @property reason why the user is asked.
