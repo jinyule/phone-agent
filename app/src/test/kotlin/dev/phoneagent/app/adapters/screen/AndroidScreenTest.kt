@@ -535,6 +535,23 @@ class AndroidScreenTest {
         }
 
     @Test
+    fun aColdLaunchSaysItsProcessWasNotRestarted() =
+        runTest {
+            // Fix list r1 S6: M1 only clears the task; killing the process waits for the helper (M2).
+            show(button("Home", Rect(0, 0, 500, 100)), pkg = "com.launcher")
+
+            val outcome = screen().launch(LaunchTarget.App("com.mail", cold = true))
+
+            assertEquals(
+                ActionOutcome.Status.Failed(
+                    "com.mail did not come to the front within 5000 ms; " +
+                        "a cold launch only clears its task, the process was not restarted",
+                ),
+                outcome.status,
+            )
+        }
+
+    @Test
     fun launchRefusesItsOwnAppAndReportsStartFailures() =
         runTest {
             show(button("Home", Rect(0, 0, 500, 100)), pkg = "com.launcher")

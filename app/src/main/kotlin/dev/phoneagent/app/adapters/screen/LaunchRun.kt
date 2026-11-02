@@ -71,13 +71,19 @@ internal class LaunchRun(
         val after = parts.observer.observe(host, geometry, before.detail)
         val status =
             if (target is LaunchTarget.App && !arrived) {
+                val cold = if (target.cold) COLD_NOT_RESTARTED else ""
                 ActionOutcome.Status.Failed(
-                    "${target.packageName} did not come to the front within ${timings.launchWaitMs} ms",
+                    "${target.packageName} did not come to the front within ${timings.launchWaitMs} ms$cold",
                 )
             } else {
                 ActionOutcome.Status.Ok
             }
         val diff = base?.let { parts.analyzer.diff(it.snapshot, after) }
         return ActionOutcome(status, before.effectOf(after), after = after, diff = diff)
+    }
+
+    private companion object {
+        /** Added to a failed cold launch: M1 cannot restart the process (see [LaunchIntents.app]). */
+        const val COLD_NOT_RESTARTED = "; a cold launch only clears its task, the process was not restarted"
     }
 }

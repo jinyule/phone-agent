@@ -86,14 +86,16 @@ internal object LaunchIntents {
             SystemIntentKind.SETTINGS to Spec(setOf("page"), setOf("package")),
         )
 
-    /** The launcher intent of [target]'s package; [launchIntent] is `ScreenSystem.launchIntent`. */
+    /**
+     * The launcher intent of [target]'s package; [launchIntent] is `ScreenSystem.launchIntent`.
+     * M1: a cold launch clears the app's task and reopens it at its first screen; the process keeps
+     * running, restarting it waits for the privileged helper (M2).
+     */
     fun app(
         target: LaunchTarget.App,
         launchIntent: (String) -> Intent?,
     ): Built {
         val intent = launchIntent(target.packageName)
-        // A cold start clears the task so the app opens at its first screen; killing the process
-        // needs the privileged helper (M2).
         val reset = if (target.cold) Intent.FLAG_ACTIVITY_CLEAR_TASK else Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
         return if (intent == null) {
             Built.Invalid("${target.packageName} is not installed or has no launcher activity")
