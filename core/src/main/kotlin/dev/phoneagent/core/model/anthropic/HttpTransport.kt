@@ -83,12 +83,21 @@ internal class HttpReply(
     val headers: Headers get() = RetryAfterStash.restore(response.headers)
     val successful: Boolean get() = response.isSuccessful
 
-    /** Up to [limit] bytes of the body as UTF-8 text (error bodies; HTML pages can be large). */
-    suspend fun text(limit: Long = ERROR_BODY_LIMIT): String =
+    /**
+     * Up to [limit] characters of an error body (HTML pages can be large) as UTF-8 text masked with
+     * the request's [Redactor], which masks before it cuts: [Redactor.reach] bytes past [limit] are
+     * read as well, so a secret that straddles the limit is masked whole. When the body goes on
+     * past what was read, the code point the read split and the [Redactor.openEnd] are dropped
+     * before the cut. The cut never splits a surrogate pair. (Same as the OpenAI adapters' copy.)
+     */
+    suspend fun maskedText(limit: Int = ERROR_BODY_LIMIT): String =
         blocking(io, redactor) {
             val source = response.body.source()
-            source.request(limit)
-            source.buffer.readUtf8(minOf(limit, source.buffer.size))
+            val wanted = limit.toLong() + redactor.reach
+            val more = source.request(wanted + 1)
+            val end = if (more) codePointStart(source.buffer, wanted) else source.buffer.size
+            val masked = redactor.text(source.buffer.readUtf8(end))
+            cut(if (more) masked.dropLast(redactor.openEnd(masked)) else masked, limit)
         }
 
     /** A line ended by CR whose LF (if any) has not been read yet. */
@@ -160,7 +169,7 @@ internal class HttpReply(
     }
 
     private companion object {
-        const val ERROR_BODY_LIMIT = 64L * 1024
+        const val ERROR_BODY_LIMIT = 64 * 1024
         const val LF = '\n'.code.toByte()
         const val CR = '\r'.code.toByte()
     }
@@ -168,6 +177,38 @@ internal class HttpReply(
 
 /** Bytes that end a line. */
 private val TERMINATORS = "\r\n".encodeUtf8()
+
+/**
+ * Where a read of [buffer] that stops at byte [end] must stop so it splits no code point: [end],
+ * or the start of the code point that byte [end] continues.
+ */
+private fun codePointStart(
+    buffer: Buffer,
+    end: Long,
+): Long {
+    var start = end
+    while (start > 0 && end - start < MAX_CONTINUATIONS && continues(buffer[start])) start--
+    return start
+}
+
+/** Whether [byte] continues a UTF-8 code point (`10xxxxxx`). */
+private fun continues(byte: Byte): Boolean = (byte.toInt() and UTF8_TOP_BITS) == UTF8_CONTINUATION
+
+/** A UTF-8 code point has at most three continuation bytes. */
+private const val MAX_CONTINUATIONS = 3
+private const val UTF8_TOP_BITS = 0xC0
+private const val UTF8_CONTINUATION = 0x80
+
+/** The first [limit] characters of [text], one fewer when the last of them would be half a surrogate pair. */
+private fun cut(
+    text: String,
+    limit: Int,
+): String =
+    when {
+        text.length <= limit -> text
+        text[limit - 1].isHighSurrogate() -> text.take(limit - 1)
+        else -> text.take(limit)
+    }
 
 /**
  * Keeps OkHttp from resending a 503 on its own: its follow-up logic retries a 503 whose

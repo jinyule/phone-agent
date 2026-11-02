@@ -60,6 +60,38 @@ class RedactionTest {
             assertClean(assertThrows<ModelError.Server> { model().complete(Kit.request()) })
         }
 
+    /**
+     * The body is read up to a limit (64 KiB). A key that crosses it must not leave its first
+     * characters behind: masking happens before the cut, and the cut never splits a secret.
+     */
+    @Test
+    fun `an error body whose key crosses the read limit leaves no part of it`() =
+        runTest {
+            server.enqueueError(502, " ".repeat(BODY_LIMIT - KEY_HEAD) + key)
+            val error = assertThrows<ModelError.Server> { model().complete(Kit.request()) }
+            assertNoPiece(key, error.stackTraceToString())
+        }
+
+    @Test
+    fun `a shaped key cut at the read limit too short for its shape leaves no part of it`() =
+        runTest {
+            server.enqueueError(502, " ".repeat(BODY_LIMIT - KEY_HEAD) + Kit.FAKE_KEY)
+            val error =
+                assertThrows<ModelError.Server> {
+                    Kit.model(server, credentials = Keys(Kit.FAKE_KEY)).complete(Kit.request())
+                }
+            assertNoPiece(Kit.FAKE_KEY, error.stackTraceToString())
+        }
+
+    /** Reading past the limit to see a key whole must not show the start of a key the read cut. */
+    @Test
+    fun `a multibyte error body whose read ends inside the key leaves no part of it`() =
+        runTest {
+            server.enqueueError(502, "中".repeat(BODY_LIMIT / UTF8_CJK + KEY_HEAD) + key)
+            val error = assertThrows<ModelError.Server> { model().complete(Kit.request()) }
+            assertNoPiece(key, error.stackTraceToString())
+        }
+
     @Test
     fun `a stream error event that echoes the key`() =
         runTest {
@@ -78,6 +110,14 @@ class RedactionTest {
             server.enqueueSse(Kit.sse("message_start" to """{"type":"message_start","message":{"id":"$key"""))
             assertClean(assertThrows<ModelError.BadResponse> { model().complete(Kit.request()) })
         }
+
+    private fun assertNoPiece(
+        secret: String,
+        printed: String,
+    ) {
+        val pieces = secret.windowed(PIECE).filter { it in printed }
+        assertTrue(pieces.isEmpty(), "part of the key leaked: $pieces")
+    }
 
     @Test
     fun `a successful reply whose metadata echoes the key`() =
@@ -116,4 +156,18 @@ class RedactionTest {
             server.enqueueSse(stream)
             assertClean(assertThrows<ModelError.BadResponse> { model().complete(Kit.request()) })
         }
+
+    private companion object {
+        /** What an error body is read up to (HttpReply). */
+        const val BODY_LIMIT = 64 * 1024
+
+        /** Characters of the key that fall before the read limit. */
+        const val KEY_HEAD = 10
+
+        /** Bytes of one CJK character in UTF-8. */
+        const val UTF8_CJK = 3
+
+        /** Shortest piece of a key that counts as a leak. */
+        const val PIECE = 6
+    }
 }

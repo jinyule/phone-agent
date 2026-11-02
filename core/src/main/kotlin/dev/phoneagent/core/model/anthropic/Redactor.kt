@@ -1,25 +1,38 @@
 package dev.phoneagent.core.model.anthropic
 
+import kotlinx.serialization.json.JsonPrimitive
 import java.util.Collections
 import java.util.IdentityHashMap
 
 /**
  * Masks credentials in provider text before it reaches a [dev.phoneagent.core.model.ModelError]
- * message or cause, or any diagnostic output (model-layer §2). Two layers: every
- * occurrence of the [secrets] a request used becomes [MASK]; then text shaped like a credential
- * (`Bearer …`, `sk-…`, JWTs) is masked whether or not this request used it. Error codes and
- * parameter names never match these shapes, so the diagnosis survives.
+ * message or cause, or any diagnostic output (model-layer §2). Two layers: every occurrence of the
+ * secrets a request used becomes [MASK], each as sent and in its standard JSON string escaping
+ * (`"` → `\"`, `\` → `\\`: [forms]); then text shaped like a credential (`Bearer …`, `sk-…`, JWTs)
+ * is masked whether or not this request used it. Error codes and parameter names never match these
+ * shapes, so the diagnosis survives.
  *
- * Callers redact before truncating, so a cut never leaves half a secret behind.
+ * Every cut comes after masking: callers redact the full text, then cut it. A reader that must
+ * stop early reads [reach] bytes past its limit and drops the [openEnd] of what it read, so a cut
+ * never leaves part of a secret behind.
  *
  * A copy of the OpenAI adapters' redactor: capabilities may not use each other's code (package
- * rules), so the two are kept in step by hand.
+ * rules), so the two are kept in step by hand; [reach] and [openEnd] match WP03's.
  */
 internal class Redactor(
     secrets: Iterable<String>,
 ) {
-    // Longest first, so a secret that contains another is masked whole.
-    private val secrets = secrets.filter { it.isNotEmpty() }.distinct().sortedByDescending { it.length }
+    private val secrets = secrets.filter { it.isNotEmpty() }.distinct()
+
+    /** Each secret as sent and JSON-escaped; longest first, so a form that contains another is masked whole. */
+    private val forms =
+        this.secrets
+            .flatMap { listOf(it, JsonPrimitive(it).toString().removeSurrounding("\"")) }
+            .distinct()
+            .sortedByDescending { it.length }
+
+    /** How many UTF-8 bytes past a cut a reader must see so that every secret starting before it is whole. */
+    val reach: Int = (forms.maxOfOrNull { it.encodeToByteArray().size } ?: 1) - 1
 
     /** A redactor that also masks [secret]. */
     fun with(secret: String?): Redactor = if (secret.isNullOrEmpty()) this else Redactor(secrets + secret)
@@ -27,10 +40,28 @@ internal class Redactor(
     /** [text] with every credential masked. */
     fun text(text: String): String {
         var masked = text
-        for (secret in secrets) masked = masked.replace(secret, MASK)
+        for (form in forms) masked = masked.replace(form, MASK)
         masked = BEARER.replace(masked, "$1$MASK")
         return SHAPES.fold(masked) { acc, shape -> shape.replace(acc, MASK) }
     }
+
+    /**
+     * The length of the end of [masked] (what [text] returned for text a read limit cut off) that
+     * may be the start of a credential that went on: the longest end that begins a [forms] entry, or a
+     * `sk-` key or JWT the cut left too short for its shape. The reader drops it.
+     */
+    fun openEnd(masked: String): Int {
+        val secret =
+            (minOf(reach, masked.length) downTo 1).firstOrNull { n -> forms.any { masked.endsWithStartOf(it, n) } }
+        val shape = OPEN_SHAPE.find(masked)?.let { masked.length - it.range.first }
+        return maxOf(secret ?: 0, shape ?: 0)
+    }
+
+    /** Whether the last [n] characters of this text are the first [n] of [form]. */
+    private fun String.endsWithStartOf(
+        form: String,
+        n: Int,
+    ): Boolean = form.length > n && regionMatches(length - n, form, 0, n)
 
     /**
      * [error] itself when no message it prints (causes and suppressed exceptions included) needs
@@ -94,5 +125,8 @@ internal class Redactor(
                 // JWTs (ChatGPT plan access tokens): header.payload.signature
                 Regex("""\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*"""),
             )
+
+        /** A credential shape still open at the end of the text (cut before [SHAPES] could match it). */
+        private val OPEN_SHAPE = Regex("""(?:\bsk-[A-Za-z0-9_-]*|\beyJ[A-Za-z0-9_.-]*)\z""")
     }
 }

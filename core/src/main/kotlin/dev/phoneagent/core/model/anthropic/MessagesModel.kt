@@ -45,7 +45,7 @@ internal class MessagesModel(
                 if (reply.successful) {
                     Outcome.Reply(read(reply, redactor, onDelta))
                 } else {
-                    Outcome.Failure(reply.status, reply.headers, redactor.text(reply.text()))
+                    Outcome.Failure(reply.status, reply.headers, reply.maskedText())
                 }
             }
         return when (outcome) {

@@ -56,7 +56,7 @@ class HttpTransportTest {
         val caller = QueueDispatcher()
         val job =
             CoroutineScope(caller + Job()).launch {
-                HttpTransport(client, io).send(request(), Redactor.SHAPES_ONLY) { it.text() }
+                HttpTransport(client, io).send(request(), Redactor.SHAPES_ONLY) { it.maskedText() }
             }
         caller.runNext() // starts the call; the caller is now suspended while execute() runs on io
         val resume = caller.next() // queued once execute() has returned the response
@@ -72,7 +72,7 @@ class HttpTransportTest {
     fun `a normal exchange neither cancels the call nor keeps its connection`() =
         runBlocking {
             server.enqueue(MockResponse.Builder().body("ok").build())
-            val text = HttpTransport(client, io).send(request(), Redactor.SHAPES_ONLY) { it.text() }
+            val text = HttpTransport(client, io).send(request(), Redactor.SHAPES_ONLY) { it.maskedText() }
             assertEquals("ok", text)
             assertFalse(events.canceled, "nothing cancels a call that finished")
             assertEquals(0, connectionsInUse())
