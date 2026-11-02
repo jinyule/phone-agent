@@ -24,11 +24,14 @@ import dev.phoneagent.core.tool.ToolStatus
  *   Each appears at most once per call, and never after the call's `tool/result`;
  * - a result for a call that never got one of its own follows the persisted start: a call with a
  *   `tool/started` is never NOT_STARTED, one without is never OUTCOME_UNKNOWN;
- * - how a run ends and the next one starts ([RunRules]): the calls that need a result (every
- *   tool call of an `assistant/message`, plus every dispatched call, `tool/call`) have one
- *   before `step/end`, `turn/end`, `task/stopped` and `session/resumed`; `turn/end(STOPPED)` is
- *   followed by `task/stopped`; every `task/stopped` by `session/resumed`; after any stop or
- *   resume nothing runs before the user's own input is recorded in a turn;
+ * - how a run ends and the next one starts ([RunRules]): turns and steps pair up (one turn open
+ *   at a time, numbered upward; one step open at a time, in the open turn, numbered upward
+ *   within it; each end closes the open one, a turn after its step); the calls that need a
+ *   result (every tool call of an `assistant/message`, plus every dispatched call, `tool/call`)
+ *   have one before `step/end`, `turn/end`, `task/stopped` and `session/resumed`;
+ *   `turn/end(STOPPED)` is followed by `task/stopped`; every `task/stopped` by
+ *   `session/resumed`; after any stop or resume nothing runs before the user's own input is
+ *   recorded in a turn;
  * - a `side/response` has exactly one source: an earlier `side/request` that has no response yet;
  * - `context/reasoning-dropped` points to an earlier record.
  *

@@ -83,11 +83,14 @@ public enum class StopCause {
     ERROR,
 }
 
-/** `turn/start`: a turn began after inputs were taken from the inbox. [turn] counts from 1. */
+/**
+ * `turn/start`: a turn began after inputs were taken from the inbox. [turn] counts from 1; one
+ * turn is open at a time (`SessionInvariants`).
+ */
 @Serializable
 @SerialName("turn/start")
 public data class TurnStarted(
-    /** Turn number within the session, >= 1. */
+    /** Turn number within the session, >= 1, above every earlier turn's. */
     val turn: Int,
 ) : SessionEvent {
     init {
@@ -98,7 +101,7 @@ public data class TurnStarted(
 /**
  * `turn/end`: a turn finished.
  *
- * @property turn the turn, >= 1.
+ * @property turn the open turn, >= 1; its step has ended.
  * @property reason why it ended.
  * @property detail diagnostic text (e.g. the refusing interceptor), or `null`.
  */
@@ -145,13 +148,16 @@ public enum class TurnEndReason {
     FAILED,
 }
 
-/** `step/start`: one model request plus the tool calls it asks for. */
+/**
+ * `step/start`: one model request plus the tool calls it asks for. One step is open at a time, in
+ * the open turn (`SessionInvariants`).
+ */
 @Serializable
 @SerialName("step/start")
 public data class StepStarted(
-    /** The turn, >= 1. */
+    /** The open turn, >= 1. */
     val turn: Int,
-    /** Step number within the turn, >= 1. */
+    /** Step number within the turn, >= 1, above the turn's earlier steps. */
     val step: Int,
 ) : SessionEvent {
     init {
@@ -159,13 +165,16 @@ public data class StepStarted(
     }
 }
 
-/** `step/end`: every call the step's replies asked for has its `tool/result` before it (`SessionInvariants`). */
+/**
+ * `step/end`: ends the open step. Every call the step's replies asked for has its `tool/result`
+ * before it (`SessionInvariants`).
+ */
 @Serializable
 @SerialName("step/end")
 public data class StepEnded(
-    /** The turn, >= 1. */
+    /** The open turn, >= 1. */
     val turn: Int,
-    /** The step, >= 1. */
+    /** The open step, >= 1. */
     val step: Int,
     /** How it ended. */
     val outcome: StepOutcome,

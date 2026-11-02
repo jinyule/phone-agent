@@ -21,11 +21,12 @@ class DecodeBoundaryTest {
     private fun envelope(
         type: String,
         data: String,
-    ) = """{"seq":${prefix.size + 1},"time":0,"type":"$type","data":$data}"""
+        seq: Int = prefix.size + 1,
+    ) = """{"seq":$seq,"time":0,"type":"$type","data":$data}"""
 
-    private fun read(line: String) =
+    private fun read(vararg lines: String) =
         codec.read(
-            (listOf(header) + prefix + line)
+            (listOf(header) + prefix + lines)
                 .joinToString("") {
                     "$it\n"
                 }.encodeToByteArray(),
@@ -97,13 +98,16 @@ class DecodeBoundaryTest {
 
     @Test
     fun `values at the edge of their range are accepted`() {
+        val turn = envelope("turn/start", """{"turn":1}""")
         val fine =
             listOf(
-                envelope("request/retry", """{"attempt":2,"delayMs":0,"error":"NETWORK"}"""),
-                envelope("turn/start", """{"turn":1}"""),
-                envelope("step/start", """{"turn":1,"step":1}"""),
+                listOf(envelope("request/retry", """{"attempt":2,"delayMs":0,"error":"NETWORK"}""")),
+                listOf(turn),
+                listOf(turn, envelope("step/start", """{"turn":1,"step":1}""", seq = prefix.size + 2)),
             )
-        fine.forEach { assertEquals(prefix.size + 1, read(it).records.size, it) }
+        fine.forEach { lines ->
+            assertEquals(prefix.size + lines.size, read(*lines.toTypedArray()).records.size, "$lines")
+        }
         assertTrue(ModelErrorKind.NETWORK.retryable)
     }
 

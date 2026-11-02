@@ -58,7 +58,8 @@
 {"seq":57,"time":570,"type":"compaction/prune","surfaceOp":{"type":"replace","startSeq":7,"endSeq":7},"data":{"parts":[{"type":"text","text":"[screenshot removed]"}]}}
 {"seq":58,"time":580,"type":"compaction/end","ignorable":true,"data":{"outcome":"COMPLETED","inputTokens":40000}}
 {"seq":59,"time":590,"type":"turn/end","data":{"turn":1,"reason":"COMPLETED","detail":null}}
-{"seq":60,"time":600,"type":"turn/end","data":{"turn":2,"reason":"FAILED","detail":"flush failed"}}
-{"seq":61,"time":610,"type":"task/stopped","data":{"cause":"ERROR"}}
-{"seq":62,"time":620,"type":"session/resumed","data":{"droppedTailBytes":17}}
-{"seq":63,"time":630,"type":"task/stopped","data":{"cause":"USER"}}
+{"seq":60,"time":600,"type":"turn/start","data":{"turn":2}}
+{"seq":61,"time":610,"type":"turn/end","data":{"turn":2,"reason":"FAILED","detail":"flush failed"}}
+{"seq":62,"time":620,"type":"task/stopped","data":{"cause":"ERROR"}}
+{"seq":63,"time":630,"type":"session/resumed","data":{"droppedTailBytes":17}}
+{"seq":64,"time":640,"type":"task/stopped","data":{"cause":"USER"}}

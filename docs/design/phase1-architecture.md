@@ -377,6 +377,7 @@ sealed interface Phase { data object Idle : Phase; data class Running(val turn: 
 
 - **停止只结束当前这次运行**（D14），没有终态，`USER`、`LIMIT`、`SHUTDOWN`、`ERROR` 都一样。停止流程先取消并 join 所有还可能写日志的协程（工具执行、取消结果、`prompt/withdrawn`、录入 inbox 的协程），再按上表补结果，写 `prompt/withdrawn`、`step/end(CANCELLED)`、`turn/end(STOPPED)`，最后写 `task/stopped(cause)`：这次运行的所有 append 都在它之前完成，之后这个 runtime 实例不再写任何记录。`turn/end(STOPPED)` 后面紧跟 `task/stopped`；写 `task/stopped` 时没有打开的 turn。
 - **不自动续跑**，等用户说"继续"，用不变量机械保证：任何 `task/stopped` 或 `session/resumed` 之后，任务进入"等待用户输入"状态，直到某个 turn 里记下一条 kind = USER 的 `user/message`。等待期间可以开 turn、记 inbox、改安全级别、再次停止或恢复，也可以先记下排着队的后台消息（INJECTED、RUNTIME_CONTEXT，它们不结束等待）；但不能有 step、模型请求、回复、工具调用、提示、旁路请求或上下文改动。所以第一个 step 之前一定有用户自己的输入。
+- **turn 和 step 配对**：同一时间最多一个打开的 turn，编号比之前所有 turn 都大；step 只在打开的 turn 里开始，同一时间最多一个，编号在这个 turn 里递增；`step/end` 只结束打开的那个 step，`turn/end` 只结束打开的那个 turn，而且要等它的 step 结束。所以 step 不跨 turn，"没有打开的 turn"不会因为 turn 嵌套或重复开始而失真。读写两端用同一份不变量检查。
 - **先恢复再继续**：每个 `task/stopped` 之后，下一条记录都必须是 `session/resumed`，四种 cause 一样。停下的 runtime 实例不再接受输入，继续任务的总是一个新实例（进程重建以后，或同一进程里由新实例接管），它先写 `session/resumed`，再记新收到的用户命令（`inbox/spliced`）、开新 turn。所以 `task/stopped` 和 `session/resumed` 之间没有 inbox 或别的已知记录。
 - **半截停止**：进程在 `turn/end(STOPPED)` 和 `task/stopped` 之间退出，日志停在 `turn/end(STOPPED)`。这是合法的日志，下一条已知记录必须是 `task/stopped`。恢复时补写 `task/stopped(ERROR)`，含义是"停止收尾没有完成"（原来的原因没有落盘，不猜），再写 `session/resumed`，然后等待用户输入。
 - 未知的可忽略记录对这些规则透明：不打断配对，不结束等待，也不被拒绝。读和写用同一份不变量，store 自己写出的日志重新打开后状态一致。

@@ -366,6 +366,7 @@ object SessionSamples {
             CompactionPrune(listOf(Part.Text("[screenshot removed]"))),
             CompactionEnded(CompactionOutcome.COMPLETED, 40_000),
             TurnEnded(1, TurnEndReason.COMPLETED),
+            TurnStarted(2),
             TurnEnded(2, TurnEndReason.FAILED, detail = "flush failed"),
             TaskStopped(StopCause.ERROR),
             SessionResumed(droppedTailBytes = 17),

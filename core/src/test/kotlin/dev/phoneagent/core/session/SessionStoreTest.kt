@@ -148,12 +148,12 @@ class SessionStoreTest {
             val store = newStore()
             store.append(TurnStarted(1))
             store.close()
-            assertThrows<SessionWriteException> { store.append(TurnStarted(2)) }
+            assertThrows<SessionWriteException> { store.append(StepStarted(1, 1)) }
             val writesBefore = storage.writes.getValue(logPath)
             val opened = SessionStore.open(files, clock)
             assertNull(opened.log.truncatedTail)
             assertEquals(writesBefore, storage.writes.getValue(logPath), "no rewrite without a torn tail")
-            assertEquals(3, opened.store.append(TurnStarted(2)).seq)
+            assertEquals(3, opened.store.append(StepStarted(1, 1)).seq)
         }
 
     @Test
@@ -206,7 +206,7 @@ class SessionStoreTest {
             val store = newStore()
             store.append(TurnStarted(1))
             storage.failAppend = true
-            assertThrows<SessionWriteException> { store.append(TurnStarted(2)) }
+            assertThrows<SessionWriteException> { store.append(StepStarted(1, 1)) }
             storage.failWrite = true
             assertThrows<SessionWriteException> { SessionStore.open(files, clock) }
         }
@@ -245,7 +245,7 @@ class SessionStoreTest {
             val holder = async(start = CoroutineStart.UNDISPATCHED) { store.append(TurnStarted(1)) }
             entered.await()
             storage.beforeAppend = {}
-            val waiter = async(start = CoroutineStart.UNDISPATCHED) { store.append(TurnStarted(99)) }
+            val waiter = async(start = CoroutineStart.UNDISPATCHED) { store.append(StepStarted(1, 99)) }
             waiter.cancel()
             try {
                 testScheduler.runCurrent()
@@ -255,8 +255,8 @@ class SessionStoreTest {
             }
             holder.await()
             assertThrows<CancellationException> { waiter.await() }
-            assertFalse(TurnStarted(99) in store.records().map { it.event }, "the waiting append was not written")
-            assertFalse("\"turn\":99" in storage.text(logPath))
+            assertFalse(StepStarted(1, 99) in store.records().map { it.event }, "the waiting append was not written")
+            assertFalse("\"step\":99" in storage.text(logPath))
         }
 
     @Test
@@ -278,6 +278,7 @@ class SessionStoreTest {
     fun `cleanup code appends from a cancelled coroutine inside NonCancellable`() =
         runTest(timeout = CANCELLATION_TIMEOUT) {
             val store = newStore()
+            store.append(TurnStarted(1))
             val job =
                 launch(start = CoroutineStart.UNDISPATCHED) {
                     try {

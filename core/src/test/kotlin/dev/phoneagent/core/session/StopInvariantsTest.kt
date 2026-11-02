@@ -44,7 +44,7 @@ class StopInvariantsTest {
         runTest {
             val afterStop =
                 mapOf(
-                    "a step right after the stop" to listOf(StepStarted(1, 2)),
+                    "a reply right after the stop" to listOf(reply),
                     "a model request right after the stop" to listOf(header),
                     "a side request right after the stop" to listOf(side),
                     "the user's input outside a turn" to listOf(goOn),
@@ -76,7 +76,7 @@ class StopInvariantsTest {
                     SessionResumed(0),
                 )
             val backgroundOnly = listOf(TurnStarted(2), injected, context, StepStarted(2, 1))
-            logs.assertRejectsLast("a step after a crash and resume", crashed + StepStarted(1, 2))
+            logs.assertRejectsLast("a step after a crash and resume", crashed + TurnStarted(2) + StepStarted(2, 1))
             logs.assertRejectsLast("background input after a crash and resume", crashed + backgroundOnly)
             logs.assertRejectsLast(
                 "a resume after a user stop",
@@ -288,8 +288,8 @@ class StopInvariantsTest {
             val user = logs.reopened(stoppedRun(StopCause.USER)).store
             assertThrows<IllegalArgumentException>("turn/start before session/resumed") { user.append(TurnStarted(2)) }
             user.append(SessionResumed(0))
-            assertThrows<IllegalArgumentException>("a step before the user's input") { user.append(StepStarted(1, 2)) }
             user.append(TurnStarted(2))
+            assertThrows<IllegalArgumentException>("a step before the user's input") { user.append(StepStarted(2, 1)) }
             user.append(injected)
             assertThrows<IllegalArgumentException>(
                 "a step after injected context only",

@@ -9,6 +9,9 @@ import kotlin.reflect.KClass
  * ends and how the next one starts. A stop ends the current run only; the session goes on when
  * the user's own input opens a new turn, never on its own.
  *
+ * - Turns and steps pair up ([TurnPairing]): one turn open at a time, numbered upward, and one
+ *   step open at a time, in the open turn, numbered upward within it; each end closes the open
+ *   one, a turn after its step. So no step crosses a turn, and a turn that ended is closed.
  * - The calls that need a result are the tool calls of every `assistant/message` (an interrupted
  *   one has none) and every dispatched call (`tool/call`). Each has its `tool/result` before
  *   anything closes the step, turn or run that asked for it: `step/end`, `turn/end`,
@@ -32,7 +35,7 @@ import kotlin.reflect.KClass
 internal class RunRules {
     private val needed = LinkedHashSet<ToolCallId>()
     private val answered = HashSet<ToolCallId>()
-    private var turnOpen = false
+    private val turns = TurnPairing()
 
     /** The last record was `turn/end(STOPPED)`. */
     private var stopUnfinished = false
@@ -44,25 +47,21 @@ internal class RunRules {
     private var waiting = false
 
     /** Why [event] may not follow the records accepted so far, or `null` when it may. */
-    fun violation(event: SessionEvent): String? = orderViolation(event) ?: closeViolation(event) ?: waitViolation(event)
+    fun violation(event: SessionEvent): String? =
+        orderViolation(event) ?: turns.violation(event) ?: closeViolation(event) ?: waitViolation(event)
 
     /** Takes [event] into account for later checks. */
     fun accept(event: SessionEvent) {
+        turns.accept(event)
         when {
             event is AssistantMessage -> needed += event.parts.filterIsInstance<Part.ToolCall>().map { it.id }
             event is ToolCallRecorded -> needed += event.call.id
             event is ToolResultRecorded -> answered += event.callId
-            event is TurnStarted -> turnOpen = true
-            event is TurnEnded -> endTurn(event.reason)
+            event is TurnEnded -> stopUnfinished = event.reason == TurnEndReason.STOPPED
             event is TaskStopped -> stop(event.cause)
             event is SessionResumed -> resume()
             event is UserMessage && event.kind == UserMessageKind.USER -> waiting = false
         }
-    }
-
-    private fun endTurn(reason: TurnEndReason) {
-        turnOpen = false
-        stopUnfinished = reason == TurnEndReason.STOPPED
     }
 
     private fun stop(cause: StopCause) {
@@ -95,7 +94,7 @@ internal class RunRules {
         val open = needed.filterNot { it in answered }
         return when {
             open.isNotEmpty() -> "${nameOf(event)} leaves calls without a result: ${open.joinToString { it.value }}"
-            turnOpen && event::class in OUTSIDE_TURNS -> "${nameOf(event)} comes after the open turn ended"
+            turns.inTurn && event::class in OUTSIDE_TURNS -> "${nameOf(event)} comes after the open turn ended"
             else -> null
         }
     }
@@ -104,7 +103,7 @@ internal class RunRules {
         when {
             !waiting || event::class in WHILE_WAITING -> null
             event is ScreenObserved && event.callId == null -> null
-            event is UserMessage && turnOpen -> null
+            event is UserMessage && turns.inTurn -> null
             event is UserMessage -> "the user's input after a stop or a resume comes in a turn (turn/start first)"
             else -> "after a stop or a resume nothing runs before the user's input: ${nameOf(event)}"
         }

@@ -57,7 +57,10 @@ class AnsweredCallsTest {
     fun `a call of a complete reply needs a result before anything closes, even when it was never dispatched`() =
         runTest {
             logs.assertRejectsLast("step/end", replied("c1") + StepEnded(1, 1, StepOutcome.CANCELLED))
-            logs.assertRejectsLast("turn/end", replied("c1") + TurnEnded(1, TurnEndReason.STOPPED))
+            logs.assertRejectsLast(
+                "turn/end, the reply outside a step",
+                listOf(TurnStarted(1), goOn, replyWith("c1"), TurnEnded(1, TurnEndReason.STOPPED)),
+            )
             logs.assertRejectsLast("task/stopped", listOf(replyWith("c1"), TaskStopped(StopCause.ERROR)))
             logs.assertRejectsLast("session/resumed", listOf(replyWith("c1"), SessionResumed(0)))
             logs.assertAccepts(
