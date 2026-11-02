@@ -189,6 +189,12 @@ class LaunchBoundaryTest(
         assertStarts("the app's own unexported activity", component(own), own)
     }
 
+    @Test
+    fun anotherPackageWithTheAppsAppIdIsTheAppsOwn() {
+        val shared = helper.install(SHARED, exported = false, permission = GUARD, uid = APP_UID)
+        assertStarts("another package, the app's app id", component(shared), shared)
+    }
+
     // ---- permissions ----
 
     @Test
@@ -202,6 +208,12 @@ class LaunchBoundaryTest(
         val vault = helper.install(OTHER, permission = GUARD)
         helper.grantApp(GUARD)
         assertStarts("guarded activity, permission held", component(vault), vault)
+    }
+
+    @Test
+    fun theAppsOwnActivityStartsWithoutThePermissionItRequires() {
+        val own = helper.install(APP, activity = "$APP.Vault", permission = GUARD)
+        assertStarts("the app's own guarded activity", component(own), own)
     }
 
     @Test
@@ -247,6 +259,14 @@ class LaunchBoundaryTest(
     }
 
     @Test
+    fun theAppsOwnActivityIsRefusedWhenTheAppOpOfItsPermissionIsNotAllowed() {
+        val own = helper.install(APP, activity = "$APP.Caller", permission = Manifest.permission.CALL_PHONE)
+        helper.grantApp(Manifest.permission.CALL_PHONE)
+        callPhoneOp(AppOpsManager.MODE_IGNORED)
+        assertRefused("the app's own activity, app op ignored", component(own), LaunchRefusal.APP_OP_DENIED)
+    }
+
+    @Test
     @Config(shadows = [UnreadableAppOps::class])
     fun anAppOpTheHelperMayNotReadIsRefused() {
         installDialer(guarded = true)
@@ -273,20 +293,30 @@ class LaunchBoundaryTest(
     }
 
     @Test
+    fun aCallToAnUnguardedHandlerStartsWhenTheAppHoldsCallPhoneAndItsAppOpIsAllowed() {
+        val dialer = installDialer(guarded = false)
+        helper.appRequests(Manifest.permission.CALL_PHONE)
+        helper.grantApp(Manifest.permission.CALL_PHONE)
+        callPhoneOp(AppOpsManager.MODE_ALLOWED)
+        assertStarts("ACTION_CALL, CALL_PHONE held, app op allowed", call(), dialer)
+    }
+
+    @Test
     fun aCallToAnUnguardedHandlerStartsWhenTheAppDoesNotRequestCallPhone() {
         val dialer = installDialer(guarded = false)
         assertStarts("ACTION_CALL, CALL_PHONE not requested", call(), dialer)
     }
 
+    /** The platform's table and [LaunchTargets.ACTION_PERMISSIONS]: an entry missing from either fails. */
     @Test
-    fun aPhotoCaptureIsRefusedWhenTheAppRequestsTheCameraButLacksIt() {
-        helper.install("com.example.camera", filter = filter(MediaStore.ACTION_IMAGE_CAPTURE))
-        helper.appRequests(Manifest.permission.CAMERA)
-        assertRefused(
-            "IMAGE_CAPTURE",
-            Intent(MediaStore.ACTION_IMAGE_CAPTURE),
-            LaunchRefusal.ACTION_PERMISSION_NOT_HELD,
-        )
+    fun everyActionTiedToARuntimePermissionIsRefusedWhenTheAppRequestsItButLacksIt() {
+        val actions = PLATFORM_ACTION_PERMISSIONS.keys + LaunchTargets.ACTION_PERMISSIONS.keys
+        actions.forEachIndexed { handler, action ->
+            val permission = PLATFORM_ACTION_PERMISSIONS[action] ?: LaunchTargets.ACTION_PERMISSIONS.getValue(action)
+            helper.install("com.example.handler$handler", filter = filter(action))
+            helper.appRequests(permission)
+            assertRefused("$action, $permission requested", Intent(action), LaunchRefusal.ACTION_PERMISSION_NOT_HELD)
+        }
     }
 
     // ---- activity-alias ----
@@ -435,6 +465,7 @@ class LaunchBoundaryTest(
         fun paths(): List<Array<Any>> = Path.entries.map { arrayOf(it) }
 
         private const val OTHER = "com.example.other"
+        private const val SHARED = "$APP.extra"
         private const val EDITOR = "$OTHER.Editor"
         private const val DIALER = "com.android.server.telecom"
         private const val GUARD = "com.example.permission.OPEN"
@@ -453,5 +484,14 @@ class LaunchBoundaryTest(
                 Intent.FLAG_GRANT_PREFIX_URI_PERMISSION,
             )
         private val URI_GRANTS = GRANT_FLAGS.reduce(Int::or)
+
+        /** `ActivityTaskSupervisor.ACTION_TO_RUNTIME_PERMISSION` (API 36), written out. */
+        private val PLATFORM_ACTION_PERMISSIONS =
+            mapOf(
+                MediaStore.ACTION_IMAGE_CAPTURE to Manifest.permission.CAMERA,
+                "android.provider.action.MOTION_PHOTO_CAPTURE" to Manifest.permission.CAMERA,
+                MediaStore.ACTION_VIDEO_CAPTURE to Manifest.permission.CAMERA,
+                Intent.ACTION_CALL to Manifest.permission.CALL_PHONE,
+            )
     }
 }

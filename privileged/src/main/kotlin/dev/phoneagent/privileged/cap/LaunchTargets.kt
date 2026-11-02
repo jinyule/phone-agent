@@ -208,11 +208,11 @@ internal class LaunchTargets(
                 ?.let(::activity),
         )
 
-    private companion object {
-        const val TAG = "PhoneAgentHelper"
+    internal companion object {
+        private const val TAG = "PhoneAgentHelper"
 
         /** Flags that would let the target open URIs with the starter's (the shell's) permissions. */
-        const val URI_GRANTS =
+        private const val URI_GRANTS =
             Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
                 Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION
 

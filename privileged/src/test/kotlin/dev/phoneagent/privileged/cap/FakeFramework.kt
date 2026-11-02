@@ -285,8 +285,8 @@ internal class CapabilityHarness(
     }
 
     /**
-     * Adds [activity] to [packageName], installing the package first if needed: the app's own
-     * package gets [APP_UID], any other [OTHER_UID]. The activity is [exported] and matches
+     * Adds [activity] to [packageName], installing the package first if needed with [uid] (by
+     * default [APP_UID] for the app's own package, [OTHER_UID] for any other). The activity is [exported] and matches
      * [filter]; [appPermission] is the application's permission (set on first install) and
      * [targetActivity] makes it an activity-alias of that activity. [permission] is the manifest's
      * `android:permission`, resolved as the package manager resolves it (`ParsedActivityUtils`):
@@ -303,8 +303,9 @@ internal class CapabilityHarness(
         filter: IntentFilter? = null,
         appPermission: String? = null,
         targetActivity: String? = null,
+        uid: Int = if (packageName == APP) APP_UID else OTHER_UID,
     ): ComponentName {
-        val app = installed(packageName, appPermission)
+        val app = installed(packageName, appPermission, uid)
         val component = ComponentName(packageName, activity)
         val declared = permission ?: app.permission.takeIf { targetActivity == null }
         packages.addOrUpdateActivity(
@@ -323,7 +324,7 @@ internal class CapabilityHarness(
 
     /** Makes the app's manifest request [permissions] (granted or not, as [grantApp] decides). */
     fun appRequests(vararg permissions: String) {
-        installed(APP, appPermission = null)
+        installed(APP, appPermission = null, APP_UID)
         packages.getInternalMutablePackageInfo(APP).requestedPermissions = arrayOf(*permissions)
     }
 
@@ -332,12 +333,13 @@ internal class CapabilityHarness(
     private fun installed(
         packageName: String,
         appPermission: String?,
+        uid: Int,
     ): ApplicationInfo {
         packages.getInternalMutablePackageInfo(packageName)?.let { return it.applicationInfo!! }
         val app =
             ApplicationInfo().apply {
                 this.packageName = packageName
-                uid = if (packageName == APP) APP_UID else OTHER_UID
+                this.uid = uid
                 permission = appPermission
             }
         packages.installPackage(
