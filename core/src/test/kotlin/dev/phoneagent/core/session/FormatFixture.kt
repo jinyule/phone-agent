@@ -12,10 +12,12 @@ import java.nio.file.Path
  * needs a new version.
  */
 object FormatFixture {
-    /** The fixture text [codec] writes for the samples. */
+    /** The fixture text [codec] writes for the samples, with a header of [codec]'s current version. */
     fun text(codec: SessionCodec = SessionCodec()): String =
-        (listOf(codec.encodeHeader(SessionSamples.header)) + SessionSamples.records.map(codec::encode))
-            .joinToString("") { "$it\n" }
+        (
+            listOf(codec.encodeHeader(SessionSamples.header.copy(version = codec.currentVersion))) +
+                SessionSamples.records.map(codec::encode)
+        ).joinToString("") { "$it\n" }
 
     /**
      * Writes the fixture of [codec]'s current version under [root] and returns its path.

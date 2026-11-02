@@ -1,5 +1,6 @@
 package dev.phoneagent.core.session
 
+import kotlinx.serialization.json.JsonObject
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -19,6 +20,31 @@ class FormatFixtureTest {
         val written = FormatFixture.write(root)
         assertEquals(root.resolve("v1").resolve(FormatFixture.FILE), written)
         assertEquals(FormatFixture.text(), Files.readString(written))
+    }
+
+    @Test
+    fun `the fixture of a later version carries that version in its directory and its header`(
+        @TempDir root: Path,
+    ) {
+        val v2 =
+            SessionCodec(
+                migrations =
+                    listOf(
+                        object : SessionMigration {
+                            override val fromVersion = 1
+
+                            override fun migrate(envelope: JsonObject) = envelope
+                        },
+                    ),
+                currentVersion = 2,
+            )
+        val written = FormatFixture.write(root, v2)
+        assertEquals(root.resolve("v2").resolve(FormatFixture.FILE), written)
+        val bytes = Files.readAllBytes(written)
+        assertEquals(2, v2.decodeHeader(bytes.decodeToString().lineSequence().first()).version)
+        val read = v2.read(bytes)
+        assertEquals(2, read.header.version)
+        assertEquals(SessionSamples.records, read.records)
     }
 
     @Test
