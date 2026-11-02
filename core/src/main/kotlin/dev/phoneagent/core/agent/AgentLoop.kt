@@ -20,6 +20,7 @@ import dev.phoneagent.core.session.SessionResumed
 import dev.phoneagent.core.session.SessionStore
 import dev.phoneagent.core.session.StopCause
 import dev.phoneagent.core.session.TaskStarted
+import dev.phoneagent.core.session.TaskStopped
 import dev.phoneagent.core.session.TurnEnded
 import dev.phoneagent.core.session.TurnStarted
 import dev.phoneagent.core.tool.ToolRegistry
@@ -86,10 +87,12 @@ public data class AgentSetup(
  * given to [start] or [resume]; cancelling that scope stops the task with [StopCause.SHUTDOWN].
  *
  * Failure and stop: see [Driver]. Stopping (or cancelling the scope) cancels the driver; the
- * shutdown, in `NonCancellable` code, closes the turn, stops accepting input, waits for the intake
- * to finish the record in progress, then records itself whatever input was accepted and not yet
- * recorded, clears the inbox (so accepted input is recorded, then recorded as removed, never
- * lost) and closes the log; then it shows [Phase.Stopped]. Input after the stop is ignored.
+ * shutdown, in `NonCancellable` code, stops accepting input, waits for the intake to finish the
+ * record in progress, then records itself whatever input was accepted and not yet recorded and
+ * clears the inbox (so accepted input is recorded, then recorded as removed, never lost). Only
+ * then it closes the turn, writes `task/stopped` last and closes the log, and shows
+ * [Phase.Stopped]. This runtime then ignores all input; the session itself may go on in a new
+ * runtime from [resume] when `TaskStopped`'s contract allows it.
  */
 public class AgentLoop private constructor(
     setup: AgentSetup,
@@ -173,20 +176,37 @@ public class AgentLoop private constructor(
         if (!driver.stopped) intake.submit(queue, entry, wake)
     }
 
-    /** Closes the turn, the inbox and the log; the task ends [Phase.Stopped] even when that fails. */
+    /**
+     * Ends this runtime (phase1 §3.7). The driver has returned; the intake stops accepting input
+     * and is joined (it stops between two records), so from then on this is the only writer. In
+     * order: the accepted input not recorded yet, the inbox cleared, the interrupted turn closed
+     * (prefix, `prompt/withdrawn`, CANCELLED results, `step/end`, `turn/end(STOPPED)`), then
+     * `task/stopped(cause)` and the log closed, so nothing can follow it. Shows [Phase.Stopped] even
+     * when that fails.
+     */
     private suspend fun shutDown() {
         val cause = driver.finalCause()
         try {
-            driver.finish()
             intake.close()
-            // The intake stops between two records; this shutdown is then the single finisher.
             intakeJob.cancelAndJoin()
             intake.drain()
             clearInbox()
+            driver.finish()
+            recordStop(cause)
             log.close()
         } finally {
             phaseFlow.value = Phase.Stopped(cause)
             job.complete()
+        }
+    }
+
+    private suspend fun recordStop(cause: StopCause) {
+        try {
+            log.append(TaskStopped(cause))
+            log.flush()
+        } catch (ignored: SessionLogException) {
+            // The log refuses writes since an earlier failure: the stop stays unrecorded and the
+            // next open repairs the log like a crashed one.
         }
     }
 

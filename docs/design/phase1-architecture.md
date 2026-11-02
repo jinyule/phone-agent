@@ -422,7 +422,7 @@ interface TaskRuntime {
 **输入与 Phase**：
 - 输入方法都不挂起、立即返回；先记成 `inbox/spliced`，再生效。
 - `Idle`：还没开始，或上一个 turn 没有最终回答就结束了（失败、上限、`preStep` 拒绝、max-tokens）。`Done`：上一个 turn 以最终回答或 `end_not_done` 结束。两者都接受 followup，都不会自己继续。
-- `Stopped(cause)` 是终态，之后的输入一律忽略。会话日志写不了或刷不了盘时，任务以 `StopCause.ERROR` 停止。
+- `Stopped(cause)` 有两层意思：这个 `TaskRuntime` 实例终止了，之后对它的输入一律忽略；会话本身不一定结束，停止原因允许时（以 `TaskStopped` 的契约为准），`AgentLoop.resume` 在同一份日志上开一个新实例，下一个 turn 要由新的用户输入开始。会话日志写不了或刷不了盘时，任务以 `StopCause.ERROR` 停止。
 - `events` 缓冲 256 条，收集者跟不上时丢最旧的；UI 不能错过的状态要从 `phase` 或日志恢复。待答提示也一样：`Phase.Waiting.promptId` 就是日志里 `approval/asked`、`question/asked` 或 `handoff/started` 的 id，完整的卡片、问题或接管说明都在那条记录里。
 - `answer` 返回 `true` 当且仅当这条回复成了提示的答案。每个提示是一个原子状态：待答 → 已答 / 已关闭，先到的一方生效。停止、关闭 scope 或到期时，提示在被取消的那一刻就关闭，之后的回复一律返回 `false`；到期前已被接受的回复照样算数，即使计时器先触发。
 
@@ -455,7 +455,13 @@ interface TaskRuntime {
   1. 未作答的提示写 `prompt/withdrawn`；
   2. 缺结果的调用补 `tool/result`，是否执行过只看有没有 `tool/started`。有的（可能已经生效）：停止时记 `CANCELLED`，失败或恢复时记 `OUTCOME_UNKNOWN`，两种都附"可能已经生效，先 `phone_observe` 核实再决定"。没有的（没执行过）：停止时记 `CANCELLED`，否则记 `NOT_STARTED`；
   3. 写 `step/end` 和 `turn/end`：停止时是 `CANCELLED` / `STOPPED`，否则是 `FAILED`。
-- 停止时：取消在途请求，撤回待答提示，补完上面的修复。停止前已接受的输入，先记录、再记为移除。最后关闭日志。外部 scope 被取消（`SHUTDOWN`）也一样：收尾在 `NonCancellable` 里进行，先停止接受输入，等录入协程写完手上那一条（每条命令先完整记录、再移除），然后由收尾者自己记录剩下已接受的命令。收尾者是唯一的，不会和录入协程同时写。
+- **停止的顺序**（`stop` 和外部 scope 被取消（`SHUTDOWN`）相同，收尾都在 `NonCancellable` 里进行）：
+  1. 取消驱动协程（在途请求、正在执行的工具、待答提示的等待都随之取消），停止接受输入，取消并 join 录入协程。录入协程停在两条记录之间（每条命令先完整记录、再移除）。从这里起，收尾者是唯一还会写日志的协程；
+  2. 收尾者自己记录剩下已接受的命令，再清空 inbox（停止前已接受的输入先记录、再记为移除，不会丢）；
+  3. 补完上面的修复：中断前缀、`prompt/withdrawn`、缺结果调用的 `CANCELLED`、`step/end`、`turn/end(STOPPED)`；
+  4. 最后写 `task/stopped(cause)`、刷盘、关闭日志。`turn/end(STOPPED)` 后面紧跟 `task/stopped`；写它的时候，每个调用都已经有结果。日志关闭以后，之后的写入都会失败，所以 `task/stopped` 之后、恢复时的 `session/resumed` 之前不会再有记录。
+
+  日志失败导致的停止（`ERROR`）：turn 先按失败修复（`turn/end(FAILED)`，日志重新打开成功时），`task/stopped(ERROR)` 照样放最后；日志一直写不进去时，两条都没有，下次打开按崩溃修复。逐 turn 的步数、续跑上限只结束 turn（`turn/end(LIMIT)`），不写 `task/stopped`；`StopCause.LIMIT` 只用于 app 层跨 turn 的上限。
 - **不自动续跑**：恢复时修复日志，写 `session/resumed`，然后等新输入。
 - 插件或拦截器出故障，只结束当前 turn（`FAILED`），不会让 TaskRuntime 停掉。
 

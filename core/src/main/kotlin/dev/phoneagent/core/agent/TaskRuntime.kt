@@ -13,7 +13,8 @@ import kotlinx.coroutines.flow.StateFlow
  *
  * All input methods are non-suspending, thread-safe and return immediately; their effect is
  * recorded (`inbox/spliced`) before it is acted on. [Phase.Idle] and [Phase.Done] both accept
- * input (a followup starts the next turn); calls after the task reached [Phase.Stopped] are ignored.
+ * input (a followup starts the next turn); calls after this runtime reached [Phase.Stopped] are
+ * ignored (the session may go on in a new runtime, see [stop]).
  */
 public interface TaskRuntime {
     /** The task. */
@@ -55,7 +56,13 @@ public interface TaskRuntime {
      * (its delivered prefix kept as interrupted), a pending prompt is withdrawn, and pending or
      * running tool calls end CANCELLED. Input accepted before the stop is recorded, then recorded
      * as removed, never lost; the same holds when the runtime's scope is cancelled
-     * ([StopCause.SHUTDOWN]). Later calls to any method are ignored.
+     * ([StopCause.SHUTDOWN]). The log ends with `task/stopped(cause)`, written after the turn's
+     * `turn/end` and once nothing else writes.
+     *
+     * Two levels: this runtime ends for good, and later calls to any of its methods are ignored;
+     * the session does not necessarily end. Whether it may be resumed after [cause] is the
+     * contract of `TaskStopped`; resuming opens a new runtime on the same log, and its next turn
+     * starts only with new user input.
      */
     public fun stop(cause: StopCause)
 
@@ -107,7 +114,10 @@ public sealed interface Phase {
      */
     public data object Done : Phase
 
-    /** Stopped for good (by [TaskRuntime.stop], a shutdown or a session log failure). Terminal. */
+    /**
+     * This runtime stopped (by [TaskRuntime.stop], a shutdown or a session log failure). Terminal
+     * for the runtime; the session may be resumed in a new one (see [TaskRuntime.stop]).
+     */
     public data class Stopped(
         /** Why. */
         val cause: StopCause,

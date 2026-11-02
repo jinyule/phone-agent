@@ -10,6 +10,7 @@ import dev.phoneagent.core.session.InboxQueue
 import dev.phoneagent.core.session.InboxSpliced
 import dev.phoneagent.core.session.StopCause
 import dev.phoneagent.core.session.TaskLevelChanged
+import dev.phoneagent.core.session.TaskStopped
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
@@ -62,7 +63,13 @@ class AgentLoopShutdownTest {
 
             assertEquals(Phase.Stopped(StopCause.SHUTDOWN), loop.phase.value)
             assertEquals(
-                listOf(LoopHarness.ATTENDED, added("a"), TaskLevelChanged(SecurityLevel.CAUTIOUS), cleared(1)),
+                listOf(
+                    LoopHarness.ATTENDED,
+                    added("a"),
+                    TaskLevelChanged(SecurityLevel.CAUTIOUS),
+                    cleared(1),
+                    TaskStopped(StopCause.SHUTDOWN),
+                ),
                 harness.events(),
             )
             assertEquals(emptyList<Throwable>(), harness.uncaught)
@@ -103,7 +110,11 @@ class AgentLoopShutdownTest {
 
             assertEquals(Phase.Stopped(StopCause.USER), loop.phase.value)
             assertEquals(listOf(added("a"), added("b"), cleared(2)), harness.events().only<InboxSpliced>())
-            assertEquals(cleared(2), harness.events().last(), "nothing is written after the inbox is cleared")
+            assertEquals(
+                listOf(cleared(2), TaskStopped(StopCause.USER)),
+                harness.events().takeLast(2),
+                "an idle task: only task/stopped follows the cleared inbox",
+            )
             assertEquals(emptyList<Throwable>(), harness.uncaught)
         }
 }

@@ -31,6 +31,7 @@ import dev.phoneagent.core.tool.ToolRegistry
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.job
@@ -90,12 +91,13 @@ internal class LoopHarness(
         )
 
     /**
-     * Where the loop runs: cancelled with the test's background work, but on a plain test
-     * dispatcher, so `advanceUntilIdle()` runs the loop until it waits for input.
+     * Where the loop runs: a child of the test's background work (cancelling it, a shutdown,
+     * leaves other harnesses of the test running), on a plain test dispatcher, so
+     * `advanceUntilIdle()` runs the loop until it waits for input.
      */
     val loopScope: CoroutineScope =
         CoroutineScope(
-            scope.backgroundScope.coroutineContext.job +
+            SupervisorJob(scope.backgroundScope.coroutineContext.job) +
                 StandardTestDispatcher(scope.testScheduler) +
                 CoroutineExceptionHandler { _, failure -> uncaught += failure },
         )

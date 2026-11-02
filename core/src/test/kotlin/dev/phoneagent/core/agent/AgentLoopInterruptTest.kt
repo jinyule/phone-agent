@@ -14,6 +14,7 @@ import dev.phoneagent.core.ports.ConfirmCard
 import dev.phoneagent.core.ports.ConfirmReason
 import dev.phoneagent.core.ports.Question
 import dev.phoneagent.core.session.AssistantMessage
+import dev.phoneagent.core.session.InboxQueue
 import dev.phoneagent.core.session.InboxSpliced
 import dev.phoneagent.core.session.PromptWithdrawn
 import dev.phoneagent.core.session.RequestRetry
@@ -21,6 +22,7 @@ import dev.phoneagent.core.session.StepEnded
 import dev.phoneagent.core.session.StepOutcome
 import dev.phoneagent.core.session.StepStarted
 import dev.phoneagent.core.session.StopCause
+import dev.phoneagent.core.session.TaskStopped
 import dev.phoneagent.core.session.ToolResultRecorded
 import dev.phoneagent.core.session.TurnEndReason
 import dev.phoneagent.core.session.TurnEnded
@@ -277,7 +279,12 @@ class AgentLoopInterruptTest {
             assertEquals(listOf(Part.Text("正在")), prefix.parts)
             assertEquals(StepEnded(1, 1, StepOutcome.CANCELLED), events.only<StepEnded>().single())
             assertEquals(TurnEnded(1, TurnEndReason.STOPPED), events.only<TurnEnded>().single())
-            assertEquals(1, events.last().let { (it as InboxSpliced).removed }, "the queued followup is cleared")
+            assertEquals(
+                InboxSpliced(InboxQueue.NEXT_TURN, removed = 1),
+                events.only<InboxSpliced>().last(),
+                "the queued followup is cleared",
+            )
+            assertEquals(TaskStopped(StopCause.USER), events.last())
         }
 
     @Test
@@ -299,7 +306,11 @@ class AgentLoopInterruptTest {
             assertEquals(Phase.Stopped(StopCause.USER), loop.phase.value)
             assertFalse(loop.answer(PromptId("prompt-1"), UserReply.Approve))
             assertEquals(before, harness.events())
-            assertEquals(listOf(LoopHarness.ATTENDED), before, "an idle task has no turn to close")
+            assertEquals(
+                listOf(LoopHarness.ATTENDED, TaskStopped(StopCause.USER)),
+                before,
+                "an idle task has no turn to close",
+            )
             assertEquals(0, model.started.value)
         }
 
