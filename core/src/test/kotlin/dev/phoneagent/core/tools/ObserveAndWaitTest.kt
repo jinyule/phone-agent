@@ -29,6 +29,7 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Assertions.assertArrayEquals
@@ -46,6 +47,9 @@ class ObserveAndWaitTest {
     private companion object {
         /** The default read interval of phone_wait (ToolsConfig.waitReadIntervalMs). */
         const val READ_INTERVAL_MS = 250L
+
+        /** A last read that takes a while (tree, OCR) but well within the margin after the longest wait. */
+        const val SLOW_READ_MS = 10_000L
     }
 
     private fun tools(config: ToolsConfig = ToolsConfig()) =
@@ -315,6 +319,26 @@ class ObserveAndWaitTest {
             }
 
         @Test
+        fun `disappear that holds only at the deadline is met by the last read`() =
+            runTest {
+                // Reads every 250 ms see the spinner until the deadline at 1100 ms falls between two
+                // reads; only the read made at the deadline sees it gone.
+                val screen =
+                    FakeScreen().apply {
+                        onSnapshot = { if (currentTime >= 1_100) loaded else loading }
+                        onAwaitChange = { timeout ->
+                            delay(timeout)
+                            false
+                        }
+                    }
+                val gone = wait("""{"condition":"disappear","text":"加载中","timeoutMs":1100}""", screen)
+                assertEquals(1_100, currentTime)
+                assertEquals(ToolStatus.OK, gone.status, gone.text())
+                assertEquals("true", gone.detail("met"))
+                assertTrue(gone.text().startsWith("等到了：「加载中」消失了。\nscreen s21"), gone.text())
+            }
+
+        @Test
         fun `disappear sees a change before the wait too`() =
             runTest {
                 val result =
@@ -443,6 +467,35 @@ class ObserveAndWaitTest {
             }
 
         @Test
+        fun `every accepted wait timeout leaves room for a slow last read at the deadline`() =
+            runTest {
+                for (budget in listOf(30_001L, 44_999L, 45_000L, 60_000L)) {
+                    val config = runCatching { ToolsConfig(waitTimeoutMs = budget) }.getOrNull() ?: continue
+                    val tool = tools(config).getValue("phone_wait")
+                    val start = currentTime
+                    // The text is there at the deadline; reading the screen then takes 10 s of virtual time.
+                    val screen =
+                        FakeScreen().apply {
+                            onSnapshot = {
+                                if (currentTime - start >= PhoneWaitTool.MAX_WAIT_MS) {
+                                    delay(SLOW_READ_MS)
+                                    loaded
+                                } else {
+                                    loading
+                                }
+                            }
+                        }
+                    val args = """{"condition":"appear","text":"已完成","timeoutMs":30000}"""
+                    val result =
+                        withTimeoutOrNull(
+                            tool.timeoutMs,
+                        ) { tool.execute(call("phone_wait", args), FakeContext(screen)) }
+                    assertEquals("true", result?.detail("met"), "waitTimeoutMs=$budget: ${result?.text()}")
+                    assertEquals(PhoneWaitTool.MAX_WAIT_MS + SLOW_READ_MS, currentTime - start, "waitTimeoutMs=$budget")
+                }
+            }
+
+        @Test
         fun `the read interval is a validated setting`() {
             assertEquals(READ_INTERVAL_MS, ToolsConfig().waitReadIntervalMs)
             assertThrows<IllegalArgumentException> { ToolsConfig(waitReadIntervalMs = 49) }
@@ -452,7 +505,11 @@ class ObserveAndWaitTest {
         @Test
         fun `the timeout leaves room for the longest wait`() {
             val tool = tools().getValue("phone_wait")
-            assertTrue(tool.timeoutMs > PhoneWaitTool.MAX_WAIT_MS)
+            assertEquals(PhoneWaitTool.MAX_WAIT_MS + 15_000, tool.timeoutMs)
+            assertThrows<IllegalArgumentException> { ToolsConfig(waitTimeoutMs = PhoneWaitTool.MAX_WAIT_MS) }
+            assertThrows<IllegalArgumentException> { ToolsConfig(waitTimeoutMs = 30_001) }
+            assertThrows<IllegalArgumentException> { ToolsConfig(waitTimeoutMs = 44_999) }
+            assertEquals(45_000, ToolsConfig(waitTimeoutMs = 45_000).waitTimeoutMs)
             assertEquals(RiskClass.READ, tool.risk)
             assertTrue(tool.concurrencySafe)
         }

@@ -87,7 +87,7 @@ class PhaseOneToolsTest {
             ToolsConfig(
                 observeTimeoutMs = 1,
                 appsTimeoutMs = 2,
-                waitTimeoutMs = 40_000,
+                waitTimeoutMs = 50_000,
                 actionTimeoutMs = 3,
                 typeTimeoutMs = 4,
                 launchTimeoutMs = 5,
@@ -95,7 +95,7 @@ class PhaseOneToolsTest {
                 controlTimeoutMs = 7,
             )
         assertEquals(
-            listOf(1L, 2L, 40_000L, 3L, 4L, 3L, 3L, 3L, 5L, 5L, 6L, 6L, 6L, 7L),
+            listOf(1L, 2L, 50_000L, 3L, 4L, 3L, 3L, 3L, 5L, 5L, 6L, 6L, 6L, 7L),
             PhaseOneTools.create(formatter, config).map { it.timeoutMs },
         )
     }

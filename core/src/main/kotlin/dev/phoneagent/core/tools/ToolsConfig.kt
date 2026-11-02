@@ -15,7 +15,8 @@ package dev.phoneagent.core.tools
  *   change, stable looks again no sooner than this.
  * @property observeTimeoutMs `phone_observe` (tree, OCR and frame).
  * @property appsTimeoutMs `phone_apps`.
- * @property waitTimeoutMs `phone_wait`; must exceed the longest wait the schema allows plus a snapshot.
+ * @property waitTimeoutMs `phone_wait`; at least the longest wait the schema allows plus
+ *   [WAIT_MARGIN_MS] for the read at the deadline (tree and OCR), so a condition that holds then is seen.
  * @property actionTimeoutMs `phone_tap`, `phone_scroll`, `phone_swipe`, `phone_key` (act, settle, read back).
  * @property typeTimeoutMs `phone_type` (several input methods, each read back).
  * @property launchTimeoutMs `phone_launch` and `phone_intent` (cold app starts).
@@ -42,8 +43,9 @@ public data class ToolsConfig(
         require(waitReadIntervalMs in MIN_READ_INTERVAL_MS..MAX_READ_INTERVAL_MS) {
             "waitReadIntervalMs must be in $MIN_READ_INTERVAL_MS..$MAX_READ_INTERVAL_MS, got $waitReadIntervalMs"
         }
-        require(waitTimeoutMs > PhoneWaitTool.MAX_WAIT_MS) {
-            "waitTimeoutMs must exceed the longest wait (${PhoneWaitTool.MAX_WAIT_MS} ms), got $waitTimeoutMs"
+        require(waitTimeoutMs >= PhoneWaitTool.MAX_WAIT_MS + WAIT_MARGIN_MS) {
+            "waitTimeoutMs must leave $WAIT_MARGIN_MS ms after the longest wait (${PhoneWaitTool.MAX_WAIT_MS} ms) " +
+                "for the last read, got $waitTimeoutMs"
         }
         val timeouts =
             listOf(
@@ -63,7 +65,7 @@ public data class ToolsConfig(
         const val MIN_READ_INTERVAL_MS = 50L
         const val MAX_READ_INTERVAL_MS = 2_000L
 
-        /** Room after the longest wait for the final snapshot. */
+        /** Room after the longest wait for the read at the deadline. */
         const val WAIT_MARGIN_MS = 15_000L
     }
 }
