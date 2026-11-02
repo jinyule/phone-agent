@@ -33,27 +33,36 @@ import kotlinx.serialization.json.putJsonObject
  * @property streamUsage send `stream_options.include_usage` (usage in the last chunk).
  * @property maxTokensField field that carries `ChatRequest.maxOutputTokens`.
  * @property reasoningEffort how a requested reasoning level is sent.
- * @property recoverLeakedCalls turn tool calls written into the answer text into calls
- *   ([LeakedToolMarkup]). Off by default: text that looks like a call is otherwise an answer, and
- *   a recovered call never went through the provider's tool channel. On only for providers known
- *   to leak them: DeepSeek models that write DSML, Qwen-family models that write `<tool_call>`
- *   JSON, and Ollama, whose chat templates leave unparsed calls of local models in the text.
- *   Even then only complete calls of the request's tools that end the answer are recovered, and
- *   only when the reply has no native call; their ids are listed in the reply's
- *   `providerMetadata.recovered_tool_calls`.
+ * @property recoverLeakedCalls formats of tool calls written into the answer text that become calls
+ *   ([LeakedToolMarkup]). Empty by default and in every preset: a recovered call never went
+ *   through the provider's tool channel, and the PolicyEngine cannot yet ask the user to confirm
+ *   one, so recovery is an explicit user choice ([ProviderPreset.leakedCallFormats] says which
+ *   formats a provider is known to leak). When set, a reply becomes calls only if it has no native
+ *   call and its whole text, apart from whitespace, is complete calls of the request's tools in
+ *   one of these formats; any other text stays as written. Recovered ids are listed in the
+ *   reply's `providerMetadata.recovered_tool_calls`.
  */
 public data class ChatQuirks(
     val parallelToolCalls: Boolean = true,
     val streamUsage: Boolean = true,
     val maxTokensField: MaxTokensField = MaxTokensField.MAX_TOKENS,
     val reasoningEffort: ReasoningEffortStyle = ReasoningEffortStyle.REASONING_EFFORT,
-    val recoverLeakedCalls: Boolean = false,
+    val recoverLeakedCalls: Set<LeakedCallFormat> = emptySet(),
 ) {
     /** Defaults. */
     public companion object {
         /** What an unknown OpenAI-compatible endpoint gets. */
         public val DEFAULT: ChatQuirks = ChatQuirks()
     }
+}
+
+/** How a model writes tool calls into the answer text ([ChatQuirks.recoverLeakedCalls]). */
+public enum class LeakedCallFormat {
+    /** DeepSeek's DSML: `<｜DSML｜function_calls>` blocks of `<｜DSML｜invoke name="…">` with parameters. */
+    DSML,
+
+    /** `<tool_call>{"name": …, "arguments": {…}}</tool_call>` blocks (Qwen-family chat templates). */
+    TOOL_CALL_TAG,
 }
 
 /** Where a Chat Completions provider takes the output cap (`ChatRequest.maxOutputTokens`). */

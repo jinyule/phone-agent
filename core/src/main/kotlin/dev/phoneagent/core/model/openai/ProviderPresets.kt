@@ -19,6 +19,10 @@ import java.util.Locale
  * @property reasoningField Chat Completions field carrying reasoning, or `null`.
  * @property echoReasoning send that reasoning back in later requests.
  * @property chat Chat Completions request quirks.
+ * @property leakedCallFormats formats this provider's models are known to write tool calls in
+ *   when they leak them into the answer text: what [ChatQuirks.recoverLeakedCalls] may be set to
+ *   if the user turns recovery on. Recovery stays off in [chat] until the PolicyEngine can ask
+ *   the user to confirm a recovered call.
  * @property officialHosts hosts that identify this provider in a custom profile.
  * @property facts known behavior, each with its source.
  */
@@ -31,6 +35,7 @@ public data class ProviderPreset(
     val reasoningField: String?,
     val echoReasoning: Boolean,
     val chat: ChatQuirks,
+    val leakedCallFormats: Set<LeakedCallFormat> = emptySet(),
     val officialHosts: Set<String>,
     val facts: List<PresetFact>,
 ) {
@@ -117,15 +122,16 @@ public object ProviderPresets {
             needsKey = true,
             reasoningField = "reasoning_content",
             echoReasoning = true,
-            chat = ChatQuirks(parallelToolCalls = false, recoverLeakedCalls = true),
+            chat = ChatQuirks(parallelToolCalls = false),
+            leakedCallFormats = setOf(LeakedCallFormat.DSML),
             officialHosts = setOf("api.deepseek.com"),
             facts =
                 listOf(
                     documented("Thinking mode returns reasoning_content; it must be sent back on tool-call steps."),
                     unverified("Accepts reasoning_effort in thinking mode."),
                     unverified(
-                        "Some models leak tool calls as DSML markup at the end of the text; the adapter " +
-                            "recovers complete calls of declared tools.",
+                        "Some models leak tool calls into the text as DSML markup. Not recovered by " +
+                            "default: the PolicyEngine cannot yet ask the user to confirm a recovered call.",
                     ),
                     noParallelParam,
                     documentedUsage,
@@ -142,14 +148,16 @@ public object ProviderPresets {
             needsKey = true,
             reasoningField = "reasoning_content",
             echoReasoning = true,
-            chat = ChatQuirks(reasoningEffort = ReasoningEffortStyle.NONE, recoverLeakedCalls = true),
+            chat = ChatQuirks(reasoningEffort = ReasoningEffortStyle.NONE),
+            leakedCallFormats = setOf(LeakedCallFormat.TOOL_CALL_TAG),
             officialHosts = setOf("dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com"),
             facts =
                 listOf(
                     documented("International accounts use dashscope-intl.aliyuncs.com."),
                     unverified(
-                        "Qwen-family models sometimes write <tool_call> JSON blocks into the text; the adapter " +
-                            "recovers complete calls of declared tools.",
+                        "Qwen-family models sometimes write <tool_call> JSON blocks into the text. Not " +
+                            "recovered by default: the PolicyEngine cannot yet ask the user to confirm a " +
+                            "recovered call.",
                     ),
                     documented("Thinking is switched with enable_thinking, not reasoning_effort."),
                     documented("Accepts parallel_tool_calls."),
@@ -283,7 +291,8 @@ public object ProviderPresets {
             needsKey = false,
             reasoningField = "reasoning",
             echoReasoning = true,
-            chat = ChatQuirks(recoverLeakedCalls = true),
+            chat = ChatQuirks.DEFAULT,
+            leakedCallFormats = setOf(LeakedCallFormat.TOOL_CALL_TAG),
             officialHosts = emptySet(),
             facts =
                 listOf(
@@ -291,8 +300,9 @@ public object ProviderPresets {
                         "On a phone, 127.0.0.1 is the phone itself: use the LAN address of the Ollama computer.",
                     ),
                     unverified(
-                        "When a model's chat template does not parse its tool calls, they arrive as <tool_call> " +
-                            "or DSML text; the adapter recovers complete calls of declared tools.",
+                        "When a model's chat template does not parse its tool calls, they arrive as " +
+                            "<tool_call> text. Not recovered by default: the PolicyEngine cannot yet ask the " +
+                            "user to confirm a recovered call.",
                     ),
                     verified("Thinking models stream delta.reasoning (2026-11-01, qwen3.8)."),
                     verified(

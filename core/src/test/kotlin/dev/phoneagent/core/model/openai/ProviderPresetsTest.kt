@@ -86,12 +86,23 @@ class ProviderPresetsTest {
     }
 
     @Test
-    fun `only presets known to leak tool calls into the text recover them`() {
-        assertEquals(false, ChatQuirks.DEFAULT.recoverLeakedCalls)
-        val recovering = ProviderPresets.ALL.filter { it.chat.recoverLeakedCalls }.map { it.id }
-        assertEquals(listOf("deepseek", "qwen", "ollama"), recovering)
-        for (preset in ProviderPresets.ALL.filter { it.chat.recoverLeakedCalls }) {
-            assertTrue(preset.facts.any { "recovers complete calls" in it.text }, "${preset.id} says why")
+    fun `no preset recovers leaked calls, and those known to leak say which format and why`() {
+        assertEquals(emptySet<LeakedCallFormat>(), ChatQuirks.DEFAULT.recoverLeakedCalls)
+        assertTrue(ProviderPresets.ALL.all { it.chat.recoverLeakedCalls.isEmpty() })
+        val leaking = ProviderPresets.ALL.filter { it.leakedCallFormats.isNotEmpty() }
+        assertEquals(
+            mapOf(
+                "deepseek" to setOf(LeakedCallFormat.DSML),
+                "qwen" to setOf(LeakedCallFormat.TOOL_CALL_TAG),
+                "ollama" to setOf(LeakedCallFormat.TOOL_CALL_TAG),
+            ),
+            leaking.associate { it.id to it.leakedCallFormats },
+        )
+        for (preset in leaking) {
+            assertTrue(
+                preset.facts.any { "cannot yet ask the user to confirm" in it.text },
+                "${preset.id} says why recovery is off",
+            )
         }
     }
 

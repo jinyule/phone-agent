@@ -1,40 +1,27 @@
 {
-  "source": "constructed from reports: DeepSeek writes DSML tool markup into the answer text",
-  "preset": "deepseek",
+  "source": "constructed from reports: DeepSeek writes DSML tool markup into the answer text; with recovery on, words before the markup keep the whole text",
+  "recover": [
+    "DSML"
+  ],
   "expect": {
     "response": {
       "parts": [
         {
           "type": "text",
-          "text": "I will check."
-        },
-        {
-          "type": "tool_call",
-          "id": "call_gen_1",
-          "name": "get_weather",
-          "argsJson": "{\"city\":\"Paris\",\"days\":3}"
+          "text": "I will check.\n\n<｜DSML｜function_calls>\n<｜DSML｜invoke name=\"get_weather\">\n<｜DSML｜parameter name=\"city\" string=\"true\">Paris</｜DSML｜parameter>\n<｜DSML｜parameter name=\"days\" string=\"false\">3</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜function_calls>"
         }
       ],
-      "stopReason": "TOOL_USE",
+      "stopReason": "END_TURN",
       "providerMetadata": {
         "id": "chatcmpl-test",
         "model": "test-model",
-        "finish_reason": "stop",
-        "recovered_tool_calls": [
-          "call_gen_1"
-        ]
+        "finish_reason": "stop"
       }
     },
     "deltas": {
-      "text": "I will check.",
+      "text": "I will check.\n\n<｜DSML｜function_calls>\n<｜DSML｜invoke name=\"get_weather\">\n<｜DSML｜parameter name=\"city\" string=\"true\">Paris</｜DSML｜parameter>\n<｜DSML｜parameter name=\"days\" string=\"false\">3</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜function_calls>",
       "reasoning": "",
-      "calls": [
-        {
-          "id": "call_gen_1",
-          "name": "get_weather",
-          "args": "{\"city\":\"Paris\",\"days\":3}"
-        }
-      ]
+      "calls": []
     }
   }
 }

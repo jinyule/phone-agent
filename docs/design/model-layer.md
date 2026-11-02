@@ -148,14 +148,20 @@ data class WireProfile(
 - **工具调用**：`tools[].function` + `tool_choice:"auto"`。主循环每轮只执行一个调用，所以服务商支持时适配器在 `prepare` 里设 `wire.disableParallelToolCalls = true`，线路上发 `parallel_tool_calls:false`。如果模型仍然返回多个调用，第一个之外的每个都要配一条结果"已跳过：每步只执行一个动作"，否则下一次请求会被拒。
 - **流式**：`stream:true` + `stream_options.include_usage`；要兼容某些网关返回 `usage:null` 的情况。
 - **推理内容**：字段名和"要不要回传"各家不同（`reasoning_content` 等）。在 `ProviderProfile.reasoningField` 和 `ProviderProfile.echoReasoning` 里按服务商配置，由能力探测确认；**探测不了的标"未验证"**。写请求头时这两项冻结进 `wire`（§2"线路快照"）。
-- **工具调用漏成文字**：有的模型会把工具调用写成正文里的标记（DeepSeek DSML、`<tool_call>` 等），参考 Mika 的 `LeakedToolMarkup`。还原**默认关闭**，只有已知会漏的预设打开（`ChatQuirks.recoverLeakedCalls`：DeepSeek、通义、Ollama）。打开后也要同时满足下面几条才还原，否则正文原样保留：本次请求声明了工具；原生 `tool_calls` 里没有调用；从第一个标记到正文末尾只有完整的调用（DSML 要有闭合的 invoke，`<tool_call>` 要有 `name` 和对象形式的参数）和空白；标记不在代码围栏或行内代码里；每个名字都在 `request.tools` 里。还原出的调用 ID 记在 `providerMetadata.recovered_tool_calls` 里（会进日志）；"测试并保存"时，试调用如果是从正文还原的，算失败。
+- **工具调用漏成文字**：有的模型会把工具调用写成正文里的标记（DeepSeek DSML、`<tool_call>` 等），参考 Mika 的 `LeakedToolMarkup`。还原**默认关闭，所有预设（包括 DeepSeek、通义、Ollama）都不打开**：还原出来的调用没走服务商的工具通道，而 PolicyEngine 现在还不能对还原出来的调用要求用户确认。以后作为用户显式开启的兼容选项提供（UI 由 WP09 决定）。预设的 `leakedCallFormats` 记下这条线路有证据会漏出的格式（DeepSeek 是 DSML，通义和 Ollama 是 `<tool_call>`），开启时 `ChatQuirks.recoverLeakedCalls` 只填这些格式。开启后，下面几条都满足才还原，否则正文原样保留：
+  - 本次请求声明了工具，原生 `tool_calls` 里没有调用；
+  - 整段正文去掉空白以后，只由某一种已开启格式的完整调用块组成：DSML 是 `function_calls` 外层里的闭合 invoke，`<tool_call>` 要有 `name` 和对象形式的参数；
+  - 前后有任何说明、引用、示例前缀或"不要执行"之类的话，都不还原；两种格式混在一起也不还原；
+  - 每个名字都在 `request.tools` 里，全有或全无。
+
+  判断不了就保留正文。还原出的调用 ID 记在 `providerMetadata.recovered_tool_calls` 里（会进日志）；"测试并保存"时，试调用如果是从正文还原的，算失败。
 - **缓存**：靠服务端隐式前缀缓存，所以历史要尽量只追加；命中情况从 usage 里读。
 - **实现约定**（`core.model.openai`，WP03）：
   - `ToolResult.isError` 在 OpenAI 两种协议里都没有对应字段，失败只靠结果文字说明。
   - `tool` 消息只能带文字：连续的若干条 TOOL 消息算一组（回答同一轮调用的结果可能分在几条消息里），组里所有结果的图片在这一组 `tool` 消息全部结束之后用一条 user 消息补上（每个结果以 "Images from tool call <id>:" 开头），中间不插别的消息；只有图片的结果，`tool` 消息写占位文字。不支持看图的模型，图片一律换成固定占位文字，保证前缀稳定。
   - 线路选项（`WireOptions`）是创建模型时传入的固定输入，适配器运行时不协商、没有可变状态：一次 `complete()` 只发一个请求，同一个模型对同一请求发出的线路总是一样，所有重试都归 `requestError`。
   - 可选字段 `parallel_tool_calls`、`stream_options` 发不发（`WireOptions.chat`），只在"测试并保存"时协商：试调用被 400 拒绝，并且结构化的 `error.param` 点名该字段（没有 `param` 时看服务商的消息有没有点名）时，去掉它再试一次，每个字段最多一次。试调用通过时用的选项写进 `ProbeResult.Passed.wire`，由 app 跟 profile 一起保存，创建模型时传入。运行时再遇到这类 400，就是不可重试的 `InvalidRequest(param)`，UI 可以据 `param` 提示重新测试。
-  - 漏成文字的工具调用，ID 由适配器生成。打开还原时，流式预览会扣住可能是标记的文字和末尾的空白；还原只去掉标记和它前面的空白，所以预览发出去的永远是最终文本的前缀，不管流在哪里断开。流结束时用 `DeltaLedger` 把预览漏掉的内容补发，保证增量拼起来和最终回复一致（文字、推理摘要、调用参数）。Responses 的推理有摘要和原始推理文字两个通道，先出现的那个通道既用于增量也用于最终的摘要，两者不拼在一起。只有服务商的最终输出和它自己发的增量矛盾时才会不一致：增量收不回来，以最终回复为准，`providerMetadata.preview_diverged` 记下不一致的通道，UI 应该用最终回复替换预览。
+  - 漏成文字的工具调用，ID 由适配器生成。打开还原时，正文还是空白或者以 `<` 开头的期间，流式预览先扣住不发（它还可能整段都是调用，还原后正文为空）；一旦出现别的开头，正文只会原样保留，就全部放出。所以预览发出去的永远是最终文本的前缀，不管流在哪里断开。流结束时用 `DeltaLedger` 把预览漏掉的内容补发，保证增量拼起来和最终回复一致（文字、推理摘要、调用参数）。Responses 的推理有摘要和原始推理文字两个通道，先出现的那个通道既用于增量也用于最终的摘要，两者不拼在一起。只有服务商的最终输出和它自己发的增量矛盾时才会不一致：增量收不回来，以最终回复为准，`providerMetadata.preview_diverged` 记下不一致的通道，UI 应该用最终回复替换预览。
   - 发送前校验对话：每个工具调用都必须有结果，不能有孤立的结果；服务端上下文编辑只支持 Anthropic。不满足时直接报 `InvalidRequest`，不发请求。
   - 预设的已知差异写在 `ProviderPresets` 里，每条注明 VERIFIED / DOCUMENTED / UNVERIFIED。没有预设的 profile 用默认线路选项；指向某个预设官方地址的自定义 profile 用该预设的选项（`WireOptions.defaultsFor`）。
   - 输出上限的字段名是线路选项 `ChatQuirks.maxTokensField`：官方 OpenAI 用 `max_completion_tokens`（`max_tokens` 已弃用），兼容网关默认 `max_tokens`。

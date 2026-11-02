@@ -125,6 +125,15 @@ internal object Kit {
         return BlobSource { ref -> map[ref] ?: throw IOException("no blob $ref") }
     }
 
+    /** [profile]'s default wire options, recovering calls leaked into the text in [formats]. */
+    fun recovering(
+        profile: ProviderProfile,
+        formats: Set<LeakedCallFormat> = LeakedCallFormat.entries.toSet(),
+    ): WireOptions {
+        val defaults = WireOptions.defaultsFor(profile)
+        return defaults.copy(chat = defaults.chat.copy(recoverLeakedCalls = formats))
+    }
+
     /** Resource text under `core/src/test/resources/wire/`. */
     fun wire(path: String): String =
         checkNotNull(Kit::class.java.getResource("/wire/$path")) { "missing fixture wire/$path" }.readText()

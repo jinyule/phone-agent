@@ -34,9 +34,9 @@ import kotlinx.serialization.json.putJsonArray
  * reused for a second call, names repeated in every fragment, mid-stream error chunks.
  *
  * Complete means `[DONE]` or a `finish_reason` arrived; a body that ends before either was cut
- * ([ModelError.Network]). Where [ChatReading.recoverableTools] allows it, calls leaked into the
- * answer text are recovered at the end ([LeakedToolMarkup]); the preview deltas then hold back
- * anything that may be markup, and the end shows what they missed ([DeltaLedger.catchUp]).
+ * ([ModelError.Network]). Where [ChatReading] allows it, a reply whose text is nothing but leaked
+ * calls is recovered at the end ([LeakedToolMarkup]); the preview deltas then hold back text that
+ * may still be such markup, and the end shows what they missed ([DeltaLedger.catchUp]).
  *
  * @param redactor masks credentials in provider text that goes into errors.
  */
@@ -49,7 +49,7 @@ internal class ChatCompletionsStream(
     onDelta: (Delta) -> Unit,
 ) {
     private val ledger = DeltaLedger(onDelta)
-    private val text = StreamedText(ledger, holdBack = reading.recoverableTools.isNotEmpty())
+    private val text = StreamedText(ledger, holdBack = reading.recovers)
     private val refusal = StringBuilder()
     private val calls = ToolCallAssembler(newCallId, ledger, redactor)
     private var usage: Usage? = null
@@ -80,13 +80,13 @@ internal class ChatCompletionsStream(
         checkOutcome(reason)
         val native = calls.parts()
         val recovery =
-            if (native.isEmpty() && reading.recoverableTools.isNotEmpty()) {
-                LeakedToolMarkup.recover(text.answer(), reading.recoverableTools)
+            if (native.isEmpty() && reading.recovers) {
+                LeakedToolMarkup.recover(text.answer(), reading.recoverableTools, reading.leakedFormats)
             } else {
                 null
             }
-        val recovered = recovery?.calls.orEmpty().map { Part.ToolCall(ToolCallId(newCallId()), it.name, it.argsJson) }
-        val answer = recovery?.text ?: text.answer()
+        val recovered = recovery.orEmpty().map { Part.ToolCall(ToolCallId(newCallId()), it.name, it.argsJson) }
+        val answer = if (recovery != null) "" else text.answer()
         val toolCalls = native + recovered
         val parts =
             buildList {
@@ -211,23 +211,27 @@ internal class ChatCompletionsStream(
  * How [ChatCompletionsStream] reads one reply.
  *
  * @property reasoningFields delta fields that carry reasoning, in priority order; the first one seen wins.
- * @property recoverableTools tools whose calls are recovered from markup leaked into the answer
- *   ([ChatQuirks.recoverLeakedCalls]: the request's tools, or none); empty turns recovery and the
- *   preview hold-back off.
+ * @property recoverableTools tools whose calls may be recovered from the answer text (the request's tools).
+ * @property leakedFormats formats recovered ([ChatQuirks.recoverLeakedCalls]).
  */
 internal data class ChatReading(
     val reasoningFields: List<String>,
     val recoverableTools: Set<String>,
-)
+    val leakedFormats: Set<LeakedCallFormat>,
+) {
+    /** Whether recovery, and with it the preview hold-back, is on: both sets are non-empty. */
+    val recovers: Boolean get() = recoverableTools.isNotEmpty() && leakedFormats.isNotEmpty()
+}
 
 /** `providerMetadata` key listing the ids of calls recovered from the answer text. */
 internal const val RECOVERED_TOOL_CALLS = "recovered_tool_calls"
 
 /**
- * Answer and reasoning text of one streamed reply. With [holdBack], answer deltas stop short of
- * anything that may be leaked tool markup ([LeakedToolMarkup.previewEnd]) and of trailing
- * whitespace, which a recovered call drops; so they never show text the reply takes back.
- * Reasoning keeps the first field it came in.
+ * Answer and reasoning text of one streamed reply. With [holdBack], answer deltas show nothing
+ * while the answer is blank or starts with `<` (it may still be wholly leaked calls, which a
+ * recovery turns into an empty text); once it starts with anything else it can only be kept, so
+ * everything is shown from then on. So they never show text the reply takes back. Reasoning keeps
+ * the first field it came in.
  */
 internal class StreamedText(
     private val ledger: DeltaLedger,
@@ -235,6 +239,7 @@ internal class StreamedText(
 ) {
     private val answer = StringBuilder()
     private var shown = 0
+    private var holding = holdBack
     private val reasoning = StringBuilder()
     private var reasoningField: String? = null
 
@@ -242,13 +247,10 @@ internal class StreamedText(
     fun appendAnswer(fragment: String) {
         if (fragment.isEmpty()) return
         answer.append(fragment)
-        var end = if (holdBack) LeakedToolMarkup.previewEnd(answer.toString()) else answer.length
-        if (holdBack) {
-            while (end > shown && answer[end - 1].isWhitespace()) end--
-        }
-        if (end > shown) {
-            ledger.text(answer.substring(shown, end))
-            shown = end
+        if (holding) holding = answer.firstOrNull { !it.isWhitespace() }.let { it == null || it == '<' }
+        if (!holding) {
+            ledger.text(answer.substring(shown))
+            shown = answer.length
         }
     }
 

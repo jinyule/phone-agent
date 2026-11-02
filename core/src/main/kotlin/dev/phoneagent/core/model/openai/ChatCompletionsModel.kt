@@ -57,10 +57,7 @@ public class ChatCompletionsModel internal constructor(
     }
 
     private fun reading(request: ChatRequest): ChatReading =
-        ChatReading(
-            reasoningFields,
-            if (inputs.options.chat.recoverLeakedCalls) request.tools.mapTo(HashSet()) { it.name } else emptySet(),
-        )
+        ChatReading(reasoningFields, request.tools.mapTo(HashSet()) { it.name }, inputs.options.chat.recoverLeakedCalls)
 
     private suspend fun read(
         request: ChatRequest,

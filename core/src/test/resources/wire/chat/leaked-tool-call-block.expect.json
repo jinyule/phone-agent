@@ -1,40 +1,27 @@
 {
-  "source": "constructed from reports: Qwen-style <tool_call> JSON block in the answer text",
-  "preset": "qwen",
+  "source": "constructed from reports: Qwen-style <tool_call> JSON block in the answer text; with recovery on, words before the markup keep the whole text",
+  "recover": [
+    "TOOL_CALL_TAG"
+  ],
   "expect": {
     "response": {
       "parts": [
         {
           "type": "text",
-          "text": "Let me look."
-        },
-        {
-          "type": "tool_call",
-          "id": "call_gen_1",
-          "name": "get_weather",
-          "argsJson": "{\"city\":\"Paris\"}"
+          "text": "Let me look.\n<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"city\": \"Paris\"}}\n</tool_call>"
         }
       ],
-      "stopReason": "TOOL_USE",
+      "stopReason": "END_TURN",
       "providerMetadata": {
         "id": "chatcmpl-test",
         "model": "test-model",
-        "finish_reason": "stop",
-        "recovered_tool_calls": [
-          "call_gen_1"
-        ]
+        "finish_reason": "stop"
       }
     },
     "deltas": {
-      "text": "Let me look.",
+      "text": "Let me look.\n<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"city\": \"Paris\"}}\n</tool_call>",
       "reasoning": "",
-      "calls": [
-        {
-          "id": "call_gen_1",
-          "name": "get_weather",
-          "args": "{\"city\":\"Paris\"}"
-        }
-      ]
+      "calls": []
     }
   }
 }

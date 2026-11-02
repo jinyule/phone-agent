@@ -6,6 +6,7 @@ import dev.phoneagent.core.model.ModelError
 import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.openai.Kit.base
+import dev.phoneagent.core.model.openai.WireSupport.array
 import dev.phoneagent.core.model.openai.WireSupport.str
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
@@ -89,7 +90,9 @@ class ReplayTest {
                 reasoningField = meta.str("reasoningField"),
                 preset = meta.str("preset"),
             )
-        val model = Kit.adapters().model(profile, Kit.MODEL, Kit.capabilities(), Kit.blobs())
+        val recover = meta.array("recover").orEmpty().map { LeakedCallFormat.valueOf((it as JsonPrimitive).content) }
+        val wire = Kit.recovering(profile, recover.toSet())
+        val model = Kit.adapters().model(profile, Kit.MODEL, Kit.capabilities(), Kit.blobs(), wire)
         val deltas = Deltas()
         return try {
             val response = model.complete(Kit.request(), deltas)

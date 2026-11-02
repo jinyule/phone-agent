@@ -26,10 +26,10 @@ class DeltaConsistencyTest {
     @StartStop
     private val server = MockWebServer()
 
-    private fun chat(): ChatModel =
-        Kit
-            .adapters()
-            .model(Kit.profile(server.base(), preset = "deepseek"), Kit.MODEL, Kit.capabilities(), Kit.blobs())
+    private fun chat(): ChatModel {
+        val profile = Kit.profile(server.base(), preset = "deepseek")
+        return Kit.adapters().model(profile, Kit.MODEL, Kit.capabilities(), Kit.blobs(), Kit.recovering(profile))
+    }
 
     private fun responses(): ChatModel =
         Kit.adapters().model(
@@ -47,17 +47,27 @@ class DeltaConsistencyTest {
             .mapNotNull { it.summary }
             .joinToString("\n\n")
 
-    /** Every split of the leaked-call answers into pieces of [size] characters. */
+    /**
+     * Every split, into pieces of [size] characters, of answers with recovery on: wholly leaked
+     * calls (recovered, so no text) and markup with words around it or markup-like text (kept).
+     */
     @ParameterizedTest(name = "pieces of {0}")
     @ValueSource(ints = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 64])
-    fun `the text deltas add up to the text a recovered call leaves`(size: Int) =
+    fun `the text deltas add up to the final text, recovered or kept`(size: Int) =
         runTest {
+            val tag = "<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {}}\n</tool_call>"
+            val dsml =
+                "<｜DSML｜function_calls><｜DSML｜invoke name=\"get_weather\"></｜DSML｜invoke></｜DSML｜function_calls>"
             val answers =
                 listOf(
-                    "Calling now.\n\n<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {}}\n</tool_call>\n",
-                    "Done.  \n</｜DSML｜function_calls><｜DSML｜invoke name=\"get_weather\"></｜DSML｜invoke>",
+                    "\n\n$tag\n" to 1,
+                    "  \n$dsml" to 1,
+                    "Calling now.\n\n$tag\n" to 0,
+                    "$dsml\nDone.  " to 0,
+                    "  <b>bold</b> and <tool_call> \n" to 0,
+                    "a < b, and $tag" to 0,
                 )
-            for (answer in answers) {
+            for ((answer, calls) in answers) {
                 val chunks =
                     answer.chunked(size).map {
                         """{"choices":[{"index":0,"delta":{"content":${JsonPrimitive(it)}}}]}"""
@@ -66,8 +76,11 @@ class DeltaConsistencyTest {
                 server.enqueueSse(Kit.sse(*chunks.toTypedArray(), end))
                 val deltas = Deltas()
                 val response = chat().complete(Kit.request(), deltas)
-                assertEquals(1, response.toolCalls.size, "the call was recovered")
-                assertEquals(text(response), deltas.text, "pieces of $size: ${JsonPrimitive(answer)}")
+                val label = "pieces of $size: ${JsonPrimitive(answer)}"
+                assertEquals(calls, response.toolCalls.size, label)
+                assertEquals(if (calls == 0) answer else "", text(response), label)
+                assertEquals(text(response), deltas.text, label)
+                assertNull(response.providerMetadata?.get(PREVIEW_DIVERGED), label)
             }
         }
 
