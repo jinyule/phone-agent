@@ -55,7 +55,7 @@ internal class ActionRun(
 
             else -> {
                 ChangeWatch.watching(host.events, displayId, timings) { watch ->
-                    finish(gesture(action, aim), watch, timings.settleCapMs)
+                    finish(gesture(action, aim, watch), watch, timings.settleCapMs)
                 }
             }
         }
@@ -63,10 +63,11 @@ internal class ActionRun(
     private suspend fun gesture(
         action: UiAction,
         aim: Aim,
+        watch: ChangeWatch,
     ): Actuator.Result =
         when (action) {
             is UiAction.Tap -> {
-                tap(action, aim)
+                tap(action, aim, watch)
             }
 
             is UiAction.Scroll -> {
@@ -108,9 +109,10 @@ internal class ActionRun(
     private suspend fun tap(
         action: UiAction.Tap,
         aim: Aim,
+        watch: ChangeWatch,
     ): Actuator.Result =
         when (aim) {
-            is Aim.AtElement -> actuator.tap(aim.element.target, action.long)
+            is Aim.AtElement -> actuator.tap(aim.element.target, action.long, probe(watch))
             is Aim.AtPixel -> actuator.tapAt(aim.pixel, action.long)
             Aim.Anywhere -> error("a tap always has a target")
         }
@@ -219,6 +221,13 @@ internal class ActionRun(
                 },
         )
 
+    private fun probe(watch: ChangeWatch): ClickProbe =
+        object : ClickProbe {
+            override fun nowMs(): Long = parts.system.uptimeMs()
+
+            override suspend fun changed(): Boolean = watch.awaitSettled(timings.quietMs)
+        }
+
     /** Settles, reads back and builds the outcome of [result]. */
     private suspend fun finish(
         result: Actuator.Result,
@@ -226,7 +235,9 @@ internal class ActionRun(
         settleMs: Long,
     ): ActionOutcome {
         if (result == Actuator.Result.Refused) return Outcomes.OWN_UI
-        watch.awaitSettled(if (result is Actuator.Result.Done) settleMs else timings.quietMs)
+        if (!(result is Actuator.Result.Done && result.settled)) {
+            watch.awaitSettled(if (result is Actuator.Result.Done) settleMs else timings.quietMs)
+        }
         val after = parts.observer.observe(host, geometry, baseline.detail)
         val diff = compareWith?.let { parts.analyzer.diff(it, after) }
         return when (result) {

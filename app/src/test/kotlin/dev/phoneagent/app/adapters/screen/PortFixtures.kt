@@ -34,6 +34,11 @@ internal class TestSystem : ScreenSystem {
             override fun restore(saved: SavedClip) = error("not saved, so never restored")
         }
 
+    /** What [uptimeMs] answers; tests move it forward. */
+    var now: Long = 0
+
+    override fun uptimeMs(): Long = now
+
     override fun locked(): Boolean = false
 
     override fun pickerPackages(): Set<String> = emptySet()

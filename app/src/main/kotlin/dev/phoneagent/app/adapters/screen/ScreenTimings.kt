@@ -13,6 +13,9 @@ package dev.phoneagent.app.adapters.screen
  * @property longPressMs how long a long-press gesture holds.
  * @property scrollSwipeMs duration of the swipe that replaces a refused scroll action.
  * @property gestureSlackMs extra time after a gesture's duration before an unanswered dispatch counts as failed.
+ * @property clickUncertainMs a node click answered `false` after at least this long is taken as the
+ *   platform's timeout (the click may have run) and not repeated with a gesture; below the
+ *   platform's 5 s interaction timeout.
  * @property snapshotsKept how many recent snapshots act(on = …) can still resolve refs against.
  */
 internal data class ScreenTimings(
@@ -25,6 +28,7 @@ internal data class ScreenTimings(
     val longPressMs: Long = 800,
     val scrollSwipeMs: Long = 350,
     val gestureSlackMs: Long = 2_000,
+    val clickUncertainMs: Long = 4_000,
     val snapshotsKept: Int = 8,
 ) {
     init {
@@ -39,10 +43,14 @@ internal data class ScreenTimings(
                 "longPressMs" to longPressMs,
                 "scrollSwipeMs" to scrollSwipeMs,
                 "gestureSlackMs" to gestureSlackMs,
+                "clickUncertainMs" to clickUncertainMs,
             ).filterValues { it <= 0 }
         require(positive.isEmpty()) { "ScreenTimings must be positive: $positive" }
         require(quietMs < settleCapMs) { "quietMs ($quietMs) must be shorter than settleCapMs ($settleCapMs)" }
         require(tapMs < longPressMs) { "tapMs ($tapMs) must be shorter than longPressMs ($longPressMs)" }
+        require(quietMs < clickUncertainMs) {
+            "quietMs ($quietMs) must be shorter than clickUncertainMs ($clickUncertainMs)"
+        }
         require(snapshotsKept >= 1) { "snapshotsKept must be >= 1, got $snapshotsKept" }
     }
 }

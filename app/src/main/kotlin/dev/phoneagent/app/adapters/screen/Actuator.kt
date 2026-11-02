@@ -26,9 +26,13 @@ internal class Actuator(
 ) {
     /** Result of one actuation. */
     sealed interface Result {
-        /** Performed; [via] names the level that did it (for logs and tests). */
+        /**
+         * Performed; [via] names the level that did it (for logs and tests). [settled] when the
+         * display was already seen to change and settle.
+         */
         data class Done(
             val via: Via,
+            val settled: Boolean = false,
         ) : Result
 
         /** Not performed; [reason] is for the model, in English. */
@@ -43,15 +47,43 @@ internal class Actuator(
     /** Which fallback level performed an action. */
     enum class Via { NODE, GESTURE, INJECTED }
 
-    /** Taps (or long-presses) [element]: the action of its nearest clickable ancestor, else a gesture at its center. */
+    /**
+     * Taps (or long-presses) [element]: the action of its nearest clickable ancestor, else a gesture
+     * at its center. Apps may answer the action `false` although it ran, so a `false` is followed by
+     * a gesture only when [probe] sees no change and the answer came quickly; a `false` that took
+     * [ScreenTimings.clickUncertainMs] or longer (the platform gave up waiting) is not retried.
+     */
     suspend fun tap(
         element: NodeTarget,
         long: Boolean,
+        probe: ClickProbe,
     ): Result {
         val center = PixelPoint(element.pixels.exactCenterX(), element.pixels.exactCenterY())
         val action = if (long) AccessibilityNodeInfo.ACTION_LONG_CLICK else AccessibilityNodeInfo.ACTION_CLICK
-        val clicked = NodeActions.clickableAncestor(element.node, center, long)?.performAction(action) == true
-        return if (clicked) Result.Done(Via.NODE) else tapAt(center, long)
+        val ancestor = NodeActions.clickableAncestor(element.node, center, long) ?: return tapAt(center, long)
+        val asked = probe.nowMs()
+        val clicked = ancestor.performAction(action)
+        val answeredInMs = probe.nowMs() - asked
+        return when {
+            clicked -> {
+                Result.Done(Via.NODE)
+            }
+
+            probe.changed() -> {
+                Result.Done(Via.NODE, settled = true)
+            }
+
+            answeredInMs >= timings.clickUncertainMs -> {
+                Result.NotDone(
+                    "the app took $answeredInMs ms to answer the click, so it may have happened; " +
+                        "it was not repeated, look at the screen before trying again",
+                )
+            }
+
+            else -> {
+                tapAt(center, long)
+            }
+        }
     }
 
     /** Taps (or long-presses) the pixel [point] with a gesture. */
@@ -169,6 +201,15 @@ internal class Actuator(
                 area.height() >= NodeActions.MIN_SWIPE_PX
         return area.takeIf { fits }
     }
+}
+
+/** What [Actuator.tap] asks when a node click answered `false`. */
+internal interface ClickProbe {
+    /** Milliseconds on a monotonic clock. */
+    fun nowMs(): Long
+
+    /** Waits a short while for the display to change; whether it did (it has then settled). */
+    suspend fun changed(): Boolean
 }
 
 /** A node to act on and its bounds in display pixels, clipped to the display. */

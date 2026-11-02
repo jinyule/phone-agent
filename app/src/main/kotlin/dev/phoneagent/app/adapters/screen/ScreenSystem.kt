@@ -13,6 +13,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.PersistableBundle
 import android.os.PowerManager
+import android.os.SystemClock
 import android.provider.MediaStore
 import java.util.concurrent.ConcurrentHashMap
 
@@ -26,6 +27,9 @@ internal interface ScreenSystem {
 
     /** The user's clipboard. */
     val clipboard: ClipboardAccess
+
+    /** Milliseconds since boot, not counting deep sleep (a monotonic clock). */
+    fun uptimeMs(): Long
 
     /** The device is locked or its screen is off (phase1 D11). */
     fun locked(): Boolean
@@ -107,6 +111,8 @@ internal class AndroidScreenSystem(
     override val ownPackage: String = app.packageName
 
     override val clipboard: ClipboardAccess = AndroidClipboard(app.getSystemService(ClipboardManager::class.java))
+
+    override fun uptimeMs(): Long = SystemClock.uptimeMillis()
 
     override fun locked(): Boolean {
         val keyguard = app.getSystemService(KeyguardManager::class.java)

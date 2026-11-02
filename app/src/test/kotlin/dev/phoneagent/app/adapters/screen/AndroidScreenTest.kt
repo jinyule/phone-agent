@@ -70,6 +70,8 @@ class AndroidScreenTest {
         val started = ArrayList<Pair<Intent, Int>>()
         var onStart: () -> StartResult = { StartResult.Started }
 
+        override fun uptimeMs(): Long = 0
+
         override fun locked(): Boolean = locked
 
         override fun pickerPackages(): Set<String> = setOf("com.android.permissioncontroller")
