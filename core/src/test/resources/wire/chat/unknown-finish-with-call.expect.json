@@ -1,0 +1,32 @@
+{
+  "source": "constructed: a native call ended by a finish_reason the adapter does not know (the call must not run)",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "tool_call",
+          "id": "call_end1",
+          "name": "get_weather",
+          "argsJson": "{\"city\": \"Paris\"}"
+        }
+      ],
+      "stopReason": "OTHER",
+      "providerMetadata": {
+        "id": "chatcmpl-test",
+        "model": "test-model",
+        "finish_reason": "something_new"
+      }
+    },
+    "deltas": {
+      "text": "",
+      "reasoning": "",
+      "calls": [
+        {
+          "id": "call_end1",
+          "name": "get_weather",
+          "args": "{\"city\": \"Paris\"}"
+        }
+      ]
+    }
+  }
+}

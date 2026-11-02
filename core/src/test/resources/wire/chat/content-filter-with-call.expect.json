@@ -1,0 +1,9 @@
+{
+  "source": "constructed from docs: a filtered completion (finish_reason content_filter) that already carried a native call",
+  "expect": {
+    "error": {
+      "kind": "REFUSAL",
+      "message": "model refused (content_filter)"
+    }
+  }
+}

@@ -152,6 +152,7 @@ internal class ChatCompletionsStream(
         const val DONE = "[DONE]"
         const val SNIPPET = 200
         val STOP = setOf("stop", "end_turn", "eos")
+        val CALLS = setOf("tool_calls", "function_call")
         val LENGTH = setOf("length", "max_tokens")
         const val REFUSAL = "refusal"
         val REFUSALS = setOf("content_filter", "sensitive", REFUSAL)
@@ -175,6 +176,11 @@ internal class ChatCompletionsStream(
                 }
             }
 
+        /**
+         * Calls make a tool step only when the reply ended normally ([STOP], [CALLS] or no reason);
+         * a reason the adapter does not know is `OTHER` with or without calls, so they never run.
+         * Refusals and failures were already thrown by `checkOutcome`.
+         */
         fun stopReason(
             reason: String?,
             hasCalls: Boolean,
@@ -182,12 +188,14 @@ internal class ChatCompletionsStream(
             when {
                 reason in LENGTH -> StopReason.MAX_TOKENS
 
+                reason != null && reason !in STOP && reason !in CALLS -> StopReason.OTHER
+
                 // Ollama reports "stop" next to tool calls; calls decide.
                 hasCalls -> StopReason.TOOL_USE
 
-                reason == null || reason in STOP -> StopReason.END_TURN
+                reason in CALLS -> StopReason.OTHER
 
-                else -> StopReason.OTHER
+                else -> StopReason.END_TURN
             }
 
         fun metadata(

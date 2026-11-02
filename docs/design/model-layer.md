@@ -154,6 +154,7 @@ data class WireProfile(
 
 - **工具调用**：`tools[].function` + `tool_choice:"auto"`。主循环每轮只执行一个调用，所以服务商支持时适配器在 `prepare` 里设 `wire.disableParallelToolCalls = true`，线路上发 `parallel_tool_calls:false`。如果模型仍然返回多个调用，第一个之外的每个都要配一条结果"已跳过：每步只执行一个动作"，否则下一次请求会被拒。
 - **流式**：`stream:true` + `stream_options.include_usage`；要兼容某些网关返回 `usage:null` 的情况。
+- **结束原因**（`finish_reason` → `stopReason`）：`length` / `max_tokens` → `MAX_TOKENS`；`content_filter`、`sensitive` 和 `refusal` 报 `Refusal`，带不带调用都一样。正常结束（`stop`、`end_turn`、`eos`、`tool_calls`、`function_call` 或没有原因）时，带调用就是 `TOOL_USE`（Ollama 带调用时也报 `stop`），不带调用就是 `END_TURN`（`tool_calls` / `function_call` 不带调用是 `OTHER`）。不认识的值一律 `OTHER`，带着的调用不执行。
 - **推理内容**：字段名和"要不要回传"各家不同（`reasoning_content` 等）。在 `ProviderProfile.reasoningField` 和 `ProviderProfile.echoReasoning` 里按服务商配置，由能力探测确认；**探测不了的标"未验证"**。写请求头时这两项冻结进 `wire`（§2"线路快照"）。
 - **工具调用漏成文字**：有的模型会把工具调用写成正文里的标记（DeepSeek DSML、`<tool_call>` 等），参考 Mika 的 `LeakedToolMarkup`。还原**默认关闭，所有预设（包括 DeepSeek、通义、Ollama）都不打开**：还原出来的调用没走服务商的工具通道，而 PolicyEngine 现在还不能对还原出来的调用要求用户确认。以后作为用户显式开启的兼容选项提供（UI 由 WP09 决定）。预设的 `leakedCallFormats` 记下这条线路有证据会漏出的格式（DeepSeek 是 DSML，通义和 Ollama 是 `<tool_call>`），开启时 `ChatQuirks.recoverLeakedCalls` 只填这些格式。开启后，下面几条都满足才还原，否则正文原样保留：
   - 本次请求声明了工具，原生 `tool_calls` 里没有调用；

@@ -75,6 +75,14 @@ class ProbeTrialOutcomeTest {
         }
 
     @Test
+    fun `a Chat call ended by an unknown finish_reason does not pass the trial`() =
+        runTest {
+            server.enqueueError(404, "{}")
+            server.enqueueSse(chatReply("something_new"))
+            assertUnfinished(trial(ModelProtocol.OPENAI_CHAT_COMPLETIONS))
+        }
+
+    @Test
     fun `a native call that finishes the reply passes, on both protocols`() =
         runTest {
             server.enqueueError(404, "{}")
