@@ -122,6 +122,23 @@ class StreamProtocolTest {
     }
 
     @Test
+    fun `the served model is the last fallback's target, also when usage lists no iterations`() {
+        val reply =
+            run(
+                START,
+                blockStart(
+                    0,
+                    """{"type":"fallback","from":{"model":"claude-opus-5-5"},"to":{"model":"claude-opus-5"}}""",
+                ),
+                STOP0,
+                END,
+                STOP,
+            )
+        assertEquals("\"claude-opus-5\"", reply.providerMetadata!!["served_model"].toString())
+        assertEquals("\"${Kit.MODEL.value}\"", reply.providerMetadata["requested_model"].toString())
+    }
+
+    @Test
     fun `empty text blocks leave no part`() {
         val reply =
             run(
