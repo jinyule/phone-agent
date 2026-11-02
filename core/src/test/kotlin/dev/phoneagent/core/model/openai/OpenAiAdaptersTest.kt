@@ -28,7 +28,7 @@ class OpenAiAdaptersTest {
                     """{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}""",
                 ),
             )
-            val chat = adapters.model(Kit.profile(server.base()), Kit.MODEL, Kit.capabilities(), Kit.blobs())
+            val chat = adapters.unprobed(Kit.profile(server.base()), Kit.MODEL, Kit.capabilities(), Kit.blobs())
             assertTrue(chat is ChatCompletionsModel)
             assertEquals(ModelProtocol.OPENAI_CHAT_COMPLETIONS, chat.info.protocol)
             val id =
@@ -39,7 +39,7 @@ class OpenAiAdaptersTest {
                     .id.value
             assertTrue(Regex("call_[0-9a-f]{32}").matches(id), id)
             val responses =
-                adapters.model(
+                adapters.unprobed(
                     Kit.profile(server.base(), protocol = ModelProtocol.OPENAI_RESPONSES),
                     Kit.MODEL,
                     Kit.capabilities(),
@@ -53,7 +53,7 @@ class OpenAiAdaptersTest {
         runTest {
             val adapters = Kit.adapters()
             assertThrows<IllegalArgumentException> {
-                adapters.model(
+                adapters.unprobed(
                     Kit.profile("https://api.anthropic.com/v1", protocol = ModelProtocol.ANTHROPIC_MESSAGES),
                     Kit.MODEL,
                     Kit.capabilities(),
@@ -64,7 +64,12 @@ class OpenAiAdaptersTest {
             for (protocol in listOf(ModelProtocol.OPENAI_CHAT_COMPLETIONS, ModelProtocol.OPENAI_RESPONSES)) {
                 val error =
                     assertThrows<IllegalArgumentException> {
-                        adapters.model(badHeader.copy(protocol = protocol), Kit.MODEL, Kit.capabilities(), Kit.blobs())
+                        adapters.unprobed(
+                            badHeader.copy(protocol = protocol),
+                            Kit.MODEL,
+                            Kit.capabilities(),
+                            Kit.blobs(),
+                        )
                     }
                 assertTrue(error.message!!.contains("header value"))
             }
@@ -74,7 +79,10 @@ class OpenAiAdaptersTest {
 
     @Test
     fun `defaults need only a credential source`() {
-        val model = OpenAiAdapters(Keys()).model(Kit.profile(server.base()), Kit.MODEL, Kit.capabilities(), Kit.blobs())
+        val model =
+            OpenAiAdapters(
+                Keys(),
+            ).unprobed(Kit.profile(server.base()), Kit.MODEL, Kit.capabilities(), Kit.blobs())
         assertEquals(Kit.MODEL, model.info.model)
         assertEquals(HttpTimeouts(15_000, 300_000, 60_000), HttpTimeouts())
     }

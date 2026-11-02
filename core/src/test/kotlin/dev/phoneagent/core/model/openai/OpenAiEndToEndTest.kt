@@ -120,7 +120,7 @@ class OpenAiEndToEndTest {
     ): ChatModel =
         Kit
             .adapters(credentials, http)
-            .model(profile(protocol), model(protocol), capabilities, Kit.blobs(*images.toList().toTypedArray()))
+            .unprobed(profile(protocol), model(protocol), capabilities, Kit.blobs(*images.toList().toTypedArray()))
 
     private fun textAndStreaming(protocol: ModelProtocol) =
         runTest(timeout = TIMEOUT) {

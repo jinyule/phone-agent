@@ -38,7 +38,7 @@ class OneRequestPerAttemptTest {
     private fun model(): ChatModel =
         Kit
             .adapters(Keys(), HttpTimeouts().client())
-            .model(Kit.profile(server.base()), Kit.MODEL, Kit.capabilities(), Kit.blobs())
+            .unprobed(Kit.profile(server.base()), Kit.MODEL, Kit.capabilities(), Kit.blobs())
 
     @Test
     fun `408 is not resent`() =

@@ -52,8 +52,10 @@ public class OpenAiAdapters internal constructor(
     /**
      * The model [model] behind [profile]. [blobs] reads the images of the session it serves (blobs
      * are stored per session, so create one model per session or pass a session-aware source).
-     * [wire] is the request shape saved with the profile by "test and save" (the preset's
-     * defaults until then); the model never changes it. Throws [IllegalArgumentException] for
+     * [wire] is the request shape "test and save" saved with the profile
+     * ([ProbeResult.Passed.wire]); a route never probed passes [WireOptions.defaultsFor] explicitly.
+     * There is no default, so a saved negotiation cannot be dropped by omission; the model never
+     * changes it. Throws [IllegalArgumentException] for
      * profiles the OpenAI adapters cannot serve: another protocol, or header values that are not
      * valid HTTP.
      */
@@ -62,7 +64,7 @@ public class OpenAiAdapters internal constructor(
         model: ModelId,
         capabilities: ModelCapabilities,
         blobs: BlobSource,
-        wire: WireOptions = WireOptions.defaultsFor(profile),
+        wire: WireOptions,
     ): ChatModel = model(profile, ModelInfo(profile.id, model, profile.protocol, capabilities), blobs, wire, env)
 
     /** The model [info] describes, on [env] (the probe's records the secrets it hands out). */

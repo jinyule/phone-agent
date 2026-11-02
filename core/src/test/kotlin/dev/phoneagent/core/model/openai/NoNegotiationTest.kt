@@ -35,10 +35,10 @@ class NoNegotiationTest {
             "[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"Hi\"}]}]}}\n\n"
 
     private fun chat(): ChatModel =
-        Kit.adapters().model(Kit.profile(server.base()), Kit.MODEL, Kit.capabilities(), Kit.blobs())
+        Kit.adapters().unprobed(Kit.profile(server.base()), Kit.MODEL, Kit.capabilities(), Kit.blobs())
 
     private fun responses(): ChatModel =
-        Kit.adapters().model(
+        Kit.adapters().unprobed(
             Kit.profile(server.base(), protocol = ModelProtocol.OPENAI_RESPONSES),
             Kit.MODEL,
             Kit.capabilities(),

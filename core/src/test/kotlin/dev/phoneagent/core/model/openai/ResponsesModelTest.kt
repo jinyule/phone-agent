@@ -40,7 +40,7 @@ class ResponsesModelTest {
         keys: Keys = Keys(),
     ): ChatModel {
         val profile = Kit.profile(server.base(), protocol = ModelProtocol.OPENAI_RESPONSES, credential = credential)
-        return Kit.adapters(keys).model(profile, Kit.MODEL, Kit.capabilities(), Kit.blobs())
+        return Kit.adapters(keys).unprobed(profile, Kit.MODEL, Kit.capabilities(), Kit.blobs())
     }
 
     @Test

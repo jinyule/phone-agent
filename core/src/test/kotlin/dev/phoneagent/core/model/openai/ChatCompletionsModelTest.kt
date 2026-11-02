@@ -57,7 +57,7 @@ class ChatCompletionsModelTest {
         vision: Boolean = false,
         blobs: BlobSource = Kit.blobs(),
         client: OkHttpClient = HttpTimeouts().client(),
-    ): ChatModel = Kit.adapters(keys, client).model(profile, Kit.MODEL, Kit.capabilities(vision = vision), blobs)
+    ): ChatModel = Kit.adapters(keys, client).unprobed(profile, Kit.MODEL, Kit.capabilities(vision = vision), blobs)
 
     @Test
     fun `posts a streamed request with the key and profile headers`() =

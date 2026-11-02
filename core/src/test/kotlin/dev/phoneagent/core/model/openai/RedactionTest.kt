@@ -27,13 +27,13 @@ class RedactionTest {
     private val server = MockWebServer()
 
     private fun chat(keys: Keys = Keys(KEY)): ChatModel =
-        Kit.adapters(keys).model(Kit.profile(server.base()), Kit.MODEL, Kit.capabilities(), Kit.blobs())
+        Kit.adapters(keys).unprobed(Kit.profile(server.base()), Kit.MODEL, Kit.capabilities(), Kit.blobs())
 
     private fun responses(
         credential: Credential,
         keys: Keys,
     ): ChatModel =
-        Kit.adapters(keys).model(
+        Kit.adapters(keys).unprobed(
             Kit.profile(server.base(), protocol = ModelProtocol.OPENAI_RESPONSES, credential = credential),
             Kit.MODEL,
             Kit.capabilities(),

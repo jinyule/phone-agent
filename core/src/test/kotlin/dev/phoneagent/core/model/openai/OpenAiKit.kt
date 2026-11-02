@@ -5,6 +5,7 @@ import dev.phoneagent.core.ids.ModelId
 import dev.phoneagent.core.ids.ProviderId
 import dev.phoneagent.core.ids.ToolCallId
 import dev.phoneagent.core.model.BlobSource
+import dev.phoneagent.core.model.ChatModel
 import dev.phoneagent.core.model.ChatRequest
 import dev.phoneagent.core.model.Credential
 import dev.phoneagent.core.model.CredentialResolver
@@ -265,3 +266,14 @@ internal class Deltas : (Delta) -> Unit {
     fun args(id: ToolCallId): String =
         all.filterIsInstance<Delta.ToolCallArgs>().filter { it.id == id }.joinToString("") { it.fragment }
 }
+
+/**
+ * The model for a route "test and save" never probed: [profile]'s default wire options, passed
+ * explicitly (`OpenAiAdapters.model` has no default for them).
+ */
+internal fun OpenAiAdapters.unprobed(
+    profile: ProviderProfile,
+    model: ModelId,
+    capabilities: ModelCapabilities,
+    blobs: BlobSource,
+): ChatModel = model(profile, model, capabilities, blobs, WireOptions.defaultsFor(profile))

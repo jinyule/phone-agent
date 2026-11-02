@@ -131,7 +131,7 @@ class ProviderPresetsTest {
             ): JsonObject {
                 server.enqueueSse(reply)
                 val profile = Kit.profile(server.base(), preset = preset)
-                val model = Kit.adapters().model(profile, Kit.MODEL, Kit.capabilities(levels = levels), Kit.blobs())
+                val model = Kit.adapters().unprobed(profile, Kit.MODEL, Kit.capabilities(levels = levels), Kit.blobs())
                 model.complete(Kit.request(reasoning = ReasoningLevel.MEDIUM, maxOutputTokens = 64))
                 return server.next().json()
             }

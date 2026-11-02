@@ -29,7 +29,7 @@ class ResponsesOutputOrderTest {
     private val server = MockWebServer()
 
     private fun model(): ChatModel =
-        Kit.adapters().model(
+        Kit.adapters().unprobed(
             Kit.profile(server.base(), protocol = ModelProtocol.OPENAI_RESPONSES),
             Kit.MODEL,
             Kit.capabilities(),

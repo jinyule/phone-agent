@@ -29,7 +29,7 @@ class ResponsesTerminalTest {
     private val server = MockWebServer()
 
     private fun model(credential: Credential = Kit.KEY): ChatModel =
-        Kit.adapters().model(
+        Kit.adapters().unprobed(
             Kit.profile(server.base(), protocol = ModelProtocol.OPENAI_RESPONSES, credential = credential),
             Kit.MODEL,
             Kit.capabilities(),

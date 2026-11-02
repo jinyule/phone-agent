@@ -52,7 +52,7 @@ class OfficialEndpointTest {
             val profile = Kit.profile("https://api.openai.com/v1")
             Kit
                 .adapters(Keys(), routedToServer())
-                .model(profile, ModelId("gpt-test"), Kit.capabilities(), Kit.blobs())
+                .unprobed(profile, ModelId("gpt-test"), Kit.capabilities(), Kit.blobs())
                 .complete(Kit.request(maxOutputTokens = 256))
             val body = server.next().json()
             assertEquals(JsonPrimitive(256), body["max_completion_tokens"])
