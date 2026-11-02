@@ -38,8 +38,9 @@ import kotlinx.serialization.json.jsonPrimitive
  *    fails gets an INVALID_ARGS result and is never dispatched;
  * 2. `tool/call`, then the [Gate] (`toolPreExecute` + policy, confirmation, handoff);
  * 3. when allowed: flush first for anything but a READ tool (phase1 §3.9 rule 3; a failed flush
- *    stops the task and the call stays NOT_STARTED), then `toolExecute` around the tool, which runs
- *    under its single timeout (`Tool.timeoutMs`, waiting for the user excluded);
+ *    stops the task and the call stays NOT_STARTED), then the whole `toolExecute` chain under the
+ *    call's single timeout (`Tool.timeoutMs`, waiting for the user excluded). The chain's end runs
+ *    the judged call only, once ([ExecutionEnd]);
  * 4. `toolPostExecute`, `tool/result`, and the attached context queued for the next step.
  */
 internal class Calls(
@@ -144,31 +145,56 @@ internal class Calls(
     ): ToolResult {
         if (tool.risk != RiskClass.READ) loop.log.flush()
         val budget = TimeoutBudget(tool.timeoutMs, loop.setup.timeSource)
-        val context = CallContext(call, prompts.interaction(call.id, budget))
-        val chain = interceptors.toolExecute.chain { input -> runTool(state, input, budget) }
-        return chain.proceed(ExecuteInput(call, tool, context))
-    }
-
-    @Suppress("TooGenericExceptionCaught") // Tools throw only for bugs, recorded as ERROR (Tool contract).
-    private suspend fun runTool(
-        state: TurnState,
-        input: ExecuteInput,
-        budget: TimeoutBudget,
-    ): ToolResult {
-        state.notStarted -= input.call.id
-        return try {
-            budget.run { input.tool.execute(input.call, input.context) } ?: timedOut(input.tool)
-        } catch (bug: Exception) {
-            // A stop propagates; a tool that throws a cancellation of its own has a bug like any other.
-            if (bug is CancellationException) currentCoroutineContext().ensureActive()
-            ToolResult.failure(ToolStatus.ERROR, "${loop.texts.toolError} $bug")
+        val judged = ExecuteInput(call, tool, CallContext(call, prompts.interaction(call.id, budget)))
+        val end = ExecutionEnd(state, judged)
+        val chain = interceptors.toolExecute.chain(end::run)
+        val result = budget.run { chain.proceed(judged) }
+        val mayHaveRun = end.started && tool.risk != RiskClass.READ
+        return when {
+            end.faulted -> ToolResult.failure(ToolStatus.ERROR, withEffect(loop.texts.interceptorFault, mayHaveRun))
+            result == null -> ToolResult.failure(ToolStatus.TIMEOUT, withEffect(loop.texts.timeout, mayHaveRun))
+            else -> result
         }
     }
 
-    private fun timedOut(tool: Tool): ToolResult {
-        val texts = loop.texts
-        val text = if (tool.risk == RiskClass.READ) texts.timeout else "${texts.timeout} ${texts.mayHaveTakenEffect}"
-        return ToolResult.failure(ToolStatus.TIMEOUT, text)
+    private fun withEffect(
+        text: String,
+        mayHaveRun: Boolean,
+    ): String = if (mayHaveRun) "$text ${loop.texts.mayHaveTakenEffect}" else text
+
+    /**
+     * The end of the `toolExecute` chain: runs [judged] (the recorded, judged call with its own
+     * context) at most once. Any other input, or a second `proceed`, runs nothing and marks the
+     * call [faulted]: it is then recorded ERROR whatever the chain returns.
+     */
+    private inner class ExecutionEnd(
+        private val state: TurnState,
+        private val judged: ExecuteInput,
+    ) {
+        private var used = false
+        var started = false
+            private set
+        var faulted = false
+            private set
+
+        @Suppress("TooGenericExceptionCaught") // Tools throw only for bugs, recorded as ERROR (Tool contract).
+        suspend fun run(input: ExecuteInput): ToolResult {
+            val same = input.call == judged.call && input.tool === judged.tool && input.context === judged.context
+            if (used || !same) {
+                faulted = true
+                return ToolResult.failure(ToolStatus.ERROR, loop.texts.interceptorFault)
+            }
+            used = true
+            started = true
+            state.notStarted -= judged.call.id
+            return try {
+                judged.tool.execute(judged.call, judged.context)
+            } catch (bug: Exception) {
+                // A stop propagates; a tool that throws a cancellation of its own has a bug like any other.
+                if (bug is CancellationException) currentCoroutineContext().ensureActive()
+                ToolResult.failure(ToolStatus.ERROR, "${loop.texts.toolError} $bug")
+            }
+        }
     }
 
     private fun screenFor(call: ToolCall): ScreenPort? =

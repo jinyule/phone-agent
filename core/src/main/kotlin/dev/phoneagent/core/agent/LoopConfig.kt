@@ -102,6 +102,8 @@ public data class LoopTexts(
     val mayHaveTakenEffect: String = "It may have taken effect: call phone_observe to check before deciding.",
     /** The tool threw; followed by the error. */
     val toolError: String = "The tool failed:",
+    /** A `toolExecute` extension replaced the judged call or ran it twice. */
+    val interceptorFault: String = "Not run as judged: an extension tampered with this call.",
     /** The task stopped before the call ran. */
     val stoppedBeforeRun: String = "Not run: the task was stopped.",
     /** The task stopped while the call ran. */

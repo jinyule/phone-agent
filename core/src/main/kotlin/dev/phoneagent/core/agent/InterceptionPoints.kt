@@ -24,15 +24,16 @@ import dev.phoneagent.core.tool.ToolResult
  * The interceptors of one task, per fixed point (phase1 §3.8), each list in chain order (add to
  * the defaults with `copy`). The loop adds its own fixed parts around them: the step limit before
  * `preStep`, the request flush after `request`, the PolicyEngine guard after `toolPreExecute`, the
- * write-action flush and the tool timeout inside `toolExecute`. A throwing interceptor ends the
- * current turn only.
+ * write-action flush before `toolExecute` and the tool timeout around the whole `toolExecute`
+ * chain. A throwing interceptor ends the current turn only.
  *
  * @property preStep before every step: refuse it, append runtime context, compact.
  * @property request before every attempt: choose the model and reasoning; cannot touch messages.
  * @property requestError after a failed attempt: decide to retry; [RetryInterceptor] by default.
  * @property toolPreExecute before every validated call: allow, refuse, ask or hand off. The policy
  *   guard always runs after this chain and the stricter verdict wins, so nothing here can bypass it.
- * @property toolExecute around the tool's execution (timeout already applied inside).
+ * @property toolExecute around the tool's execution, inside the call's timeout; it may wrap, delay or
+ *   short-circuit the call, never replace it (see [ExecuteInput]).
  * @property toolPostExecute after every validated call: replace the result, attach context.
  * @property turnStopping when the turn would end with a final answer and no steer is queued.
  */
@@ -172,7 +173,9 @@ public class PreExecuteInput(
 )
 
 /**
- * `toolExecute` input.
+ * `toolExecute` input: the judged, recorded call with the context it runs with. `proceed` accepts
+ * exactly this input, once: a different call, tool or context, or a second `proceed`, runs nothing
+ * and the call is recorded ERROR (an extension fault), whatever the chain returns.
  *
  * @property call the call.
  * @property tool the tool.

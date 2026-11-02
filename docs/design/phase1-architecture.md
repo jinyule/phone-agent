@@ -438,7 +438,7 @@ interface TaskRuntime {
 - **turn-stopping 续跑上限**：每个 turn 默认 3 次（`maxContinuationsPerTurn`）→ `LIMIT`。
 
 **取消与超时契约**：
-- 单一超时真相源：工具超时（`Tool.timeoutMs`）在 `toolExecute` 链里面，工具层先作答。等待用户的时间不计入工具超时。超时的结果是 `TIMEOUT`；非 READ 的调用还要附上"可能已生效"。
+- 单一超时真相源：工具超时（`Tool.timeoutMs`）包住整条 `toolExecute` 链（包装器也算在内），工具层先作答。等待用户的时间不计入工具超时。超时的结果是 `TIMEOUT`；非 READ 的调用还要附上"可能已生效"。
 - **刷盘**：每次模型请求前、每个非 READ 调用执行前。刷盘失败就不执行，调用记 `NOT_STARTED`，任务以 `ERROR` 停止。
 - 确认之后、执行之前，按 §3.8 的 `toolPreExecute` 在新屏幕上复核一次。
 - **steer 只打断模型 attempt 和重试前的等待**，不打断正在执行的工具。
@@ -471,11 +471,11 @@ fun interface Chain<I, O> { suspend fun proceed(input: I): O }   // 不调用 pr
 | `request` | 每次 attempt 之前 | `RequestPlan` → `RequestPlan` | 为主请求选模型、线路快照、推理档位、缓存断点；`RequestPlan` 只服务主对话，看图和轻量请求走旁路（`side/*`）；**不能改消息** | ModelRouter |
 | `requestError` | attempt 失败后（step 仍打开） | `RequestFailure(error, attempt, retries)` → `Retry(delayMs)` / `Fail` | 决定是否重试；每次重试记 `request/retry` | `RetryInterceptor`（默认）、OverflowCompaction、ImageOffload |
 | `toolPreExecute` | 每个通过校验的调用，已写 `tool/call` | `PreExecuteInput(call, tool)` → `Verdict` | allow / refuse / confirm / handoff | **PolicyEngine**（固定排在链后，不可重排、无法绕过） |
-| `toolExecute` | 包住执行体 | `ExecuteInput(call, tool, context)` → `ToolResult` | 刷盘之外的包装、spill-back 检测 | MainScreenWatch |
+| `toolExecute` | 包住执行体，在工具超时之内 | `ExecuteInput(call, tool, context)` → `ToolResult` | 包装、延后或短路这个调用，spill-back 检测；**不能替换调用**：`proceed` 只接受判定过的那一组 call、tool、context，而且只能调一次，否则什么都不执行，调用记 `ERROR` | MainScreenWatch |
 | `toolPostExecute` | 每个调用有结果之后（执行、拒绝、转交都算） | `PostExecuteInput(call, tool, result)` → `PostExecuteResult(result, context)` | 替换结果；附加上下文（进 nextStep） | LoopGuard（含重复调用提醒）、OutwardPacing、KnowledgeNotice、Spill |
 | `turnStopping` | 有最终回答且 nextStep 里没有 steer 时 | `TurnStoppingInput(turn, step, continuations, reply)` → `End` / `Continue(context)` | 继续本 turn（受续跑上限约束） | TodoContinuation（M3） |
 
-主循环自带、不能被拦截器替换的部分：`preStep` 之前的步数上限；`request` 之后的刷盘；`toolPreExecute` 之后的 PolicyEngine；`toolExecute` 里面的非 READ 刷盘和工具超时。
+主循环自带、不能被拦截器替换的部分：`preStep` 之前的步数上限；`request` 之后的刷盘；`toolPreExecute` 之后的 PolicyEngine；`toolExecute` 链之前的非 READ 刷盘，以及包住整条链的工具超时。
 
 **`requestError` 默认行为**（`RetryInterceptor`）：可重试的错误每个 step 最多重试 5 次；服务端给了 retry-after 就按它等，否则从 500 ms 指数退避到 10 s，一半固定一半随机。retry-after 超过 `maxRetryAfterMs`（默认 60 s，构造时校验）**不重试**，直接按不可重试失败，不会把等待缩短到上限。重试前的等待可以被 steer 打断。
 
@@ -713,7 +713,7 @@ TaskRuntime 循环（每个 step，对应 §3.8 的拦截点）：
        Confirm → 显示确认卡（悬浮层 / 通知 / App 内）→ 等待（15 分钟没人回按拒绝）
                  → 批准后读新屏、在新屏上复核（再要确认最多再问 1 次）
        Allow   ↓
-  6. toolExecute 链：刷盘（非 READ）→ 工具超时内执行：watchMainScreen(3000) → ScreenPort.act → awaitChange → 回读快照
+  6. 刷盘（非 READ）→ 工具超时内跑 toolExecute 链：watchMainScreen(3000) → ScreenPort.act → awaitChange → 回读快照
        → mainArrivals：期间有非用户打开的任务冒到主屏 → moveTask 挪回 → effect = SPILLED_BACK
   7. toolPostExecute 链：计算差分与效果 → LoopGuard → 节奏控制 → 知识提示 → 写 tool/result
   8. 附加的上下文进 nextStep → step/end → 下一个 step
