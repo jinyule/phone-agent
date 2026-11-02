@@ -137,6 +137,8 @@ class EngineMatrixTest {
             assertEquals(refused, refusal(decide(call("phone_scroll", "direction" to "down"), ctxIn(level, page))))
             val list = screen(text("t1", "设置", box(0, 40, 500, 100)), el("e1", "开发者选项"), pkg = Pages.SETTINGS)
             assertEquals(refused, refusal(decide(tap("e1"), ctxIn(level, list))))
+            val permissions = screen(text("t1", "权限管理", box(0, 40, 500, 100)), el("e1", "相机"), pkg = Pages.SETTINGS)
+            assertEquals(refused, refusal(decide(tap("e1"), ctxIn(level, permissions))))
             val byActivity =
                 screen(el("e1", "开启"), pkg = Pages.SETTINGS).copy(activity = ".Settings\$SecuritySettingsActivity")
             assertEquals(refused, refusal(decide(tap("e1"), ctxIn(level, byActivity))))

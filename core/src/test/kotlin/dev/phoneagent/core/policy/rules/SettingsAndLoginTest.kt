@@ -86,6 +86,37 @@ class SettingsAndLoginTest {
         }
     }
 
+    @ParameterizedTest
+    @EnumSource(SecurityLevel::class)
+    fun `an app's settings page refuses its permission entry and disabling, also for an unknown app`(
+        level: SecurityLevel,
+    ) {
+        val unknown =
+            details(
+                "某个应用",
+                el("e5", "权限", bounds = box(0, 600, 999, 660)),
+                el("e6", "停用", bounds = box(0, 680, 999, 740)),
+            )
+        assertEquals("hard.sensitive_settings", refusal(decide(tap("e5"), on(unknown, level))))
+        assertEquals("hard.app_management", refusal(decide(tap("e6"), on(unknown, level))))
+    }
+
+    @ParameterizedTest
+    @EnumSource(SecurityLevel::class)
+    fun `the managed app is known by OCR too`(level: SecurityLevel) {
+        val drawn =
+            screen(
+                text("t1", "应用信息", box(0, 40, 500, 100)),
+                el("e1", "强行停止", bounds = box(0, 300, 480, 360)),
+                el("e3", "通知", bounds = box(0, 400, 999, 460)),
+                pkg = Pages.SETTINGS,
+                ocr = listOf(ocr("招商银行", box(0, 110, 500, 150))),
+            ).copy(activity = "com.android.settings.SubSettings")
+        for (ref in listOf("e1", "e3")) {
+            assertEquals("hard.finance_app", refusal(decide(tap(ref), on(drawn, level))), ref)
+        }
+    }
+
     /** The storage page of one app, as AOSP shows it, for the app named [app]. */
     private fun storage(
         app: String,

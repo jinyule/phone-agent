@@ -195,6 +195,24 @@ class RecheckTest {
     }
 
     @Test
+    fun `every spend entry binds the amount - typing that submits on a payment page`() {
+        val note = field("e2", hint = "备注", focused = true)
+        val type = call("phone_type", "screen" to "s1", "ref" to "e2", "text" to "x", "submit" to true)
+        val approved = ask(type, checkout("¥20", note))
+        assertEquals(ConfirmReason.SPEND to Money(2000, null), approved.reason to approved.amount)
+        assertEquals(Verdict.Allow, recheck(type, approved, checkout("¥20", note, "s2")))
+        assertEquals(Money(9900, null), card(recheck(type, approved, checkout("¥99", note, "s2"))).amount)
+    }
+
+    @Test
+    fun `an approval is for one app - the same chat in another app asks again`() {
+        val approved = ask(tap("e1"), chat())
+        val elsewhere = chat(id = "s2").copy(pkg = "com.example.other")
+        val again = card(recheck(tap("e1"), approved, elsewhere))
+        assertEquals(approved.copy(pkg = "com.example.other"), again)
+    }
+
+    @Test
     fun `an amount in a form that cannot be read never passes the re-check`() {
         for ((shown, changed) in listOf("¥20.000" to "¥99.000", "¥12,34" to "¥99,99", "12,34" to "99,99")) {
             val approved = ask(tap("e1"), checkout(shown))
