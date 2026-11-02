@@ -1,11 +1,11 @@
 package dev.phoneagent.core.policy.rules
 
 import dev.phoneagent.core.ports.ElementRef
+import dev.phoneagent.core.ports.Money
 import dev.phoneagent.core.ports.SystemIntentKind
 import dev.phoneagent.core.ports.SystemKey
 import dev.phoneagent.core.tool.ToolCall
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import java.util.Locale
 
 /** Where a screen action is aimed, as the model wrote it. */
@@ -40,10 +40,12 @@ internal sealed interface Step {
         override val ref: Aim.Ref? get() = aim as? Aim.Ref
     }
 
+    /** `phone_type`; with [append] the field ends up holding its current text followed by [text]. */
     data class Type(
         val aim: Aim.Ref?,
         val text: String,
         val submit: Boolean,
+        val append: Boolean,
     ) : ScreenStep {
         override val ref: Aim.Ref? get() = aim
     }
@@ -67,23 +69,24 @@ internal sealed interface Step {
         override val ref: Aim.Ref? get() = null
     }
 
-    /** `phone_launch`: [target] is the `link` argument when [link], else the `app` argument (package or name). */
+    /** `phone_launch`: [target] is the `link` argument when [link], else the `app` argument, trimmed. */
     data class Launch(
         val target: String,
         val link: Boolean,
     ) : Step
 
+    /** `phone_intent`; [fields] are the other arguments, trimmed. */
     data class Intent(
         val kind: SystemIntentKind,
         val fields: Map<String, String>,
     ) : Step
 
-    /** `request_confirmation`. */
+    /** `request_confirmation`; [amount] is the `amount` argument read as money, `null` when not given. */
     data class Confirmation(
         val action: String,
         val target: String?,
         val content: String?,
-        val amount: String?,
+        val amount: Money?,
     ) : Step
 
     /** A tool the vocabulary does not know. */
@@ -99,7 +102,7 @@ internal sealed interface ScreenStep : Step {
     val ref: Aim.Ref?
 }
 
-/** Decodes [ToolCall]s into [Step]s. Total: never throws. */
+/** Decodes [ToolCall]s into [Step]s by the rules the tools read their arguments with ([Args]). Total: never throws. */
 internal object Steps {
     private val PARSERS: Map<String, (JsonObject) -> Step?> =
         mapOf(
@@ -113,7 +116,7 @@ internal object Steps {
             "phone_type" to ::type,
             "phone_scroll" to { args -> Args.optionalRef(args)?.let { Step.Scroll(it.aim) } },
             "phone_swipe" to ::swipe,
-            "phone_key" to ::key,
+            "phone_key" to { args -> Args.choice(args, "key", KEYS)?.let(Step::Key) },
             "phone_launch" to ::launch,
             "phone_intent" to ::intent,
             "request_confirmation" to ::confirmation,
@@ -127,13 +130,26 @@ internal object Steps {
         return if (parser == null) Step.Unknown else parser(call.args) ?: Step.Malformed
     }
 
+    /** A ref, or both coordinates; never both. */
     private fun tap(args: JsonObject): Step? =
-        if (args.containsKey("ref")) Args.ref(args)?.let(Step::Tap) else Args.point(args, "x", "y")?.let(Step::Tap)
+        when {
+            !Args.has(args, "ref") -> Args.point(args, "x", "y")?.let(Step::Tap)
+            Args.has(args, "x") || Args.has(args, "y") -> null
+            else -> Args.ref(args)?.let(Step::Tap)
+        }
 
     private fun type(args: JsonObject): Step? {
-        val text = Args.string(args, "text")
+        val text = Args.text(args, "text")
         val target = Args.optionalRef(args)
-        return if (text != null && target != null) Step.Type(target.aim, text, Args.bool(args, "submit")) else null
+        val submit = Args.flag(args, "submit")
+        val append = Args.flag(args, "append")
+        return if (text != null && target != null &&
+            submit != null
+        ) {
+            append?.let { Step.Type(target.aim, text, submit, it) }
+        } else {
+            null
+        }
     }
 
     private fun swipe(args: JsonObject): Step? {
@@ -142,36 +158,54 @@ internal object Steps {
         return if (from != null && to != null) Step.Swipe(from, to) else null
     }
 
-    private fun key(args: JsonObject): Step? =
-        SystemKey.entries.firstOrNull { it.name == Args.string(args, "key")?.uppercase(Locale.ROOT) }?.let(Step::Key)
-
+    /** Exactly one of `app` and `link`, not blank. */
     private fun launch(args: JsonObject): Step? {
-        val app = Args.string(args, "app")?.takeIf(String::isNotBlank)
-        val link = Args.string(args, "link")?.takeIf(String::isNotBlank)
+        val app = Args.text(args, "app")?.trim()
+        val link = Args.text(args, "link")?.trim()
         return when {
-            app != null && link == null -> Step.Launch(app, link = false)
-            link != null && app == null -> Step.Launch(link, link = true)
-            else -> null
+            Args.has(args, "app") == Args.has(args, "link") -> null
+            app != null -> app.takeIf(String::isNotEmpty)?.let { Step.Launch(it, link = false) }
+            else -> link?.takeIf(String::isNotEmpty)?.let { Step.Launch(it, link = true) }
         }
     }
 
+    /** The kind by its wire name; `page=app_details` needs a package name. */
     private fun intent(args: JsonObject): Step? {
-        val kind = SystemIntentKind.entries.firstOrNull { it.name == Args.string(args, "kind")?.uppercase(Locale.ROOT) }
+        val kind = Args.choice(args, "kind", KINDS)
         val fields =
-            args
-                .filterKeys { it != "kind" }
-                .mapNotNull { (k, v) ->
-                    (v as? JsonPrimitive)?.let {
-                        k to
-                            it.content
-                    }
-                }.toMap()
-        return kind?.let { Step.Intent(it, fields) }
+            args.keys
+                .filter { it != "kind" }
+                .mapNotNull { key -> Args.text(args, key)?.let { key to it.trim() } }
+                .toMap()
+        val details = kind == SystemIntentKind.SETTINGS && fields["page"] == APP_DETAILS
+        return if (kind != null &&
+            (!details || Text.isPackage(fields["package"].orEmpty()))
+        ) {
+            Step.Intent(kind, fields)
+        } else {
+            null
+        }
     }
 
+    /** `action` is required; an `amount` that is given must read as one amount that fits. */
     private fun confirmation(args: JsonObject): Step? {
-        val action = Args.string(args, "action")?.takeIf(String::isNotBlank)
-        val amount = (args["amount"] as? JsonPrimitive)?.content
-        return action?.let { Step.Confirmation(it, Args.string(args, "target"), Args.string(args, "content"), amount) }
+        val action = Args.text(args, "action")?.takeIf(String::isNotBlank)
+        val given = Args.has(args, "amount")
+        val amount = Args.text(args, "amount")?.let(Prices::stated)?.money
+        return if (action == null || (given && amount == null)) {
+            null
+        } else {
+            Step.Confirmation(action, Args.text(args, "target"), Args.text(args, "content"), amount)
+        }
     }
 }
+
+/** `phone_intent` page that opens one app's settings. */
+internal const val APP_DETAILS: String = "app_details"
+
+private val KEYS: Map<String, SystemKey> = SystemKey.entries.associateBy { it.name.lowercase(Locale.ROOT) }
+
+private val KINDS: Map<String, SystemIntentKind> =
+    SystemIntentKind.entries.associateBy {
+        it.name.lowercase(Locale.ROOT)
+    }

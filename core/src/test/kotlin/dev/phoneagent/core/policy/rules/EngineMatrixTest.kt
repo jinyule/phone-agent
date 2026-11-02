@@ -37,7 +37,7 @@ import org.junit.jupiter.params.provider.EnumSource
  * of policy-rules.md §6. Calls go through the resolver first, as in the runtime.
  */
 class EngineMatrixTest {
-    private val policy = PolicyRules(setOf(OWN))
+    private val policy = Fx.rules()
 
     private fun decide(
         call: ToolCall,
@@ -78,15 +78,26 @@ class EngineMatrixTest {
 
         @ParameterizedTest
         @EnumSource(SecurityLevel::class)
-        fun `bank, broker and payment apps, by package, label or link`(level: SecurityLevel) {
+        fun `bank, broker and payment apps, by package - names and app links are not launched at all`(
+            level: SecurityLevel,
+        ) {
             listOf(
                 call("phone_launch", "app" to "com.icbc"),
-                call("phone_launch", "app" to "富途牛牛"),
-                call("phone_launch", "app" to "支付宝"),
-                call("phone_launch", "link" to "alipays://platformapi/startapp?appId=20000056"),
-                call("phone_launch", "link" to "android-app://cmb.pb/x"),
+                call("phone_launch", "app" to "COM.ICBC"),
                 call("phone_intent", "kind" to "settings", "page" to "app_details", "package" to "com.icbc"),
             ).forEach { assertEquals("hard.finance_app", refusal(decide(it, ctxIn(level, null))), it.args.toString()) }
+            listOf(call("phone_launch", "app" to "富途牛牛"), call("phone_launch", "app" to "支付宝"))
+                .forEach {
+                    assertEquals(
+                        "call.launch_package",
+                        refusal(decide(it, ctxIn(level, null))),
+                        it.args.toString(),
+                    )
+                }
+            listOf(
+                call("phone_launch", "link" to "alipays://platformapi/startapp?appId=20000056"),
+                call("phone_launch", "link" to "android-app://cmb.pb/x"),
+            ).forEach { assertEquals("call.link_scheme", refusal(decide(it, ctxIn(level, null))), it.args.toString()) }
             val bank = screen(el("e1", "转账"), pkg = "com.icbc")
             assertEquals("hard.finance_app", refusal(decide(tap("e1"), ctxIn(level, bank))))
             // Not even looking: the screen of a blocked app is not shown to the model.
@@ -119,7 +130,7 @@ class EngineMatrixTest {
                     "phone_launch",
                     "link" to "intent:#Intent;action=android.settings.APPLICATION_DEVELOPMENT_SETTINGS;end",
                 )
-            assertEquals(refused, refusal(decide(link, ctxIn(level, null))))
+            assertEquals("call.link_scheme", refusal(decide(link, ctxIn(level, null))))
             val page = screen(text("t1", "无障碍", box(0, 40, 500, 100)), el("e1", "已下载的应用"), pkg = Pages.SETTINGS)
             assertEquals(refused, refusal(decide(tap("e1"), ctxIn(level, page))))
             assertEquals(refused, refusal(decide(call("phone_observe"), ctxIn(level, page), RiskClass.READ)))
@@ -224,7 +235,7 @@ class EngineMatrixTest {
         fun `spending is confirmed at every level, with the amount`(level: SecurityLevel) {
             val verdict = assertInstanceOf(Verdict.Confirm::class.java, decide(tap("e1"), ctxIn(level, checkout)))
             assertEquals(ConfirmReason.SPEND, verdict.card.reason)
-            assertEquals(Money(8800, "CNY"), verdict.card.amount)
+            assertEquals(Money(8800, null), verdict.card.amount)
             assertEquals("提交订单", verdict.card.target)
         }
 
@@ -348,7 +359,8 @@ class EngineMatrixTest {
                 Verdict.Allow,
                 decide(call("ask_user", "question" to "?"), ctx(CAUTIOUS, page), RiskClass.READ),
             )
-            assertEquals(Verdict.Allow, decide(call("phone_launch", "app" to "微信"), ctx(CAUTIOUS, null)))
+            val alarm = call("phone_intent", "kind" to "alarm", "time" to "07:00")
+            assertEquals(Verdict.Allow, decide(alarm, ctx(CAUTIOUS, null)))
         }
 
         @ParameterizedTest
@@ -425,7 +437,8 @@ class EngineMatrixTest {
         fun `a ref from another snapshot is refused`() {
             assertEquals("call.stale_screen", refusal(decide(tap("e1", screen = "s0"), ctx(AUTONOMOUS, chat))))
             assertEquals("call.stale_screen", refusal(decide(call("phone_tap", "ref" to "e1"), ctx(AUTONOMOUS, chat))))
-            assertEquals("call.stale_screen", refusal(decide(tap("e1"), ctx(AUTONOMOUS, null))))
+            // Without any screen, the model must observe first.
+            assertEquals("call.no_screen", refusal(decide(tap("e1"), ctx(AUTONOMOUS, null))))
             // On the old screen e1 was "发送"; on the current one e1 is a harmless button. Looking
             // the old ref up in the new screen would allow it, but the tap runs on the old screen.
             val reshuffled = screen(el("e1", "返回"), id = "s2")
@@ -435,7 +448,7 @@ class EngineMatrixTest {
             )
             // Points and steps without a ref carry no snapshot.
             assertEquals(Verdict.Allow, decide(call("phone_tap", "x" to 50, "y" to 425), ctx(AUTONOMOUS, chat)))
-            assertEquals(Verdict.Allow, decide(call("phone_scroll", "direction" to "down"), ctx(AUTONOMOUS, null)))
+            assertEquals(Verdict.Allow, decide(call("phone_scroll", "direction" to "down"), ctx(AUTONOMOUS, chat)))
         }
     }
 
@@ -483,7 +496,7 @@ class EngineMatrixTest {
             val ask = call("request_confirmation", "action" to "给张三转账", "target" to "张三", "amount" to "¥10")
             val card = assertInstanceOf(Verdict.Confirm::class.java, decide(ask, ctx(level, chat), RiskClass.READ)).card
             assertEquals(ConfirmReason.REQUESTED_BY_MODEL, card.reason)
-            assertEquals(Money(1000, "CNY"), card.amount)
+            assertEquals(Money(1000, null), card.amount)
             // It names no app, so approving it never stands in for the per-app outward confirmation.
             assertNull(card.pkg)
             assertEquals(Verdict.Allow, decide(ask, ctx(level, chat).copy(approved = card), RiskClass.READ))

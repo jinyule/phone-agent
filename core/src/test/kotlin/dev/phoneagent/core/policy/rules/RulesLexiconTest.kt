@@ -17,7 +17,7 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
 
 class RulesLexiconTest {
-    private val lexicon = RulesLexicon()
+    private val lexicon = Fx.rules().lexicon
 
     private fun risk(
         element: UiElement,

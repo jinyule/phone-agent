@@ -37,20 +37,26 @@ internal class BlockedAppsTest {
     }
 
     @Test
-    fun `labels find the package, normalized, whole name only`() {
-        assertEquals("com.eg.android.AlipayGphone", list.packageNamed("支付宝"))
-        assertEquals("com.eg.android.AlipayGphone", list.packageNamed("ALIPAY"))
-        assertEquals("cmb.pb", list.packageNamed(" 招商 银行 "))
-        assertNull(list.packageNamed("支付"))
-        assertNull(list.packageNamed("微信"))
+    fun `packages compare in any case`() {
+        assertEquals(AppCategory.PAYMENT, list.categoryOf("COM.EG.ANDROID.ALIPAYGPHONE"))
+        assertEquals(AppCategory.BANK, list.categoryOf("com.bankcomm.bankcomm"))
+    }
+
+    @Test
+    fun `labels find the category, normalized, whole name only`() {
+        assertEquals(AppCategory.PAYMENT, list.categoryNamed("支付宝"))
+        assertEquals(AppCategory.PAYMENT, list.categoryNamed("ALIPAY"))
+        assertEquals(AppCategory.BANK, list.categoryNamed(" 招商 银行 "))
+        assertNull(list.categoryNamed("支付"))
+        assertNull(list.categoryNamed("微信"))
     }
 
     @Test
     fun `the format skips comments and blank lines`() {
-        val parsed = BlockedApps.parse("# header\n\n  # indented comment\ncom.a.b  bank  甲|A Bank\n", "test")
+        val parsed = BlockedApps.parse("# header\n\n  # indented comment\ncom.a.B  bank  甲|A Bank\n", "test")
         assertEquals(AppCategory.BANK, parsed.categoryOf("com.a.b"))
-        assertEquals("com.a.b", parsed.packageNamed("a bank"))
-        assertEquals("com.a.b", parsed.packageNamed("甲"))
+        assertEquals(AppCategory.BANK, parsed.categoryNamed("a bank"))
+        assertEquals(AppCategory.BANK, parsed.categoryNamed("甲"))
     }
 
     @Test
@@ -59,9 +65,10 @@ internal class BlockedAppsTest {
             assertThrows<IllegalArgumentException> { BlockedApps.parse(text, "t.txt") }.message.orEmpty()
         assertTrue("t.txt line 2" in error("# c\ncom.a.b bank"), "missing labels")
         assertTrue("invalid package" in error("not_a_package bank X"))
+        assertTrue("invalid package" in error("com.1a bank X"))
         assertTrue("unknown category 'shop'" in error("com.a.b shop X"))
         assertTrue("empty label" in error("com.a.b bank X||Y"))
-        assertTrue("duplicate packages [com.a.b]" in error("com.a.b bank X\ncom.a.b broker Y"))
+        assertTrue("duplicate packages [com.a.b]" in error("com.a.b bank X\ncom.A.b broker Y"))
     }
 
     @Test

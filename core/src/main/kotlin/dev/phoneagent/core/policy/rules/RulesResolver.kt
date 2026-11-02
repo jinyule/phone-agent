@@ -12,20 +12,24 @@ import dev.phoneagent.core.tool.ToolCall
 
 /**
  * Resolves calls of the phase1 §5 tools into [ActionIntent]s (policy-rules.md §2). Every tap is
- * classified by [lexicon], the same vocabulary the screen format marks ⚠ with. The tool's
- * [RiskClass] is a floor: a tool declared SPEND always resolves to SPEND.
+ * classified by [Risks], the same reading the screen format marks ⚠ with. The tool's [RiskClass]
+ * is a floor: a tool declared SPEND always resolves to SPEND. The amount is read once the kind is
+ * final, so every way of spending carries it ([Reading.price]).
  */
 internal class RulesResolver(
-    lexicon: RulesLexicon,
-    private val blocked: BlockedApps,
+    private val reading: Reading,
 ) : IntentResolver {
-    private val screenIntents = ScreenIntents(lexicon)
+    private val screenIntents = ScreenIntents(reading)
 
     override fun resolve(
         call: ToolCall,
         risk: RiskClass,
         screen: ScreenSnapshot?,
-    ): ActionIntent = floor(base(Steps.parse(call), risk, screen), risk)
+    ): ActionIntent {
+        val step = Steps.parse(call)
+        val intent = floor(base(step, risk, screen), risk)
+        return intent.copy(amount = reading.price(step, intent, screen).money)
+    }
 
     private fun base(
         step: Step,
@@ -50,18 +54,13 @@ internal class RulesResolver(
                 ActionIntent(IntentKind.NAVIGATE, screen?.pkg)
             }
 
+            // Only a package name launches an app; a link opens no app the policy can name.
             is Step.Launch -> {
-                ActionIntent(IntentKind.NAVIGATE, launched(step))
+                ActionIntent(IntentKind.NAVIGATE, step.target.takeIf { !step.link && Text.isPackage(it) })
             }
 
             is Step.Intent -> {
-                ActionIntent(
-                    IntentKind.NAVIGATE,
-                    Pages.SETTINGS.takeIf {
-                        step.kind ==
-                            SystemIntentKind.SETTINGS
-                    },
-                )
+                ActionIntent(IntentKind.NAVIGATE, Pages.SETTINGS.takeIf { step.kind == SystemIntentKind.SETTINGS })
             }
 
             is Step.Confirmation -> {
@@ -72,9 +71,6 @@ internal class RulesResolver(
                 if (screen == null) blind(step) else screenIntents.resolve(step, screen)
             }
         }
-
-    private fun launched(step: Step.Launch): String? =
-        if (step.link) Launches.linkPackage(step.target) else Launches.packageOf(step.target, blocked)
 
     /** Without a screen nothing can be looked up: typing that submits and Enter count as reaching out. */
     private fun blind(step: ScreenStep): ActionIntent {
@@ -88,15 +84,14 @@ internal class RulesResolver(
 
     /** `request_confirmation`: SPEND when it states an amount, else what its action text names, else OUTWARD. */
     private fun confirmation(step: Step.Confirmation): ActionIntent {
-        val amount = step.amount?.let { Amounts.find(it, bare = true) }
-        val named = Lexicon.classify(step.action)
+        val named = reading.lexicon.classify(step.action)
         val kind =
             when {
-                amount != null -> IntentKind.SPEND
+                step.amount != null -> IntentKind.SPEND
                 named != null -> named.kind
                 else -> IntentKind.OUTWARD
             }
-        return ActionIntent(kind, amount = amount)
+        return ActionIntent(kind)
     }
 
     private fun floor(
@@ -104,7 +99,7 @@ internal class RulesResolver(
         risk: RiskClass,
     ): ActionIntent {
         val minimum = FLOORS[risk] ?: return intent
-        val raise = intent.fieldClass !in Fields.HAND_OFF && SEVERITY.indexOf(intent.kind) < SEVERITY.indexOf(minimum)
+        val raise = intent.fieldClass !in Fields.HAND_OFF && severity(intent.kind) < severity(minimum)
         return if (raise) intent.copy(kind = minimum, fieldClass = null) else intent
     }
 }
@@ -114,16 +109,4 @@ private val FLOORS =
         RiskClass.SPEND to IntentKind.SPEND,
         RiskClass.OUTWARD to IntentKind.OUTWARD,
         RiskClass.SETUP to IntentKind.SETTINGS,
-    )
-
-/** Least to most severe, for `RulesResolver.floor`. */
-private val SEVERITY =
-    listOf(
-        IntentKind.READ,
-        IntentKind.NAVIGATE,
-        IntentKind.INPUT,
-        IntentKind.SETTINGS,
-        IntentKind.DELETE,
-        IntentKind.OUTWARD,
-        IntentKind.SPEND,
     )

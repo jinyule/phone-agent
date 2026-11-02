@@ -2,20 +2,23 @@ package dev.phoneagent.core.policy.rules
 
 import dev.phoneagent.core.ports.Bounds
 
-/** Box arithmetic in normalized coordinates (0–999, edges inclusive). */
+/**
+ * Box arithmetic in normalized coordinates (0–999, edges inclusive).
+ *
+ * [rightOf] and [sameRow] are adapted from Mika's `IrreversibleDetector` (Copyright 2026
+ * wangzan101, Apache-2.0). Modified by PhoneAgent contributors: rows are matched by the vertical
+ * centers of both boxes, and the start piece itself is left out. See NOTICE.
+ */
 internal object Geometry {
-    /** [start] followed by the pieces on its row to its right, in left-to-right order. */
-    fun rowText(
+    /** The texts of the other [pieces] on [start]'s row that begin at or right of it, left to right. */
+    fun rightOf(
         start: Piece,
         pieces: List<Piece>,
     ): String =
-        (
-            listOf(start.text) +
-                pieces
-                    .filter { it !== start && it.bounds.left >= start.bounds.left && sameRow(it.bounds, start.bounds) }
-                    .sortedBy { it.bounds.left }
-                    .map { it.text }
-        ).joinToString("")
+        pieces
+            .filter { it !== start && it.bounds.left >= start.bounds.left && sameRow(it.bounds, start.bounds) }
+            .sortedBy { it.bounds.left }
+            .joinToString(" ") { it.text }
 
     fun contains(
         bounds: Bounds,
@@ -35,6 +38,9 @@ internal object Geometry {
         a: Bounds,
         b: Bounds,
     ): Boolean = centerY(a) in b.top..b.bottom && centerY(b) in a.top..a.bottom
+
+    /** The point a tap by ref lands on (the target's center, rounded down). */
+    fun center(b: Bounds): Aim.Point = Aim.Point((b.left + b.right) / 2, centerY(b))
 
     private fun centerY(b: Bounds): Int = (b.top + b.bottom) / 2
 

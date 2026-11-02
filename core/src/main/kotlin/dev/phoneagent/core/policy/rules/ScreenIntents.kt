@@ -3,6 +3,7 @@ package dev.phoneagent.core.policy.rules
 import dev.phoneagent.core.policy.ActionIntent
 import dev.phoneagent.core.policy.FieldClass
 import dev.phoneagent.core.policy.IntentKind
+import dev.phoneagent.core.ports.ElementRole
 import dev.phoneagent.core.ports.ElementState
 import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.ports.SystemKey
@@ -11,64 +12,49 @@ import kotlin.math.abs
 
 /** Intents of gestures and input on a known screen (policy-rules.md §2). */
 internal class ScreenIntents(
-    private val lexicon: RulesLexicon,
+    reading: Reading,
 ) {
+    private val tuning = reading.tuning
+    private val risks = reading.risks
+    private val pages = reading.pages
+    private val fields = reading.fields
+
     fun resolve(
         step: ScreenStep,
         screen: ScreenSnapshot,
     ): ActionIntent =
         when (step) {
-            is Step.Tap -> {
-                tap(step.aim, screen)
-            }
-
-            is Step.Type -> {
-                type(step, screen)
-            }
-
-            is Step.Scroll -> {
-                ActionIntent(
-                    IntentKind.NAVIGATE,
-                    screen.pkg,
-                    step.aim?.let { Targets.element(it, screen) },
-                )
-            }
-
-            is Step.Swipe -> {
-                swipe(step, screen)
-            }
-
-            is Step.Key -> {
-                key(step.key, screen)
-            }
+            is Step.Tap -> tap(step.aim, screen)
+            is Step.Type -> type(step, screen)
+            is Step.Scroll -> scroll(step, screen)
+            is Step.Swipe -> swipe(step, screen)
+            is Step.Key -> key(step.key, screen)
         }
 
     private fun tap(
         aim: Aim,
         screen: ScreenSnapshot,
     ): ActionIntent {
-        val target = Targets.element(aim, screen)
-        val risk = Targets.risk(aim, target, screen, lexicon)
-        val kind = if (risk == null) IntentKind.NAVIGATE else risk.kind
-        val amount = if (kind == IntentKind.SPEND) Amounts.forSpend(Targets.label(target, screen), screen) else null
-        return ActionIntent(kind, screen.pkg, target, amount)
+        val touched = risks.tap(aim, screen)
+        return ActionIntent(touched.kind, screen.pkg, touched.target)
     }
 
     /**
      * Typing: a password, code or payment-password field is INPUT with that class (handed off);
-     * submitting anywhere but a search field reaches out; typing in the settings app changes
-     * settings.
+     * submitting on a payment page pays; submitting anywhere else but a search field reaches out;
+     * typing in the settings app changes settings.
      */
     private fun type(
         step: Step.Type,
         screen: ScreenSnapshot,
     ): ActionIntent {
-        val field = if (step.aim == null) Fields.typingTarget(screen) else Targets.element(step.aim, screen)
-        val fieldClass = if (field == null) FieldClass.PLAIN else Fields.classify(field, screen)
-        val searches = field?.let { Fields.isSearch(it, screen) } == true
+        val field = if (step.aim == null) fields.typingTarget(screen) else Elements.byRef(screen, step.aim.ref)
+        val fieldClass = if (field == null) FieldClass.PLAIN else fields.classify(field, screen)
+        val searches = field != null && fields.isSearch(field, screen)
         val kind =
             when {
                 fieldClass in Fields.HAND_OFF -> IntentKind.INPUT
+                step.submit && pages.isPayment(screen) -> IntentKind.SPEND
                 step.submit && !searches -> IntentKind.OUTWARD
                 screen.pkg == Pages.SETTINGS -> IntentKind.SETTINGS
                 else -> IntentKind.INPUT
@@ -76,22 +62,37 @@ internal class ScreenIntents(
         return ActionIntent(kind, screen.pkg, field, fieldClass = fieldClass.takeIf { kind == IntentKind.INPUT })
     }
 
-    /** A long horizontal swipe from a list row deletes it in many apps; a swipe on a pay slider pays. */
+    /** Scrolling a picker or a slider in the settings app sets a value. */
+    private fun scroll(
+        step: Step.Scroll,
+        screen: ScreenSnapshot,
+    ): ActionIntent {
+        val target = step.aim?.let { Elements.byRef(screen, it.ref) }
+        val sets = target != null && screen.pkg == Pages.SETTINGS && target.role in ADJUSTERS
+        return ActionIntent(if (sets) IntentKind.SETTINGS else IntentKind.NAVIGATE, screen.pkg, target)
+    }
+
+    /**
+     * A swipe from a pay slider pays; from a slider, picker or toggle in the settings app it sets a
+     * value; sideways along a list row it may delete the row (mail and chat lists swipe to delete).
+     */
     private fun swipe(
         step: Step.Swipe,
         screen: ScreenSnapshot,
     ): ActionIntent {
-        val start = Elements.at(screen, step.from.x, step.from.y)
+        val start = risks.at(step.from, screen)
+        val element = start.target
         val dx = abs(step.to.x - step.from.x)
-        val long = dx >= SWIPE_DELETE_MIN && dx > abs(step.to.y - step.from.y)
+        val sideways = dx >= tuning.rowSwipeMin && dx > abs(step.to.y - step.from.y)
         val kind =
             when {
-                start == null -> IntentKind.NAVIGATE
-                lexicon.activationRisk(start, screen)?.kind == IntentKind.SPEND -> IntentKind.SPEND
-                long && rowLike(start, screen) -> IntentKind.DELETE
+                element == null -> IntentKind.NAVIGATE
+                start.risk?.kind == IntentKind.SPEND -> IntentKind.SPEND
+                screen.pkg == Pages.SETTINGS && element.role in SETTERS -> IntentKind.SETTINGS
+                sideways && rowLike(element, screen) -> IntentKind.DELETE
                 else -> IntentKind.NAVIGATE
             }
-        return ActionIntent(kind, screen.pkg, start)
+        return ActionIntent(kind, screen.pkg, element)
     }
 
     private fun rowLike(
@@ -102,59 +103,42 @@ internal class ScreenIntents(
         val inCarousel =
             screen.elements.any {
                 ElementState.SCROLLABLE in it.states && Geometry.inside(b, it.bounds) &&
-                    it.bounds.bottom - it.bounds.top < CAROUSEL_MAX
+                    it.bounds.bottom - it.bounds.top < tuning.carouselMax
             }
-        return ElementState.CLICKABLE in element.states && b.right - b.left >= ROW_MIN_WIDTH && !inCarousel
+        return Elements.clickable(element) && b.right - b.left >= tuning.rowMinWidth && !inCarousel
     }
 
-    /** Enter on a non-search field sends; when nothing is focused it sends unless every field searches. */
+    /**
+     * Enter: on a payment page it pays; in a field it sends unless the field searches; on a focused
+     * control it activates it; with nothing focused it sends unless every field searches.
+     */
     private fun key(
         key: SystemKey,
         screen: ScreenSnapshot,
     ): ActionIntent {
         val focused = screen.elements.firstOrNull { ElementState.FOCUSED in it.states }
+        val pressed = if (focused == null || Elements.editable(focused)) null else risks.activation(focused, screen)
         val kind =
             when {
                 key != SystemKey.ENTER -> IntentKind.NAVIGATE
-
-                focused == null -> enterUnfocused(screen)
-
-                Elements.editable(
-                    focused,
-                ) -> if (Fields.isSearch(focused, screen)) IntentKind.NAVIGATE else IntentKind.OUTWARD
-
-                else -> activated(focused, screen)
+                pressed != null -> pressed.kind
+                pages.isPayment(screen) -> IntentKind.SPEND
+                focused != null -> if (fields.isSearch(focused, screen)) IntentKind.NAVIGATE else IntentKind.OUTWARD
+                else -> enterUnfocused(screen)
             }
-        return ActionIntent(kind, screen.pkg, focused)
-    }
-
-    private fun activated(
-        element: UiElement,
-        screen: ScreenSnapshot,
-    ): IntentKind {
-        val risk = lexicon.activationRisk(element, screen)
-        return if (risk == null) IntentKind.NAVIGATE else risk.kind
+        return ActionIntent(kind, screen.pkg, if (pressed == null) focused else pressed.target)
     }
 
     private fun enterUnfocused(screen: ScreenSnapshot): IntentKind {
         val fields = screen.elements.filter(Elements::editable)
-        return if (fields.isNotEmpty() &&
-            fields.all { Fields.isSearch(it, screen) }
-        ) {
-            IntentKind.NAVIGATE
-        } else {
-            IntentKind.OUTWARD
-        }
-    }
-
-    private companion object {
-        /** A horizontal swipe at least this long (0–999) on a row counts as swipe-to-delete. */
-        const val SWIPE_DELETE_MIN = 400
-
-        /** Rows are at least this wide (0–999). */
-        const val ROW_MIN_WIDTH = 600
-
-        /** Scrollable areas lower than this (0–999) are carousels: swiping them pages. */
-        const val CAROUSEL_MAX = 400
+        val searches = fields.isNotEmpty() && fields.all { this.fields.isSearch(it, screen) }
+        return if (searches) IntentKind.NAVIGATE else IntentKind.OUTWARD
     }
 }
+
+/** Roles that set a value when scrolled. */
+private val ADJUSTERS = setOf(ElementRole.PICKER, ElementRole.PROGRESS)
+
+/** Roles that set a value when swiped from. */
+private val SETTERS =
+    setOf(ElementRole.PROGRESS, ElementRole.PICKER, ElementRole.SWITCH, ElementRole.CHECKBOX, ElementRole.RADIO)

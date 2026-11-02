@@ -31,7 +31,7 @@ import org.junit.jupiter.api.assertThrows
 import kotlin.random.Random
 
 class PolicyRulesTest {
-    private val policy = PolicyRules(setOf(OWN, "$OWN.debug"))
+    private val policy = PolicyRules(setOf(OWN, "$OWN.debug"), setOf(Fx.OWN_LABEL))
 
     private val screens =
         listOf(
@@ -65,6 +65,12 @@ class PolicyRulesTest {
             screen(el("e1", "转账"), pkg = "com.icbc"),
             screen(ocr = listOf(ocr("立即支付", box(0, 800, 999, 900))), flags = setOf(ScreenFlag.SECURE), pkg = null),
             screen(
+                text("t1", "实付 ¥92,233,720,368,547,758.08", box(0, 900, 400, 960)),
+                el("e1", "提交订单", bounds = box(600, 900, 999, 960)),
+                text("t2", "删".repeat(HUGE), box(0, 100, 999, 800)),
+                ocr = listOf(ocr("¥" + "999,".repeat(HUGE / 4) + "999", box(0, 0, 999, 50))),
+            ),
+            screen(
                 el(
                     "e8",
                     role = ElementRole.LIST,
@@ -77,9 +83,13 @@ class PolicyRulesTest {
 
     @Test
     fun `configuration is checked when the policy is built`() {
-        assertThrows<IllegalArgumentException> { PolicyRules(emptySet()) }
-        val e = assertThrows<IllegalArgumentException> { PolicyRules(setOf(OWN, "not a package")) }
+        val labels = setOf(Fx.OWN_LABEL)
+        assertThrows<IllegalArgumentException> { PolicyRules(emptySet(), labels) }
+        val e = assertThrows<IllegalArgumentException> { PolicyRules(setOf(OWN, "not a package"), labels) }
         assertEquals("Invalid own package names: [not a package]", e.message)
+        assertThrows<IllegalArgumentException> { PolicyRules(setOf(OWN), emptySet()) }
+        assertThrows<IllegalArgumentException> { PolicyRules(setOf(OWN), setOf(Fx.OWN_LABEL, " ")) }
+        assertThrows<IllegalArgumentException> { PolicyRules(setOf(OWN), labels, PolicyTuning(labelMax = 0)) }
     }
 
     @Test
@@ -125,7 +135,8 @@ class PolicyRulesTest {
             }
             assertFalse(hint.any(Char::isDigit), "${r.name} names a threshold")
             assertFalse(r.reason in hint, r.name)
-            val next = listOf("phone_", "end_not_done", "user", "Fix the arguments", "another tool")
+            assertTrue(hint.any { it in '\u4e00'..'\u9fff' }, "${r.name} is not written in Chinese")
+            val next = listOf("phone_", "end_not_done", "告诉用户", "请用户", "修正参数", "换一个工具")
             assertTrue(next.any { it in hint }, "${r.name} gives no next step")
         }
         HandOffs.entries.forEach { assertTrue(it.verdict().hint.endsWith("tap Done."), it.name) }
@@ -150,14 +161,38 @@ class PolicyRulesTest {
             assertDoesNotThrow("$name $args") {
                 val verdict = policy.engine.evaluate(call, policy.resolver.resolve(call, risk, screen), ctx)
                 if (verdict is Verdict.Confirm) {
-                    assertInstanceOf(
-                        Verdict.Allow::class.java,
+                    val again =
                         policy.engine.evaluate(
                             call,
                             policy.resolver.resolve(call, risk, screen),
                             ctx.copy(approved = verdict.card),
-                        ),
-                    )
+                        )
+                    // On an unchanged screen the approved card runs, unless its amount cannot be told.
+                    if (again != Verdict.Allow) assertEquals(Verdict.Confirm(verdict.card), again, "$name $args")
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `hostile argument values in every argument a tool reads never throw`() {
+        val hostile =
+            STRINGS.filter { it.length > SHORT_STRING } +
+                listOf("¥92,233,720,368,547,758.08", "¥9,999,999,999,999,999,999")
+        for ((tool, keys) in READS) {
+            for (key in keys) {
+                for (bad in hostile) {
+                    val args = BASE.getValue(tool) + (key to bad)
+                    val call = call(tool, *args.toList().toTypedArray())
+                    for (screen in screens + null) {
+                        assertDoesNotThrow("$tool $key=${bad.take(SHORT_STRING)}") {
+                            policy.engine.evaluate(
+                                call,
+                                policy.resolver.resolve(call, RiskClass.WRITE, screen),
+                                ctx(SecurityLevel.STANDARD, screen),
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -176,6 +211,9 @@ class PolicyRulesTest {
     private companion object {
         const val SEED = 20261101
         const val ITERATIONS = 5000
+
+        /** 10⁵ characters. */
+        const val HUGE = 100_000
 
         val KEYS =
             listOf(
@@ -236,6 +274,37 @@ class PolicyRulesTest {
                 OWN,
                 "x".repeat(300),
                 "4111111111111111",
+                "a" + ".a".repeat(HUGE / 2),
+                "android-app://a" + ".a".repeat(HUGE / 2) + "/x",
+                "¥" + "999,".repeat(HUGE / 4) + "999",
+                "¥92,233,720,368,547,758.08",
+                "¥9,999,999,999,999,999,999",
+                "支付".repeat(HUGE / 2),
+                "1".repeat(HUGE),
+            )
+
+        /** Strings longer than this are the hostile ones of [STRINGS]; also how much of one a message shows. */
+        const val SHORT_STRING = 300
+
+        /** The arguments each tool reads, with valid values for the others. */
+        val BASE: Map<String, Map<String, Any>> =
+            mapOf(
+                "phone_tap" to mapOf("screen" to "s1", "ref" to "e1"),
+                "phone_type" to mapOf("screen" to "s1", "text" to "x", "submit" to true),
+                "phone_scroll" to mapOf("screen" to "s1", "direction" to "down"),
+                "phone_launch" to emptyMap(),
+                "phone_intent" to mapOf("kind" to "settings"),
+                "request_confirmation" to mapOf("action" to "支付", "target" to "张三", "content" to "x"),
+            )
+
+        val READS: Map<String, List<String>> =
+            mapOf(
+                "phone_tap" to listOf("screen", "ref"),
+                "phone_type" to listOf("screen", "ref", "text"),
+                "phone_scroll" to listOf("screen", "ref"),
+                "phone_launch" to listOf("app", "link"),
+                "phone_intent" to listOf("page", "package"),
+                "request_confirmation" to listOf("action", "target", "content", "amount"),
             )
 
         val NUMBERS: List<Number> = listOf(-1, 0, 5, 425, 999, 1000, Int.MAX_VALUE, Long.MAX_VALUE, 5.5, Double.NaN)

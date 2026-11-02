@@ -27,7 +27,13 @@ internal object Fx {
     const val APP = "com.example.chat"
     const val OWN = "dev.phoneagent"
 
+    /** The name this app is shown under. */
+    const val OWN_LABEL = "PhoneAgent"
+
     val CLICK = setOf(ElementState.CLICKABLE)
+
+    /** The policy under test, built as the app builds it. */
+    fun rules(): PolicyRules = PolicyRules(setOf(OWN), setOf(OWN_LABEL))
 
     fun box(
         left: Int,

@@ -4,26 +4,22 @@ import dev.phoneagent.core.policy.IntentKind
 
 /**
  * The risk vocabulary (docs/design/policy-rules.md §3). Data only; [Lexicon] does the matching.
- * Every entry is written in [Text.compact] form (lower case, no spaces) unless noted.
+ * Every entry is written in [Text.compact] form (lower case, simplified, no spaces) unless noted.
  *
  * Several lists and the matching approach (strong words count inside short labels unless they
  * read as a status; ambiguous words count only as the whole label) are adapted from Mika's
  * `IrreversibleDetector` (Copyright 2026 wangzan101, Apache-2.0). Modified by PhoneAgent
- * contributors. See NOTICE.
+ * contributors: more words and English phrases, status words split by kind, vetoes limited to
+ * codes sent to the user's own phone, and length limits moved to [PolicyTuning]. See NOTICE.
  */
 internal object Words {
-    /** Longest label (compact) in which a strong word still counts: longer text is content. */
-    const val LABEL_MAX = 12
-
-    /** Longest context text (dialog body) in which a strong word counts for a generic button. */
-    const val CONTEXT_MAX = 40
-
     /** Count when they occur in a short label and are not a status ([STATUS_BEFORE], [STATUS_AFTER]). */
     val STRONG: List<Pair<String, IntentKind>> =
         listOf(
             "支付" to IntentKind.SPEND,
             "付款" to IntentKind.SPEND,
             "转账" to IntentKind.SPEND,
+            "转帐" to IntentKind.SPEND,
             "购买" to IntentKind.SPEND,
             "下单" to IntentKind.SPEND,
             "提交订单" to IntentKind.SPEND,
@@ -139,9 +135,19 @@ internal object Words {
     /** A strong word right after one of these is a status ("待付款", "已发送"). */
     val STATUS_BEFORE: Set<Char> = setOf('待', '已', '未')
 
-    /** A strong word followed (after punctuation) by one of these names a status or an entry ("付款成功", "删除记录"). */
+    /** A strong word followed (after punctuation) by one of these names a status or an entry ("付款成功", "发送中"). */
     val STATUS_AFTER: List<String> =
-        listOf("成功", "失败", "记录", "售后", "明细", "方式", "列表", "中心", "入口", "码", "设置", "详情", "说明", "须知", "协议", "中", "状态")
+        listOf("成功", "失败", "售后", "明细", "方式", "列表", "中心", "入口", "码", "设置", "详情", "说明", "须知", "协议", "中", "状态")
+
+    /**
+     * Status words of one kind only: "付款记录" and "发送记录" open a list, but "删除记录"
+     * deletes records.
+     */
+    val STATUS_AFTER_KIND: Map<IntentKind, List<String>> =
+        mapOf(
+            IntentKind.SPEND to listOf("记录"),
+            IntentKind.OUTWARD to listOf("记录"),
+        )
 
     /** Removed from a label before matching: names that contain a strong word but are not actions. */
     val NOT_ACTIONS: List<String> = listOf("支付宝", "支付方式", "付款方式", "支付设置", "货到付款", "先用后付", "花呗")
@@ -150,15 +156,19 @@ internal object Words {
     val PAYMENT_ADVERT: Regex = Regex("支持.{0,8}?(?:支付|付款)")
 
     /**
-     * A label containing one of these is not of that kind at all. "发送验证码" sends a code to the
-     * user's own phone, not to another person; clearing search history or a cache loses nothing
-     * the user cannot get back (policy-rules.md §3.3).
+     * The whole label ([Text.words] form) asks for a code sent to the user's own phone: not
+     * reaching anyone ("发送验证码", "重新获取短信验证码"). With a recipient it is ("发送验证码给张三").
      */
-    val VETO: Map<IntentKind, List<String>> =
-        mapOf(
-            IntentKind.OUTWARD to listOf("验证码", "校验码", "动态码", "短信码", "code"),
-            IntentKind.DELETE to listOf("搜索历史", "历史搜索", "搜索记录", "缓存", "searchhistory", "recentsearch", "cache"),
-        )
+    val SELF_CODE: Regex =
+        Regex("(?:重新|再次)?(?:发送|获取)(?:短信|手机)?(?:验证码|校验码|动态码|短信码|动态密码)(?:到手机|至手机|到本机)?")
+
+    /** [SELF_CODE] in English ([Text.phrase] form, trailing punctuation removed). */
+    val SELF_CODE_EN: Regex =
+        Regex("(?:re)?send (?:(?:a|the|an|sms|verification|one-time|login) ){0,4}(?:code|otp|passcode)")
+
+    /** A label containing one of these deletes nothing the user cannot get back (policy-rules.md §3.3). */
+    val HARMLESS_DELETES: List<String> =
+        listOf("搜索历史", "历史搜索", "搜索记录", "缓存", "searchhistory", "recentsearch", "cache")
 
     /** Generic confirmations ([Text.bare] form): their risk comes from the dialog around them. */
     val GENERIC: Set<String> =
@@ -188,7 +198,7 @@ internal object Words {
             "dismiss",
         )
 
-    /** Clearing the text of an input ([Text.bare] form) is editing, not deleting. */
+    /** Clearing an input is editing, not deleting: words in [Text.bare] form, symbols in [Text.compact] form. */
     val FIELD_CLEAR: Set<String> =
         setOf("清空", "清除", "清空输入", "清除输入", "清空内容", "清除内容", "清空搜索", "×", "✕", "x", "clear", "cleartext")
 

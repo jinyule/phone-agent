@@ -24,7 +24,7 @@ import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
 
 class ResolverTest {
-    private val resolver = RulesResolver(RulesLexicon(), BlockedApps.DEFAULT)
+    private val resolver = RulesResolver(Reading(PolicyTuning()))
 
     private fun resolve(
         call: ToolCall,
@@ -61,12 +61,12 @@ class ResolverTest {
         }
 
         @Test
-        fun `launches name the app they open`() {
+        fun `launches name the app they open, by package name only`() {
             val launch = { arg: Pair<String, Any?> -> resolve(call("phone_launch", arg), null) }
-            assertEquals(ActionIntent(IntentKind.NAVIGATE, "com.tencent.mm"), launch("app" to "com.tencent.mm"))
-            assertEquals(ActionIntent(IntentKind.NAVIGATE, "com.icbc"), launch("app" to "工商银行"))
-            assertEquals(ActionIntent(IntentKind.NAVIGATE), launch("app" to "微信"))
-            assertEquals(ActionIntent(IntentKind.NAVIGATE, "com.icbc"), launch("link" to "android-app://com.icbc/x"))
+            assertEquals(ActionIntent(IntentKind.NAVIGATE, "com.tencent.mm"), launch("app" to " com.tencent.mm "))
+            // A name is no package (the engine refuses it); a link names no app.
+            assertEquals(ActionIntent(IntentKind.NAVIGATE), launch("app" to "工商银行"))
+            assertEquals(ActionIntent(IntentKind.NAVIGATE), launch("link" to "android-app://com.icbc/x"))
             assertEquals(ActionIntent(IntentKind.NAVIGATE), launch("link" to "https://example.com"))
         }
 
@@ -85,7 +85,7 @@ class ResolverTest {
             fun confirm(vararg args: Pair<String, Any?>) =
                 resolve(call("request_confirmation", *args), null, RiskClass.READ)
             assertEquals(
-                ActionIntent(IntentKind.SPEND, amount = Money(1000, "CNY")),
+                ActionIntent(IntentKind.SPEND, amount = Money(1000, null)),
                 confirm(
                     "action" to "转账",
                     "amount" to "¥10",
@@ -98,7 +98,12 @@ class ResolverTest {
                     "amount" to 10,
                 ),
             )
-            assertEquals(ActionIntent(IntentKind.SPEND), confirm("action" to "付款给张三", "amount" to "一些"))
+            // An amount that does not read as money is an argument to fix.
+            assertEquals(ActionIntent(IntentKind.NAVIGATE), confirm("action" to "付款给张三", "amount" to "一些"))
+            // Without an amount argument a spend takes the amount the screen shows.
+            val checkout = screen(text("t1", "实付 ¥20"))
+            val fromScreen = resolve(call("request_confirmation", "action" to "付款给张三"), checkout, RiskClass.READ)
+            assertEquals(ActionIntent(IntentKind.SPEND, amount = Money(2000, null)), fromScreen)
             assertEquals(ActionIntent(IntentKind.DELETE), confirm("action" to "删除聊天记录"))
             assertEquals(ActionIntent(IntentKind.OUTWARD), confirm("action" to "通知张三明天开会"))
         }
@@ -151,17 +156,20 @@ class ResolverTest {
             val back = el("e1", "返回")
             assertEquals(ActionIntent(IntentKind.NAVIGATE, APP, back), resolve(tap("e1"), screen(back)))
             val pay = el("e1", "立即支付 ¥39.90")
-            assertEquals(ActionIntent(IntentKind.SPEND, APP, pay, Money(3990, "CNY")), resolve(tap("e1"), screen(pay)))
+            assertEquals(ActionIntent(IntentKind.SPEND, APP, pay, Money(3990, null)), resolve(tap("e1"), screen(pay)))
         }
 
         @Test
-        fun `a point hits the smallest clickable element under it`() {
+        fun `a point counts every innermost control under it, the riskiest first`() {
             val card = el("e1", "商品卡片", bounds = box(0, 0, 999, 500))
             val buy = el("e2", "立即购买", bounds = box(800, 400, 999, 500))
             val label = el("e3", "价格", ElementRole.TEXT, box(800, 400, 999, 500), emptySet())
             val s = screen(card, buy, label, text("t1", "¥5"))
             val intent = resolve(call("phone_tap", "x" to 900, "y" to 450), s)
-            assertEquals(ActionIntent(IntentKind.SPEND, APP, buy, Money(500, "CNY")), intent)
+            assertEquals(ActionIntent(IntentKind.SPEND, APP, buy, Money(500, null)), intent)
+            // Equal risks: the smaller control.
+            val plain = el("e2", "详情", bounds = box(800, 400, 999, 500))
+            assertEquals(plain, resolve(call("phone_tap", "x" to 900, "y" to 450), screen(card, plain)).target)
             val decor = el("e4", "装饰", ElementRole.IMAGE, box(0, 600, 100, 700), emptySet())
             assertEquals(decor, resolve(call("phone_tap", "x" to 50, "y" to 650), screen(decor)).target)
         }
@@ -175,7 +183,7 @@ class ResolverTest {
             // A ref that is not on the screen has no label either.
             assertEquals(ActionIntent(IntentKind.NAVIGATE, APP), resolve(tap("e9"), screen()))
             val sheet = screen(text("t1", "实付 ¥12", box(0, 800, 500, 840)), flags = setOf(ScreenFlag.PAYMENT))
-            val expected = ActionIntent(IntentKind.SPEND, APP, amount = Money(1200, "CNY"))
+            val expected = ActionIntent(IntentKind.SPEND, APP, amount = Money(1200, null))
             assertEquals(expected, resolve(call("phone_tap", "x" to 900, "y" to 950), sheet))
             assertEquals(IntentKind.SPEND, kind(tap("e9"), sheet))
             // A labelled element on a payment page is judged by its label.
@@ -303,7 +311,7 @@ class ResolverTest {
         }
 
         @Test
-        fun `a long horizontal swipe on a list row deletes`() {
+        fun `a sideways swipe on a list row may delete it`() {
             val list =
                 el("e8", role = ElementRole.LIST, bounds = box(0, 0, 999, 999), states = setOf(ElementState.SCROLLABLE))
             assertEquals(
@@ -315,7 +323,7 @@ class ResolverTest {
 
         @Test
         fun `other swipes navigate`() {
-            assertEquals(IntentKind.NAVIGATE, kind(swipe(900, 350, 600, 350), screen(row)))
+            assertEquals(IntentKind.NAVIGATE, kind(swipe(900, 350, 850, 350), screen(row)))
             assertEquals(IntentKind.NAVIGATE, kind(swipe(500, 350, 0, 900), screen(row)))
             assertEquals(ActionIntent(IntentKind.NAVIGATE, APP), resolve(swipe(900, 650, 100, 650), screen(row)))
             val narrow = el("e1", "标签", bounds = box(0, 300, 400, 400))
@@ -328,6 +336,14 @@ class ResolverTest {
             // A carousel elsewhere on the page does not matter.
             val banner = el("e8", bounds = box(0, 500, 999, 700), states = setOf(ElementState.SCROLLABLE))
             assertEquals(IntentKind.DELETE, kind(swipe(900, 350, 100, 350), screen(banner, row)))
+        }
+
+        @Test
+        fun `in the settings app a swipe from a value control sets it, from anything else it does not`() {
+            val toggle = el("e1", "蓝牙", ElementRole.SWITCH, box(800, 300, 999, 400))
+            assertEquals(IntentKind.SETTINGS, kind(swipe(850, 350, 950, 350), screen(toggle, pkg = Pages.SETTINGS)))
+            val entry = el("e1", "显示", bounds = box(0, 300, 999, 400))
+            assertEquals(IntentKind.NAVIGATE, kind(swipe(500, 380, 500, 100), screen(entry, pkg = Pages.SETTINGS)))
         }
 
         @Test
@@ -347,7 +363,7 @@ class ResolverTest {
             val send = el("e1", "发送", states = setOf(ElementState.FOCUSED, ElementState.CLICKABLE))
             assertEquals(IntentKind.OUTWARD, kind(enter, screen(send)))
             val other = el("e1", "更多", states = setOf(ElementState.FOCUSED))
-            assertEquals(IntentKind.NAVIGATE, kind(enter, screen(other)))
+            assertEquals(ActionIntent(IntentKind.NAVIGATE, APP, other), resolve(enter, screen(other)))
             // Nothing focused: it navigates only when every field searches.
             assertEquals(IntentKind.NAVIGATE, kind(enter, screen(field("e1", hint = "搜索"))))
             assertEquals(IntentKind.OUTWARD, kind(enter, screen(field("e1", hint = "搜索"), field("e2", hint = "评论"))))
