@@ -88,7 +88,11 @@ internal class SettingsPages(
         screen: ScreenSnapshot,
     ): String? = if (screen.pkg == Pages.SETTINGS) texts.firstNotNullOfOrNull(::sensitive) else null
 
-    /** The settings page of one app ("应用信息"), where it can be stopped, cleared or uninstalled. */
+    /**
+     * A settings page of one app where it can be stopped, cleared, disabled or uninstalled: its
+     * app info page, its storage page, and the dialogs they open ("要删除应用数据吗？"); told by
+     * the activity or by any short text on the screen.
+     */
     fun isAppDetails(screen: ScreenSnapshot): Boolean =
         screen.pkg == Pages.SETTINGS &&
             (activityHas(screen, DETAILS_ACTIVITIES) || pages.shortTexts(screen).any { t -> DETAILS.any { it in t } })
@@ -244,11 +248,30 @@ private val SENSITIVE_ACTIVITIES =
         "account",
     )
 
-/** Texts only an app's settings page shows. */
-private val DETAILS = listOf("应用信息", "应用详情", "appinfo", "强行停止", "强制停止", "forcestop")
+/** Texts only the settings pages of one app (info, storage, their dialogs) show. */
+private val DETAILS =
+    listOf(
+        "应用信息",
+        "应用详情",
+        "appinfo",
+        "强行停止",
+        "强制停止",
+        "forcestop",
+        "存储和缓存",
+        "storage&cache",
+        "清除存储",
+        "清除数据",
+        "清空数据",
+        "删除应用数据",
+        "清除应用数据",
+        "clearstorage",
+        "cleardata",
+        "clearappdata",
+        "deleteappdata",
+    )
 
-/** Lower-case fragments of the activities hosting an app's settings page. */
-private val DETAILS_ACTIVITIES = listOf("installedappdetails", "appinfo", "appdetail")
+/** Lower-case fragments of the activities hosting the settings pages of one app. */
+private val DETAILS_ACTIVITIES = listOf("installedappdetails", "appinfo", "appdetail", "appstorage")
 
 /** What a control on an app's settings page does to the app itself. */
 private val MANAGEMENT =
@@ -261,6 +284,8 @@ private val MANAGEMENT =
         "清除存储",
         "清空数据",
         "删除数据",
+        "删除应用数据",
+        "清除应用数据",
         "卸载",
         "停用",
         "禁用",
@@ -268,5 +293,7 @@ private val MANAGEMENT =
         "uninstall",
         "cleardata",
         "clearstorage",
+        "clearappdata",
+        "deleteappdata",
         "disable",
     )

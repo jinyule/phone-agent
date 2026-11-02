@@ -2,6 +2,7 @@ package dev.phoneagent.core.policy.rules
 
 import dev.phoneagent.core.policy.ActionIntent
 import dev.phoneagent.core.policy.FieldClass
+import dev.phoneagent.core.policy.IntentKind
 import dev.phoneagent.core.policy.Verdict
 import dev.phoneagent.core.ports.ScreenFlag
 import dev.phoneagent.core.ports.ScreenSnapshot
@@ -48,8 +49,10 @@ internal class HardRules(
 
     /**
      * Hard refusal: this app or a blocked app (also through its `app_details` settings page); a
-     * sensitive settings page opened, shown or acted on; an app settings page of a refused app, or
-     * of an app it cannot tell, stopping, clearing or uninstalling it; a launcher icon of a refused app.
+     * sensitive settings page opened, shown or acted on; on the settings pages of one app (info,
+     * storage, their dialogs), the whole page of a refused app, and for any other app (or one it
+     * cannot tell) stopping, clearing, disabling or uninstalling it, also by confirming a dialog
+     * that says so; a launcher icon of a refused app.
      */
     fun refusal(
         step: Step,
@@ -87,10 +90,25 @@ internal class HardRules(
             settings.isSensitive(screen) -> Refusal.SENSITIVE_SETTINGS
             managed != null -> managed
             settings.sensitiveEntry(texts, screen) != null -> Refusal.SENSITIVE_SETTINGS
-            details && settings.managesApp(texts) -> Refusal.APP_MANAGEMENT
+            details && (settings.managesApp(texts) || confirmsManaging(intent, screen)) -> Refusal.APP_MANAGEMENT
             screen.pkg in LAUNCHERS -> texts.firstNotNullOfOrNull(apps::byName)
             else -> null
         }
+    }
+
+    /**
+     * [intent] confirms a dialog about managing the app: a generic or deleting button ("确定",
+     * "删除") whose dialog (its window, or the whole screen when the window is unknown) stops,
+     * clears, disables or uninstalls an app.
+     */
+    private fun confirmsManaging(
+        intent: ActionIntent,
+        screen: ScreenSnapshot,
+    ): Boolean {
+        val target = intent.target
+        return target != null &&
+            (intent.kind == IntentKind.DELETE || reading.lexicon.isGeneric(Elements.label(target, screen))) &&
+            settings.managesApp(Elements.context(target, screen))
     }
 
     /** The visible text on everything [step] may activate: for a tap every control it may reach, else its target. */

@@ -86,6 +86,69 @@ class SettingsAndLoginTest {
         }
     }
 
+    /** The storage page of one app, as AOSP shows it, for the app named [app]. */
+    private fun storage(
+        app: String,
+        vararg more: UiElement,
+        activity: String = "com.android.settings.Settings\$AppStorageSettingsActivity",
+    ): ScreenSnapshot =
+        screen(
+            text("t1", "Storage & cache", box(0, 40, 500, 100)),
+            text("t2", app, box(0, 160, 500, 200)),
+            el("e1", "Clear storage", bounds = box(0, 300, 480, 360)),
+            el("e2", "Clear cache", bounds = box(520, 300, 999, 360)),
+            *more,
+            pkg = Pages.SETTINGS,
+        ).copy(activity = activity)
+
+    @ParameterizedTest
+    @EnumSource(SecurityLevel::class)
+    fun `an app's storage page is an app's settings page`(level: SecurityLevel) {
+        for (ref in listOf("e1", "e2")) {
+            assertEquals("hard.own_app", refusal(decide(tap(ref), on(storage("PhoneAgent"), level))), ref)
+        }
+        val chat = storage("微信")
+        assertEquals("hard.app_management", refusal(decide(tap("e1"), on(chat, level))))
+        assertFalse(decide(tap("e2"), on(chat, level)) is Verdict.Refuse)
+        val nothing = Fx.call("phone_tap", "screen" to "s1", "x" to 990, "y" to 990)
+        assertFalse(decide(nothing, on(chat, level)) is Verdict.Refuse)
+        // Known by its texts on any activity, and without the app's name.
+        val bare =
+            screen(
+                text("t1", "存储和缓存", box(0, 40, 500, 100)),
+                el("e1", "清除存储空间", bounds = box(0, 300, 480, 360)),
+                pkg = Pages.SETTINGS,
+            ).copy(activity = "com.android.settings.SubSettings")
+        assertEquals("hard.app_management", refusal(decide(tap("e1"), on(bare, level))))
+    }
+
+    @ParameterizedTest
+    @EnumSource(SecurityLevel::class)
+    fun `confirming a dialog that clears, stops or disables an app is managing it`(level: SecurityLevel) {
+        val dialog =
+            arrayOf(
+                text("t3", "要删除应用数据吗？", box(100, 400, 900, 450)).copy(window = 2),
+                text("t4", "此应用的所有数据都将被永久删除。", box(100, 460, 900, 520)).copy(window = 2),
+                el("e8", "取消", bounds = box(100, 600, 450, 660)).copy(window = 2),
+                el("e9", "确定", bounds = box(550, 600, 900, 660)).copy(window = 2),
+            )
+        val chat = storage("微信", *dialog)
+        assertEquals("hard.app_management", refusal(decide(tap("e9"), on(chat, level))))
+        assertFalse(decide(tap("e8"), on(chat, level)) is Verdict.Refuse)
+        val alone = screen(*dialog, pkg = Pages.SETTINGS).copy(activity = "com.android.settings.SubSettings")
+        assertEquals("hard.app_management", refusal(decide(tap("e9"), on(alone, level))))
+        val delete =
+            screen(*dialog, el("e7", "删除", bounds = box(550, 600, 900, 660)).copy(window = 2), pkg = Pages.SETTINGS)
+        assertEquals("hard.app_management", refusal(decide(tap("e7"), on(delete, level))))
+        val stop =
+            screen(
+                text("t3", "要强行停止吗？", box(100, 400, 900, 450)).copy(window = 2),
+                el("e9", "确定", bounds = box(550, 600, 900, 660)).copy(window = 2),
+                pkg = Pages.SETTINGS,
+            )
+        assertEquals("hard.app_management", refusal(decide(tap("e9"), on(stop, level))))
+    }
+
     @ParameterizedTest
     @EnumSource(SecurityLevel::class)
     fun `a sensitive page is known by any title candidate, not only the first text`(level: SecurityLevel) {
