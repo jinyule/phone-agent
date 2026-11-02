@@ -11,9 +11,9 @@ import java.util.Locale
  * form; texts up to [PolicyTuning.shortText] count as labels and headings.
  *
  * Word lists here are adapted from Mika's `IrreversibleDetector` (Copyright 2026 wangzan101,
- * Apache-2.0). Modified by PhoneAgent contributors: login flows without a password box, no bare
- * "向右滑动" among the captcha words, settings pages told by every title candidate, app settings
- * pages, and thresholds from [PolicyTuning]. See NOTICE.
+ * Apache-2.0). Modified by PhoneAgent contributors: login flows without a password box, sliders
+ * counted as captchas only with a word of checking, settings pages told by every title candidate,
+ * app settings pages, and thresholds from [PolicyTuning]. See NOTICE.
  */
 internal class Pages(
     private val tuning: PolicyTuning,
@@ -49,7 +49,16 @@ internal class Pages(
         return Elements.editable(element) && (element.secret || words.any { it in said })
     }
 
-    fun isCaptcha(screen: ScreenSnapshot): Boolean = ScreenFlag.CAPTCHA in screen.flags || mentions(screen, CAPTCHA)
+    /**
+     * A captcha page: flagged; or a short text names a check ("安全验证", "人机验证"); or it says
+     * to drag or slide together with a word of checking ("拖动滑块完成拼图", "向右滑动完成验证").
+     * Sliding alone is not one: pay sliders say "向右滑动支付", "拖动滑块付款".
+     */
+    fun isCaptcha(screen: ScreenSnapshot): Boolean =
+        ScreenFlag.CAPTCHA in screen.flags ||
+            shortTexts(screen).any { t ->
+                CAPTCHA.any { it in t } || (SLIDING.any { it in t } && CHECKING.any { it in t })
+            }
 
     fun isPaymentPassword(screen: ScreenSnapshot): Boolean = mentions(screen, PAYMENT_PASSWORD)
 
@@ -153,20 +162,27 @@ private val SECRET_HINTS = listOf("验证码", "code")
 private val ACCOUNT_HINTS =
     listOf("手机号", "账号", "帐号", "用户名", "邮箱", "phone", "mobile", "account", "email", "username")
 
+/** Names of a check: each is a captcha by itself. */
 private val CAPTCHA =
     listOf(
         "滑动验证",
-        "拖动滑块",
-        "滑动完成验证",
+        "滑块验证",
         "安全验证",
         "人机验证",
-        "请按顺序点击",
         "图形验证",
+        "拼图验证",
+        "请按顺序点击",
         "i'mnotarobot",
         "verifyyouarehuman",
         "slidetoverify",
         "completethepuzzle",
     )
+
+/** Dragging or sliding: a captcha only with a word of [CHECKING] in the same text. */
+private val SLIDING = listOf("滑块", "滑动", "拖动", "slide", "drag")
+
+/** Words of checking that make a slider a captcha. */
+private val CHECKING = listOf("验证", "拼图", "人机", "校验", "verify", "puzzle")
 
 private val PAYMENT_PASSWORD =
     listOf("支付密码", "交易密码", "付款密码", "验证指纹", "指纹支付", "面容支付", "刷脸支付", "paymentpassword", "paymentpin")

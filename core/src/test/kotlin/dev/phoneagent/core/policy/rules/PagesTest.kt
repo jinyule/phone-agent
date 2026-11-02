@@ -49,8 +49,11 @@ class PagesTest {
     fun `captcha pages are flagged or say so`() {
         assertTrue(pages.isCaptcha(screen(flags = setOf(ScreenFlag.CAPTCHA))))
         assertTrue(pages.isCaptcha(screen(text("t1", "向右滑动完成验证"))))
-        // A pay slider is not a captcha (A6).
+        // A pay slider is not a captcha (A6, r2 B8): sliding counts only with a word of checking.
         assertFalse(pages.isCaptcha(screen(text("t1", "向右滑动支付"))))
+        assertFalse(pages.isCaptcha(screen(text("t1", "拖动滑块付款"))))
+        assertTrue(pages.isCaptcha(screen(text("t1", "请拖动下方滑块完成拼图"))))
+        assertTrue(pages.isCaptcha(screen(text("t1", "安全验证"))))
         assertTrue(pages.isCaptcha(screen(ocr = listOf(ocr("I'm not a robot")))))
         assertFalse(pages.isCaptcha(screen(text("t1", "安全中心"))))
     }

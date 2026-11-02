@@ -185,6 +185,17 @@ class SpendingTest {
         assertEquals("spend.unattended", refusal(decide(swipe, on(canvas, level, unattended = true))))
     }
 
+    @ParameterizedTest
+    @EnumSource(SecurityLevel::class)
+    fun `dragging a slider to pay is spending, not a captcha`(level: SecurityLevel) {
+        val slider = el("e1", "拖动滑块付款", bounds = box(0, 800, 999, 880))
+        val s = screen(text("t1", "实付 ¥20", box(0, 700, 500, 760)), slider)
+        val swipe = call("phone_swipe", "x1" to 50, "y1" to 840, "x2" to 950, "y2" to 840, "durationMs" to 800)
+        val confirmed = card(decide(swipe, on(s, level)))
+        assertEquals(ConfirmReason.SPEND to Money(2000, null), confirmed.reason to confirmed.amount)
+        assertEquals("spend.unattended", refusal(decide(swipe, on(s, level, unattended = true))))
+    }
+
     @Test
     fun `an amount written in a form that cannot be read is unclear, not absent`() {
         for (shown in listOf("¥20.000", "¥12,34", "12,34", "¥1,2345.00")) {
