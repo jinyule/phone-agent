@@ -155,6 +155,23 @@ class SettingsAndLoginTest {
 
     @ParameterizedTest
     @EnumSource(SecurityLevel::class)
+    fun `an app's storage page is known by its activity alone`(level: SecurityLevel) {
+        // No text here names an app's settings page ("存储" alone, a harmless "清除缓存").
+        val s =
+            screen(
+                text("t1", "存储", box(0, 40, 500, 100)),
+                text("t2", "PhoneAgent", box(0, 160, 500, 200)),
+                el("e1", "清除缓存", bounds = box(0, 300, 480, 360)),
+                pkg = Pages.SETTINGS,
+            )
+        val byActivity = s.copy(activity = "com.android.settings.Settings\$AppStorageSettingsActivity")
+        assertEquals("hard.own_app", refusal(decide(tap("e1"), on(byActivity, level))))
+        val other = s.copy(activity = "com.android.settings.SubSettings")
+        assertFalse(decide(tap("e1"), on(other, level)) is Verdict.Refuse)
+    }
+
+    @ParameterizedTest
+    @EnumSource(SecurityLevel::class)
     fun `confirming a dialog that clears, stops or disables an app is managing it`(level: SecurityLevel) {
         val dialog =
             arrayOf(
