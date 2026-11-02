@@ -45,6 +45,8 @@ internal class ReadElement(
  * @property keyboard a soft keyboard window is on the display.
  * @property windowPackages package of each content window by window id (`null` when its root is unreadable).
  * @property windowBounds bounds in pixels of each content window by id, top-most first.
+ * @property frontPackage package of the window keys act on: the focused content window, else the
+ *   top-most one (`null` when unknown).
  */
 internal class TreeRead(
     val elements: List<ReadElement>,
@@ -52,6 +54,7 @@ internal class TreeRead(
     val keyboard: Boolean,
     val windowPackages: Map<Int, String?>,
     val windowBounds: List<Pair<Int, Rect>>,
+    val frontPackage: String?,
 ) {
     /**
      * The elements [detail] shows, with [refs] (one per element of the read) as their refs; each
@@ -140,6 +143,7 @@ internal object ScreenReader {
             keyboard = windows.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD },
             windowPackages = packages,
             windowBounds = windowBounds,
+            frontPackage = (content.firstOrNull { it.isFocused } ?: content.firstOrNull())?.let { packages[it.id] },
         )
     }
 

@@ -53,7 +53,14 @@ internal class TreeBuilder {
 
     /** The read, for [RefMatcher]. */
     fun read(): TreeRead =
-        TreeRead(elements.toList(), APP, keyboard = false, windowPackages = emptyMap(), windowBounds = emptyList())
+        TreeRead(
+            elements.toList(),
+            APP,
+            keyboard = false,
+            windowPackages = emptyMap(),
+            windowBounds = emptyList(),
+            frontPackage = APP,
+        )
 }
 
 /** A read of one list "Chats" (index 0) with a row for each name at its top. */

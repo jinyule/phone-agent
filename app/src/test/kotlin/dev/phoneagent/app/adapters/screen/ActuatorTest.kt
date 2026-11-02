@@ -44,7 +44,8 @@ class ActuatorTest {
     private fun actuator(
         displayId: Int = 0,
         injector: InputInjector? = null,
-    ) = Actuator(host, displayId, GEOMETRY, timings, injector)
+        ownAt: (PixelPoint) -> Boolean = { false },
+    ) = Actuator(host, displayId, GEOMETRY, timings, injector, ownAt)
 
     private fun target(node: AccessibilityNodeInfo): NodeTarget = NodeTarget(node, Rect().also(node::getBoundsInScreen))
 
@@ -295,5 +296,22 @@ class ActuatorTest {
 
             assertEquals(Actuator.Result.Done(Actuator.Via.NODE), actuator().enter(field))
             assertEquals(1, actions)
+        }
+
+    @Test
+    fun noGestureOrInjectedStrokeStartsOnItsOwnUi() =
+        runTest {
+            val injector = RecordingInjector(accept = true)
+            val actuator = actuator(injector = injector, ownAt = { it.x <= 500f })
+
+            assertEquals(Actuator.Result.Refused, actuator.tapAt(PixelPoint(10f, 10f), long = false))
+            assertEquals(Actuator.Result.Refused, actuator.swipe(PixelPoint(10f, 900f), PixelPoint(900f, 900f), 300))
+            assertEquals(Actuator.Result.Refused, actuator.scroll(null, Direction.DOWN))
+            assertTrue(host.gestures.isEmpty())
+            assertTrue(injector.strokes.isEmpty())
+            assertEquals(
+                Actuator.Result.Done(Actuator.Via.GESTURE),
+                actuator.tapAt(PixelPoint(900f, 900f), long = false),
+            )
         }
 }

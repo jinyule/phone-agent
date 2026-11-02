@@ -92,6 +92,20 @@ internal object Aims {
             }
         }
 
+    /**
+     * Whether [aim] is on [ownPackage]'s UI. Actions without a target are checked where they land
+     * (ActionRun: keys and fields; Actuator: gestures at their start point).
+     */
+    fun onOwnUi(
+        aim: Aim,
+        ownPackage: String,
+    ): Boolean =
+        when (aim) {
+            is Aim.AtElement -> aim.element.windowPackage == ownPackage
+            is Aim.AtPixel -> aim.windowPackage == ownPackage
+            Aim.Anywhere -> false
+        }
+
     /** Package of the top-most window containing [pixel]. */
     fun windowPackageAt(
         read: TreeRead,

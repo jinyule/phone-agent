@@ -279,7 +279,10 @@ class AndroidScreenDeviceTest {
             val tap = screen.act(UiAction.Tap(Target.Point(500, 500)), on = null)
             log("tap on own screen: ${tap.describe()}")
             assertTrue(tap.status is ActionOutcome.Status.Refused)
-            screen.act(UiAction.Key(SystemKey.HOME), on = null)
+            val home = screen.act(UiAction.Key(SystemKey.HOME), on = null)
+            log("HOME on own screen: ${home.describe()}")
+            assertTrue(home.status is ActionOutcome.Status.Refused)
+            shell("input keyevent KEYCODE_HOME")
         }
 
     @Test
@@ -320,17 +323,6 @@ class AndroidScreenDeviceTest {
         @JvmStatic
         @BeforeClass
         fun connectTheService() {
-            val automation =
-                InstrumentationRegistry
-                    .getInstrumentation()
-                    .getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES)
-
-            fun shell(command: String) {
-                ParcelFileDescriptor
-                    .AutoCloseInputStream(
-                        automation.executeShellCommand(command),
-                    ).use { it.readBytes() }
-            }
             if (AgentAccessibility.host.value == null) {
                 shell("settings delete secure enabled_accessibility_services")
                 shell("settings put secure enabled_accessibility_services $SERVICE")
@@ -338,12 +330,22 @@ class AndroidScreenDeviceTest {
             runBlocking { withTimeout(CONNECT_TIMEOUT_MS) { AgentAccessibility.host.first { it != null } } }
         }
 
+        /** Leaves the device on the launcher; the port refuses keys on this app's own screens. */
         @JvmStatic
         @AfterClass
         fun goHome() {
-            AgentAccessibility.host.value?.performGlobalAction(
-                android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME,
-            )
+            shell("input keyevent KEYCODE_HOME")
+        }
+
+        /** Runs [command] as the shell user; returns its output. Keeps accessibility services running. */
+        fun shell(command: String): String {
+            val automation =
+                InstrumentationRegistry
+                    .getInstrumentation()
+                    .getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES)
+            return ParcelFileDescriptor
+                .AutoCloseInputStream(automation.executeShellCommand(command))
+                .use { it.readBytes().decodeToString() }
         }
     }
 }

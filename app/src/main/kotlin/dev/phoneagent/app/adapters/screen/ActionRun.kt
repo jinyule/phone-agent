@@ -35,7 +35,9 @@ internal class ActionRun(
     private val displayId = parts.surface.displayId
     private val timings = parts.timings
     private val before = baseline.read
-    private val actuator = Actuator(host, displayId, geometry, timings, parts.injector)
+    private val ownPackage = parts.system.ownPackage
+    private val actuator =
+        Actuator(host, displayId, geometry, timings, parts.injector) { Aims.windowPackageAt(before, it) == ownPackage }
 
     /** Performs [action] aimed at [aim]. */
     suspend fun perform(
@@ -43,7 +45,7 @@ internal class ActionRun(
         aim: Aim,
     ): ActionOutcome =
         when {
-            touchesOwnUi(aim) -> {
+            Aims.onOwnUi(aim, ownPackage) -> {
                 Outcomes.OWN_UI
             }
 
@@ -80,15 +82,28 @@ internal class ActionRun(
             }
 
             is UiAction.Key -> {
-                // Only ENTER acts on a field; BACK and HOME skip the focus lookup.
-                val field = if (action.key == SystemKey.ENTER) Aims.focusedEditable(host.windowsOn(displayId)) else null
-                actuator.key(action.key, field)
+                key(action.key)
             }
 
             is UiAction.Type, is UiAction.SetWheel -> {
                 error("${action::class.simpleName} is not a gesture")
             }
         }
+
+    /**
+     * Presses [key] unless it would act on this app: ENTER on its focused field, BACK and HOME on
+     * the window in front (the focused one, else the top-most).
+     */
+    private suspend fun key(key: SystemKey): Actuator.Result {
+        // Only ENTER acts on a field; BACK and HOME skip the focus lookup.
+        val field = if (key == SystemKey.ENTER) Aims.focusedEditable(host.windowsOn(displayId)) else null
+        val own =
+            when (key) {
+                SystemKey.ENTER -> field?.packageName?.toString() == ownPackage
+                SystemKey.BACK, SystemKey.HOME -> before.frontPackage == ownPackage
+            }
+        return if (own) Actuator.Result.Refused else actuator.key(key, field)
+    }
 
     private suspend fun tap(
         action: UiAction.Tap,
@@ -134,7 +149,7 @@ internal class ActionRun(
                 Outcomes.failed(missing)
             }
 
-            field.packageName?.toString() == parts.system.ownPackage -> {
+            field.packageName?.toString() == ownPackage -> {
                 Outcomes.OWN_UI
             }
 
@@ -177,14 +192,11 @@ internal class ActionRun(
 
     private fun submit(field: AccessibilityNodeInfo): Actuator.Result {
         field.refresh()
-        return when (val pressed = actuator.enter(field)) {
-            is Actuator.Result.Done -> {
-                pressed
-            }
-
-            is Actuator.Result.NotDone -> {
-                Actuator.Result.NotDone("the text was entered but not submitted: ${pressed.reason}")
-            }
+        val pressed = actuator.enter(field)
+        return if (pressed is Actuator.Result.NotDone) {
+            Actuator.Result.NotDone("the text was entered but not submitted: ${pressed.reason}")
+        } else {
+            pressed
         }
     }
 
@@ -207,19 +219,13 @@ internal class ActionRun(
                 },
         )
 
-    private fun touchesOwnUi(aim: Aim): Boolean =
-        when (aim) {
-            is Aim.AtElement -> aim.element.windowPackage == parts.system.ownPackage
-            is Aim.AtPixel -> aim.windowPackage == parts.system.ownPackage
-            Aim.Anywhere -> false
-        }
-
     /** Settles, reads back and builds the outcome of [result]. */
     private suspend fun finish(
         result: Actuator.Result,
         watch: ChangeWatch,
         settleMs: Long,
     ): ActionOutcome {
+        if (result == Actuator.Result.Refused) return Outcomes.OWN_UI
         watch.awaitSettled(if (result is Actuator.Result.Done) settleMs else timings.quietMs)
         val after = parts.observer.observe(host, geometry, baseline.detail)
         val diff = compareWith?.let { parts.analyzer.diff(it, after) }
@@ -235,6 +241,10 @@ internal class ActionRun(
                     after,
                     diff,
                 )
+            }
+
+            Actuator.Result.Refused -> {
+                error("refusals return before the display is read")
             }
         }
     }

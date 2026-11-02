@@ -13,6 +13,8 @@ import kotlinx.coroutines.withTimeoutOrNull
  * Taps, scrolls, swipes and keys on one display, each with its fallback chain (phase1 §3.3):
  * node action first, then a display-targeted accessibility gesture. Injection through the
  * privileged helper is the third level from M2 ([InputInjector]).
+ *
+ * @param ownAt whether a pixel lies on this app's own UI; no gesture or injected stroke starts there.
  */
 internal class Actuator(
     private val host: ScreenHost,
@@ -20,6 +22,7 @@ internal class Actuator(
     private val geometry: DisplayGeometry,
     private val timings: ScreenTimings,
     private val injector: InputInjector?,
+    private val ownAt: (PixelPoint) -> Boolean,
 ) {
     /** Result of one actuation. */
     sealed interface Result {
@@ -32,6 +35,9 @@ internal class Actuator(
         data class NotDone(
             val reason: String,
         ) : Result
+
+        /** Not performed: it would have touched this app's own UI. */
+        data object Refused : Result
     }
 
     /** Which fallback level performed an action. */
@@ -139,6 +145,7 @@ internal class Actuator(
         stroke: Stroke,
         what: String,
     ): Result {
+        if (ownAt(stroke.points.first())) return Result.Refused
         val dispatched =
             withTimeoutOrNull(stroke.startMs + stroke.durationMs + timings.gestureSlackMs) {
                 host.dispatchStrokes(displayId, listOf(stroke))
