@@ -13,17 +13,18 @@ internal class GitHistory(
 ) {
     /**
      * Text of [fileName] at commit [ref], or null when that commit has no such file. Throws
-     * [GradleException] when [ref] is malformed or not a commit in this clone.
+     * [GradleException] when [ref] is not a full commit sha, or not a commit in this clone. Only a
+     * full sha always names the same content, which the task's up-to-date check and cache rely on.
      */
     fun read(
         ref: String,
         fileName: String,
     ): String? {
-        if (!REF.matches(
-                ref,
+        if (!FULL_SHA.matches(ref)) {
+            throw GradleException(
+                "privilegedProtocolBaseRef '$ref' is not a full commit sha (40 or 64 lowercase hex characters). " +
+                    "A branch, tag or short sha can move while the task stays up to date; pass `git rev-parse <ref>`.",
             )
-        ) {
-            throw GradleException("privilegedProtocolBaseRef '$ref' is not a commit sha or ref name.")
         }
         if (git("rev-parse", "--verify", "--quiet", "$ref^{commit}").code != 0) {
             throw GradleException(
@@ -56,6 +57,7 @@ internal class GitHistory(
     }
 
     private companion object {
-        val REF = Regex("""[A-Za-z0-9][A-Za-z0-9._/~^-]*""")
+        /** SHA-1 or SHA-256 object name, as `git rev-parse` prints it. */
+        val FULL_SHA = Regex("[0-9a-f]{40}|[0-9a-f]{64}")
     }
 }

@@ -7,8 +7,8 @@ import org.gradle.kotlin.dsl.register
 /**
  * `:privileged` only: `verifyPrivilegedProtocol` (part of `check`, and run by the CI
  * `privileged-build` job) fails when the AIDL changed without bumping `PrivilegedProtocol.VERSION`
- * or transactions 1-4 changed at all. CI also passes `-PprivilegedProtocolBaseRef=<base sha>` so the
- * history can only grow; local runs skip that part.
+ * or transactions 1-4 changed at all. CI also passes `-PprivilegedProtocolBaseRef=<full base sha>`
+ * so the history can only grow; local runs skip that part.
  */
 class PrivilegedProtocolConventionPlugin : Plugin<Project> {
     override fun apply(target: Project): Unit =

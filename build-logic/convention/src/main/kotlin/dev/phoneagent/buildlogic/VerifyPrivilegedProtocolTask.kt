@@ -19,8 +19,8 @@ import javax.inject.Inject
 
 /**
  * Fails unless transactions 1-4 are unchanged and `protocol-history.txt` records the current VERSION
- * with the current AIDL fingerprint. With [baseRef] (CI only) the history must also start with the
- * history of that commit.
+ * with the current AIDL fingerprint. With [baseRef] (CI only, a full commit sha) the history must
+ * also start with the history of that commit.
  */
 @CacheableTask
 abstract class VerifyPrivilegedProtocolTask : DefaultTask() {
@@ -36,7 +36,11 @@ abstract class VerifyPrivilegedProtocolTask : DefaultTask() {
     @get:PathSensitive(PathSensitivity.NONE)
     abstract val history: RegularFileProperty
 
-    /** Commit whose history must stay a prefix (`-PprivilegedProtocolBaseRef`); unset locally. */
+    /**
+     * Full sha of the commit whose history must stay a prefix (`-PprivilegedProtocolBaseRef`);
+     * unset locally. A full sha names fixed content, so it is a sound up-to-date and cache key;
+     * anything that can move (branch, tag, short sha) fails the task.
+     */
     @get:Input
     @get:Optional
     abstract val baseRef: Property<String>

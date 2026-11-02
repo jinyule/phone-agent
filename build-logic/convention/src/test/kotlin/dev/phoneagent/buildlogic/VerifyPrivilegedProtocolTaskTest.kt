@@ -127,6 +127,33 @@ class VerifyPrivilegedProtocolTaskTest {
     }
 
     @Test
+    fun aBaseRefMovedToAnotherCommitIsCheckedAgainNotUpToDate() {
+        protocol(1, aidl, "1 ${fingerprint(aidl)}\n")
+        git("branch", "base", commit())
+        verify("-PprivilegedProtocolBaseRef=base").run()
+        protocol(2, changed, "1 ${fingerprint(aidl)}\n2 ${fingerprint(changed)}\n")
+        git("branch", "-f", "base", commit())
+        protocol(1, aidl, "1 ${fingerprint(aidl)}\n") // The working tree drops entry 2 of the new base.
+
+        val moved = verify("-PprivilegedProtocolBaseRef=base").run()
+
+        assertEquals(TaskOutcome.FAILED, moved.outcome(), moved.output)
+    }
+
+    @Test
+    fun onlyAFullCommitShaIsABaseRef() {
+        protocol(1, aidl, "1 ${fingerprint(aidl)}\n")
+        val base = commit()
+        git("branch", "base", base)
+
+        for (ref in listOf("base", "HEAD", "HEAD~0", base.take(12), base.uppercase())) {
+            val failure = verify("-PprivilegedProtocolBaseRef=$ref").buildAndFail()
+            assertTrue(failure.output.contains("full commit sha"), "$ref: ${failure.output}")
+        }
+        assertEquals(TaskOutcome.SUCCESS, verify("-PprivilegedProtocolBaseRef=$base").build().outcome())
+    }
+
+    @Test
     fun aBaseRefThatIsNotInTheCloneFailsLoudly() {
         protocol(1, aidl, "1 ${fingerprint(aidl)}\n")
         commit()
