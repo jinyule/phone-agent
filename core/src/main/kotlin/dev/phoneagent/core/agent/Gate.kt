@@ -13,6 +13,7 @@ import dev.phoneagent.core.tool.Tool
 import dev.phoneagent.core.tool.ToolCall
 import dev.phoneagent.core.tool.ToolResult
 import dev.phoneagent.core.tool.ToolStatus
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * `toolPreExecute` with the PolicyEngine as its last, fixed guard (phase1 §3.8, AGENTS §3.3).
@@ -21,12 +22,15 @@ import dev.phoneagent.core.tool.ToolStatus
  * verdict wins (Refuse > HandOff > Confirm > Allow; the policy's on a tie), so no interceptor can
  * bypass it. Every policy verdict is logged.
  *
- * An approved card is not enough to run (contracts addendum §8, §14): the runtime observes a fresh
- * screen S', records it (`screen/snapshot` without a call: a runtime observation the model has not
- * seen), and the policy resolves and judges the call again on S' with the card as
- * `PolicyContext.approved`. Allow runs it; Refuse and HandOff end as such; a new Confirm (the
- * screen changed under the approval) is shown again, at most [LoopConfig.maxReconfirmations] times
- * per call, after which the call is refused and the model told to observe and try again.
+ * An approved card is not enough to run (contracts addendum §8, §14): the runtime always tries to
+ * observe a fresh screen S' ([freshScreen]) and records it (`screen/snapshot` without a call: a
+ * runtime observation the model has not seen); the policy then resolves and judges the call again
+ * with the card as `PolicyContext.approved`, on S', or on no screen when there is no screen port or
+ * the read failed or took longer than [LoopConfig.recheckScreenTimeoutMs]. Whether a call may run
+ * without a screen is the policy's decision, never the runtime's. Allow runs it; Refuse and
+ * HandOff end as such; a new Confirm (the screen changed under the approval) is shown again, at
+ * most [LoopConfig.maxReconfirmations] times per call, after which the call is refused and the
+ * model told to observe and try again.
  */
 internal class Gate(
     private val loop: LoopContext,
@@ -84,13 +88,7 @@ internal class Gate(
         interaction: UserInteraction,
         reconfirmed: Int,
     ): ToolResult? {
-        val screen =
-            try {
-                loop.setup.screen?.snapshot()
-            } catch (unavailable: ScreenUnavailableException) {
-                return ToolResult.failure(ToolStatus.ERROR, "${loop.texts.screenUnavailable} ${unavailable.message}")
-            }
-        screen?.let { loop.log.append(ScreenObserved(callId = null, snapshot = it)) }
+        val screen = freshScreen(loop)
         val verdict = judge(call, tool, screen, card, Verdict.Allow)
         val exhausted = verdict is Verdict.Confirm && reconfirmed >= loop.config.maxReconfirmations
         return if (exhausted) {
@@ -142,4 +140,22 @@ internal class Gate(
 
     /** Verdicts from least to most strict. */
     private enum class Strictness { ALLOW, CONFIRM, HAND_OFF, REFUSE }
+}
+
+/**
+ * A screen the runtime reads for itself (not for a call), recorded as `screen/snapshot` without a
+ * call id; `null` when there is no screen port, the surface is unusable, or the read takes longer
+ * than [LoopConfig.recheckScreenTimeoutMs].
+ */
+internal suspend fun freshScreen(loop: LoopContext): ScreenSnapshot? {
+    val port = loop.setup.screen ?: return null
+    val screen =
+        try {
+            withTimeoutOrNull(loop.config.recheckScreenTimeoutMs) { port.snapshot() }
+        } catch (ignored: ScreenUnavailableException) {
+            // An unusable surface is no screen; the policy decides what may run without one.
+            null
+        }
+    screen?.let { loop.log.append(ScreenObserved(callId = null, snapshot = it)) }
+    return screen
 }

@@ -485,11 +485,11 @@ fun interface Chain<I, O> { suspend fun proceed(input: I): O }   // 不调用 pr
 - 拦截器链先跑。PolicyEngine 再用 `IntentResolver` 解析调用，在**模型看过的最新屏幕**上判定。这个屏幕从日志推导：已经有 `tool/result` 的调用所记录的最近一屏；运行时自己读的屏（`callId = null`）不算。
 - 链和策略的结论取更严的（Refuse > HandOff > Confirm > Allow，平手取策略的）。每个判定都写 `policy/verdict`。
 - Refuse：原因作为结果返回给模型。HandOff：转交给用户。Confirm：显示确认卡。
-- **批准后复核**：读一张新屏 S'，记成 `screen/snapshot(callId = null)`；以 `approved = card` 在 S' 上重新解析、判定。
+- **批准后复核**：runtime 一律尝试读一张新屏 S'（最多等 `LoopConfig.recheckScreenTimeoutMs`，默认 5 s，构造时校验），读到就记成 `screen/snapshot(callId = null)`；以 `approved = card` 重新解析、判定。
+  - 读到了：在 S' 上判定。没有屏幕端口、读失败（`ScreenUnavailableException`）或超时：以 `screen = null` 判定，不报 `ERROR`。没有屏幕能不能放行由 PolicyEngine 决定（WP05：坐标点击、输入、滚动这类写动作一律 Refuse），runtime 不去猜调用依不依赖屏幕；
   - Allow → 执行；
   - Refuse / HandOff → 按对应结局处理；
   - 又是 Confirm（屏幕在批准后变了）→ 再确认一次。**每个调用最多再问 `LoopConfig.maxReconfirmations` 次（默认 1）**，超过就拒绝，并告诉模型屏幕已变、请重新观察。
-  - 读不了屏 → `ERROR`，不执行。
 
 只读的观察事件（记录、流式分片、轨迹卡）走 `TaskRuntime.events`，不能改变行为。
 
@@ -714,7 +714,7 @@ TaskRuntime 循环（每个 step，对应 §3.8 的拦截点）：
        Refuse  → 原因作为结果返回给模型
        HandOff → SurfaceManager.handToUser → 等待 → takeBack；结果告诉模型"用户已处理，请核实"
        Confirm → 显示确认卡（悬浮层 / 通知 / App 内）→ 等待（15 分钟没人回按拒绝）
-                 → 批准后读新屏、在新屏上复核（再要确认最多再问 1 次）
+                 → 批准后读新屏、在新屏上复核（读不到就以 screen=null 复核；再要确认最多再问 1 次）
        Allow   ↓
   6. 刷盘（非 READ）→ 工具超时内跑 toolExecute 链：watchMainScreen(3000) → ScreenPort.act → awaitChange → 回读快照
        → mainArrivals：期间有非用户打开的任务冒到主屏 → moveTask 挪回 → effect = SPILLED_BACK

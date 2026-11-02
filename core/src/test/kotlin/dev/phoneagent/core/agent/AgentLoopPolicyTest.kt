@@ -2,6 +2,10 @@
 
 package dev.phoneagent.core.agent
 
+import dev.phoneagent.core.agent.PolicySamples.c1
+import dev.phoneagent.core.agent.PolicySamples.handOff
+import dev.phoneagent.core.agent.PolicySamples.refuse
+import dev.phoneagent.core.agent.PolicySamples.sendCard
 import dev.phoneagent.core.ids.PromptId
 import dev.phoneagent.core.ids.TaskId
 import dev.phoneagent.core.ids.ToolCallId
@@ -19,6 +23,9 @@ import dev.phoneagent.core.ports.HandoffKind
 import dev.phoneagent.core.ports.HandoffResult
 import dev.phoneagent.core.ports.HandoffTicket
 import dev.phoneagent.core.ports.Question
+import dev.phoneagent.core.ports.ScreenPort
+import dev.phoneagent.core.ports.ScreenSnapshot
+import dev.phoneagent.core.ports.SnapshotOptions
 import dev.phoneagent.core.ports.SurfaceAllocation
 import dev.phoneagent.core.ports.SurfaceCapability
 import dev.phoneagent.core.ports.SurfaceKind
@@ -43,11 +50,13 @@ import dev.phoneagent.core.tool.RiskClass
 import dev.phoneagent.core.tool.ToolResult
 import dev.phoneagent.core.tool.ToolStatus
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -58,84 +67,6 @@ import java.io.IOException
 
 /** The PolicyEngine guard, confirmations, questions and handoffs (phase1 §3.8, contracts addendum §8). */
 class AgentLoopPolicyTest {
-    private val c1 = ToolCallId("c1")
-    private val sendCard = ConfirmCard(c1, ConfirmReason.OUTWARD, "send", target = "小王", pkg = "com.example.chat")
-    private val handOff = Verdict.HandOff(HandoffKind.LOGIN, "log in")
-    private val refuse = Verdict.Refuse("rule-7", "Sending to strangers is not allowed.")
-
-    /** Answers with [verdicts] in order (then Allow) and remembers what it was asked. */
-    private class ScriptedPolicy(
-        vararg verdicts: Verdict,
-    ) : PolicyEngine {
-        private val queue = ArrayDeque(verdicts.toList())
-        val contexts = mutableListOf<PolicyContext>()
-        val intents = mutableListOf<ActionIntent>()
-
-        override fun evaluate(
-            call: dev.phoneagent.core.tool.ToolCall,
-            intent: ActionIntent,
-            ctx: PolicyContext,
-        ): Verdict {
-            contexts += ctx
-            intents += intent
-            return queue.removeFirstOrNull() ?: Verdict.Allow
-        }
-    }
-
-    private class Run(
-        val harness: LoopHarness,
-        val loop: AgentLoop,
-        val tool: FakeTool,
-    ) {
-        suspend fun result(): ToolResult =
-            harness
-                .events()
-                .only<ToolResultRecorded>()
-                .first()
-                .result
-    }
-
-    @Suppress("LongParameterList") // Every parameter has a default; tests name the few they change.
-    private suspend fun TestScope.send(
-        policy: PolicyEngine,
-        config: LoopConfig = LoopConfig(),
-        interceptors: Interceptors = Interceptors(requestError = emptyList()),
-        screen: ScriptedScreen? = ScriptedScreen(ScriptedScreen.snapshotOf("s1")),
-        surfaces: SurfaceManager? = null,
-        settings: TaskStarted = LoopHarness.ATTENDED,
-    ): Run {
-        val tool = FakeTool("send", risk = RiskClass.OUTWARD)
-        val model = FakeChatModel().calls(call("c1", "send")).answers("ok")
-        val harness =
-            LoopHarness(
-                this,
-                model,
-                tools = listOf(tool),
-                policy = policy,
-                screen = screen,
-                surfaces = surfaces,
-                config = config,
-                settings = settings,
-                interceptors = interceptors,
-            )
-        val loop = harness.start()
-        loop.followup(text("给小王发消息"))
-        return Run(harness, loop, tool)
-    }
-
-    /** The first prompt other than [after]. */
-    private suspend fun AgentLoop.awaitPrompt(after: PromptId? = null): Phase.Waiting =
-        phase.first { it is Phase.Waiting && it.promptId != after } as Phase.Waiting
-
-    /** Approves the next confirmation after [after] and returns its prompt. */
-    private suspend fun AgentLoop.approveNext(after: PromptId? = null): PromptId {
-        val prompt = awaitPrompt(after).promptId!!
-        assertTrue(answer(prompt, UserReply.Approve))
-        return prompt
-    }
-
-    private fun ToolResult.text(): String = (content.single() as Part.Text).text
-
     @Test
     fun `a refused call never runs and the model gets the hint`() =
         runTest {
@@ -219,232 +150,6 @@ class AgentLoopPolicyTest {
                 )
             val waiting = run.loop.awaitPrompt()
             assertEquals(WaitReason.HANDOFF, waiting.reason)
-        }
-
-    @Test
-    fun `an approved call is judged again on a fresh screen before it runs`() =
-        runTest {
-            val policy = ScriptedPolicy(Verdict.Confirm(sendCard), Verdict.Allow)
-            val screen = ScriptedScreen(ScriptedScreen.snapshotOf("s1"))
-            val run = send(policy, screen = screen)
-            val waiting = run.loop.awaitPrompt()
-            assertEquals(WaitReason.USER, waiting.reason)
-            assertEquals(PromptId("prompt-${run.harness.records().last().seq}"), waiting.promptId)
-
-            assertFalse(run.loop.answer(PromptId("prompt-999"), UserReply.Approve), "unknown prompt")
-            assertFalse(run.loop.answer(waiting.promptId!!, UserReply.Answer("好")), "an answer does not fit a card")
-            assertFalse(run.loop.answer(waiting.promptId, UserReply.HandoffDone), "nor does a handoff")
-            assertFalse(run.loop.answer(waiting.promptId, UserReply.Decline), "nor does declining")
-            assertTrue(run.loop.answer(waiting.promptId, UserReply.Approve))
-            assertFalse(run.loop.answer(waiting.promptId, UserReply.Reject), "answered once")
-            run.loop.awaitPhase(Phase.Done)
-
-            assertEquals(1, run.tool.calls.size)
-            assertEquals(listOf(null, sendCard), policy.contexts.map { it.approved })
-            assertEquals(
-                listOf(null, "s1"),
-                policy.contexts.map { it.screen?.id?.value },
-                "the re-check observes first",
-            )
-            val observed =
-                run.harness
-                    .events()
-                    .only<ScreenObserved>()
-                    .single()
-            assertNull(observed.callId, "a runtime observation the model has not seen")
-            assertEquals(
-                2,
-                run.harness
-                    .events()
-                    .only<PolicyVerdictRecorded>()
-                    .size,
-            )
-            assertEquals(
-                ConfirmResult.APPROVED,
-                run.harness
-                    .events()
-                    .only<ApprovalDecided>()
-                    .single()
-                    .result,
-            )
-            val asked =
-                run.harness
-                    .events()
-                    .only<ApprovalAsked>()
-                    .single()
-            assertEquals(LoopConfig().confirmTimeoutMs, asked.expiresAt, "expiry from the virtual clock at 0")
-        }
-
-    @Test
-    fun `the policy judges on the screen the model saw and the re-check on a fresh one`() =
-        runTest {
-            val policy = ScriptedPolicy(Verdict.Allow, Verdict.Confirm(sendCard))
-            val screen = ScriptedScreen(ScriptedScreen.snapshotOf("s1"), ScriptedScreen.snapshotOf("s2"))
-            val look =
-                FakeTool("look") { _, context ->
-                    context.screen!!.snapshot()
-                    ToolResult.ok("seen")
-                }
-            val model =
-                FakeChatModel()
-                    .calls(call("c0", "look"))
-                    .calls(call("c1", "send"))
-                    .calls(call("c2", "look-later"))
-                    .answers("ok")
-            val tools = listOf(look, FakeTool("send", risk = RiskClass.OUTWARD), FakeTool("look-later"))
-            val harness = LoopHarness(this, model, tools = tools, policy = policy, screen = screen)
-            val loop = harness.start()
-            loop.followup(text("给小王发消息"))
-            loop.approveNext()
-            loop.awaitPhase(Phase.Done)
-
-            assertEquals(
-                listOf(null, "s1", "s2", "s1"),
-                policy.contexts.map { it.screen?.id?.value },
-                "nothing seen yet; the look's screen; the re-check's own; the re-check's is still unseen",
-            )
-            assertEquals(listOf(null, null, sendCard, null), policy.contexts.map { it.approved })
-            val observed = harness.events().only<ScreenObserved>()
-            assertEquals(listOf(ToolCallId("c0"), null), observed.map { it.callId })
-        }
-
-    @Test
-    fun `a screen that changed under the approval is confirmed again and then runs`() =
-        runTest {
-            val changed = sendCard.copy(amount = null, target = "小王 (新)")
-            val policy = ScriptedPolicy(Verdict.Confirm(sendCard), Verdict.Confirm(changed), Verdict.Allow)
-            val screen = ScriptedScreen(ScriptedScreen.snapshotOf("s1"), ScriptedScreen.snapshotOf("s2"))
-            val run = send(policy, screen = screen)
-            val first = run.loop.approveNext()
-            run.loop.approveNext(after = first)
-            run.loop.awaitPhase(Phase.Done)
-
-            assertEquals(1, run.tool.calls.size)
-            assertEquals(
-                listOf(sendCard, changed),
-                run.harness
-                    .events()
-                    .only<ApprovalAsked>()
-                    .map { it.card },
-                "the second card is the re-check's",
-            )
-            assertEquals(listOf(null, sendCard, changed), policy.contexts.map { it.approved })
-            assertEquals(listOf(null, "s1", "s2"), policy.contexts.map { it.screen?.id?.value })
-        }
-
-    @Test
-    fun `a call is confirmed again at most once and then refused with the reason`() =
-        runTest {
-            val again = Verdict.Confirm(sendCard)
-            val run = send(ScriptedPolicy(again, again, again, Verdict.Allow))
-            val first = run.loop.approveNext()
-            run.loop.approveNext(after = first)
-            run.loop.awaitPhase(Phase.Done)
-
-            assertTrue(run.tool.calls.isEmpty(), "never runs on a third mismatch, even if a fourth check allowed it")
-            assertEquals(ToolStatus.REFUSED, run.result().status)
-            assertEquals(LoopTexts().changedSinceApproval, run.result().text())
-            assertEquals(
-                2,
-                run.harness
-                    .events()
-                    .only<ApprovalAsked>()
-                    .size,
-            )
-            assertEquals(
-                3,
-                run.harness
-                    .events()
-                    .only<PolicyVerdictRecorded>()
-                    .size,
-            )
-        }
-
-    @Test
-    fun `the re-confirmation limit is configurable`() =
-        runTest {
-            val again = Verdict.Confirm(sendCard)
-            val never = send(ScriptedPolicy(again, again), config = LoopConfig(maxReconfirmations = 0))
-            never.loop.approveNext()
-            never.loop.awaitPhase(Phase.Done)
-            assertEquals(LoopTexts().changedSinceApproval, never.result().text())
-            assertEquals(
-                1,
-                never.harness
-                    .events()
-                    .only<ApprovalAsked>()
-                    .size,
-            )
-
-            val twice = send(ScriptedPolicy(again, again, again), config = LoopConfig(maxReconfirmations = 2))
-            var prompt = twice.loop.approveNext()
-            prompt = twice.loop.approveNext(after = prompt)
-            twice.loop.approveNext(after = prompt)
-            twice.loop.awaitPhase(Phase.Done)
-            assertEquals(1, twice.tool.calls.size)
-            assertEquals(
-                3,
-                twice.harness
-                    .events()
-                    .only<ApprovalAsked>()
-                    .size,
-            )
-        }
-
-    @Test
-    fun `a page that needs a hand-off after approval is handed off`() =
-        runTest {
-            val run = send(ScriptedPolicy(Verdict.Confirm(sendCard), handOff))
-            val confirmed = run.loop.approveNext()
-            val handing = run.loop.awaitPrompt(after = confirmed)
-            assertEquals(WaitReason.HANDOFF, handing.reason)
-            assertTrue(run.loop.answer(handing.promptId!!, UserReply.HandoffDone))
-            run.loop.awaitPhase(Phase.Done)
-
-            assertTrue(run.tool.calls.isEmpty(), "the user did it; the call itself never runs")
-            assertEquals(LoopTexts().handoffDone, run.result().text())
-            assertEquals(
-                handOff.kind,
-                run.harness
-                    .events()
-                    .only<HandoffStarted>()
-                    .single()
-                    .kind,
-            )
-        }
-
-    @Test
-    fun `the re-check may refuse with its own hint`() =
-        runTest {
-            val run = send(ScriptedPolicy(Verdict.Confirm(sendCard), refuse))
-            run.loop.answer(run.loop.awaitPrompt().promptId!!, UserReply.Approve)
-            run.loop.awaitPhase(Phase.Done)
-            assertEquals(refuse.hintForModel, run.result().text())
-        }
-
-    @Test
-    fun `an unreadable screen at the re-check is an error and the call does not run`() =
-        runTest {
-            val screen = ScriptedScreen(ScriptedScreen.snapshotOf("s1"))
-            val run = send(ScriptedPolicy(Verdict.Confirm(sendCard)), screen = screen)
-            val waiting = run.loop.awaitPrompt()
-            screen.unavailable = "secure window"
-            run.loop.answer(waiting.promptId!!, UserReply.Approve)
-            run.loop.awaitPhase(Phase.Done)
-            assertTrue(run.tool.calls.isEmpty())
-            assertEquals(ToolStatus.ERROR, run.result().status)
-            assertEquals("${LoopTexts().screenUnavailable} secure window", run.result().text())
-        }
-
-    @Test
-    fun `without a screen the re-check judges without one`() =
-        runTest {
-            val policy = ScriptedPolicy(Verdict.Confirm(sendCard))
-            val run = send(policy, screen = null)
-            run.loop.answer(run.loop.awaitPrompt().promptId!!, UserReply.Approve)
-            run.loop.awaitPhase(Phase.Done)
-            assertEquals(1, run.tool.calls.size)
-            assertNull(policy.contexts[1].screen)
         }
 
     @Test
@@ -561,7 +266,7 @@ class AgentLoopPolicyTest {
             )
         }
 
-    private suspend fun promptSeq(run: Run): Long =
+    private suspend fun promptSeq(run: PolicyRun): Long =
         run.harness
             .records()
             .first { it.event is HandoffStarted }

@@ -12,6 +12,8 @@ package dev.phoneagent.core.agent
  * @property confirmTimeoutMs how long a confirmation card waits before it counts as rejected, > 0.
  * @property questionTimeoutMs how long an `ask_user` question waits, > 0.
  * @property handoffTimeoutMs how long a handed-off step waits for the user, > 0.
+ * @property recheckScreenTimeoutMs how long the runtime waits for a fresh screen of its own (the
+ *   re-check after approval, the look after a handoff); a slower read counts as no screen, > 0.
  * @property texts model-visible feedback the loop writes into tool results.
  */
 public data class LoopConfig(
@@ -21,6 +23,7 @@ public data class LoopConfig(
     val confirmTimeoutMs: Long = DEFAULT_CONFIRM_TIMEOUT_MS,
     val questionTimeoutMs: Long = DEFAULT_QUESTION_TIMEOUT_MS,
     val handoffTimeoutMs: Long = DEFAULT_HANDOFF_TIMEOUT_MS,
+    val recheckScreenTimeoutMs: Long = DEFAULT_RECHECK_SCREEN_TIMEOUT_MS,
     val texts: LoopTexts = LoopTexts(),
 ) {
     init {
@@ -30,6 +33,7 @@ public data class LoopConfig(
         require(confirmTimeoutMs > 0) { "confirmTimeoutMs must be > 0, got $confirmTimeoutMs" }
         require(questionTimeoutMs > 0) { "questionTimeoutMs must be > 0, got $questionTimeoutMs" }
         require(handoffTimeoutMs > 0) { "handoffTimeoutMs must be > 0, got $handoffTimeoutMs" }
+        require(recheckScreenTimeoutMs > 0) { "recheckScreenTimeoutMs must be > 0, got $recheckScreenTimeoutMs" }
     }
 
     /** Defaults (phase1 §3.7, §7.2). */
@@ -51,6 +55,9 @@ public data class LoopConfig(
 
         /** A handoff nobody finishes expires after 30 minutes (logins take a while). */
         public const val DEFAULT_HANDOFF_TIMEOUT_MS: Long = 30 * 60_000L
+
+        /** A fresh screen the runtime reads itself takes at most 5 seconds. */
+        public const val DEFAULT_RECHECK_SCREEN_TIMEOUT_MS: Long = 5_000L
     }
 }
 
@@ -94,8 +101,6 @@ public data class LoopTexts(
     val handoffUnavailable: String = "Not done: this step needs the user, but nobody can take over now.",
     /** Moving the task to the user failed. */
     val handoffFailed: String = "Not done: handing this step to the user failed.",
-    /** The screen could not be read when re-checking an approved call; followed by the reason. */
-    val screenUnavailable: String = "Not run: the screen could not be read:",
     /** The tool did not finish in time. */
     val timeout: String = "The tool did not finish in time and was cancelled.",
     /** Appended to [timeout] and [stoppedWhileRunning] for calls that may change the phone. */
