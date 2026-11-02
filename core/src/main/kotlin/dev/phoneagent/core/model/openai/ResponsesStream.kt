@@ -19,7 +19,9 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -199,9 +201,9 @@ internal class ResponsesStream(
 /**
  * The output items of one reply by `output_index` (model-layer §3.2): those the stream finished,
  * then the final `response.output` (by position) merged in, so items only one of them has are
- * kept. An item without an index takes the next position. Two versions of one item must agree on
- * what the adapter reads from it (type, ids, name, arguments, texts, encrypted content); a
- * contradiction is [ModelError.BadResponse].
+ * kept. An item without an index takes the next position. Where both have an item, the final one
+ * wins key by key, except that JSON `null` never replaces a value. The two versions must agree on
+ * what the item means ([meaning]); a contradiction is [ModelError.BadResponse].
  */
 internal class OutputItems {
     private val byIndex = sortedMapOf<Int, JsonObject>()
@@ -228,30 +230,58 @@ internal class OutputItems {
         next = maxOf(next, index + 1)
     }
 
-    /** [known] and [other] as one item ([known] wins on keys the adapter does not read). */
+    /** [known] with [later]'s non-null values over it, once both mean the same. */
     private fun agreed(
         index: Int,
         known: JsonObject,
-        other: JsonObject,
+        later: JsonObject,
     ): JsonObject {
-        val a = visible(known)
-        val b = visible(other)
+        val type = present(known["type"]) ?: present(later["type"])
+        val a = meaning(known, type)
+        val b = meaning(later, type)
         val clash = a.keys.firstOrNull { key -> a[key] != null && b[key] != null && a[key] != b[key] }
         if (clash != null) throw ModelError.BadResponse("output item $index has two different '$clash' values")
-        return JsonObject(other + known)
+        return JsonObject(known + later.filterValues { it !is JsonNull })
     }
 
     private companion object {
-        val READ = listOf("type", "id", "call_id", "name", "arguments", "encrypted_content")
+        val CALL = listOf("call_id", "name", "arguments")
+        val REASONING = listOf("id", "encrypted_content")
+        val CONTENT = listOf("type", "text", "refusal")
 
-        /** What the adapter reads from an item; `null` values are absent. */
-        fun visible(item: JsonObject): Map<String, JsonElement?> =
-            READ.associateWith { item[it] } +
-                mapOf("content" to texts(item["content"]), "summary" to texts(item["summary"]))
+        /**
+         * What an item means, read as an item of [type]: its type, then for a message the type,
+         * text and refusal of each content part, for a function call its call id, name and
+         * arguments (not its item id), for reasoning its id and encrypted content. Absent and
+         * `null` values are both `null`.
+         */
+        fun meaning(
+            item: JsonObject,
+            type: JsonElement?,
+        ): Map<String, JsonElement?> {
+            val fields =
+                when ((type as? JsonPrimitive)?.content) {
+                    "message" -> mapOf("content" to content(present(item["content"])))
+                    "function_call" -> CALL.associateWith { present(item[it]) }
+                    "reasoning" -> REASONING.associateWith { present(item[it]) }
+                    else -> emptyMap()
+                }
+            return mapOf("type" to present(item["type"])) + fields
+        }
 
-        /** The `text` members of a content or summary array. */
-        fun texts(parts: JsonElement?): JsonElement? =
-            (parts as? JsonArray)?.let { array -> JsonArray(array.mapNotNull { (it as? JsonObject)?.get("text") }) }
+        /** A message's content parts cut down to [CONTENT]; anything but an array as it is. */
+        fun content(content: JsonElement?): JsonElement? =
+            (content as? JsonArray)?.let { parts ->
+                JsonArray(
+                    parts.map { part ->
+                        (part as? JsonObject)?.let { obj ->
+                            JsonObject(CONTENT.mapNotNull { key -> present(obj[key])?.let { key to it } }.toMap())
+                        } ?: part
+                    },
+                )
+            } ?: content
+
+        fun present(value: JsonElement?): JsonElement? = value?.takeIf { it !is JsonNull }
     }
 }
 

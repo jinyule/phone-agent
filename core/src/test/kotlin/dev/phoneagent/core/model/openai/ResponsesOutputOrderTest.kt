@@ -9,6 +9,7 @@ import dev.phoneagent.core.model.StopReason
 import dev.phoneagent.core.model.openai.Kit.base
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import mockwebserver3.MockWebServer
 import mockwebserver3.junit5.StartStop
@@ -19,7 +20,9 @@ import org.junit.jupiter.api.assertThrows
 /**
  * The reply's parts are the response's output in `output_index` order (model-layer §3.2): items
  * finished on the stream and `response.completed.output` are two views of one list, merged by
- * index, and a contradiction between them is a protocol violation.
+ * index. The final output wins and a value wins over JSON `null`; the two views are compared only
+ * on what means something (message content types and texts, call ids, names and arguments,
+ * reasoning ids and encrypted content), and a contradiction there is a protocol violation.
  */
 class ResponsesOutputOrderTest {
     @StartStop
@@ -76,13 +79,92 @@ class ResponsesOutputOrderTest {
             val contradictions =
                 listOf(
                     done(0, call("call_a", "{\"x\":1}")) + completed(call("call_a", "{\"x\":2}")),
-                    done(0, call("call_a")) + completed(call("call_a", id = "fc_other")),
                     done(0, call("call_a")) + completed(reasoning),
                     done(0, call("call_a")) + done(0, call("call_b")) + completed(),
                 )
             for (stream in contradictions) {
                 server.enqueueSse(stream)
                 assertThrows<ModelError.BadResponse>(stream) { model().complete(Kit.request()) }
+            }
+        }
+
+    private fun message(
+        content: String?,
+        id: String = "msg_1",
+    ) = """{"type":"message","id":"$id","role":"assistant","content":$content}"""
+
+    private val refusal = """[{"type":"refusal","refusal":"I can't help with that."}]"""
+
+    private fun text(value: String) = """[{"type":"output_text","text":"$value","annotations":[]}]"""
+
+    @Test
+    fun `an empty streamed message does not erase a final refusal`() =
+        runTest {
+            server.enqueueSse(done(0, message("[]")) + completed(message(refusal)))
+            assertThrows<ModelError.BadResponse> { model().complete(Kit.request()) }
+            server.enqueueSse(done(0, message("null")) + completed(message(refusal)))
+            assertThrows<ModelError.Refusal> { model().complete(Kit.request()) }
+            server.enqueueSse(done(0, message(refusal)) + completed(message("null")))
+            assertThrows<ModelError.Refusal> { model().complete(Kit.request()) }
+        }
+
+    @Test
+    fun `a value wins over null, whichever view has it`() =
+        runTest {
+            val nullArgs = """{"type":"function_call","id":"fc_1","call_id":"call_1","name":"tap","arguments":null}"""
+            val args = call("call_1", "{\"x\":1}", "fc_1")
+            for ((streamed, final) in listOf(nullArgs to args, args to nullArgs)) {
+                server.enqueueSse(done(0, streamed) + completed(final))
+                assertEquals(
+                    "{\"x\":1}",
+                    model()
+                        .complete(Kit.request())
+                        .toolCalls
+                        .single()
+                        .argsJson,
+                )
+            }
+            val hi = message(text("hi"))
+            for ((streamed, final) in listOf(message("null") to hi, hi to message("null"))) {
+                server.enqueueSse(done(0, streamed) + completed(final))
+                assertEquals(listOf(Part.Text("hi")), model().complete(Kit.request()).parts)
+            }
+        }
+
+    @Test
+    fun `ids the adapter does not use may differ`() =
+        runTest {
+            server.enqueueSse(done(0, call("call_a")) + completed(call("call_a", id = "fc_other")))
+            assertEquals(listOf("call_a"), model().complete(Kit.request()).toolCalls.map { it.id.value })
+            server.enqueueSse(done(0, message(text("hi"))) + completed(message(text("hi"), id = "msg_2")))
+            assertEquals(listOf(Part.Text("hi")), model().complete(Kit.request()).parts)
+        }
+
+    @Test
+    fun `reasoning must agree on id and encrypted content, and keeps every other field`() =
+        runTest {
+            val streamed = """{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"enc"}"""
+            val final =
+                """{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"s"}],""" +
+                    """"encrypted_content":null,"status":"completed"}"""
+            server.enqueueSse(done(0, streamed) + completed(final))
+            val part = model().complete(Kit.request()).parts.single() as Part.Reasoning
+            val opaque = part.opaque as JsonObject
+            assertEquals("s", part.summary, "the final summary")
+            assertEquals(JsonPrimitive("enc"), opaque["encrypted_content"], "the streamed encrypted content")
+            assertEquals(JsonPrimitive("completed"), opaque["status"])
+            for (other in listOf(streamed.replace("rs_1", "rs_2"), streamed.replace("\"enc\"", "\"other\""))) {
+                server.enqueueSse(done(0, streamed) + completed(other))
+                assertThrows<ModelError.BadResponse>(other) { model().complete(Kit.request()) }
+            }
+        }
+
+    @Test
+    fun `messages must agree on content types and texts`() =
+        runTest {
+            for (other in listOf(text("bye"), refusal, "[]")) {
+                server.enqueueSse(done(0, message(text("hi"))) + completed(message(other)))
+                assertThrows<ModelError.BadResponse>(other) { model().complete(Kit.request()) }
             }
         }
 }
