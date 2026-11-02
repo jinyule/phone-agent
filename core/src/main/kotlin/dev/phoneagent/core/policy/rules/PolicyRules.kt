@@ -35,7 +35,7 @@ public class PolicyRules(
     private val apps = RefusedApps(ownPackages, ownLabels, BlockedApps.DEFAULT)
 
     /** Which elements are risky to activate; the screen format marks them ⚠. */
-    public val lexicon: RiskLexicon = RulesLexicon(reading.risks)
+    public val lexicon: RiskLexicon = RulesLexicon(reading)
 
     /** What a call would do; the runtime calls it right before [engine]. */
     public val resolver: IntentResolver = RulesResolver(reading)

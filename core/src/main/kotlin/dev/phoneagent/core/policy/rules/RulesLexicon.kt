@@ -11,10 +11,11 @@ import dev.phoneagent.core.ports.UiElement
  * answers ⚠, so the mark and the verdict agree.
  */
 internal class RulesLexicon(
-    private val risks: Risks,
+    private val reading: Reading,
 ) : RiskLexicon {
+    /** `null` on a screen beyond the limits ([Reading.readable]): the engine refuses every action there. */
     override fun activationRisk(
         element: UiElement,
         screen: ScreenSnapshot,
-    ): ElementRisk? = risks.activation(element, screen).risk
+    ): ElementRisk? = if (reading.readable(screen)) reading.risks.activation(element, screen).risk else null
 }

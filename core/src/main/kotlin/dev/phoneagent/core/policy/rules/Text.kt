@@ -18,14 +18,14 @@ internal object Text {
     private val CAMEL = Regex("([a-z0-9])([A-Z])")
     private val ID_SEPARATORS = Regex("[_.\\-]+")
 
-    /** Notes in brackets ("《服务协议》", "（共计¥88）", "(3)"): not part of what a button says it does. */
-    private val NOTES = Regex("[(（\\[【《〈「『<][^)）\\]】》〉」』>]*[)）\\]】》〉」』>]")
-
-    /** Amounts and counts ("¥1,299.00", "123.45 元", "3件"), after [normalize]. */
+    /**
+     * Amounts and counts ("¥1,299.00", "123.45 元", "3件"), after [normalize]. Runs of spaces
+     * inside are bounded, so a match costs time in proportion to what it covers.
+     */
     private val NUMBERS =
         Regex(
-            "(?:us\\$|hk\\$|nt\\$|s\\$|a\\$|c\\$|rmb|cny|usd|hkd|eur|gbp|jpy|[$¥€£])?\\s*\\d[\\d,.]*\\s*万?\\s*" +
-                "(?:元|块|美元|港元|港币|欧元|英镑|日元|rmb|cny|usd|hkd|eur|gbp|jpy|件|个|份|项|张|次)?",
+            "(?:us\\$|hk\\$|nt\\$|s\\$|a\\$|c\\$|rmb|cny|usd|hkd|eur|gbp|jpy|[$¥€£])?\\s{0,8}\\d[\\d,.]*" +
+                "\\s{0,8}万?\\s{0,8}(?:元|块|美元|港元|港币|欧元|英镑|日元|rmb|cny|usd|hkd|eur|gbp|jpy|件|个|份|项|张|次)?",
         )
 
     /**
@@ -79,7 +79,7 @@ internal object Text {
     /** [words] in [spaced] form, for English phrases. */
     fun phrase(raw: String): String = stripped(raw).trim().replace(WHITESPACE, " ")
 
-    private fun stripped(raw: String): String = normalize(raw).replace(NOTES, " ").replace(NUMBERS, " ")
+    private fun stripped(raw: String): String = withoutNotes(normalize(raw)).replace(NUMBERS, " ")
 
     /** Words of a resource id's last segment: split at `_`, `-`, `.` and camel case, lower case. */
     fun idWords(resourceId: String): List<String> =
@@ -98,6 +98,32 @@ internal object Text {
             }
         }
     }
+}
+
+/** Brackets that open a note ("《服务协议》", "（共计¥88）", "(3)") and those that close one, of any kind. */
+private const val OPENERS = "(（[【《〈「『<"
+private val CLOSERS = charArrayOf(')', '）', ']', '】', '》', '〉', '」', '』', '>')
+
+/**
+ * [text] with every bracketed note replaced by a space: from an opening bracket to the next closing
+ * one of any kind; an opening bracket with no closing one after it stays. Notes are not part of
+ * what a button says it does. One pass over [text]: each character is looked at a bounded number
+ * of times.
+ */
+private fun withoutNotes(text: String): String {
+    val last = text.lastIndexOfAny(CLOSERS)
+    val out = StringBuilder(text.length)
+    var at = 0
+    while (at < text.length) {
+        if (at < last && text[at] in OPENERS) {
+            out.append(' ')
+            at = text.indexOfAny(CLOSERS, at + 1) + 1
+        } else {
+            out.append(text[at])
+            at++
+        }
+    }
+    return out.toString()
 }
 
 /** Currency words after an amount, in [Text.compact] form, as one regex group. */

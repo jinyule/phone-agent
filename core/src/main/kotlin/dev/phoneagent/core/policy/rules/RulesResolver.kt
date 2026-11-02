@@ -68,11 +68,18 @@ internal class RulesResolver(
             }
 
             is ScreenStep -> {
-                if (screen == null) blind(step) else screenIntents.resolve(step, screen)
+                when {
+                    screen == null -> blind(step)
+                    !reading.readable(screen) -> blind(step).copy(pkg = screen.pkg)
+                    else -> screenIntents.resolve(step, screen)
+                }
             }
         }
 
-    /** Without a screen nothing can be looked up: typing that submits and Enter count as reaching out. */
+    /**
+     * Without a screen, or on one beyond the limits ([Reading.readable]), nothing can be looked
+     * up: typing that submits and Enter count as reaching out.
+     */
     private fun blind(step: ScreenStep): ActionIntent {
         val sends = (step is Step.Type && step.submit) || step == Step.Key(SystemKey.ENTER)
         return when {

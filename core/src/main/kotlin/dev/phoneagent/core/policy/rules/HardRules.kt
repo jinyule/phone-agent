@@ -52,7 +52,8 @@ internal class HardRules(
      * sensitive settings page opened, shown or acted on; on the settings pages of one app (info,
      * storage, their dialogs), the whole page of a refused app, and for any other app (or one it
      * cannot tell) stopping, clearing, disabling or uninstalling it, also by confirming a dialog
-     * that says so; a launcher icon of a refused app.
+     * that says so; a launcher icon of a refused app; any action on or reading of a screen beyond
+     * the limits ([Reading.readable]), since none of this can be checked there.
      */
     fun refusal(
         step: Step,
@@ -60,12 +61,10 @@ internal class HardRules(
         screen: ScreenSnapshot?,
     ): Verdict? {
         val onScreen =
-            if (screen != null &&
-                (step is ScreenStep || step == Step.Observe)
-            ) {
-                shown(step, intent, screen)
-            } else {
-                null
+            when {
+                screen == null || (step !is ScreenStep && step != Step.Observe) -> null
+                !reading.readable(screen) -> Refusal.UNREADABLE_SCREEN
+                else -> shown(step, intent, screen)
             }
         return (apps.byPackage(intent.pkg) ?: apps.byPackage(detailsOf(step)) ?: opened(step) ?: onScreen)?.verdict()
     }

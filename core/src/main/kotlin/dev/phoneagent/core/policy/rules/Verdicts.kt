@@ -33,6 +33,10 @@ internal enum class Refusal(
         "hard.app_management",
         "不能在系统设置里强行停止、清除数据、卸载 App 或修改权限。请返回（phone_key back），或者告诉用户需要用户自己操作。",
     ),
+    UNREADABLE_SCREEN(
+        "screen.unreadable",
+        "这一屏内容太多或者结构异常，安全策略检查不了，所以没有执行。请离开这个界面（phone_key back 或 home），换一种方式继续，或者告诉用户。",
+    ),
     SPEND_UNATTENDED(
         "spend.unattended",
         "这是无人值守的任务，没有人能批准付款，所以没有付款。不要换别的方式付款。请用 end_not_done 结束，并说明付款还需要用户本人完成。",

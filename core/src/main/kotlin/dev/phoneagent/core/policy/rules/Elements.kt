@@ -18,7 +18,7 @@ internal object Elements {
     fun byRef(
         screen: ScreenSnapshot,
         ref: ElementRef,
-    ): UiElement? = screen.elements.firstOrNull { it.ref == ref }
+    ): UiElement? = ScreenIndex.of(screen).byRef(ref)
 
     fun editable(element: UiElement): Boolean =
         element.role == ElementRole.INPUT || ElementState.EDITABLE in element.states
@@ -41,21 +41,7 @@ internal object Elements {
     fun content(
         element: UiElement,
         screen: ScreenSnapshot,
-    ): List<String> {
-        val children = screen.elements.groupBy { it.parent }
-        val center = Geometry.center(element.bounds)
-        val inside = mutableSetOf(element.ref)
-        val queue = ArrayDeque(listOf(element.ref))
-        while (queue.isNotEmpty()) {
-            for (child in children[queue.removeFirst()].orEmpty()) {
-                val separate = clickable(child) && !Geometry.contains(child.bounds, center.x, center.y)
-                if (!separate && inside.add(child.ref)) queue.addLast(child.ref)
-            }
-        }
-        return screen.elements
-            .filter { it.ref in inside && it.ref != element.ref }
-            .mapNotNull { it.name?.takeIf(String::isNotBlank) }
-    }
+    ): List<String> = ScreenIndex.of(screen).content(element)
 
     /** Visible text on [screen]: element names and OCR lines. */
     fun pieces(screen: ScreenSnapshot): List<Piece> =
@@ -71,16 +57,20 @@ internal object Elements {
         screen: ScreenSnapshot,
     ): List<String> =
         screen.elements
-            .filter { it.ref != target.ref && (target.window == null || it.window == target.window) }
+            .filter { around(it, target) }
             .mapNotNull { it.name?.takeIf(String::isNotBlank) } + screen.ocr.orEmpty().map { it.text }
+
+    /** [element] is another element in [target]'s window (any element when that window is unknown). */
+    fun around(
+        element: UiElement,
+        target: UiElement,
+    ): Boolean = element.ref != target.ref && (target.window == null || element.window == target.window)
 }
 
 /** Which element a touch reaches, as the actuator (WP07) delivers taps. */
 internal object Tree {
     /** How many ancestors a tap by ref climbs to find the control that takes the click (as the actuator does). */
     private const val MAX_ANCESTORS = 8
-
-    private val BY_AREA: Comparator<UiElement> = compareBy { Geometry.area(it.bounds) }
 
     /**
      * The control a tap by ref on [element] activates: [element] when it takes the click, else the
@@ -92,7 +82,7 @@ internal object Tree {
         screen: ScreenSnapshot,
     ): UiElement? {
         val center = Geometry.center(element.bounds)
-        return (sequenceOf(element) + ancestors(element, screen))
+        return (sequenceOf(element) + ScreenIndex.of(screen).ancestors(element))
             .take(MAX_ANCESTORS + 1)
             .firstOrNull { Elements.clickable(it) && Geometry.contains(it.bounds, center.x, center.y) }
     }
@@ -106,35 +96,11 @@ internal object Tree {
         screen: ScreenSnapshot,
         x: Int,
         y: Int,
-    ): List<UiElement> {
-        val hit = screen.elements.filter { Geometry.contains(it.bounds, x, y) }
-        val controls = hit.filter(Elements::clickable)
-        val innermost = controls.filter { c -> controls.none { it !== c && within(it, c, screen) } }
-        return innermost.sortedWith(BY_AREA).ifEmpty { listOfNotNull(hit.minWithOrNull(BY_AREA)) }
-    }
+    ): List<UiElement> = ScreenIndex.of(screen).under(x, y)
 
     /** Whether some ancestor of [element] takes clicks: it is part of a control. */
     fun inControl(
         element: UiElement,
         screen: ScreenSnapshot,
-    ): Boolean = ancestors(element, screen).any(Elements::clickable)
-
-    /** [element] lies inside [ancestor] in the tree. */
-    private fun within(
-        element: UiElement,
-        ancestor: UiElement,
-        screen: ScreenSnapshot,
-    ): Boolean = ancestors(element, screen).any { it === ancestor }
-
-    /** [element]'s ancestors, nearest first; a cyclic tree ends after as many steps as there are elements. */
-    private fun ancestors(
-        element: UiElement,
-        screen: ScreenSnapshot,
-    ): Sequence<UiElement> =
-        generateSequence(parentOf(element, screen)) { parentOf(it, screen) }.take(screen.elements.size)
-
-    private fun parentOf(
-        element: UiElement,
-        screen: ScreenSnapshot,
-    ): UiElement? = element.parent?.let { Elements.byRef(screen, it) }
+    ): Boolean = ScreenIndex.of(screen).inControl(element)
 }

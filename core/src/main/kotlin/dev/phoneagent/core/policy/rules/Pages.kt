@@ -17,7 +17,7 @@ import java.util.Locale
  */
 internal class Pages(
     private val tuning: PolicyTuning,
-    private val amounts: Amounts,
+    amounts: Amounts,
 ) {
     /**
      * A login page: flagged; or it names a login flow ("本机号码一键登录", "验证码登录") in a short
@@ -62,9 +62,13 @@ internal class Pages(
 
     fun isPaymentPassword(screen: ScreenSnapshot): Boolean = mentions(screen, PAYMENT_PASSWORD)
 
-    /** A checkout or payment sheet: flagged, shows a total, or lists payment methods. */
-    fun isPayment(screen: ScreenSnapshot): Boolean =
-        ScreenFlag.PAYMENT in screen.flags || amounts.showsTotal(screen) || mentions(screen, PAY_SHEET)
+    private val payment =
+        PerScreen { screen ->
+            ScreenFlag.PAYMENT in screen.flags || amounts.showsTotal(screen) || mentions(screen, PAY_SHEET)
+        }
+
+    /** A checkout or payment sheet: flagged, shows a total, or lists payment methods. Read once per snapshot. */
+    fun isPayment(screen: ScreenSnapshot): Boolean = payment.of(screen)
 
     /** The page heading for a confirmation card: the first named text in the top band. */
     fun title(screen: ScreenSnapshot): String? =

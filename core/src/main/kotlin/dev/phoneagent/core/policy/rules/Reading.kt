@@ -33,8 +33,21 @@ internal class Reading(
         return when {
             intent.kind != IntentKind.SPEND -> Price.Absent
             stated != null -> Price.Known(stated)
+            screen != null && !readable(screen) -> Price.Unclear
             else -> amounts.forSpend(label(intent, screen), screen)
         }
+    }
+
+    /**
+     * Whether [screen] is within the limits of [tuning] (policy-rules.md §8): no more elements
+     * and OCR lines, characters of text and levels of tree than allowed, and no cycle. Every step
+     * of reading a screen within them takes time in proportion to it; a screen beyond them is not
+     * read at all, and what depends on it is treated as unknown.
+     */
+    fun readable(screen: ScreenSnapshot): Boolean {
+        if (screen.elements.size + screen.ocr.orEmpty().size > tuning.maxElements) return false
+        val index = ScreenIndex.of(screen)
+        return index.textLength <= tuning.maxScreenText && index.depth <= tuning.maxDepth
     }
 
     /** The label of the control [intent] acts on, or "" when there is none. */

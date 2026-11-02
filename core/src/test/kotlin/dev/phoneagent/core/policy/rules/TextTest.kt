@@ -41,6 +41,24 @@ class TextTest {
     }
 
     @Test
+    fun `a note runs to the next closing bracket of any kind, and an opening one without a closing one stays`() {
+        assertEquals("ac", Text.words("a(b)c"))
+        assertEquals("b", Text.words("(a]b"))
+        assertEquals("b", Text.words("((a)b"))
+        assertEquals("a(b", Text.words("a(b"))
+        assertEquals("(y", Text.words("《x》(y"))
+        assertEquals("pay later", Text.phrase("Pay (now) later"))
+        assertEquals("(".repeat(5) + "x", Text.words("(".repeat(5) + "x"))
+    }
+
+    @Test
+    fun `a currency mark further than eight spaces from a number is not part of the amount`() {
+        assertEquals("", Text.words("¥" + " ".repeat(8) + "20元"))
+        assertEquals("¥", Text.words("¥" + " ".repeat(9) + "20元"))
+        assertEquals("x", Text.words(" ".repeat(100) + "x"))
+    }
+
+    @Test
     fun `words leave out notes, amounts and counts`() {
         assertEquals("同意并支付", Text.words("同意《服务协议》并支付 ¥1,299.00"))
         assertEquals("删除", Text.words("删除 3件"))

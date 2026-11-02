@@ -41,6 +41,23 @@ internal class Fields(
     private fun secretClass(screen: ScreenSnapshot): FieldClass =
         if (pages.isPaymentPassword(screen)) FieldClass.PAYMENT_PASSWORD else FieldClass.PASSWORD
 
+    /** The elements labelled to send and those labelled "搜索" on a screen, read once per snapshot. */
+    private val buttons =
+        PerScreen { screen ->
+            val labelled = screen.elements.map { it to Elements.label(it, screen) }
+            Buttons(
+                sends = labelled.filter { (_, label) -> sends(label, screen) }.map { it.first },
+                searches = labelled.filter { (_, label) -> searches(label) }.map { it.first },
+            )
+        }
+
+    private fun sends(
+        label: String,
+        screen: ScreenSnapshot,
+    ): Boolean = lexicon.classify(lexicon.read(label), screen)?.kind == IntentKind.OUTWARD
+
+    private fun searches(label: String): Boolean = lexicon.whole(label) && Text.bare(label) in SEARCH
+
     /** Enter in this field searches rather than sends: it says so, and nothing on its row sends. */
     fun isSearch(
         field: UiElement,
@@ -48,10 +65,10 @@ internal class Fields(
     ): Boolean {
         val own = Text.compact(listOfNotNull(field.hint, field.name).joinToString(" "))
         val ids = field.resourceId?.let(Text::idWords).orEmpty()
-        val row = screen.elements.filter { it.ref != field.ref && Geometry.sameRow(it.bounds, field.bounds) }
-        val sendsOnRow = row.any { lexicon.classify(Elements.label(it, screen))?.kind == IntentKind.OUTWARD }
-        val searchesOnRow = row.any { Text.bare(Elements.label(it, screen)) in SEARCH }
-        return !sendsOnRow && ("搜索" in own || "search" in own || "search" in ids || searchesOnRow)
+        val found = buttons.of(screen)
+        val onRow = { e: UiElement -> e.ref != field.ref && Geometry.sameRow(e.bounds, field.bounds) }
+        return found.sends.none(onRow) &&
+            ("搜索" in own || "search" in own || "search" in ids || found.searches.any(onRow))
     }
 
     /**
@@ -70,22 +87,28 @@ internal class Fields(
         val clears = clearWord(label) || "clear" in element.resourceId?.let(Text::idWords).orEmpty()
         val icon = label.isBlank() && element.resourceId == null
         val drawnClear = texts.isNotEmpty() && texts.all(::clearWord)
-        val fields = screen.elements.filter { it.ref != element.ref && Elements.editable(it) }
+        val fields = ScreenIndex.of(screen).editables.filter { it.ref != element.ref }
         val near =
             fields.any { field ->
                 val inside = Geometry.inside(element.bounds, field.bounds)
                 val iconClears = icon && inside && (drawnClear || (texts.isEmpty() && !field.value.isNullOrEmpty()))
                 iconClears || (clears && (inside || next(element, field)))
             }
-        return near && texts.none(::namesRisk)
+        return near && texts.none { namesRisk(it, screen) }
     }
 
     /** [text] on a would-be clear button names a risk other than clearing the field. */
-    private fun namesRisk(text: String): Boolean = !clearWord(text) && lexicon.ofControl(text) != null
+    private fun namesRisk(
+        text: String,
+        screen: ScreenSnapshot,
+    ): Boolean = !clearWord(text) && lexicon.ofControl(text, screen) != null
 
-    /** A [Words.FIELD_CLEAR] entry: a word ([Text.bare] form) or a symbol such as "×" ([Text.compact] form). */
+    /**
+     * A [Words.FIELD_CLEAR] entry: a word ([Text.bare] form) or a symbol such as "×" ([Text.compact]
+     * form); never a text longer than what is read of a label ([Lexicon.whole]).
+     */
     private fun clearWord(text: String): Boolean =
-        Text.bare(text) in Words.FIELD_CLEAR || Text.compact(text) in Words.FIELD_CLEAR
+        lexicon.whole(text) && (Text.bare(text) in Words.FIELD_CLEAR || Text.compact(text) in Words.FIELD_CLEAR)
 
     private fun next(
         element: UiElement,
@@ -97,7 +120,7 @@ internal class Fields(
 
     /** The field `phone_type` without a ref types into: the focused editable, else the only editable. */
     fun typingTarget(screen: ScreenSnapshot): UiElement? {
-        val fields = screen.elements.filter(Elements::editable)
+        val fields = ScreenIndex.of(screen).editables
         return fields.firstOrNull { ElementState.FOCUSED in it.states } ?: fields.singleOrNull()
     }
 
@@ -140,3 +163,9 @@ private val CLASSES: List<Triple<FieldClass, List<String>, Set<String>>> =
     )
 
 private val SEARCH = setOf("搜索", "search")
+
+/** Elements of one screen whose label sends, and those whose label is a search button. */
+private class Buttons(
+    val sends: List<UiElement>,
+    val searches: List<UiElement>,
+)

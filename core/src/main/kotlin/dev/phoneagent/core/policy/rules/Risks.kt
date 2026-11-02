@@ -5,6 +5,7 @@ import dev.phoneagent.core.policy.IntentKind
 import dev.phoneagent.core.ports.ElementRole
 import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.ports.UiElement
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * What a touch activates and how risky that is.
@@ -36,6 +37,12 @@ internal class Risks(
 ) {
     private val byRisk: Comparator<Judged> = compareBy { severity(it.risk?.kind) }
 
+    /** Clicks of a control, by the control and the OCR lines at the point; read once per snapshot. */
+    private val clicks = PerScreen { ConcurrentHashMap<Pair<UiElement, List<String>>, Assessment>() }
+
+    /** Touches at a point; read once per snapshot. */
+    private val touches = PerScreen { ConcurrentHashMap<Aim.Point, Assessment>() }
+
     /** A tap aimed at [aim]. */
     fun tap(
         aim: Aim,
@@ -56,7 +63,8 @@ internal class Risks(
 
     /**
      * A tap by ref on [element], as the actuator performs it: the click of the control that takes
-     * it ([Tree.clickTarget]), else a touch at [element]'s center.
+     * it ([Tree.clickTarget]), else a touch at [element]'s center. The click depends on the point
+     * only through the OCR lines there, so every element of one control is read once.
      */
     fun activation(
         element: UiElement,
@@ -64,14 +72,19 @@ internal class Risks(
     ): Assessment {
         val control = Tree.clickTarget(element, screen)
         val center = Geometry.center(element.bounds)
-        return if (control == null) at(center, screen) else assess(listOf(control), center, screen)
+        return if (control == null) {
+            at(center, screen)
+        } else {
+            val key = control to Evidence.drawnAt(center, screen)
+            clicks.of(screen).computeIfAbsent(key) { assess(listOf(control), center, screen) }
+        }
     }
 
     /** A touch at [point]: every control that may take it counts ([Tree.under]), and the riskiest decides. */
     fun at(
         point: Aim.Point,
         screen: ScreenSnapshot,
-    ): Assessment = assess(Tree.under(screen, point.x, point.y), point, screen)
+    ): Assessment = touches.of(screen).computeIfAbsent(point) { assess(Tree.under(screen, it.x, it.y), it, screen) }
 
     /** The visible text on [element], as a tap by ref at its center sees it. */
     fun texts(
@@ -183,7 +196,7 @@ internal class Controls(
     fun ofText(
         texts: List<String>,
         screen: ScreenSnapshot,
-    ): ElementRisk? = best(texts.mapNotNull(lexicon::classify)) ?: unlabeled(texts, screen)
+    ): ElementRisk? = best(texts.mapNotNull { lexicon.classify(it, screen) }) ?: unlabeled(texts, screen)
 
     private fun settingsEntry(
         texts: List<String>,
@@ -191,11 +204,11 @@ internal class Controls(
     ): ElementRisk? = settings.sensitiveEntry(texts, screen)?.let { ElementRisk(IntentKind.SETTINGS, "settings:$it") }
 
     /**
-     * The riskiest word among the control's own label, its label as a whole and each text; an
-     * icon's resource id when there is no text; a generic button by its dialog. A strong word
-     * counts at any length in the control's own label: its name, or the one text it shows, or on a
-     * payment page any text on it. A control that shows several texts elsewhere (a list row: a
-     * name, a preview, a time) is read text by text, so a long preview is not a button.
+     * The riskiest word among the control's own label, its label as a whole ([Lexicon.read]) and
+     * each text; an icon's resource id when there is no text; a generic button by its dialog. A
+     * strong word counts at any length in the control's own label: its name, or the one text it
+     * shows, or on a payment page any text on it. A control that shows several texts elsewhere (a
+     * list row: a name, a preview, a time) is read text by text, so a long preview is not a button.
      */
     private fun labelled(
         element: UiElement,
@@ -203,13 +216,14 @@ internal class Controls(
         screen: ScreenSnapshot,
     ): ElementRisk? {
         val label = Elements.label(element, screen)
+        val read = lexicon.read(label)
         val own = listOfNotNull(element.name?.takeIf(String::isNotBlank) ?: texts.singleOrNull())
         val whole = if (pages.isPayment(screen)) texts else own
         val hits =
-            whole.mapNotNull(lexicon::ofControl) +
-                listOfNotNull(lexicon.classify(label), lexicon.leading(label), icon(element, texts)) +
-                texts.mapNotNull(lexicon::classify)
-        return best(hits) ?: if (lexicon.isGeneric(label)) generic(element, screen, label) else unlabeled(texts, screen)
+            whole.mapNotNull { lexicon.ofControl(it, screen) } +
+                listOfNotNull(lexicon.classify(read, screen), lexicon.leading(read), icon(element, texts)) +
+                texts.mapNotNull { lexicon.classify(it, screen) }
+        return best(hits) ?: if (lexicon.isGeneric(label)) generic(element, screen, read) else unlabeled(texts, screen)
     }
 
     private fun best(hits: List<Hit>): ElementRisk? =
@@ -238,15 +252,33 @@ internal class Controls(
     }
 
     /**
-     * "确定" and the like do what the dialog around them says: pay on a payment page or when the
-     * dialog mentions paying, else delete or reach out when it mentions that, else nothing.
+     * The dialog risk of every named element and OCR line on a screen, in reading order, OCR
+     * last, each with the element it is on (`null` for OCR); read once per snapshot.
+     */
+    private val contextHits =
+        PerScreen { screen ->
+            val named = screen.elements.mapNotNull { e -> e.name?.takeIf(String::isNotBlank)?.let { e to it } }
+            val drawn = screen.ocr.orEmpty().map { null to it.text }
+            (named + drawn).mapNotNull { (on, text) -> lexicon.inContext(text)?.let { on to it } }
+        }
+
+    /**
+     * "确定" and the like do what the dialog around them says ([Elements.context]): pay on a
+     * payment page or when the dialog mentions paying, else delete or reach out when it mentions
+     * that, else nothing.
      */
     private fun generic(
         element: UiElement,
         screen: ScreenSnapshot,
         label: String,
     ): ElementRisk? {
-        val hits = Elements.context(element, screen).mapNotNull(lexicon::inContext)
+        val hits =
+            contextHits.of(screen).mapNotNull { (on, hit) ->
+                hit.takeIf {
+                    on == null ||
+                        Elements.around(on, element)
+                }
+            }
         val spend =
             hits.firstOrNull { it.kind == IntentKind.SPEND }
                 ?: Hit(IntentKind.SPEND, "payment page").takeIf { pages.isPayment(screen) }
@@ -259,12 +291,10 @@ internal class Controls(
         element: UiElement,
         screen: ScreenSnapshot,
     ): ElementRisk? {
-        val toggles = element.role in TOGGLES || screen.elements.any { it.parent == element.ref && it.role in TOGGLES }
-        val acts = Text.bare(Elements.label(element, screen)) in SETTINGS_ACTIONS
-        return ElementRisk(IntentKind.SETTINGS, "settings:control").takeIf {
-            screen.pkg == Pages.SETTINGS &&
-                (toggles || acts)
-        }
+        if (screen.pkg != Pages.SETTINGS) return null
+        val toggles = element.role in TOGGLES || ScreenIndex.of(screen).children(element).any { it.role in TOGGLES }
+        val acts = toggles || Text.bare(lexicon.read(Elements.label(element, screen))) in SETTINGS_ACTIONS
+        return ElementRisk(IntentKind.SETTINGS, "settings:control").takeIf { acts }
     }
 }
 

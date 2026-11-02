@@ -179,31 +179,38 @@ internal object Prices {
 internal class Amounts(
     private val tuning: PolicyTuning,
 ) {
-    private val byRank: Comparator<Pair<Int, Price>> = compareBy { it.first }
-
     /** Whether [screen] shows a total label (合计, 实付 …), loaded or not: a checkout. */
     fun showsTotal(screen: ScreenSnapshot): Boolean = Elements.pieces(screen).any { totalLabel(it.text) != null }
 
     /**
      * What a spend through a control labelled [label] is about: an amount in the label itself,
-     * else the amount after the best-ranked total label (the last one in reading order among
-     * equals), else the only distinct amount on [screen]; several distinct amounts are unclear.
+     * else the amount after the best-ranked total label with one after it (the last one in reading
+     * order among equals), else the only distinct amount on [screen]; several distinct amounts
+     * are unclear.
      */
     fun forSpend(
         label: String,
         screen: ScreenSnapshot?,
     ): Price = Prices.inLabel(label) ?: if (screen == null) Price.Absent else total(screen) ?: single(screen)
 
+    /**
+     * The amount after the best total label that has one, trying at most
+     * [PolicyTuning.totalsRead] labels best first, so a screen full of them is read in time in
+     * proportion to it; when more labels are shown and none of those has an amount, which one is
+     * paid is unclear.
+     */
     private fun total(screen: ScreenSnapshot): Price? {
         val pieces = Elements.pieces(screen)
-        val candidates =
-            pieces.mapNotNull { piece ->
-                totalLabel(piece.text)?.let { (rank, end) ->
-                    val after = Text.spaced(piece.text).substring(end) + " " + Geometry.rightOf(piece, pieces)
-                    following(after)?.let { rank to it }
-                }
+        val labels =
+            pieces
+                .mapNotNull { piece -> totalLabel(piece.text)?.let { (rank, end) -> Triple(piece, rank, end) } }
+                .asReversed()
+                .sortedBy { it.second }
+        val found =
+            labels.take(tuning.totalsRead).firstNotNullOfOrNull { (piece, _, end) ->
+                following(Text.spaced(piece.text).substring(end) + " " + Geometry.rightOf(piece, pieces))
             }
-        return candidates.asReversed().minWithOrNull(byRank)?.second
+        return found ?: Price.Unclear.takeIf { labels.size > tuning.totalsRead }
     }
 
     /** The best total label in [text] and where it ends in [Text.spaced] form, or `null`. */
