@@ -185,10 +185,22 @@ class PhaseOneToolsTest {
                             ToolResult(status, listOf(Part.Text("x")), JsonObject(emptyMap())),
                         ).state
                 }
-            assertEquals(StepState.REFUSED, states[ToolStatus.REFUSED])
-            assertEquals(StepState.UNKNOWN, states[ToolStatus.OUTCOME_UNKNOWN])
-            assertEquals(StepState.FAILED, states[ToolStatus.ERROR])
-            assertEquals(StepState.FAILED, states[ToolStatus.TIMEOUT])
+            // Stopped or timed out while running: it may have taken effect, so the card must not
+            // say "failed" (the user might do it again). Not started at all is a plain failure.
+            assertEquals(
+                mapOf(
+                    ToolStatus.OK to StepState.SUCCEEDED,
+                    ToolStatus.ERROR to StepState.FAILED,
+                    ToolStatus.REFUSED to StepState.REFUSED,
+                    ToolStatus.INVALID_ARGS to StepState.FAILED,
+                    ToolStatus.TIMEOUT to StepState.UNKNOWN,
+                    ToolStatus.CANCELLED to StepState.UNKNOWN,
+                    ToolStatus.SKIPPED to StepState.FAILED,
+                    ToolStatus.NOT_STARTED to StepState.FAILED,
+                    ToolStatus.OUTCOME_UNKNOWN to StepState.UNKNOWN,
+                ),
+                states,
+            )
             assertNull(observe.presentResult(call, ToolResult.ok("x")).image)
         }
 }

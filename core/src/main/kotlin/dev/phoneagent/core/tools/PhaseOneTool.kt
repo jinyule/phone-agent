@@ -77,18 +77,24 @@ internal abstract class PhaseOneTool(
             is JsonObject -> value.toString()
         }
 
+    /**
+     * The card state of a result. A call stopped ([ToolStatus.CANCELLED]) or timed out while it may
+     * already have acted shows as [StepState.UNKNOWN], like [ToolStatus.OUTCOME_UNKNOWN], so the
+     * user is not told it failed and does it again; [ToolStatus.NOT_STARTED] never ran and fails.
+     */
     private fun stateOf(status: ToolStatus): StepState =
         when (status) {
             ToolStatus.OK -> StepState.SUCCEEDED
 
             ToolStatus.REFUSED -> StepState.REFUSED
 
-            ToolStatus.OUTCOME_UNKNOWN -> StepState.UNKNOWN
+            ToolStatus.OUTCOME_UNKNOWN,
+            ToolStatus.TIMEOUT,
+            ToolStatus.CANCELLED,
+            -> StepState.UNKNOWN
 
             ToolStatus.ERROR,
             ToolStatus.INVALID_ARGS,
-            ToolStatus.TIMEOUT,
-            ToolStatus.CANCELLED,
             ToolStatus.SKIPPED,
             ToolStatus.NOT_STARTED,
             -> StepState.FAILED
