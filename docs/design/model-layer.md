@@ -134,7 +134,7 @@ data class WireProfile(
   - 适配器（WP03/WP04）实现它：按 `clampTo` 把档位钳制到 `info.capabilities.reasoningLevels`，再按自己 `mappingVersion` 的规则映射成 `reasoningEffort` 等线路项。钳制和映射在同一步完成，调用方不自己算。`ProviderProfile.wire(mappingVersion)` 是给适配器用的辅助函数，填来自 profile 的部分（凭据种类、headers 副本、推理字段与回传）。
   - 调用方：主循环（WP02）写 `request/header` 前调用，能力包写 `side/request` 前调用；两者把 `reasoning` 放进 `ChatRequest.reasoning`，把 `wire` 放进 `ChatRequest.wire`，并原样记进日志。**回放不调用 `prepare`**，两项都从日志取。
   - `ModelRouter` 把任务绑定到模型时，把 profile、能力和映射版本冻结进 ChatModel 实例，所以任务中途改设置不会改变 `prepare` 的结果。
-  - 适配器测试继承 core 测试源里的 `ChatModelContract`（稳定性、钳制、`prepare` 的结果能被 `complete` 接受、外来 `mappingVersion` 或凭据种类在发送前被拒）。
+  - 适配器测试继承 core 测试源里的 `ChatModelContract`（稳定性、钳制、`prepare` 的结果能被 `complete` 接受、外来 `mappingVersion` 或凭据种类在发送前被拒；`complete` 不改动已经给出的 settings（包括发出去的那份，原地修改也算）和之后 `prepare` 给出的 settings）。被测模型必须声明档位的真子集（不能是全部档位，也不能是 null），让某个档位真的被钳制，否则"先钳制再映射"查不出来，契约直接失败；真实模型档位未知时，测试里用声明了真子集的能力构造适配器。`ChatModelContractStrengthTest` 用带缺陷的 fake 证明这些检查会失败。
 - 回放时，同一个 `mappingVersion` 的规则加上日志里的请求，必须逐字节重建当时发出的请求。
 
 ---

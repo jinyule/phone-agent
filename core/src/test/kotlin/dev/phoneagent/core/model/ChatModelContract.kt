@@ -2,16 +2,20 @@ package dev.phoneagent.core.model
 
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 
 /**
  * The [ChatModel] contract every adapter test inherits (WP03, WP04), next to its own tests:
+ * - the subject's model declares a strict subset of the reasoning levels, so that some level
+ *   clamps to another and the two checks below can fail ([Subject]);
  * - [ChatModel.prepare] gives the same [RequestSettings] for the same input, one mapping version
  *   and one credential kind per instance, and the level clamped like [clampTo];
  * - the wire maps the clamped level: preparing the effective level gives the same wire;
- * - the settings stay the same after [ChatModel.complete] has run;
+ * - [ChatModel.complete] changes neither the settings already given out, the ones it sends
+ *   included (in place included), nor the ones [ChatModel.prepare] gives afterwards;
  * - settings already given out, and later ones, do not follow a change of the live settings the
  *   model was built from ([Subject.mutateLiveSettings]);
  * - [ChatModel.complete] accepts a request built from those settings and sends it once;
@@ -29,6 +33,11 @@ abstract class ChatModelContract {
      * The model under test, the number of requests its transport has sent so far, and a hook that
      * changes the live settings the model was built from (the user editing the provider profile),
      * or `null` when the adapter reads none.
+     *
+     * The model's `info.capabilities.reasoningLevels` is a strict subset of [ReasoningLevel]: not
+     * every level, and not `null` (unknown), since then no level clamps and mapping the level asked
+     * for instead of the clamped one goes unnoticed. Build the adapter under test with such
+     * capabilities even when the real model's are unknown; the contract fails otherwise.
      */
     class Subject(
         val model: ChatModel,
@@ -49,6 +58,17 @@ abstract class ChatModelContract {
             maxOutputTokens = OUTPUT_CAP,
             reasoning = settings.reasoning,
         )
+
+    @Test
+    fun `the subject declares reasoning levels that make some level clamp`() {
+        val supported =
+            subject()
+                .model.info.capabilities.reasoningLevels
+        assertTrue(
+            LEVELS.any { it != null && it.clampTo(supported) != it },
+            "the subject's model must declare a strict, non-null subset of reasoning levels, got $supported",
+        )
+    }
 
     @Test
     fun `prepare gives the same settings for the same input, with one mapping version and credential kind`() {
@@ -78,12 +98,24 @@ abstract class ChatModelContract {
     }
 
     @Test
-    fun `prepare gives the same settings after complete has run`() =
+    fun `complete changes neither the settings given out nor the ones prepared afterwards`() =
         runTest {
             val subject = subject()
-            val before = LEVELS.map { subject.model.prepare(it) }
-            LEVELS.forEach { subject.model.complete(request(subject.model.prepare(it))) }
-            assertEquals(before, LEVELS.map { subject.model.prepare(it) })
+            val given = LEVELS.map { subject.model.prepare(it) }
+            val frozen = given.map { it.copied() }
+            LEVELS.zip(given).forEach { (level, settings) ->
+                subject.model.complete(request(settings))
+                assertEquals(
+                    frozen,
+                    given,
+                    "settings given out, the ones sent included, after complete at level $level",
+                )
+                assertEquals(
+                    frozen,
+                    LEVELS.map { subject.model.prepare(it) },
+                    "settings prepared after complete at level $level",
+                )
+            }
         }
 
     @Test
@@ -92,10 +124,7 @@ abstract class ChatModelContract {
         val mutate = subject.mutateLiveSettings
         assumeTrue(mutate != null, "the adapter reads no live settings")
         val given = LEVELS.map { subject.model.prepare(it) }
-        val frozen =
-            given.map {
-                it.copy(wire = it.wire.copy(headers = it.wire.headers.toMap(), options = it.wire.options.toMap()))
-            }
+        val frozen = given.map { it.copied() }
         mutate?.invoke()
         assertEquals(frozen, given, "settings given out before the change")
         assertEquals(frozen, LEVELS.map { subject.model.prepare(it) }, "settings given out after the change")
@@ -132,5 +161,9 @@ abstract class ChatModelContract {
     private companion object {
         val LEVELS: List<ReasoningLevel?> = listOf(null) + ReasoningLevel.entries
         const val OUTPUT_CAP = 16
+
+        /** These settings with their own copies of the wire's maps, the only mutable parts. */
+        fun RequestSettings.copied(): RequestSettings =
+            copy(wire = wire.copy(headers = wire.headers.toMap(), options = wire.options.toMap()))
     }
 }

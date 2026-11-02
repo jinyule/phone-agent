@@ -27,7 +27,8 @@ public interface ChatModel {
      * `ChatRequest.wire`. Replay takes both from the log and never calls this.
      *
      * Stable for the life of this instance: the same [reasoning] always gives an equal result,
-     * whatever live settings do meanwhile, and collections in the snapshot are copies. The app's
+     * whatever live settings or [complete] do meanwhile, and collections in the snapshot are
+     * copies that nothing changes once given out, [complete] included. The app's
      * `ModelRouter` freezes the profile, the capabilities and the mapping version into the
      * instance when it binds the model to a task. Pure: no I/O, never throws.
      */
