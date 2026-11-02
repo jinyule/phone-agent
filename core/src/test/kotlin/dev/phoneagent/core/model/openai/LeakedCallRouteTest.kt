@@ -93,6 +93,8 @@ class LeakedCallRouteTest {
     fun `what a route allows is all settings may offer`() {
         val deepseek = Kit.profile(BASE, preset = "deepseek")
         assertEquals(setOf(DSML), WireOptions.defaultsFor(deepseek).allowedLeakedCalls(deepseek))
+        val stray = options(deepseek, emptySet(), declared = setOf(TOOL_CALL_TAG))
+        assertEquals(setOf(DSML), stray.allowedLeakedCalls(deepseek), "a preset route ignores a stray declaration")
         val official = Kit.profile("https://dashscope.aliyuncs.com/compatible-mode/v1")
         assertEquals(setOf(TOOL_CALL_TAG), WireOptions.defaultsFor(official).allowedLeakedCalls(official))
         val custom = Kit.profile(BASE)
