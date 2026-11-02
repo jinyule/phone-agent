@@ -212,14 +212,14 @@ public class ProviderProbe internal constructor(
      * as a tool step ([StopReason.TOOL_USE]) verifies anything: one cut at the output limit or
      * left incomplete fails even with the right call. A call recovered from the answer text does
      * not count either: the provider's tool channel is what is being verified. What it quotes
-     * from the reply is masked with [redactor], then cut.
+     * from the reply is masked with [redactor], then cut; arguments are masked as JSON
+     * ([Redactor.json]), so escapes cannot hide a secret.
      */
     private fun checkTrialCall(
         reply: ChatResponse,
         token: String,
         redactor: Redactor,
     ): String? {
-        fun quote(text: String) = redactor.text(text).take(SNIPPET)
         val call = reply.toolCalls.firstOrNull { it.name == TRIAL_TOOL }
         val stop = reply.stopReason
         return when {
@@ -229,7 +229,7 @@ public class ProviderProbe internal constructor(
 
             call == null -> {
                 "the model answered without calling the trial tool: " +
-                    quote(reply.parts.filterIsInstance<Part.Text>().joinToString(" ") { it.text })
+                    redactor.text(reply.parts.filterIsInstance<Part.Text>().joinToString(" ") { it.text }).take(SNIPPET)
             }
 
             reply.providerMetadata?.array(RECOVERED_TOOL_CALLS)?.contains(JsonPrimitive(call.id.value)) == true -> {
@@ -241,7 +241,7 @@ public class ProviderProbe internal constructor(
             }
 
             else -> {
-                "the trial tool got unexpected arguments: ${quote(call.argsJson)}"
+                "the trial tool got unexpected arguments: ${redactor.json(call.argsJson).take(SNIPPET)}"
             }
         }
     }

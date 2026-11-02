@@ -1,14 +1,22 @@
 package dev.phoneagent.core.model.openai
 
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import java.util.Collections
 import java.util.IdentityHashMap
 
 /**
  * Masks credentials in provider text before it reaches a [dev.phoneagent.core.model.ModelError]
  * message or cause, a [ProbeResult] or any diagnostic output (model-layer §2). Two layers: every
- * occurrence of the [secrets] a request used becomes [MASK]; then text shaped like a credential
+ * occurrence of the secrets a request used becomes [MASK], each as sent and in its standard JSON
+ * string escaping (`"` → `\"`, `\` → `\\`: [forms]); then text shaped like a credential
  * (`Bearer …`, `sk-…`, JWTs) is masked whether or not this request used it. Error codes and
- * parameter names never match these shapes, so the diagnosis survives.
+ * parameter names never match these shapes, so the diagnosis survives. JSON that may escape a
+ * secret in other ways (`\/`, `\u0073`) is masked string by string ([json]).
  *
  * Every cut comes after masking, with the whole set of secrets the run has sent: callers redact
  * the full text, then cut it. A reader that must stop early reads [reach] characters past its
@@ -17,11 +25,17 @@ import java.util.IdentityHashMap
 internal class Redactor(
     secrets: Iterable<String>,
 ) {
-    // Longest first, so a secret that contains another is masked whole.
-    private val secrets = secrets.filter { it.isNotEmpty() }.distinct().sortedByDescending { it.length }
+    private val secrets = secrets.filter { it.isNotEmpty() }.distinct()
+
+    /** Each secret as sent and JSON-escaped; longest first, so a form that contains another is masked whole. */
+    private val forms =
+        this.secrets
+            .flatMap { listOf(it, JsonPrimitive(it).toString().removeSurrounding("\"")) }
+            .distinct()
+            .sortedByDescending { it.length }
 
     /** How many UTF-8 bytes past a cut a reader must see so that every secret starting before it is whole. */
-    val reach: Int = (this.secrets.maxOfOrNull { it.encodeToByteArray().size } ?: 1) - 1
+    val reach: Int = (forms.maxOfOrNull { it.encodeToByteArray().size } ?: 1) - 1
 
     /** A redactor that also masks [secret]. */
     fun with(secret: String?): Redactor = if (secret.isNullOrEmpty()) this else Redactor(secrets + secret)
@@ -29,28 +43,51 @@ internal class Redactor(
     /** [text] with every credential masked. */
     fun text(text: String): String {
         var masked = text
-        for (secret in secrets) masked = masked.replace(secret, MASK)
+        for (form in forms) masked = masked.replace(form, MASK)
         masked = BEARER.replace(masked, "$1$MASK")
         return SHAPES.fold(masked) { acc, shape -> shape.replace(acc, MASK) }
     }
 
     /**
+     * [json] (text that should be JSON, such as call arguments) with every credential masked:
+     * when it parses, each string in it (keys too) is masked as decoded, then the whole is written
+     * back and masked as [text]; otherwise it is masked as [text].
+     */
+    fun json(json: String): String {
+        val parsed =
+            try {
+                Json.parseToJsonElement(json)
+            } catch (ignoredNotJson: SerializationException) {
+                // Not JSON: no escapes to decode, the text is all there is to mask.
+                null
+            }
+        return text(parsed?.let(::masked)?.toString() ?: json)
+    }
+
+    private fun masked(element: JsonElement): JsonElement =
+        when (element) {
+            is JsonObject -> JsonObject(element.entries.associate { (key, value) -> text(key) to masked(value) })
+            is JsonArray -> JsonArray(element.map(::masked))
+            is JsonPrimitive -> if (element.isString) JsonPrimitive(text(element.content)) else element
+        }
+
+    /**
      * The length of the end of [masked] (what [text] returned for text a read limit cut off) that
-     * may be the start of a credential that went on: the longest end that begins a secret, or a
+     * may be the start of a credential that went on: the longest end that begins a [forms] entry, or a
      * `sk-` key or JWT the cut left too short for its shape. The reader drops it.
      */
     fun openEnd(masked: String): Int {
         val secret =
-            (minOf(reach, masked.length) downTo 1).firstOrNull { n -> secrets.any { masked.endsWithStartOf(it, n) } }
+            (minOf(reach, masked.length) downTo 1).firstOrNull { n -> forms.any { masked.endsWithStartOf(it, n) } }
         val shape = OPEN_SHAPE.find(masked)?.let { masked.length - it.range.first }
         return maxOf(secret ?: 0, shape ?: 0)
     }
 
-    /** Whether the last [n] characters of this text are the first [n] of [secret]. */
+    /** Whether the last [n] characters of this text are the first [n] of [form]. */
     private fun String.endsWithStartOf(
-        secret: String,
+        form: String,
         n: Int,
-    ): Boolean = secret.length > n && regionMatches(length - n, secret, 0, n)
+    ): Boolean = form.length > n && regionMatches(length - n, form, 0, n)
 
     /**
      * [error] itself when no message it prints (causes and suppressed exceptions included) needs

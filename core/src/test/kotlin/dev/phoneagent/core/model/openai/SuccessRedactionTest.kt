@@ -12,6 +12,8 @@ import mockwebserver3.junit5.StartStop
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
 
 /**
  * What a provider echoes back in a reply that succeeds is masked too (model-layer §2): probe
@@ -49,6 +51,41 @@ class SuccessRedactionTest {
             val result = adapters.probe().testAndSave(Kit.profile(server.base()), Kit.MODEL, Kit.capabilities(), "t")
             assertTrue(result is ProbeResult.Failed, "the trial fails")
             assertClean("the probe result", result.toString())
+        }
+
+    @ParameterizedTest(name = "{0}")
+    @CsvSource(
+        delimiter = '|',
+        quoteCharacter = '`',
+        textBlock = """
+        quote     | placeholder"with-quote-0001     | {"token":"placeholder\"with-quote-0001"}
+        backslash | placeholder\with-backslash-01   | {"token":"placeholder\\with-backslash-01"}
+        slash     | placeholder/with-slash-00001    | {"token":"placeholder\/with-slash-00001"}""",
+    )
+    fun `trial arguments echoing the key behind JSON escapes are masked`(
+        name: String,
+        echoed: String,
+        args: String,
+    ) = runTest {
+        server.enqueueError(404, "{}")
+        server.enqueueSse(trialCall(args))
+        val probe = Kit.adapters(Keys(echoed)).probe()
+        val result = probe.testAndSave(Kit.profile(server.base()), Kit.MODEL, Kit.capabilities(), "t")
+        assertTrue(result is ProbeResult.Failed, "the trial fails")
+        val shown = result.toString()
+        assertFalse(shown.contains(echoed.take(PREFIX)), "$name: the result leaks the key (value not shown)")
+    }
+
+    @Test
+    fun `trial arguments hiding a key shape behind a JSON escape are masked`() =
+        runTest {
+            // Assembled at run time so secret scanners do not take the placeholder for a real key.
+            val shape = "sk-" + "abcdefghijkl"
+            server.enqueueError(404, "{}")
+            server.enqueueSse(trialCall("{\"token\":\"\\u0073" + shape.drop(1) + "\"}"))
+            val result = adapters.probe().testAndSave(Kit.profile(server.base()), Kit.MODEL, Kit.capabilities(), "t")
+            assertTrue(result is ProbeResult.Failed, "the trial fails")
+            assertFalse(result.toString().contains(shape.drop(1)), "the result leaks the key shape (value not shown)")
         }
 
     @Test

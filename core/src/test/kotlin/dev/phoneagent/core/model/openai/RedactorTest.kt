@@ -50,6 +50,36 @@ class RedactorTest {
     }
 
     @Test
+    fun `secrets are masked in their JSON escaping too`() {
+        val quoted = "placeholder\"with-quote-0001"
+        val backslashed = "placeholder\\with-backslash-01"
+        val redactor = Redactor(listOf(quoted, backslashed))
+        assertEquals(
+            """{"message":"bad key ***","param":"***"} and *** / ***""",
+            redactor.text(
+                """{"message":"bad key placeholder\"with-quote-0001","param":"placeholder\\with-backslash-01"}""" +
+                    " and $quoted / $backslashed",
+            ),
+        )
+    }
+
+    @Test
+    fun `JSON is masked string by string, whatever escapes it uses`() {
+        val slashed = "placeholder/with-slash-00001"
+        val redactor = Redactor(listOf(slashed))
+        // `\/` and `\u0070` hide the secret from a scan of the text; keys are masked too.
+        assertEquals(
+            """{"token":"***","***":[1,null,"***"]}""",
+            redactor.json(
+                """{"token":"placeholder\/with-slash-00001","$slashed":[1,null,"\u0070laceholder/with-slash-00001"]}""",
+            ),
+        )
+        // Assembled at run time so secret scanners do not take the placeholder for a real key.
+        assertEquals("""{"token":"***"}""", Redactor.SHAPES_ONLY.json("{\"token\":\"\\u0073k-" + "abcdefghijkl\"}"))
+        assertEquals("not json *** {", redactor.json("not json $slashed {"))
+    }
+
+    @Test
     fun `clean causes are kept as they are`() {
         val error = IOException("connection reset", IllegalStateException("inner"))
         assertSame(error, Redactor(listOf(secret)).cause(error))
