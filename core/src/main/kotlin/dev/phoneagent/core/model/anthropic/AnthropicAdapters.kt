@@ -119,14 +119,13 @@ public data class AnthropicTimeouts(
         } else {
             ConnectionPool(MAX_IDLE_CONNECTIONS, idleConnectionKeepAlive.inWholeNanoseconds, TimeUnit.NANOSECONDS)
         }
-
-    private companion object {
-        val MAX_KEEP_ALIVE = 5.minutes
-
-        /** OkHttp's default. */
-        const val MAX_IDLE_CONNECTIONS = 5
-    }
 }
+
+/** The longest [AnthropicTimeouts.idleConnectionKeepAlive]. */
+private val MAX_KEEP_ALIVE = 5.minutes
+
+/** Idle connections a pool that keeps any may hold: OkHttp's default. */
+private const val MAX_IDLE_CONNECTIONS = 5
 
 /** What every model of one [AnthropicAdapters] shares. */
 internal class AnthropicEnv(
