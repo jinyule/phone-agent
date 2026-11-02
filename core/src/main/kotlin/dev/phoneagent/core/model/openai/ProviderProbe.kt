@@ -14,6 +14,7 @@ import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.PromptBlock
 import dev.phoneagent.core.model.ProviderProfile
 import dev.phoneagent.core.model.Role
+import dev.phoneagent.core.model.StopReason
 import dev.phoneagent.core.model.ToolDef
 import dev.phoneagent.core.model.VerifiedCapability
 import dev.phoneagent.core.model.openai.WireSupport.array
@@ -186,34 +187,54 @@ public class ProviderProbe internal constructor(
     }
 
     /**
-     * Why [reply] is not the expected trial call, or `null` when it is. A call recovered from the
-     * answer text does not count: the provider's tool channel is what is being verified.
+     * Why [reply] is not the expected trial call, or `null` when it is. Only a reply that finished
+     * as a tool step ([StopReason.TOOL_USE]) verifies anything: one cut at the output limit or
+     * left incomplete fails even with the right call. A call recovered from the answer text does
+     * not count either: the provider's tool channel is what is being verified.
      */
     private fun checkTrialCall(
         reply: ChatResponse,
         token: String,
     ): String? {
-        val call =
-            reply.toolCalls.firstOrNull { it.name == TRIAL_TOOL }
-                ?: return "the model answered without calling the trial tool: " +
+        val call = reply.toolCalls.firstOrNull { it.name == TRIAL_TOOL }
+        val stop = reply.stopReason
+        return when {
+            stop != StopReason.TOOL_USE && (call != null || stop != StopReason.END_TURN) -> {
+                "the reply did not finish normally (stop reason $stop), so the trial call is not verified"
+            }
+
+            call == null -> {
+                "the model answered without calling the trial tool: " +
                     reply.parts
                         .filterIsInstance<Part.Text>()
                         .joinToString(" ") { it.text }
                         .take(SNIPPET)
-        val recovered = reply.providerMetadata?.array(RECOVERED_TOOL_CALLS)?.contains(JsonPrimitive(call.id.value))
-        val args =
-            try {
-                Json.parseToJsonElement(call.argsJson) as? JsonObject
-            } catch (ignoredNotJson: SerializationException) {
-                // Reported below with the raw text, which is what the user needs to see.
+            }
+
+            reply.providerMetadata?.array(RECOVERED_TOOL_CALLS)?.contains(JsonPrimitive(call.id.value)) == true -> {
+                "the model wrote the trial call into its answer text instead of calling the tool"
+            }
+
+            tokenOf(call.argsJson) == token -> {
                 null
             }
-        val sent = (args?.get("token") as? JsonPrimitive)?.contentOrNull?.trim()
-        return when {
-            recovered == true -> "the model wrote the trial call into its answer text instead of calling the tool"
-            sent == token -> null
-            else -> "the trial tool got unexpected arguments: ${call.argsJson.take(SNIPPET)}"
+
+            else -> {
+                "the trial tool got unexpected arguments: ${call.argsJson.take(SNIPPET)}"
+            }
         }
+    }
+
+    /** The trial call's `token` argument, or `null` when the arguments are not an object holding one. */
+    private fun tokenOf(argsJson: String): String? {
+        val args =
+            try {
+                Json.parseToJsonElement(argsJson) as? JsonObject
+            } catch (ignoredNotJson: SerializationException) {
+                // Reported by the caller with the raw text, which is what the user needs to see.
+                null
+            }
+        return (args?.get("token") as? JsonPrimitive)?.contentOrNull?.trim()
     }
 
     private fun trialRequest(token: String): ChatRequest =
