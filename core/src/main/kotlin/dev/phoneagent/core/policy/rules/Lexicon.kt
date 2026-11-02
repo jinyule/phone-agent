@@ -89,7 +89,17 @@ private class TextMemo(
     ): Hit? = memo.of(screen).computeIfAbsent(text) { Optional.ofNullable(read(it)) }.orElse(null)
 }
 
-/** The matching of [Words] lists, without length limits. Every function takes the raw text. */
+/**
+ * The matching of [Words] lists, without length limits. Every function takes the raw text.
+ *
+ * Adapted from the label matching of Mika's `IrreversibleDetector` (strong words at each of
+ * their occurrences unless they read as a status, whole words after prefixes, English phrases at
+ * a word boundary, names and adverts removed first; Copyright 2026 wangzan101, Apache-2.0).
+ * Modified by PhoneAgent contributors: traditional characters read as simplified, zero-width
+ * characters dropped, English letters written apart read together, status words that depend on
+ * the kind, vetoes limited to codes sent to the user's own phone, amounts left out of whole
+ * words, and status checks in time in proportion to the text. See NOTICE.
+ */
 internal object Phrases {
     /**
      * An [Words.EXACT] word as the whole label, optionally after a [Words.PREFIXES] entry; an

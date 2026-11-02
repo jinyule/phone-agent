@@ -118,6 +118,7 @@ Mika
   adapted declarations.
     core/src/main/kotlin/com/wangzan101/mika/core/gate/IrreversibleDetector.kt
       -> core/src/main/kotlin/dev/phoneagent/core/policy/rules/Words.kt
+      -> core/src/main/kotlin/dev/phoneagent/core/policy/rules/Lexicon.kt
       -> core/src/main/kotlin/dev/phoneagent/core/policy/rules/Pages.kt
       -> core/src/main/kotlin/dev/phoneagent/core/policy/rules/Amounts.kt
       -> core/src/main/kotlin/dev/phoneagent/core/policy/rules/Fields.kt
