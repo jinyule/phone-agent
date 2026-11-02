@@ -69,6 +69,37 @@ class ParseErrorRedactionTest {
     ) = runTest {
         val data = input(cut)
         assertParserCutsTheKey(data)
+        val error = failure(protocol, framing, data)
+        assertNoPiece("the error", error.stackTraceToString())
+        assertTrue(error.message.orEmpty().contains("not JSON"), "fails as data that is not JSON")
+    }
+
+    @ParameterizedTest(name = "{0} {1}, the snippet cut crosses the key")
+    @CsvSource(
+        "OPENAI_CHAT_COMPLETIONS, stream",
+        "OPENAI_CHAT_COMPLETIONS, json",
+        "OPENAI_RESPONSES, stream",
+        "OPENAI_RESPONSES, json",
+    )
+    fun `unparseable reply data whose snippet cut crosses the key`(
+        protocol: ModelProtocol,
+        framing: String,
+    ) = runTest {
+        // The key starts 20 characters before the snippet's cut, so cutting before masking leaves its start.
+        val head = """{"id":""""
+        val data = head + "x".repeat(SNIPPET - CROSSING - head.length) + KEY + """" "next":1}"""
+        assertTrue(data.indexOf(KEY) == SNIPPET - CROSSING, "the key crosses the cut")
+        val error = failure(protocol, framing, data)
+        assertNoPiece("the error", error.stackTraceToString())
+        assertTrue(error.message.orEmpty().contains("not JSON"), "fails as data that is not JSON")
+    }
+
+    /** The failure of a reply carrying [data], streamed or as a whole JSON body. */
+    private suspend fun failure(
+        protocol: ModelProtocol,
+        framing: String,
+        data: String,
+    ): ModelError.BadResponse {
         if (framing == "stream") {
             server.enqueueSse(Kit.sse(data))
         } else {
@@ -89,9 +120,7 @@ class ParseErrorRedactionTest {
                 Kit.blobs(),
                 WireOptions.defaultsFor(profile),
             )
-        val error = assertThrows<ModelError.BadResponse> { model.complete(Kit.request()) }
-        assertNoPiece("the error", error.stackTraceToString())
-        assertTrue(error.message.orEmpty().contains("not JSON"), "fails as data that is not JSON")
+        return assertThrows<ModelError.BadResponse> { model.complete(Kit.request()) }
     }
 
     @ParameterizedTest
@@ -114,5 +143,9 @@ class ParseErrorRedactionTest {
         const val KEY = "plain-placeholder-for-the-parse-window-0001"
         const val FILLER = 250
         const val MIN_PIECE = 8
+
+        /** The adapters' snippet length for data that is not JSON. */
+        const val SNIPPET = 200
+        const val CROSSING = 20
     }
 }
