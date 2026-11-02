@@ -51,7 +51,13 @@ internal class LaunchTargets(
     private fun permitted(activity: ActivityInfo): Target {
         val component = ComponentName(activity.packageName, activity.name)
         val permission = activity.permission
+        // A cold start names the package on the `am force-stop` command line.
+        val nameProblem = PackageNames.problem(context, activity.packageName)
         return when {
+            nameProblem != null -> {
+                Target.Refused(StartResult.REFUSED, nameProblem)
+            }
+
             !activity.exported && activity.packageName != app.packageName -> {
                 Target.Refused(StartResult.REFUSED, "$component is not exported")
             }

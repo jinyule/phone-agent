@@ -35,13 +35,20 @@ internal class SystemOps(
     private val lock = Any()
     private val ledger = AudioMuteLedger(MuteFile(File(stateDir, "phoneagent_audio_mute_$appUser")))
 
-    /** Mutes or unmutes [pkg] through the `PLAY_AUDIO` app-op; false when the op could not be written. */
+    /**
+     * Mutes or unmutes [pkg] through the `PLAY_AUDIO` app-op; false when the op could not be
+     * written or [pkg] is not an installed package ([PackageNames]).
+     */
     fun setAudioMuted(
         pkg: String?,
         muted: Boolean,
     ): Boolean {
-        if (pkg == null) return false
-        return synchronized(lock) { if (muted) mute(pkg) else unmute(pkg) }
+        val problem = PackageNames.problem(context, pkg)
+        if (problem != null) {
+            Log.w(TAG, "setAudioMuted refused: $problem")
+            return false
+        }
+        return synchronized(lock) { if (muted) mute(checkNotNull(pkg)) else unmute(checkNotNull(pkg)) }
     }
 
     private fun mute(pkg: String): Boolean {
