@@ -29,7 +29,7 @@ internal class ScreenObserver(
         geometry: DisplayGeometry,
         detail: SnapshotDetail,
     ): ScreenSnapshot {
-        val read = ScreenReader.read(host.windowsOn(surface.displayId), geometry)
+        val read = ScreenReader.read(host.windowsOn(surface.displayId), geometry, system.ownPackage)
         val carried = RefCarrier.carry(history.newest()?.tree, read.elements, lastRef)
         lastRef = carried.lastUsed
         val elements = read.project(carried.refs, detail)
@@ -60,7 +60,7 @@ internal class ScreenObserver(
         geometry: DisplayGeometry,
         detail: SnapshotDetail,
     ): Baseline {
-        val read = ScreenReader.read(host.windowsOn(surface.displayId), geometry)
+        val read = ScreenReader.read(host.windowsOn(surface.displayId), geometry, system.ownPackage)
         val elements = read.provisional(detail)
         return Baseline(read, detail, analyzer.fingerprint(read.pkg, activityOf(host, read.pkg), elements, ocr = null))
     }

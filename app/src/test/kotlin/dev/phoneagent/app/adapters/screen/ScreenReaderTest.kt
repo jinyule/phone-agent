@@ -59,7 +59,7 @@ class ScreenReaderTest {
     }
 
     private fun read(vararg windows: AccessibilityWindowInfo = arrayOf(window(settingsTree(), id = 7))): TreeRead =
-        ScreenReader.read(windows.toList(), GEOMETRY)
+        ScreenReader.read(windows.toList(), GEOMETRY, OWN)
 
     /** What [detail] shows of [windows], with the read's own refs. */
     private fun shown(

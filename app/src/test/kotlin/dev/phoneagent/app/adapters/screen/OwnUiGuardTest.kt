@@ -8,6 +8,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.phoneagent.core.ports.ActionOutcome
 import dev.phoneagent.core.ports.Direction
 import dev.phoneagent.core.ports.SystemKey
+import dev.phoneagent.core.ports.Target
 import dev.phoneagent.core.ports.UiAction
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -135,6 +136,54 @@ class OwnUiGuardTest {
 
             assertEquals(ActionOutcome.Status.Ok, outcome.status)
             assertEquals(listOf(AccessibilityService.GLOBAL_ACTION_BACK), host.globalActions)
+        }
+
+    @Test
+    fun aScrollWithoutTargetIsRefusedWhileItsOwnWindowIsInFront() =
+        runTest {
+            // Fix list r2 S2 (Codex R2-B6): the app's list is still partly visible below PhoneAgent's window.
+            val list =
+                node("androidx.recyclerview.widget.RecyclerView", Rect(0, 0, 1000, 2000)) {
+                    isScrollable = true
+                    addAction(AccessibilityAction.ACTION_SCROLL_DOWN)
+                }.with(button("Send", Rect(0, 200, 500, 300)))
+            val app = window(node("android.widget.FrameLayout", GEOMETRY.pixels).with(list), id = 1, layer = 1)
+            val own = window(node("android.widget.FrameLayout", Rect(0, 1000, 1000, 2000), OWN), id = 2, layer = 5)
+            shadowOf(own).setBoundsInScreen(Rect(0, 1000, 1000, 2000))
+            listOf(app, own).forEach { shadowOf(it).setFocused(it.id == 2) }
+            host.windows = mapOf(0 to listOf(app, own))
+
+            val outcome = mainPort(host).act(UiAction.Scroll(null, Direction.DOWN), on = null)
+
+            assertEquals(refused, outcome.status)
+            assertTrue("no node action", list.log.actions.isEmpty())
+            assertTrue("no gesture", host.gestures.isEmpty())
+        }
+
+    @Test
+    fun aTapOnItsOwnBarShapedSystemWindowIsRefused() =
+        runTest {
+            // Fix list r2 S6 (Claude r2 S3): a full-width strip at the bottom edge, of type
+            // TYPE_SYSTEM like a navigation bar, but PhoneAgent's own (a future floating control).
+            val strip = Rect(0, 1850, 1000, 2000)
+            val own =
+                window(
+                    node(
+                        "android.widget.FrameLayout",
+                        strip,
+                        OWN,
+                    ).with(button("Stop task", Rect(800, 1850, 1000, 2000), OWN)),
+                    id = 2,
+                    layer = 5,
+                    type = android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM,
+                )
+            shadowOf(own).setBoundsInScreen(strip)
+            host.show(button("Send", Rect(0, 1000, 500, 1100)), extra = listOf(own))
+
+            val outcome = mainPort(host).act(UiAction.Tap(Target.Point(950, 962)), on = null)
+
+            assertEquals(refused, outcome.status)
+            assertTrue("no gesture", host.gestures.isEmpty())
         }
 
     @Test

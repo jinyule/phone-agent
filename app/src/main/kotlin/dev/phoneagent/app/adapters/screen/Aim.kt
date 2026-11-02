@@ -93,8 +93,9 @@ internal object Aims {
         }
 
     /**
-     * Whether [aim] is on [ownPackage]'s UI. Actions without a target are checked where they land
-     * (ActionRun: keys and fields; Actuator: gestures at their start point).
+     * Whether [aim] is on [ownPackage]'s UI. Actions without a target are checked by what they act
+     * on (ActionRun: BACK, HOME and a scroll of the main list by the window in front, ENTER and
+     * typing by the field's package; Actuator: every gesture at its start point).
      */
     fun onOwnUi(
         aim: Aim,
@@ -106,7 +107,7 @@ internal object Aims {
             Aim.Anywhere -> false
         }
 
-    /** Package of the top-most window containing [pixel]. */
+    /** Package of the top-most window containing [pixel], status and navigation bars included. */
     fun windowPackageAt(
         read: TreeRead,
         pixel: PixelPoint,

@@ -169,7 +169,7 @@ internal class AndroidScreen(
         val geometry = geometry(host)
         return host
             .windowsOn(displayId)
-            .filter { ScreenReader.isSystemBar(it, geometry) }
+            .filter { ScreenReader.isSystemBar(it, geometry, parts.system.ownPackage) }
             .map { it.id }
             .toSet()
     }

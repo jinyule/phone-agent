@@ -162,19 +162,58 @@ class SystemBarsTest {
         }
         val system = AccessibilityWindowInfo.TYPE_SYSTEM
 
-        assertTrue("status bar", ScreenReader.isSystemBar(bar(Rect(0, 0, 1000, 60), system), GEOMETRY))
-        assertTrue("navigation bar", ScreenReader.isSystemBar(bar(Rect(0, 1900, 1000, 2000), system), GEOMETRY))
-        assertTrue("side navigation bar", ScreenReader.isSystemBar(bar(Rect(950, 0, 1000, 2000), system), GEOMETRY))
+        assertTrue("status bar", ScreenReader.isSystemBar(bar(Rect(0, 0, 1000, 60), system), GEOMETRY, OWN))
+        assertTrue("navigation bar", ScreenReader.isSystemBar(bar(Rect(0, 1900, 1000, 2000), system), GEOMETRY, OWN))
+        assertTrue(
+            "side navigation bar",
+            ScreenReader.isSystemBar(bar(Rect(950, 0, 1000, 2000), system), GEOMETRY, OWN),
+        )
         assertFalse(
             "an app's toolbar",
-            ScreenReader.isSystemBar(bar(Rect(0, 0, 1000, 60), AccessibilityWindowInfo.TYPE_APPLICATION), GEOMETRY),
+            ScreenReader.isSystemBar(
+                bar(Rect(0, 0, 1000, 60), AccessibilityWindowInfo.TYPE_APPLICATION),
+                GEOMETRY,
+                OWN,
+            ),
         )
-        assertFalse("the notification shade", ScreenReader.isSystemBar(bar(Rect(0, 0, 1000, 2000), system), GEOMETRY))
-        assertFalse("a heads-up notification", ScreenReader.isSystemBar(bar(Rect(30, 40, 970, 240), system), GEOMETRY))
+        assertFalse(
+            "the notification shade",
+            ScreenReader.isSystemBar(bar(Rect(0, 0, 1000, 2000), system), GEOMETRY, OWN),
+        )
+        assertFalse(
+            "a heads-up notification",
+            ScreenReader.isSystemBar(bar(Rect(30, 40, 970, 240), system), GEOMETRY, OWN),
+        )
         assertFalse(
             "a full-width banner off the edges",
-            ScreenReader.isSystemBar(bar(Rect(0, 900, 1000, 1000), system), GEOMETRY),
+            ScreenReader.isSystemBar(bar(Rect(0, 900, 1000, 1000), system), GEOMETRY, OWN),
         )
+    }
+
+    @Test
+    fun aBarShapedWindowOfThisAppIsReadAndKnownToBeItsOwn() {
+        // Fix list r2 S6 (Claude r2 S3): a future floating control along the bottom edge.
+        val strip = Rect(0, 1850, 1000, 2000)
+        val own =
+            systemWindow(
+                node(
+                    "android.widget.FrameLayout",
+                    strip,
+                    OWN,
+                ).with(button("Stop task", Rect(800, 1850, 1000, 2000), OWN)),
+                id = 70,
+                bounds = strip,
+            )
+        val app =
+            window(node("android.widget.FrameLayout", GEOMETRY.pixels).with(button("OK", Rect(0, 1000, 500, 1100))))
+
+        val read = ScreenReader.read(listOf(app, own, statusBar("10:08")), GEOMETRY, OWN)
+
+        assertFalse(ScreenReader.isSystemBar(own, GEOMETRY, OWN))
+        assertTrue("its window is read", read.elements.any { it.element.name == "Stop task" })
+        assertEquals(OWN, Aims.windowPackageAt(read, PixelPoint(950f, 1925f)))
+        assertEquals("a bar is still known as a window", SYSTEM_UI, Aims.windowPackageAt(read, PixelPoint(500f, 30f)))
+        assertEquals(setOf(STATUS_BAR), read.systemBars)
     }
 
     private companion object {

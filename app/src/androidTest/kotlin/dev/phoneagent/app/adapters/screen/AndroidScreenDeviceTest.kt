@@ -282,7 +282,7 @@ class AndroidScreenDeviceTest {
         val size = host.displaySize(Display.DEFAULT_DISPLAY)!!
         return host
             .windowsOn(Display.DEFAULT_DISPLAY)
-            .filter { ScreenReader.isSystemBar(it, DisplayGeometry(size.width, size.height)) }
+            .filter { ScreenReader.isSystemBar(it, DisplayGeometry(size.width, size.height), context.packageName) }
             .map { it.id }
             .toSet()
     }

@@ -61,8 +61,9 @@ internal class ReadElement(
 /**
  * What a read found about the windows of the display.
  *
- * @property packages package of each content window by window id (`null` when its root is unreadable).
- * @property bounds bounds in pixels of each content window by id, top-most first.
+ * @property packages package of each content window by window id (`null` when its root is
+ *   unreadable), the status and navigation bars included: the own-UI guard needs every window.
+ * @property bounds bounds in pixels of each content window by id, top-most first, bars included.
  * @property top id of the top-most application window with a readable package, or `null`.
  * @property front package of the window keys act on: the focused content window, else the
  *   top-most one (`null` when unknown).
@@ -91,10 +92,10 @@ internal class TreeRead(
     val keyboard: Boolean,
     val windows: WindowFacts,
 ) {
-    /** Package of each content window by window id. */
+    /** Package of each content window by window id, bars included. */
     val windowPackages: Map<Int, String?> get() = windows.packages
 
-    /** Bounds in pixels of each content window by id, top-most first. */
+    /** Bounds in pixels of each content window by id, top-most first, bars included. */
     val windowBounds: List<Pair<Int, Rect>> get() = windows.bounds
 
     /** Id of the window [pkg] comes from, or `null` when there is none. */
@@ -136,7 +137,8 @@ internal class TreeRead(
  *
  * The status and navigation bars are left out ([isSystemBar]): their clock and icons change on
  * their own and would make every screen look changed. Other system windows (dialogs, heads-up
- * notifications, the notification shade, pickers) are kept.
+ * notifications, the notification shade, pickers) are kept, and so is every window of this app,
+ * whatever its shape. Which window lies where is recorded for the bars too ([TreeRead.windowBounds]).
  *
  * Window filtering, ordering and the depth limit are adapted from Mika's ScreenReader (Apache-2.0,
  * see NOTICE). Modified by PhoneAgent contributors.
@@ -186,13 +188,16 @@ internal object ScreenReader {
 
     /**
      * Whether [window] is a status or navigation bar: a system window spanning the display along
-     * one edge, at most [BAR_SHARE] thick.
+     * one edge, at most [BAR_SHARE] thick, that is not [ownPackage]'s (a floating control of this
+     * app may have that shape).
      */
     fun isSystemBar(
         window: AccessibilityWindowInfo,
         geometry: DisplayGeometry,
+        ownPackage: String,
     ): Boolean {
-        if (window.type != AccessibilityWindowInfo.TYPE_SYSTEM) return false
+        val system = window.type == AccessibilityWindowInfo.TYPE_SYSTEM
+        if (!system || window.root?.packageName?.toString() == ownPackage) return false
         val r = Rect().also(window::getBoundsInScreen)
         val (width, height) = geometry.width to geometry.height
         val acrossTopOrBottom =
@@ -202,22 +207,27 @@ internal object ScreenReader {
         return acrossTopOrBottom || alongASide
     }
 
-    /** Reads [windows] of one display with size [geometry]. */
+    /** Reads [windows] of one display with size [geometry]; [ownPackage] is this app's. */
     fun read(
         windows: List<AccessibilityWindowInfo>,
         geometry: DisplayGeometry,
+        ownPackage: String,
     ): TreeRead {
-        val (bars, content) = contentWindows(windows).partition { isSystemBar(it, geometry) }
+        val all = contentWindows(windows)
+        val bars = all.filter { isSystemBar(it, geometry, ownPackage) }.map { it.id }.toSet()
         val walker = Walker(geometry)
         val packages = LinkedHashMap<Int, String?>()
         val windowBounds = ArrayList<Pair<Int, Rect>>()
+        for (window in all) {
+            packages[window.id] = window.root?.packageName?.toString()
+            windowBounds += window.id to Rect().also(window::getBoundsInScreen)
+        }
+        val content = all.filter { it.id !in bars }
         var pkg: String? = null
         var topWindow: Int? = null
         for (window in content) {
             val root = window.root
-            val windowPackage = root?.packageName?.toString()
-            packages[window.id] = windowPackage
-            windowBounds += window.id to Rect().also(window::getBoundsInScreen)
+            val windowPackage = packages[window.id]
             if (pkg == null && window.type == AccessibilityWindowInfo.TYPE_APPLICATION && windowPackage != null) {
                 pkg = windowPackage
                 topWindow = window.id
@@ -234,7 +244,7 @@ internal object ScreenReader {
                     bounds = windowBounds,
                     top = topWindow,
                     front = (content.firstOrNull { it.isFocused } ?: content.firstOrNull())?.let { packages[it.id] },
-                    bars = bars.map { it.id }.toSet(),
+                    bars = bars,
                 ),
         )
     }

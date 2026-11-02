@@ -72,7 +72,12 @@ internal class ActionRun(
             }
 
             is UiAction.Scroll -> {
-                actuator.scroll(container(aim), action.direction)
+                // Without a target, the main list is the front window's: none while this app is in front.
+                if (aim == Aim.Anywhere && before.frontPackage == ownPackage) {
+                    Actuator.Result.Refused
+                } else {
+                    actuator.scroll(container(aim), action.direction)
+                }
             }
 
             is UiAction.Swipe -> {
