@@ -20,6 +20,7 @@ import dev.phoneagent.core.session.RequestRetry
 import dev.phoneagent.core.session.StepEnded
 import dev.phoneagent.core.session.StepOutcome
 import dev.phoneagent.core.session.StepStarted
+import dev.phoneagent.core.session.StopCause
 import dev.phoneagent.core.session.ToolResultRecorded
 import dev.phoneagent.core.session.TurnEndReason
 import dev.phoneagent.core.session.TurnEnded

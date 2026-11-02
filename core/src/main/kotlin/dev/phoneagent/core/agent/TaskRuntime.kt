@@ -3,8 +3,8 @@ package dev.phoneagent.core.agent
 import dev.phoneagent.core.ids.PromptId
 import dev.phoneagent.core.ids.TaskId
 import dev.phoneagent.core.model.Part
-import dev.phoneagent.core.session.StopCause
 import dev.phoneagent.core.policy.SecurityLevel
+import dev.phoneagent.core.session.StopCause
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 

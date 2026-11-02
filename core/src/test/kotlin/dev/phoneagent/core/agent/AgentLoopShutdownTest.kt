@@ -8,6 +8,7 @@ import dev.phoneagent.core.session.InboxEntry
 import dev.phoneagent.core.session.InboxEntryKind
 import dev.phoneagent.core.session.InboxQueue
 import dev.phoneagent.core.session.InboxSpliced
+import dev.phoneagent.core.session.StopCause
 import dev.phoneagent.core.session.TaskLevelChanged
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi

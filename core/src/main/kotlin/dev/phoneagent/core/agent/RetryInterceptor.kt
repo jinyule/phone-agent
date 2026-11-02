@@ -14,7 +14,7 @@ import kotlin.random.Random
  * away). A stated wait above [maxRetryAfterMs] is **not retried**: the error goes down the chain as
  * if it were not retryable, so the turn fails at once with the provider's message instead of
  * looking hung. It is never shortened to the cap, since a request sent before the server's time
- * would only be refused again. A negative stated wait counts as 0.
+ * would only be refused again. A stated wait is never negative (`ModelError` checks it).
  *
  * @param maxRetries retries per step, >= 0.
  * @param baseDelayMs first backoff ceiling, in 1..[maxDelayMs].
@@ -40,7 +40,7 @@ public class RetryInterceptor(
         input: RequestFailure,
         chain: Chain<RequestFailure, Recovery>,
     ): Recovery {
-        val delayMs = input.error.retryAfterMs()?.coerceAtLeast(0) ?: backoff(input.retries)
+        val delayMs = input.error.retryAfterMs() ?: backoff(input.retries)
         val retry = input.error.retryable && input.retries < maxRetries && delayMs <= maxRetryAfterMs
         return if (retry) Recovery.Retry(delayMs) else chain.proceed(input)
     }

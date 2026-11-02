@@ -103,7 +103,7 @@ class RetryInterceptorTest {
             assertEquals(Recovery.Retry(30_000), interceptor.decide(ModelError.Overloaded(30_000)))
             assertEquals(Recovery.Retry(250), interceptor.decide(ModelError.Overloaded(null)), "none stated: backoff")
             assertEquals(Recovery.Retry(250), interceptor.decide(ModelError.RateLimited(null)))
-            assertEquals(Recovery.Retry(0), interceptor.decide(ModelError.RateLimited(-5)), "negative counts as 0")
+            assertEquals(Recovery.Retry(0), interceptor.decide(ModelError.RateLimited(0)), "zero is no wait")
         }
 
     @Test

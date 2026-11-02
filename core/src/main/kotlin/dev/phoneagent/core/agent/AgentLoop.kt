@@ -18,6 +18,7 @@ import dev.phoneagent.core.session.SessionLogException
 import dev.phoneagent.core.session.SessionRecord
 import dev.phoneagent.core.session.SessionResumed
 import dev.phoneagent.core.session.SessionStore
+import dev.phoneagent.core.session.StopCause
 import dev.phoneagent.core.session.TaskStarted
 import dev.phoneagent.core.session.TurnEnded
 import dev.phoneagent.core.session.TurnStarted

@@ -31,6 +31,7 @@ import dev.phoneagent.core.ports.SurfaceCapability
 import dev.phoneagent.core.ports.SurfaceKind
 import dev.phoneagent.core.ports.SurfaceManager
 import dev.phoneagent.core.ports.SurfaceRef
+import dev.phoneagent.core.ports.UserInteraction
 import dev.phoneagent.core.session.ApprovalAsked
 import dev.phoneagent.core.session.ApprovalDecided
 import dev.phoneagent.core.session.HandoffEnded
@@ -39,6 +40,7 @@ import dev.phoneagent.core.session.PolicyVerdictRecorded
 import dev.phoneagent.core.session.QuestionAnswered
 import dev.phoneagent.core.session.QuestionAsked
 import dev.phoneagent.core.session.ScreenObserved
+import dev.phoneagent.core.session.StopCause
 import dev.phoneagent.core.session.TaskLevelChanged
 import dev.phoneagent.core.session.TaskStarted
 import dev.phoneagent.core.session.ToolResultRecorded
@@ -344,7 +346,7 @@ class AgentLoopPolicyTest {
             val tool =
                 FakeTool("ask") { _, ctx ->
                     results += ctx.interaction.ask(Question("?"))
-                    results += ctx.interaction.confirm(sendCard)
+                    results += (ctx.interaction as UserInteraction).confirm(sendCard)
                     results += ctx.interaction.handOff(HandoffKind.CAPTCHA, "solve it")
                     ToolResult.ok("ok")
                 }

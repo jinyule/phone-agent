@@ -9,6 +9,7 @@ import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.policy.Verdict
 import dev.phoneagent.core.session.CompactionSummary
+import dev.phoneagent.core.session.StopCause
 import dev.phoneagent.core.session.SurfaceOp
 import dev.phoneagent.core.session.UserMessage
 import dev.phoneagent.core.testing.FakeChatModel

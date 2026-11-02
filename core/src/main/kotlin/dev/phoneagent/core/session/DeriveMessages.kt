@@ -14,7 +14,9 @@ import dev.phoneagent.core.model.Role
  * - `user/message` and `compaction/summary` → a [Role.USER] message with their parts;
  * - `assistant/message` → a [Role.ASSISTANT] message. An interrupted one counts only once a user
  *   message follows it before any other reply: a prefix superseded by a retry of the same step is
- *   UI-only, a prefix cut by steer, stop or a final failure joins the view with the next input;
+ *   UI-only, a prefix cut by steer, stop or a final failure joins the view with the next input,
+ *   without its [Part.Reasoning]s (an unfinished block cannot be sent back), and not at all when
+ *   nothing else is left;
  * - `tool/result` → a [Part.ToolResult]; consecutive results form one [Role.TOOL] message, so the
  *   results answering one reply travel together;
  * - `context/reasoning-dropped(upToSeq)` leaves out the [Part.Reasoning]s of replies with
@@ -141,6 +143,9 @@ private fun visibleOf(event: SessionEvent): Visible? =
         is ScreenActed,
         is ScreenLaunched,
         is ScreenFrame,
+        is ToolStarted,
+        is ToolExecuted,
+        is TaskStopped,
         -> null
     }
 
@@ -168,7 +173,9 @@ private fun assemble(
 
             is Visible.Assistant -> {
                 flushResults()
-                val parts = if (contribution.source <= droppedUpTo) visible.parts.withoutReasoning() else visible.parts
+                // An interrupted prefix never carries reasoning: an unfinished block cannot be sent back.
+                val dropped = contribution.source <= droppedUpTo || visible.interrupted
+                val parts = if (dropped) visible.parts.withoutReasoning() else visible.parts
                 val shown = !visible.interrupted || userFollows(view, index)
                 if (shown && parts.isNotEmpty()) messages += Message(Role.ASSISTANT, parts)
             }

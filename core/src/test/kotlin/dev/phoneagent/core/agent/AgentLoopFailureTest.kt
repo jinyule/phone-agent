@@ -28,6 +28,7 @@ import dev.phoneagent.core.session.SessionStore
 import dev.phoneagent.core.session.StepEnded
 import dev.phoneagent.core.session.StepOutcome
 import dev.phoneagent.core.session.StepStarted
+import dev.phoneagent.core.session.StopCause
 import dev.phoneagent.core.session.ToolCallRecorded
 import dev.phoneagent.core.session.ToolResultRecorded
 import dev.phoneagent.core.session.TurnEndReason

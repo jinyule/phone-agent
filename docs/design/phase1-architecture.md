@@ -412,7 +412,7 @@ interface TaskRuntime {
     fun steer(input: UserInput)              // 进 nextStep：在下一个 step 边界被取走；排队期间普通最终回答不结束本 turn
     fun inject(context: ContextInput)        // 进 nextStep，不唤醒驱动器（例如定时结果、通知）
     fun changeLevel(level: SecurityLevel)    // 写 task/level-changed，之后判定的调用按新级别；级别只能这样改
-    fun stop(cause: StopCause)               // USER / SHUTDOWN / LIMIT / ERROR；只停这一个任务，清空 inbox
+    fun stop(cause: StopCause)               // USER / SHUTDOWN / LIMIT / ERROR（StopCause 在 core.session）；只停这一个任务，清空 inbox
     fun answer(promptId: PromptId, reply: UserReply): Boolean   // Approve / Reject / Answer / Decline / HandoffDone；提示已失效或回复不匹配时返回 false
 }
 ```
@@ -449,7 +449,7 @@ interface TaskRuntime {
   - 先来的是另一条 `assistant/message`（同一 step 的重试，期间没有新的用户输入）：前缀只给 UI 看。重试重发的是产生它的那个请求，回复是在没有前缀的情况下生成的；
   - 先来的是 `user/message`（steer 截断后重开 step，或者 stop / 最终失败之后下一个 turn 的输入）：前缀跟着这条输入进入模型视图，但去掉其中的 `Part.Reasoning`（没写完的推理块不能回传），compaction 块也一样：回复不完整，其中的 compaction 块不回传，之后的请求由服务端重新压缩。视图是对日志的纯函数，前缀进入视图以后每次请求里的样子都相同，不违反"历史只追加"（model-layer §5）。去掉后为空就整条不进；
   - 规则样例在 `core` 测试源码的 `DeriveRuleSamples`，WP02 的 `deriveMessages` 测试逐条运行。
-- **去掉 thinking 重试**：签名失效等情况下，`requestError` 先写 `context/reasoning-dropped(upToSeq)`，之后的请求不再带 seq ≤ upToSeq 的 `Part.Reasoning`，文字、工具调用和工具结果不变。
+- **去掉 thinking 重试**：签名失效等情况下，`requestError` 先写 `context/reasoning-dropped(upToSeq)`，之后的请求不再带 seq ≤ upToSeq 的 `Part.Reasoning`，文字、工具调用和工具结果不变。多条去掉记录累加；只剩推理的回复整条不进；upToSeq 之后的推理照常带上。
 - **异常结束要修复日志**：停止、step 失败、进程被杀后恢复，三种情况用同一个对日志的纯函数（`repairOf`）推导修复内容，按顺序写入：
   1. 未作答的提示写 `prompt/withdrawn`；
   2. 缺结果的调用补 `tool/result`。有 `tool/call` 的（可能执行过）：停止时记 `CANCELLED` 并附"可能已生效"，失败或恢复时记 `OUTCOME_UNKNOWN` 并附"这一步可能已经生效，先 `phone_observe` 核实再决定"。没有 `tool/call` 的，或确知还没开始的：停止时记 `CANCELLED`，否则记 `NOT_STARTED`；

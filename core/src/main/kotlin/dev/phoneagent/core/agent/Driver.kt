@@ -5,6 +5,7 @@ import dev.phoneagent.core.session.InboxEntry
 import dev.phoneagent.core.session.InboxQueue
 import dev.phoneagent.core.session.SessionEvent
 import dev.phoneagent.core.session.SessionLogException
+import dev.phoneagent.core.session.StopCause
 import dev.phoneagent.core.session.TaskLevelChanged
 import dev.phoneagent.core.session.TurnEnded
 import dev.phoneagent.core.session.TurnStarted

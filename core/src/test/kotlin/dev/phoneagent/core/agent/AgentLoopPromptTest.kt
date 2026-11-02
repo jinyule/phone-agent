@@ -10,6 +10,7 @@ import dev.phoneagent.core.ports.ConfirmReason
 import dev.phoneagent.core.ports.ConfirmResult
 import dev.phoneagent.core.session.ApprovalDecided
 import dev.phoneagent.core.session.PromptWithdrawn
+import dev.phoneagent.core.session.StopCause
 import dev.phoneagent.core.testing.FakeChatModel
 import dev.phoneagent.core.testing.FakeChatModel.Companion.call
 import dev.phoneagent.core.testing.FakeTool

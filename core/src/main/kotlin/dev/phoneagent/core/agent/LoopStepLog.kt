@@ -35,8 +35,11 @@ import dev.phoneagent.core.session.StepStarted
 import dev.phoneagent.core.session.SurfaceOp
 import dev.phoneagent.core.session.TaskLevelChanged
 import dev.phoneagent.core.session.TaskStarted
+import dev.phoneagent.core.session.TaskStopped
 import dev.phoneagent.core.session.ToolCallRecorded
+import dev.phoneagent.core.session.ToolExecuted
 import dev.phoneagent.core.session.ToolResultRecorded
+import dev.phoneagent.core.session.ToolStarted
 import dev.phoneagent.core.session.TurnEnded
 import dev.phoneagent.core.session.TurnStarted
 import dev.phoneagent.core.session.UserMessage
@@ -81,9 +84,9 @@ internal class LoopStepLog(
 /**
  * The allowlist of [StepLog.append]: compaction (`compaction/…`), `context/reasoning-dropped` and
  * runtime context (`user/message` of kind `RUNTIME_CONTEXT`). Everything else is a loop fact
- * (turns, steps, inbox, user input, replies, requests, calls, results, verdicts, prompts, screen
- * facts, task settings, side requests) that only the loop writes. Every type is listed, so a new
- * one is classified when it is added.
+ * (turns, steps, inbox, user input, replies, requests, calls, execution facts, results, verdicts,
+ * prompts, screen facts, task settings and stops, side requests) that only the loop writes.
+ * Every type is listed, so a new one is classified when it is added.
  */
 internal fun isContextEvent(event: SessionEvent): Boolean =
     when (event) {
@@ -124,5 +127,8 @@ internal fun isContextEvent(event: SessionEvent): Boolean =
         is ScreenActed,
         is ScreenLaunched,
         is ScreenFrame,
+        is ToolStarted,
+        is ToolExecuted,
+        is TaskStopped,
         -> false
     }

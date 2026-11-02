@@ -12,7 +12,11 @@ import dev.phoneagent.core.model.ModelError
 import dev.phoneagent.core.model.ModelInfo
 import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.Part
+import dev.phoneagent.core.model.ReasoningLevel
+import dev.phoneagent.core.model.RequestSettings
 import dev.phoneagent.core.model.StopReason
+import dev.phoneagent.core.model.WireProfile
+import dev.phoneagent.core.model.clampTo
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
@@ -31,6 +35,7 @@ import kotlinx.coroutines.flow.first
  */
 class FakeChatModel(
     override val info: ModelInfo = INFO,
+    private val wire: WireProfile = TEST_WIRE,
 ) : ChatModel {
     /** What one request does. */
     fun interface Script {
@@ -51,6 +56,10 @@ class FakeChatModel(
 
     /** Scripts not played yet. */
     val remaining: Int get() = script.size
+
+    /** The level clamped to the model's levels, with [wire] as given. */
+    override fun prepare(reasoning: ReasoningLevel?): RequestSettings =
+        RequestSettings(reasoning?.clampTo(info.capabilities.reasoningLevels), wire)
 
     fun then(next: Script): FakeChatModel = apply { script.addLast(next) }
 
