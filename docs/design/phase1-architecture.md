@@ -429,6 +429,7 @@ interface TaskRuntime {
 - **turn**：从 inbox 取出输入后的一次完整消化。
 - **step**：一次模型回复，加上它请求的工具调用。**每个回复只执行第一个调用**，其余的记 `SKIPPED`，模型看到结果后重新决定。
 - **attempt**：同一 step 内的一次请求（重试，或 steer 之后重发）。每个 attempt 都重新走 `request` 链，再从日志推导消息；`request/header` 只在变化时写。重试的请求和上一次相同（失败 attempt 的中断前缀不进请求），steer 之后的请求带上新输入。
+- **回复的边界校验**：回复记成 `assistant/message` 之前先校验。callId 在同一 session 内唯一，由主循环在这里保证：同一回复里不能重复，也不能和日志里已有的 callId 重复；不重新编号，因为 Responses 这类有服务端状态的协议依赖原始 id。不过校验就当 `ModelError.BadResponse` 交给 `requestError`：回复本身不记录，只留已显示的中断前缀和带诊断的 `assistant/attempt`，什么都不执行。
 
 **停止条件**（turn 的结束原因）：
 - 最终回答（没有工具调用）→ `turnStopping` → `COMPLETED`；`end_not_done` → `END_NOT_DONE`；
@@ -469,7 +470,7 @@ fun interface Chain<I, O> { suspend fun proceed(input: I): O }   // 不调用 pr
 |---|---|---|---|---|
 | `preStep` | 每个 step 之前（本 step 的输入已写入日志） | `PreStepInput(turn, step, log)` → `Proceed` / `Refuse(detail)` | **拒绝本 step**；追加 runtime-context（前台 App、时间、知识提示）；压缩 | RuntimeContext、Compaction |
 | `request` | 每次 attempt 之前 | `RequestPlan` → `RequestPlan` | 为主请求选模型、线路快照、推理档位、缓存断点；`RequestPlan` 只服务主对话，看图和轻量请求走旁路（`side/*`）；**不能改消息** | ModelRouter |
-| `requestError` | attempt 失败后（step 仍打开） | `RequestFailure(error, attempt, retries)` → `Retry(delayMs)` / `Fail` | 决定是否重试；每次重试记 `request/retry` | `RetryInterceptor`（默认）、OverflowCompaction、ImageOffload |
+| `requestError` | attempt 失败后（step 仍打开；回复没过边界校验也算，按 `BadResponse`） | `RequestFailure(error, attempt, retries)` → `Retry(delayMs)` / `Fail` | 决定是否重试；每次重试记 `request/retry` | `RetryInterceptor`（默认）、OverflowCompaction、ImageOffload |
 | `toolPreExecute` | 每个通过校验的调用，已写 `tool/call` | `PreExecuteInput(call, tool)` → `Verdict` | allow / refuse / confirm / handoff | **PolicyEngine**（固定排在链后，不可重排、无法绕过） |
 | `toolExecute` | 包住执行体，在工具超时之内 | `ExecuteInput(call, tool, context)` → `ToolResult` | 包装、延后或短路这个调用，spill-back 检测；**不能替换调用**：`proceed` 只接受判定过的那一组 call、tool、context，而且只能调一次，否则什么都不执行，调用记 `ERROR` | MainScreenWatch |
 | `toolPostExecute` | 每个调用有结果之后（执行、拒绝、转交都算） | `PostExecuteInput(call, tool, result)` → `PostExecuteResult(result, context)` | 替换结果；附加上下文（进 nextStep） | LoopGuard（含重复调用提醒）、OutwardPacing、KnowledgeNotice、Spill |
@@ -703,6 +704,7 @@ TaskRuntime 循环（每个 step，对应 §3.8 的拦截点）：
   3. request 链选模型 → 写 request/header（有变化才写）→ deriveMessages → 刷盘 → ChatModel.complete
        steer 到来、模型请求还在进行：取消这次 attempt（已输出的部分记成 interrupted），取走 steer 后重发
        工具执行中不被插话打断
+       回复先过边界校验（§3.7：callId 在 session 内唯一）→ 不过就当 BadResponse 走下面的失败路径，回复不记录、不执行
        失败 → requestError 链（重试 / 溢出压缩 / 卸载图片 / 思考块前缀不匹配时去掉 thinking 块重试一次）
        撞到 max-tokens → 本次回复的工具调用全部 SKIPPED，turn 结束
   4. 没有工具调用 → 校验（空回复 / 工具调用漏成文字 / 语言是否对）→ 作为最终回答 → turnStopping

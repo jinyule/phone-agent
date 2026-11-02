@@ -36,8 +36,11 @@ internal sealed interface Requested {
  * attempt in flight (or a retry wait) and the step goes on with a new attempt that includes the
  * steer; what the user already saw is kept as an interrupted `assistant/message`. A failed
  * attempt is recorded (the interrupted prefix if any, then `assistant/attempt`) and handed to the
- * `requestError` chain, which decides on a retry (`request/retry`). An attempt ended by a stop
- * or a bug leaves its prefix in [TurnState.streaming] for the turn's ending to record.
+ * `requestError` chain, which decides on a retry (`request/retry`). A reply that breaks the reply
+ * contract ([replyProblem]: e.g. a call id already used in this session) is such a failure, a
+ * `ModelError.BadResponse`: none of it but the streamed prefix is recorded and nothing of it runs.
+ * An attempt ended by a stop or a bug leaves its prefix in [TurnState.streaming] for the turn's
+ * ending to record.
  */
 internal class Requests(
     private val loop: LoopContext,
@@ -122,7 +125,7 @@ internal class Requests(
         state.streaming = null
         return when (outcome) {
             is Outcome.Done -> {
-                reply(number, plan, outcome.value)
+                reply(number, plan, streaming, outcome.value)
             }
 
             Outcome.Steered -> {
@@ -131,20 +134,31 @@ internal class Requests(
             }
 
             is Outcome.Failed -> {
-                streaming.interrupted()?.let { loop.log.append(it) }
-                val error = outcome.error
-                val status = (error as? ModelError.Server)?.status
-                loop.log.append(AssistantAttempt(number, error.kind, "${error.message}", status, error.retryAfterMs()))
-                Attempted.Failed(error)
+                failed(number, streaming, outcome.error)
             }
         }
     }
 
+    /** Records the failed attempt: what the user saw as an interrupted prefix, then `assistant/attempt`. */
+    private suspend fun failed(
+        number: Int,
+        streaming: Streaming,
+        error: ModelError,
+    ): Attempted.Failed {
+        streaming.interrupted()?.let { loop.log.append(it) }
+        val status = (error as? ModelError.Server)?.status
+        loop.log.append(AssistantAttempt(number, error.kind, "${error.message}", status, error.retryAfterMs()))
+        return Attempted.Failed(error)
+    }
+
+    /** Records [response] as the step's reply, unless it breaks the reply contract ([replyProblem]). */
     private suspend fun reply(
         number: Int,
         plan: RequestPlan,
+        streaming: Streaming,
         response: ChatResponse,
-    ): Attempted.Replied {
+    ): Attempted {
+        replyProblem(response, loop.log.records())?.let { return failed(number, streaming, ModelError.BadResponse(it)) }
         val info = plan.model.info
         val message =
             AssistantMessage(

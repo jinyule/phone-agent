@@ -1,0 +1,39 @@
+package dev.phoneagent.core.agent
+
+import dev.phoneagent.core.ids.ToolCallId
+import dev.phoneagent.core.model.ChatResponse
+import dev.phoneagent.core.model.Part
+import dev.phoneagent.core.session.AssistantMessage
+import dev.phoneagent.core.session.SessionRecord
+
+/**
+ * Why [response] breaks the reply contract, or `null` when the loop may record it and act on it.
+ * The loop treats a violation as `ModelError.BadResponse` (retryable), before anything of the
+ * reply is recorded (phase1 §7.2 step 4). [earlier] is the log so far.
+ *
+ * Call ids are unique within a session; the loop guarantees it here, at the boundary: a reply may
+ * not repeat an id, nor reuse one of an earlier reply in [earlier]. Ids are never renumbered,
+ * since stateful protocols (Responses) refer to the provider's own ids.
+ */
+internal fun replyProblem(
+    response: ChatResponse,
+    earlier: List<SessionRecord>,
+): String? {
+    val ids = response.toolCalls.map { it.id }
+    val used = earlier.flatMapTo(mutableSetOf()) { record -> callIdsOf(record) }
+    val seen = mutableSetOf<ToolCallId>()
+    val repeated = ids.firstOrNull { !seen.add(it) }
+    val reused = ids.firstOrNull { it in used }
+    return when {
+        repeated != null -> "tool call id $repeated appears more than once in the reply"
+        reused != null -> "tool call id $reused was already used in this session"
+        else -> null
+    }
+}
+
+private fun callIdsOf(record: SessionRecord): List<ToolCallId> =
+    (record.event as? AssistantMessage)
+        ?.parts
+        .orEmpty()
+        .filterIsInstance<Part.ToolCall>()
+        .map { it.id }
