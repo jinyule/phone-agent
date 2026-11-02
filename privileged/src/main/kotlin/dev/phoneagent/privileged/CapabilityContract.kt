@@ -27,8 +27,9 @@ public object StartResult {
 
     /**
      * Refused by the helper: not its own display, another user, a malformed intent, or (protocol
-     * 2) an intent that carries another intent, has several handlers, or names an activity the
-     * app itself could not start (not exported, or guarded by a permission the app lacks).
+     * 2) an intent that may carry another intent (an extra of a type not on the helper's list),
+     * has several handlers, or names an activity the app itself could not start (not exported,
+     * or guarded by a permission the app lacks).
      */
     public const val REFUSED: Int = 6
 

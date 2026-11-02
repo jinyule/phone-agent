@@ -320,7 +320,7 @@ interface IPrivilegedCore {
 - 只往自己建的屏启动、注入；主屏和别人的屏一律拒绝。
 - 用户在主屏**可见**地用着的 App 不启动（`StartResult.IN_USE_ON_MAIN`）；看不清任务列表时也不启动。
 - 只启动 App 自己的 uid 也能启动的 Activity：解析成唯一的 Activity，要求它已导出（或属于本 App）、它要求的权限 App 已获得，并且只启动检查过的这一个；解析不出是 `NOT_FOUND`，多个候选、未导出、缺权限是 `REFUSED`。
-- 带嵌套 intent 的请求一律拒绝（`StartResult.REFUSED`）：extras 里任何一层的 Intent / Intent[] / Intent 列表、`ACTION_CHOOSER`、selector、带 intent 的 ClipData 条目，以及读不出来的 extras。
+- 可能夹带 intent 的请求一律拒绝（`StartResult.REFUSED`）：`ACTION_CHOOSER`、selector、带 intent 的 ClipData 条目；extras 按允许清单检查，清单外的类型一律拒绝，读不出来的 extras 也拒绝。允许的只有：null、primitive 及其数组；String、CharSequence、Uri 及其数组和 ArrayList（ArrayList 也可以是装箱整数）；值也在清单内的 Bundle；值只能是前两类叶子的 ContentValues 组成的 ArrayList（联系人插入的 `Insert.DATA`）。其他 Parcelable、Parcelable 数组、SparseArray、Map、Serializable、ClipData、IBinder 都拒绝；要放行新类型，必须连同"检查它里面装了什么"一起加进清单（`NestedIntents`）。所有容器共用一个嵌套深度上限。
 - 进命令行的包名（`setAudioMuted` 的 `appops`、冷启动的 `am force-stop`）先校验：Java 包名格式（至少两段、每段以字母开头），并且已经安装；UID、`u0aNN`、`--` 开头的选项一律拒绝。
 - 解除静音只恢复本助手账本里记过的包；没记过的包什么都不做，也不执行 `appops`。静音前的原模式写不进账本文件就不静音；启动时恢复账本只认格式合法的行。
 - 锁屏时什么都不启动（`StartResult.LOCKED`）。锁屏状态读自 `IWindowManager.isKeyguardLocked()`，读不到就当作锁屏；不用 `KeyguardManager`，它在调用失败时会回答"没锁"。

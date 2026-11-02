@@ -24,7 +24,12 @@ phase1-architecture §3.5 列出了 `IPrivilegedCore` 的能力面，调研报�
    - 冷启动只在"这个 App 的任务全在这块屏上"时才 `am force-stop`，否则降级为普通启动并返回 `COLD_IGNORED`。
    - intent 里的 `FLAG_GRANT_*`（URI 授权）在启动前被清掉：助手是 shell 身份，不替任何人授予 URI 权限。
    - 只启动 App 自己的 uid 也能启动的 Activity（`LaunchTargets`）：intent 先解析成唯一的 Activity，它必须已导出（或属于本 App），它要求的权限 App 的 uid 必须已获得（`checkPermission(perm, appUid)`）；启动时把 component 设成检查过的那个。解析不出来是 `NOT_FOUND`；能处理它的 Activity 不止一个、未导出、缺权限都是 `REFUSED`。例如 PhoneAgent 没有 `CALL_PHONE`，`ACTION_CALL tel:` 就被拒绝。助手以 shell 身份运行，权限远多于 App，这一条只管"调用身份的权限上限"，付款、发送这类内容判定仍归 PolicyEngine。
-   - 带嵌套 intent 的请求一律拒绝（`REFUSED`，`NestedIntents`）：extras 里任何一层的 Intent、Intent 数组或列表，`ACTION_CHOOSER`，selector，带 intent 的 ClipData 条目；extras 读不出来也拒绝。嵌套的 intent 会被接收方再启动一次，助手没检查过它启动什么、用谁的权限。ClipData 里的普通 URI 照旧允许。
+   - 可能夹带 intent 的请求一律拒绝（`REFUSED`，`NestedIntents`）。嵌套的 intent 会被接收方再启动一次，助手没检查过它启动什么、用谁的权限。
+     - `ACTION_CHOOSER`、selector、带 intent 的 ClipData 条目拒绝；ClipData 里的普通 URI 照旧允许。
+     - extras 用**允许清单**，不再去找 intent：r1a 复审实测了 6 种藏 intent 的形状（SparseArray、Map 的值、作为 extra 的 ClipData、`RunningTaskInfo.baseIntent`、`ShortcutInfo` 的 intent、`ChooserTarget` 的 Bundle 里的 `EXTRA_INTENT`），逐个补分支封不完。
+     - 允许：null、primitive 及其数组；String、CharSequence、Uri 及其数组和 ArrayList（ArrayList 也可以是装箱整数，`putIntegerArrayListExtra`）；值也在清单内的 Bundle；ContentValues 组成的 ArrayList，每个值只能是前两类叶子（联系人插入的 `ContactsContract.Intents.Insert.DATA`）。
+     - 其余一律拒绝：任意其他 Parcelable 和 Parcelable 数组、SparseArray、Map、Serializable、ClipData、IBinder。要放行别的类型，必须连同"检查它里面装了什么"一起加进清单；其他纯数据 Parcelable 等有实际需要时再加。
+     - Bundle、数组、列表、ContentValues 共用一个嵌套深度上限；extras 读不出来也拒绝。
    - 只支持主用户（`userId` 必须是助手自己的用户或 `USER_CURRENT`）。分身和工作资料留到以后。
    - `injectKey` 只放行导航和编辑键（`PressKeys`）。音量、电源、Home、最近任务、助手、相机、媒体键作用于整机而不是 agent 的屏，一律拒绝。
      `phone_key` 的 schema 仍然有 `home`（phase1 §5）：主屏模式下由无障碍的 `performGlobalAction` 实现；后台屏上由 ScreenPort（WP14）直接返回 Failed，原因"后台屏上没有桌面，请用 phone_launch 切换 App"，不调用 `injectKey`。
