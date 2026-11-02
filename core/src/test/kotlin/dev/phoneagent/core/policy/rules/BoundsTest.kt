@@ -11,9 +11,10 @@ import java.util.concurrent.TimeUnit
 /**
  * Reading hostile texts and screens ends (policy-rules.md §8). Each case of [BoundsProbe] runs in
  * a JVM of its own, killed when it has not finished within [LIMIT_SECONDS]. The time is not
- * measured: the limit is only how long to wait before calling a case hung. It is about a hundred
- * times what a case takes on a developer machine, so a slow machine does not fail it, while on the
- * rules before these bounds every case but the one beyond the limits did not finish within it.
+ * measured: the limit is only how long to wait before calling a case hung. It is at least thirty
+ * times what any case takes on a developer machine, JVM start included, so a slow machine does not
+ * fail it, while on the rules before these bounds (81d14af) eight of the nine cases did not finish
+ * within it.
  */
 class BoundsTest {
     @Test
