@@ -25,7 +25,7 @@ import dev.phoneagent.privileged.handoff.HandoffContract
 import dev.phoneagent.privileged.handoff.HandoffNonces
 import dev.phoneagent.privileged.handoff.HandoffReject
 import java.util.Collections
-import java.util.WeakHashMap
+import java.util.IdentityHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -69,8 +69,14 @@ class HelperClient internal constructor(
     private val admitting = Any()
     private val admission = HandoffAdmission(nonces, appBuild)
 
-    /** Binders of helpers this process told to shut down; guarded by [lock]. Weak, so dead ones go. */
-    private val retired: MutableSet<IBinder> = Collections.newSetFromMap(WeakHashMap())
+    /**
+     * Binders of helpers this process told to shut down; guarded by [lock]. Strong until the Binder
+     * dies: a remote Binder keeps arriving as the same proxy object only while that proxy is held.
+     */
+    private val retired: MutableSet<IBinder> = Collections.newSetFromMap(IdentityHashMap())
+
+    /** How many Binders of replaced helpers are held, for tests. */
+    internal val retiredHelpers: Int get() = synchronized(lock) { retired.size }
 
     /** Lives as long as this process; the helper watches its death. */
     private val token: IBinder = Binder()
@@ -228,11 +234,18 @@ class HelperClient internal constructor(
     /**
      * A newer helper was admitted: stop following the old one and tell it to release and exit.
      * Runs outside [lock], inside [admitting]; a death of [previous] meanwhile is ignored, it is no
-     * longer [connection]. From here on [offer] refuses it.
+     * longer [connection]. From here on [offer] refuses it, until its Binder dies.
      */
     private fun retire(previous: Connection) {
         val binder = previous.core.asBinder()
+        val forget = IBinder.DeathRecipient { synchronized(lock) { retired -= binder } }
         synchronized(lock) { retired += binder }
+        try {
+            binder.linkToDeath(forget, 0)
+        } catch (e: RemoteException) {
+            Log.i(TAG, "replaced helper ${previous.pid} died before it was told to stop", e)
+            synchronized(lock) { retired -= binder }
+        }
         binder.unlinkToDeath(previous.death, 0)
         try {
             previous.core.shutdown()

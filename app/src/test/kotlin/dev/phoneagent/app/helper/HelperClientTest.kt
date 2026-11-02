@@ -277,9 +277,10 @@ class HelperClientTest {
 
         assertEquals(HelperState.Connected(second, pid + 1), client.state)
         assertEquals("shutdown", first.calls.last())
-        assertEquals("the old helper is no longer followed", 0, first.linked)
+        assertEquals("only the recipient that forgets the old helper stays linked", 1, first.linked)
         first.die()
         assertEquals(HelperState.Connected(second, pid + 1), client.state)
+        assertEquals(0, client.retiredHelpers)
     }
 
     @Test
