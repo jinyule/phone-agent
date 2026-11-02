@@ -12,9 +12,23 @@ class RedactorTest {
 
     @Test
     fun `every use of a request secret is masked, longest first`() {
-        val redactor = Redactor(listOf("abc", "abcdef", "", "abc"))
-        assertEquals("x *** y *** z", redactor.text("x abcdef y abc z"))
+        val redactor = Redactor(listOf("placeholder", "placeholder-long", "", "placeholder"))
+        assertEquals("x *** y *** z", redactor.text("x placeholder-long y placeholder z"))
         assertEquals("a *** b ***", Redactor(listOf(secret)).text("a $secret b $secret"))
+    }
+
+    @Test
+    fun `secrets shorter than eight characters are placeholders, matched only by shape`() {
+        val redactor = Redactor(listOf("1", "test", "ollama", "tinkey", "1234567"))
+        val text = "model ollama/llama3 on tinkey, test 1234567 #1"
+        assertEquals(text, redactor.text(text))
+        assertEquals(0, redactor.reach, "nothing to read past a cut for")
+        assertEquals("*** and ***", Redactor(listOf("12345678")).text("12345678 and 12345678"))
+        // Assembled at run time so secret scanners do not take the placeholder for a real key.
+        assertEquals(
+            "*** is still masked by its shape",
+            redactor.text("sk-" + "test-abcdefgh is still masked by its shape"),
+        )
     }
 
     @Test

@@ -16,6 +16,13 @@ import java.util.IdentityHashMap
  * secret in other ways (`\/`, `\u0073`) is masked after it is written back in the standard
  * escaping ([json]).
  *
+ * Secrets shorter than [MIN_SECRET] characters are treated as placeholders ("1", "test",
+ * "ollama", a local gateway's "tinkey"): no exit matches them exactly, since ordinary text such as
+ * model ids holds them too; only the shapes apply. The length is provisional.
+ *
+ * Content the model produced is never masked: a reply that holds a form of a secret is rejected
+ * whole ([guard], [EchoGuard]).
+ *
  * Every cut comes after masking, with the whole set of secrets the run has sent: callers redact
  * the full text, then cut it. A reader that must stop early reads [reach] characters past its
  * limit and drops the [openEnd] of what it read, so a cut never leaves part of a secret behind.
@@ -23,7 +30,7 @@ import java.util.IdentityHashMap
 internal class Redactor(
     secrets: Iterable<String>,
 ) {
-    private val secrets = secrets.filter { it.isNotEmpty() }.distinct()
+    private val secrets = secrets.filter { it.length >= MIN_SECRET }.distinct()
 
     /** Each secret as sent and JSON-escaped; longest first, so a form that contains another is masked whole. */
     private val forms =
@@ -37,6 +44,9 @@ internal class Redactor(
 
     /** A redactor that also masks [secret]. */
     fun with(secret: String?): Redactor = if (secret.isNullOrEmpty()) this else Redactor(secrets + secret)
+
+    /** A fresh [EchoGuard] (one per reply) for the same secrets. */
+    fun guard(): EchoGuard = if (forms.isEmpty()) EchoGuard.NONE else EchoGuard(forms)
 
     /** [text] with every credential masked. */
     fun text(text: String): String {
@@ -129,6 +139,9 @@ internal class Redactor(
     companion object {
         /** What a masked credential reads as. */
         const val MASK: String = "***"
+
+        /** Shortest secret matched exactly; shorter ones are placeholders. */
+        const val MIN_SECRET: Int = 8
 
         private const val MAX_DEPTH = 8
 

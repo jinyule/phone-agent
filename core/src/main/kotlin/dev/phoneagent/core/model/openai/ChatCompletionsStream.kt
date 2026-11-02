@@ -38,6 +38,9 @@ import kotlinx.serialization.json.putJsonArray
  * calls is recovered at the end ([LeakedToolMarkup]); the preview deltas then hold back text that
  * may still be such markup, and the end shows what they missed ([DeltaLedger.catchUp]).
  *
+ * A reply whose content holds a request secret fails as [CredentialEcho] ([EchoGuard]): each delta
+ * is checked before it is shown, and the reply's parts before the end shows what the deltas missed.
+ *
  * @param redactor masks credentials in provider text that goes into errors and the reply metadata.
  */
 internal class ChatCompletionsStream(
@@ -48,7 +51,8 @@ internal class ChatCompletionsStream(
     private val redactor: Redactor,
     onDelta: (Delta) -> Unit,
 ) {
-    private val ledger = DeltaLedger(onDelta)
+    private val guard = redactor.guard()
+    private val ledger = DeltaLedger(onDelta, guard)
     private val text = StreamedText(ledger, holdBack = reading.recovers)
     private val refusal = StringBuilder()
     private val calls = ToolCallAssembler(newCallId, ledger, redactor)
@@ -94,6 +98,7 @@ internal class ChatCompletionsStream(
                 if (answer.isNotEmpty()) add(Part.Text(answer))
                 addAll(toolCalls)
             }
+        guard.parts(parts)
         val diverged = ledger.catchUp(parts)
         val meta = metadata(responseId, reportedModel, reason?.let(redactor::text), recovered.map { it.id }, diverged)
         return ChatResponse(parts, stopReason(reason, toolCalls.isNotEmpty()), usage, meta)

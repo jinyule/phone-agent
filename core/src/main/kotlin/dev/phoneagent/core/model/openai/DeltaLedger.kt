@@ -13,26 +13,35 @@ import dev.phoneagent.core.model.openai.WireSupport.TEXT_SEPARATOR
  * summaries (blank-line separated) and call arguments, and every call has been announced once.
  * Only a provider whose final output contradicts its own deltas breaks that; deltas cannot be
  * taken back, so [catchUp] reports it and the reply records it under [PREVIEW_DIVERGED].
+ *
+ * Everything is checked with [guard] before it is shown: a delta that completes a request secret
+ * fails the reply ([CredentialEcho]) and is not shown.
  */
 internal class DeltaLedger(
     private val onDelta: (Delta) -> Unit,
+    private val guard: EchoGuard,
 ) {
     private val text = StringBuilder()
     private val reasoning = StringBuilder()
     private val args = LinkedHashMap<ToolCallId, StringBuilder>()
     private val names = HashMap<ToolCallId, String>()
+    private val textWindow = guard.Window()
+    private val reasoningWindow = guard.Window()
+    private val argsWindows = HashMap<ToolCallId, EchoGuard.Window>()
 
     /** Whether any reasoning was shown (a new reasoning section then needs a separator). */
     val hasReasoning: Boolean get() = reasoning.isNotEmpty()
 
     fun text(fragment: String) {
         if (fragment.isEmpty()) return
+        textWindow.next(fragment)
         text.append(fragment)
         onDelta(Delta.Text(fragment))
     }
 
     fun reasoning(fragment: String) {
         if (fragment.isEmpty()) return
+        reasoningWindow.next(fragment)
         reasoning.append(fragment)
         onDelta(Delta.Reasoning(fragment))
     }
@@ -43,8 +52,11 @@ internal class DeltaLedger(
         name: String,
     ) {
         if (id in args) return
+        guard.check(id.value)
+        guard.check(name)
         args[id] = StringBuilder()
         names[id] = name
+        argsWindows[id] = guard.Window()
         onDelta(Delta.ToolCallStarted(id, name))
     }
 
@@ -55,6 +67,7 @@ internal class DeltaLedger(
     ) {
         val shown = args[id]
         if (shown == null || fragment.isEmpty()) return
+        argsWindows.getValue(id).next(fragment)
         shown.append(fragment)
         onDelta(Delta.ToolCallArgs(id, fragment))
     }

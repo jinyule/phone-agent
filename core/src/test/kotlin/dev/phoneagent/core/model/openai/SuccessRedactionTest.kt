@@ -1,5 +1,6 @@
 package dev.phoneagent.core.model.openai
 
+import dev.phoneagent.core.model.ModelErrorKind
 import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.openai.Kit.base
 import dev.phoneagent.core.model.openai.Kit.enqueueError
@@ -9,6 +10,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import mockwebserver3.junit5.StartStop
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -16,10 +18,12 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
 
 /**
- * What a provider echoes back in a reply that succeeds is masked too (model-layer §2): probe
- * diagnostics, listed model ids and the reply metadata the log keeps. The secret here has no
- * credential shape, so only a redactor that knows the request's secret can mask it; text is masked
- * before it is cut, so no prefix of the secret survives a cut. Assertions never print the secret.
+ * What a provider echoes back in a reply that succeeds never shows the secret either (model-layer
+ * §2): listed model ids and the reply metadata the log keeps are masked; a trial reply whose
+ * content echoes it is rejected ([EchoRejectionTest]), so the probe result shows none of it. The
+ * secret here has no credential shape, so only a redactor that knows the request's secret can mask
+ * it; text is masked before it is cut, so no prefix of the secret survives a cut. Assertions never
+ * print the secret.
  */
 class SuccessRedactionTest {
     @StartStop
@@ -42,14 +46,14 @@ class SuccessRedactionTest {
         )
 
     @Test
-    fun `trial arguments echoing the key are masked before they are cut`() =
+    fun `trial arguments echoing the key never reach the probe result`() =
         runTest {
             // The cut of the quoted arguments falls inside the secret.
             val args = "{\"token\":\"" + "x".repeat(PAD) + ECHOED + "\"}"
             server.enqueueError(404, "{}")
             server.enqueueSse(trialCall(args))
             val result = adapters.probe().testAndSave(Kit.profile(server.base()), Kit.MODEL, Kit.capabilities(), "t")
-            assertTrue(result is ProbeResult.Failed, "the trial fails")
+            assertEquals(ModelErrorKind.BAD_RESPONSE, (result as ProbeResult.Failed).kind, "the echo is rejected")
             assertClean("the probe result", result.toString())
         }
 
@@ -89,7 +93,7 @@ class SuccessRedactionTest {
         }
 
     @Test
-    fun `an answer echoing the key is masked in the probe diagnosis`() =
+    fun `an answer echoing the key never reaches the probe result`() =
         runTest {
             server.enqueueError(404, "{}")
             server.enqueueSse(
@@ -99,7 +103,7 @@ class SuccessRedactionTest {
                 ),
             )
             val result = adapters.probe().testAndSave(Kit.profile(server.base()), Kit.MODEL, Kit.capabilities(), "t")
-            assertTrue(result is ProbeResult.Failed, "the trial fails")
+            assertEquals(ModelErrorKind.BAD_RESPONSE, (result as ProbeResult.Failed).kind, "the echo is rejected")
             assertClean("the probe result", result.toString())
         }
 

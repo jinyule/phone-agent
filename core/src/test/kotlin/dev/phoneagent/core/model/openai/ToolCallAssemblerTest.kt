@@ -9,7 +9,8 @@ import org.junit.jupiter.api.Test
 class ToolCallAssemblerTest {
     private val deltas = Deltas()
     private var ids = 0
-    private val calls = ToolCallAssembler({ "call_gen_${++ids}" }, DeltaLedger(deltas), Redactor.SHAPES_ONLY)
+    private val calls =
+        ToolCallAssembler({ "call_gen_${++ids}" }, DeltaLedger(deltas, EchoGuard.NONE), Redactor.SHAPES_ONLY)
 
     private fun merge(fragment: String) = calls.merge(Json.parseToJsonElement(fragment) as JsonObject)
 

@@ -24,7 +24,7 @@ class DeltaLedgerTest {
     @Test
     fun `the end shows only what the deltas missed`() {
         val deltas = Deltas()
-        val ledger = DeltaLedger(deltas)
+        val ledger = DeltaLedger(deltas, EchoGuard.NONE)
         ledger.text("Hel")
         ledger.reasoning("Thi")
         ledger.started(id, "tap")
@@ -39,7 +39,7 @@ class DeltaLedgerTest {
 
     @Test
     fun `channels the reply contradicts are reported, in order`() {
-        val ledger = DeltaLedger(Deltas())
+        val ledger = DeltaLedger(Deltas(), EchoGuard.NONE)
         ledger.text("Hello")
         ledger.reasoning("Thinking")
         ledger.started(id, "tap")
@@ -50,18 +50,18 @@ class DeltaLedgerTest {
 
     @Test
     fun `an announced call the reply does not have, or names differently, is a contradiction`() {
-        val ledger = DeltaLedger(Deltas())
+        val ledger = DeltaLedger(Deltas(), EchoGuard.NONE)
         ledger.started(id, "tap")
         ledger.args(id, "{}")
         assertEquals(listOf("calls"), ledger.catchUp(listOf(Part.Text("Done"))), "the call vanished")
-        val renamed = DeltaLedger(Deltas())
+        val renamed = DeltaLedger(Deltas(), EchoGuard.NONE)
         renamed.started(id, "tap")
         assertEquals(listOf("calls"), renamed.catchUp(listOf(Part.ToolCall(id, "swipe", "{}"))), "another name")
-        val replaced = DeltaLedger(Deltas())
+        val replaced = DeltaLedger(Deltas(), EchoGuard.NONE)
         replaced.started(id, "tap")
         val other = Part.ToolCall(ToolCallId("call_2"), "tap", "{}")
         assertEquals(listOf("calls"), replaced.catchUp(listOf(other)), "another call instead")
-        val kept = DeltaLedger(Deltas())
+        val kept = DeltaLedger(Deltas(), EchoGuard.NONE)
         kept.started(id, "tap")
         assertEquals(
             emptyList<String>(),

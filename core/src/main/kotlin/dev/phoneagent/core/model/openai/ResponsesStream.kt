@@ -40,7 +40,8 @@ import kotlinx.serialization.json.putJsonArray
  * whole JSON reply), is [ModelError.BadResponse]. An incomplete
  * reply stops with [StopReason.MAX_TOKENS] or [StopReason.OTHER] (a content filter is a
  * [ModelError.Refusal]); on the ChatGPT plan only `response.completed` succeeds.
- * `response.failed` and `error` events become [ModelError]s.
+ * `response.failed` and `error` events become [ModelError]s. A reply whose content holds a
+ * request secret fails as [CredentialEcho] ([EchoGuard]), the deltas checked as they are shown.
  */
 internal class ResponsesStream(
     private val provider: ProviderId,
@@ -49,7 +50,8 @@ internal class ResponsesStream(
     private val redactor: Redactor,
     onDelta: (Delta) -> Unit,
 ) {
-    private val ledger = DeltaLedger(onDelta)
+    private val guard = redactor.guard()
+    private val ledger = DeltaLedger(onDelta, guard)
     private var reasoningSection: String? = null
     private var reasoningChannel: String? = null
     private val items = OutputItems()
@@ -83,6 +85,7 @@ internal class ResponsesStream(
         val reason = response.obj("incomplete_details")?.str("reason")
         val rawFirst = reasoningChannel == RAW_REASONING_DELTA
         val parts = ResponsesOutput.parts(output, provider, model, redactor, rawFirst)
+        guard.parts(parts)
         val hasCalls = parts.any { it is Part.ToolCall }
         ResponsesOutput.checkRefusal(output, parts, incomplete && reason == "content_filter")
         if (incomplete && plan) {
