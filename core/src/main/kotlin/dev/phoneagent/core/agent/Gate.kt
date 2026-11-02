@@ -19,14 +19,16 @@ import kotlinx.coroutines.withTimeoutOrNull
 /**
  * `toolPreExecute` with the PolicyEngine as its last, fixed guard (phase1 §3.8, AGENTS §3.3).
  * The interceptor chain runs first; the policy then resolves and judges the recorded call on the
- * newest screen recorded by a call that already has its result ([latestSnapshot]) whatever the
- * chain returned, and the stricter verdict wins (Refuse > HandOff > Confirm > Allow; the policy's
- * on a tie), so no interceptor can bypass it. Every policy verdict is logged.
+ * newest screen recorded by a call that already has its result, with nothing since that may have
+ * changed the screen ([latestSnapshot]), whatever the chain returned, and the stricter verdict
+ * wins (Refuse > HandOff > Confirm > Allow; the policy's on a tie), so no interceptor can bypass
+ * it. Every policy verdict is logged.
  *
  * An approved card is not enough to run (contracts addendum §8, §14): the runtime always tries to
  * observe a fresh screen S' ([freshScreen]) and records it under the call (`screen/snapshot`
- * with its callId, so once the call has its result, whatever it is, S' is the screen later calls
- * are judged on); the policy then resolves and judges the call again with the card as
+ * with its callId, so once the call has its result S' is the screen later calls are judged on,
+ * unless the call started a non-READ execution after it or another boundary of [latestSnapshot]
+ * followed); the policy then resolves and judges the call again with the card as
  * `PolicyContext.approved`, on S', or on no screen when there is no screen port or the read failed
  * or took longer than [LoopConfig.recheckScreenTimeoutMs]. Whether a call may run
  * without a screen is the policy's decision, never the runtime's. Allow runs it; Refuse and

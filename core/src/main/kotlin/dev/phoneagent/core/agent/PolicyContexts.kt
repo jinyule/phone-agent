@@ -19,6 +19,7 @@ import dev.phoneagent.core.session.ScreenLaunched
 import dev.phoneagent.core.session.ScreenObserved
 import dev.phoneagent.core.session.SessionEvent
 import dev.phoneagent.core.session.SessionRecord
+import dev.phoneagent.core.session.SessionResumed
 import dev.phoneagent.core.session.TaskLevelChanged
 import dev.phoneagent.core.session.TaskStarted
 import dev.phoneagent.core.session.ToolExecuted
@@ -30,11 +31,22 @@ import dev.phoneagent.core.tool.ToolStatus
  * The screen the policy judges a call on (`PolicyContext.screen`, contracts addendum §14): the
  * newest snapshot recorded by a tool call whose `tool/result` is already in the log (an
  * observation, the screen read back after an action or launch, or the runtime's own read for that
- * call: the re-check after its approval, the look after its handoff). Snapshots of a call still
- * running, and any without a call, do not count. `null` before any screen counts, and after a
- * handoff until a screen is recorded after it: from its `handoff/started` on, whether it ends
- * normally, is stopped, times out or breaks, every screen before it is hidden, since the user may
- * have changed what is shown; a `handoff/end` hides those recorded during the handoff too.
+ * call: the re-check after its approval, the look after its handoff), unless something that may
+ * have changed the screen was recorded after it. Snapshots of a call still running, and any
+ * without a call, do not count. These boundaries hide every screen recorded before them:
+ * - `handoff/started` and `handoff/end`: the user may have changed what is shown, however the
+ *   handoff ends (normally, stopped, timed out, broken); so screens recorded while handed over
+ *   are hidden too;
+ * - `session/resumed`: the process ended, and the app with it, perhaps;
+ * - the `tool/started` of a non-READ call (by the intent of the verdict it started on): from the
+ *   start of its execution its action may have changed the screen, whether it then finishes, times
+ *   out, is stopped or dies; a call refused after its re-check never starts, so its S' still
+ *   counts;
+ * - `screen/acted` and `screen/launched`: their own read-back counts as recorded after the
+ *   boundary (once their call has a result); without one there is no screen.
+ *
+ * `null` before any screen counts and after a boundary until a screen is recorded after it; the
+ * policy then decides (screen-bound actions get NO_SCREEN and are told to observe first).
  *
  * This screen can be newer than the one the model saw: a call's result need not show the screen it
  * recorded (an action's read-back, for one). That is deliberate. Judging on the newer screen costs
@@ -44,7 +56,11 @@ import dev.phoneagent.core.tool.ToolStatus
  */
 internal fun latestSnapshot(records: List<SessionRecord>): ScreenSnapshot? {
     val answered = records.mapNotNullTo(HashSet()) { (it.event as? ToolResultRecorded)?.callId }
-    val seen = records.asReversed().firstNotNullOfOrNull { seenSnapshot(it.event, answered) }
+    val acting =
+        startsOf(records)
+            .filter { (_, verdict) -> verdict.intent.kind != IntentKind.READ }
+            .mapTo(HashSet()) { (started, _) -> started.callId }
+    val seen = records.asReversed().firstNotNullOfOrNull { seenSnapshot(it.event, answered, acting) }
     return (seen as? Seen.Screen)?.snapshot
 }
 
@@ -67,9 +83,9 @@ internal fun screenLostAfterHandoff(
             val event = record.event
             (event is HandoffStarted && event.promptId in handoffs) ||
                 (event is HandoffEnded && event.promptId in handoffs) ||
-                seenSnapshot(event, setOf(callId)) is Seen.Screen
+                seenSnapshot(event, setOf(callId), acting = emptySet()) is Seen.Screen
         }
-    return last != null && seenSnapshot(last.event, setOf(callId)) !is Seen.Screen
+    return last != null && seenSnapshot(last.event, setOf(callId), acting = emptySet()) !is Seen.Screen
 }
 
 private sealed interface Seen {
@@ -80,35 +96,37 @@ private sealed interface Seen {
     data object Hidden : Seen
 }
 
+/** What [event] says about the screen, walking the log backwards; `null` when it says nothing. */
 private fun seenSnapshot(
     event: SessionEvent,
     answered: Set<ToolCallId?>,
+    acting: Set<ToolCallId>,
 ): Seen? =
     when {
-        event is ScreenObserved -> {
-            event.snapshot.takeIf { event.callId in answered }?.let(Seen::Screen)
-        }
-
-        event is ScreenActed -> {
-            event.outcome.after
-                .takeIf { event.callId in answered }
-                ?.let(Seen::Screen)
-        }
-
-        event is ScreenLaunched -> {
-            event.outcome.after
-                .takeIf { event.callId in answered }
-                ?.let(Seen::Screen)
-        }
-
-        event is HandoffStarted || event is HandoffEnded -> {
-            Seen.Hidden
-        }
-
-        else -> {
-            null
-        }
+        event is ScreenObserved -> event.snapshot.takeIf { event.callId in answered }?.let(Seen::Screen)
+        event is ScreenActed -> readBack(event.outcome.after, event.callId in answered)
+        event is ScreenLaunched -> readBack(event.outcome.after, event.callId in answered)
+        event is ToolStarted -> Seen.Hidden.takeIf { event.callId in acting }
+        event is HandoffStarted || event is HandoffEnded || event is SessionResumed -> Seen.Hidden
+        else -> null
     }
+
+/** An action or launch: its own read-back [after] once its call has a result, else nothing before it counts. */
+private fun readBack(
+    after: ScreenSnapshot?,
+    answered: Boolean,
+): Seen = after?.takeIf { answered }?.let(Seen::Screen) ?: Seen.Hidden
+
+/**
+ * Every `tool/started` with the verdict it started on, in log order; the log's invariants make
+ * `verdictSeq` the seq of the call's Allow (SessionInvariants).
+ */
+internal fun startsOf(records: List<SessionRecord>): List<Pair<ToolStarted, PolicyVerdictRecorded>> {
+    val bySeq = records.associateBy { it.seq }
+    return records.mapNotNull { it.event as? ToolStarted }.map {
+        it to bySeq.getValue(it.verdictSeq).event as PolicyVerdictRecorded
+    }
+}
 
 /**
  * The policy's view of the task, derived from the log only (so replay rebuilds it). Both package
@@ -127,13 +145,7 @@ internal fun policyContextOf(
     screen: ScreenSnapshot?,
     approved: ConfirmCard?,
 ): PolicyContext {
-    val bySeq = records.associateBy { it.seq }
-    // The log's invariants make verdictSeq the seq of this call's Allow (SessionInvariants).
-    val ran =
-        records.mapNotNull { it.event as? ToolStarted }.map {
-            it to
-                bySeq.getValue(it.verdictSeq).event as PolicyVerdictRecorded
-        }
+    val ran = startsOf(records)
     val operated =
         ran
             .map { (_, verdict) -> verdict.intent }

@@ -15,6 +15,8 @@ import dev.phoneagent.core.policy.Verdict
 import dev.phoneagent.core.ports.ConfirmCard
 import dev.phoneagent.core.ports.ConfirmReason
 import dev.phoneagent.core.ports.Question
+import dev.phoneagent.core.ports.SystemKey
+import dev.phoneagent.core.ports.UiAction
 import dev.phoneagent.core.session.ApprovalAsked
 import dev.phoneagent.core.session.AssistantMessage
 import dev.phoneagent.core.session.PolicyVerdictRecorded
@@ -80,7 +82,13 @@ class AgentLoopExecutionHistoryTest {
                     ctx.screen!!.snapshot()
                     ToolResult.ok("看到了")
                 }
-            val send = FakeTool("send", risk = RiskClass.OUTWARD)
+            // send reads its screen back, as a real send does: without that, c2 would be judged on
+            // no screen (AgentLoopScreenBoundaryTest).
+            val send =
+                FakeTool("send", risk = RiskClass.OUTWARD) { _, ctx ->
+                    ctx.screen!!.act(UiAction.Key(SystemKey.ENTER), on = null)
+                    ToolResult.ok("发了")
+                }
             val model =
                 FakeChatModel()
                     .calls(call("c0", "look"))

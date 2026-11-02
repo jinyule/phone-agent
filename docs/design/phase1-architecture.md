@@ -490,11 +490,17 @@ fun interface Chain<I, O> { suspend fun proceed(input: I): O }   // 不调用 pr
 **`requestError` 默认行为**（`RetryInterceptor`）：可重试的错误每个 step 最多重试 5 次；服务端给了 retry-after 就按它等，否则从 500 ms 指数退避到 10 s，一半固定一半随机。retry-after 超过 `maxRetryAfterMs`（默认 60 s，构造时校验）**不重试**，直接按不可重试失败，不会把等待缩短到上限。重试前的等待可以被 steer 打断。
 
 **`toolPreExecute` 与 PolicyEngine**：
-- 拦截器链先跑。PolicyEngine 再用 `IntentResolver` 解析调用，在 `ctx.screen` 上判定。`ctx.screen` 从日志推导：**已经有 `tool/result` 的调用所记录的最近一屏**（包括 runtime 记在那个调用名下的屏：批准后复核读的屏 S'，以及接管结束后读的屏，§7.3）；还没有结果的调用记的屏、不属于任何调用的屏都不算。从 `handoff/started` 起，之前的屏都不算，`handoff/end` 再把接管期间记的屏也作废；接管不论怎样结束（正常结束、被停止、超时、意外异常、进程被杀后修复），之后还没读到屏，就是 `screen = null`，交给 PolicyEngine 处理。
+- 拦截器链先跑。PolicyEngine 再用 `IntentResolver` 解析调用，在 `ctx.screen` 上判定。`ctx.screen` 从日志推导：**已经有 `tool/result` 的调用所记录的最近一屏**（包括 runtime 记在那个调用名下的屏：批准后复核读的屏 S'，以及接管结束后读的屏，§7.3）；还没有结果的调用记的屏、不属于任何调用的屏都不算。记下以后，只要发生下面任何一种作废边界，它和之前记的屏就都不算了：
+  - `handoff/started`、`handoff/end`：从 `handoff/started` 起之前的屏都不算，`handoff/end` 再把接管期间记的屏也作废；接管不论怎样结束（正常结束、被停止、超时、意外异常、进程被杀后修复）都一样；
+  - `session/resumed`：进程结束过，App 可能也不在原来的状态；
+  - 非 READ 调用的 `tool/started`（按 verdictSeq 指向的那条 verdict 的 `intent.kind` 判断）：一开始执行，动作就可能改变了屏幕，不论之后正常返回、超时、被停止还是进程被杀；
+  - `screen/acted`、`screen/launched`：事件自带的回读屏（`after`）算作在边界之后记录的，所在调用有了结果就有效；`after` 为 null 时就没有有效的屏。
+
+  边界之后还没读到屏，就是 `screen = null`，交给 PolicyEngine 处理（WP05 对依赖屏幕的动作返回 `NO_SCREEN`，提示先 `phone_observe`）。全部只从日志推导，不用内存状态。
   - 这一屏可能比模型看到的更新：调用的结果不一定把它记录的屏展示给模型（比如动作之后回读的屏）。这样取是有意的：用更新的屏，最坏是带 ref 的调用多一次 stale 拒绝（快照 id 对不上）；如果严格按"模型看到的屏"判，坐标点击会在过期的屏上解析，可能放行一次在当前屏上本该确认的点击。
 - 链和策略的结论取更严的（Refuse > HandOff > Confirm > Allow，平手取策略的）。每个判定都写 `policy/verdict`。
 - Refuse：原因作为结果返回给模型。HandOff：转交给用户。Confirm：显示确认卡。
-- **批准后复核**：runtime 一律尝试读一张新屏 S'（最多等 `LoopConfig.recheckScreenTimeoutMs`，默认 5 s，构造时校验），读到就记在这个调用名下（`screen/snapshot(callId)`），这个调用有了结果（不论放行、拒绝还是执行完）以后，S' 就是后续调用判定用的 `ctx.screen`；以 `approved = card` 重新解析、判定。
+- **批准后复核**：runtime 一律尝试读一张新屏 S'（最多等 `LoopConfig.recheckScreenTimeoutMs`，默认 5 s，构造时校验），读到就记在这个调用名下（`screen/snapshot(callId)`），这个调用有了结果以后，S' 就是后续调用判定用的 `ctx.screen`，直到出现上面的作废边界：调用被拒、没有执行时 S' 仍然有效；非 READ 调用开始执行以后 S' 作废，之后只认它回读的屏；以 `approved = card` 重新解析、判定。
   - 读到了：在 S' 上判定。没有屏幕端口、读失败（`ScreenUnavailableException`）或超时：以 `screen = null` 判定，不报 `ERROR`。没有屏幕能不能放行由 PolicyEngine 决定（WP05：坐标点击、输入、滚动这类写动作一律 Refuse），runtime 不去猜调用依不依赖屏幕；
   - Allow → 执行；
   - Refuse / HandOff → 按对应结局处理；

@@ -122,11 +122,12 @@ class AgentLoopRecheckTest {
         }
 
     @Test
-    fun `the re-check's screen counts for later calls once its call has a result`() =
+    fun `the re-check's screen is the call's own, and a write that then runs hides it`() =
         runTest {
-            // look's and send's results show only text: the policy still judges on the screen
-            // they recorded, which can be newer than what the model saw (latestSnapshot). The
-            // re-check reads s2 under c1, so c2 is judged on s2, not on c0's s1.
+            // look's result shows only text: the policy still judges on the screen it recorded,
+            // which can be newer than what the model saw (latestSnapshot). The re-check reads s2
+            // under c1 and judges c1 on it; send then starts, and as it reads nothing back, c2 is
+            // judged on no screen, neither s2 nor c0's s1 (a refused call keeps its S', below).
             val policy = ScriptedPolicy(Verdict.Allow, Verdict.Confirm(sendCard))
             val screen = ScriptedScreen(ScriptedScreen.snapshotOf("s1"), ScriptedScreen.snapshotOf("s2"))
             val look =
@@ -148,9 +149,9 @@ class AgentLoopRecheckTest {
             loop.awaitPhase(Phase.Done)
 
             assertEquals(
-                listOf(null, "s1", "s2", "s2"),
+                listOf(null, "s1", "s2", null),
                 policy.contexts.map { it.screen?.id?.value },
-                "nothing recorded yet; what c0 recorded; the re-check's own read; that read once c1 has its result",
+                "nothing recorded yet; what c0 recorded; the re-check's own read; none after send started",
             )
             assertEquals(listOf(null, null, sendCard, null), policy.contexts.map { it.approved })
             val observed = harness.events().only<ScreenObserved>()

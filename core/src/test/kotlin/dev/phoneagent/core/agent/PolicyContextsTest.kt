@@ -27,6 +27,7 @@ import dev.phoneagent.core.session.ScreenActed
 import dev.phoneagent.core.session.ScreenLaunched
 import dev.phoneagent.core.session.ScreenObserved
 import dev.phoneagent.core.session.SessionEvent
+import dev.phoneagent.core.session.SessionResumed
 import dev.phoneagent.core.session.SessionSamples
 import dev.phoneagent.core.session.TaskLevelChanged
 import dev.phoneagent.core.session.TaskStarted
@@ -75,10 +76,12 @@ class PolicyContextsTest {
             "a snapshot without a call does not count",
         )
         assertEquals(s2, latestSnapshot(log(acted("c1", s1), launched("c2", s2), answered("c1"), answered("c2"))))
-        assertEquals(s1, latestSnapshot(log(acted("c1", s1), launched("c2", s2), answered("c1"))))
-        assertEquals(s2, latestSnapshot(log(launched("c2", s2), acted("c1", s1), answered("c2"))))
-        assertEquals(
-            s3,
+        assertNull(
+            latestSnapshot(log(acted("c1", s1), launched("c2", s2), answered("c1"))),
+            "a launch hides what came before it; its own read-back counts once its call has a result",
+        )
+        assertNull(latestSnapshot(log(launched("c2", s2), acted("c1", s1), answered("c2"))), "the same for an action")
+        assertNull(
             latestSnapshot(
                 log(
                     ScreenObserved(id("c0"), s3),
@@ -89,8 +92,31 @@ class PolicyContextsTest {
                     answered("c2"),
                 ),
             ),
-            "an action without a screen afterwards shows none",
+            "an action or a launch without a read-back leaves no screen",
         )
+    }
+
+    @Test
+    fun `a resume and the start of a non-READ call hide the screens before them`() {
+        val log = Log()
+        log.add(ScreenObserved(id("c0"), s1))
+        log.add(answered("c0"))
+        log.ran("look", IntentKind.READ, "app.look")
+        log.add(answered("look"))
+        val read = log.events.toList()
+        assertEquals(s1, latestSnapshot(log(*read.toTypedArray())), "a READ call's start changes nothing")
+
+        log.ran("tap", IntentKind.INPUT, "app.tap", status = null)
+        log.add(answered("tap"))
+        assertNull(latestSnapshot(log(*log.events.toTypedArray())), "tap may have changed the screen")
+        log.add(ScreenObserved(id("c2"), s2))
+        log.add(answered("c2"))
+        assertEquals(s2, latestSnapshot(log(*log.events.toTypedArray())), "a screen recorded after it counts")
+
+        val resumed = log(*read.toTypedArray(), SessionResumed(droppedTailBytes = 0))
+        assertNull(latestSnapshot(resumed), "the process ended in between")
+        val observed = log(*read.toTypedArray(), SessionResumed(0), ScreenObserved(id("c3"), s3), answered("c3"))
+        assertEquals(s3, latestSnapshot(observed))
     }
 
     private fun verdict(
