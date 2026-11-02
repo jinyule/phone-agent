@@ -29,7 +29,8 @@ public sealed class ModelError(
     /**
      * Whether what this attempt streamed must not be kept. When `true` the runtime records no
      * interrupted `assistant/message` for the attempt, only its `assistant/attempt` with the
-     * error's fixed message, and the UI clears the fragments it has shown. Only a [BadResponse]
+     * error's fixed message, and the UI withdraws or marks void the fragments it has shown (they
+     * were passed on as they arrived, [Delta]). Only a [BadResponse]
      * for a reply that carries the request's secret sets it (`CredentialResolver`, redaction).
      */
     public open val discardsStreamed: Boolean get() = false

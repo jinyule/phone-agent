@@ -96,7 +96,10 @@ public data class Usage(
  * [ChatResponse] is authoritative and is what gets recorded. The [Text] fragments, in order, are
  * always a prefix of the final reply's text. [Reasoning], [ToolCallStarted] and [ToolCallArgs] are
  * previews that promise nothing: when the server degrades the reply, they may be missing from the
- * final [ChatResponse], and the UI re-renders from that.
+ * final [ChatResponse], and the UI re-renders from that. Fragments are passed on as they arrive,
+ * never held back, and never logged; when the attempt then fails with an error that
+ * [ModelError.discardsStreamed], none of them is kept in the log either, and the UI withdraws or
+ * marks void the ones it has shown.
  */
 public sealed interface Delta {
     /** Visible reply text, appended to what came before. */

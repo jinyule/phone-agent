@@ -95,7 +95,8 @@ fun interface BlobSource {              // 读当前会话 BlobStore 里 Part.Im
 - 密钥不进日志、异常消息和 `toString`。
 - **脱敏**（本次请求用到的密钥；契约写在 `CredentialResolver` 的 KDoc，WP03、WP04 各自实现，两边规则相同）：
   - **模型产生的内容一律不改写**。密钥出现在其中任何地方（正文、调用参数、推理预览、opaque 和签名块：Anthropic 的 `thinking`、`redacted_thinking`、`tool_use`，OpenAI 的 `reasoning`、`encrypted_content`，以及其他协议里的同类内容），**整条回复按 `BadResponse` 拒绝**，返回固定文字，并设上 `ModelError.discardsStreamed`。不改写的原因：Anthropic 把 thinking 绑定到它之前的整段对话，改写已经返回的正文或 `tool_use.input`，下一次请求就会报 prefix mismatch；改写调用参数还会改掉要执行的操作。我们从不把密钥放进上下文，模型输出里出现密钥本身就说明出了问题。
-  - **`discardsStreamed`**：这次 attempt 已经流出的内容不保留。runtime 不把它记成 interrupted 的 `assistant/message`，只记 `assistant/attempt` 和固定原因；界面上已经显示的片段由 UI 按这个错误清掉。
+  - **`discardsStreamed`**：这次 attempt 已经流出的内容不保留。runtime 不把它记成 interrupted 的 `assistant/message`，只记 `assistant/attempt` 和固定原因；界面上已经显示的片段由 UI 按这个错误撤回或标记作废（WP09）。
+  - **预览 delta 不推迟发布**：适配器收到片段就交给 `onDelta`，不为了检测密钥先扣住。delta 只用来显示，从不进日志；出现带 `discardsStreamed` 的错误时，已经流出的片段同样不留在日志里，界面按上一条撤回或标记作废。
   - **匹配方式**：只做精确匹配，同时匹配密钥的 JSON 转义形式，不按形状兜底。不设最短长度，所有密钥都匹配：任何阈值都会让短的真实凭据漏出去。不需要认证的本地服务用 `Credential.None`，不要填占位 key。
   - **服务端写的诊断字段**（错误正文、拒答 category、metadata）照旧改写成 `***`，并按形状兜底。
 - **流式增量**：`Delta.Text` 依次拼起来一定是最终正文的前缀；推理和工具调用的预览不作保证，服务端降级时可能不出现在最终回复里，界面以最终的 `ChatResponse` 为准重新渲染。
