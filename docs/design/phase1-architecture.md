@@ -358,7 +358,7 @@ sealed interface Phase { data object Idle : Phase; data class Running(val turn: 
 - **被放弃的调用绝不晚些执行**；收尾时写日志的代码放在 `withContext(NonCancellable)` 里。
 - **流被中断**：用户已经看到的部分回复写成 `assistant/message(interrupted=true)`，parts 不能为空（什么都没显示就不写）。它进不进模型视图只看后面先来的是什么：
   - 先来的是另一条 `assistant/message`（同一 step 的重试，期间没有新的用户输入）：前缀只给 UI 看。重试重发的是产生它的那个请求，回复是在没有前缀的情况下生成的；
-  - 先来的是 `user/message`（steer 截断后重开 step，或者 stop / 最终失败之后下一个 turn 的输入）：前缀跟着这条输入进入模型视图，但去掉其中的 `Part.Reasoning`（没写完的推理块不能回传）；去掉后为空就整条不进；
+  - 先来的是 `user/message`（steer 截断后重开 step，或者 stop / 最终失败之后下一个 turn 的输入）：前缀跟着这条输入进入模型视图，但去掉其中的 `Part.Reasoning`（没写完的推理块不能回传），compaction 块也一样：回复不完整，其中的 compaction 块不回传，之后的请求由服务端重新压缩。视图是对日志的纯函数，前缀进入视图以后每次请求里的样子都相同，不违反"历史只追加"（model-layer §5）。去掉后为空就整条不进；
   - 规则样例在 `core` 测试源码的 `DeriveRuleSamples`，WP02 的 `deriveMessages` 测试逐条运行。
 - **去掉 thinking 重试**：签名失效等情况下，`requestError` 先写 `context/reasoning-dropped(upToSeq)`，之后的请求不再带 seq ≤ upToSeq 的推理块（`ReasoningKind.isReasoning`：thinking、redacted thinking、Responses 加密推理、Chat 推理字段），文字、工具调用、工具结果和 **compaction 块**不变（compaction 块装的是压缩后的历史，去掉它服务端就要重新处理整段历史）。多条去掉记录累加；只剩推理的回复整条不进；upToSeq 之后的推理照常带上。
 - **执行事实写进日志**：真正调用 `Tool.execute` 之前写 `tool/started(callId, verdictSeq)` 并刷盘（verdictSeq 是这个调用最新的 verdict，必须是 Allow）；execute 返回后、`toolPostExecute` 之前写 `tool/executed(callId, status)`，记原始状态。拒绝、转交、等待或被拒的审批、拦截器短路都不写 `tool/started`。

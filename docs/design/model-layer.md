@@ -259,6 +259,8 @@ OpenAI 在 DevDay 2026 推出的这个通道，面向"开源、在本地运行"�
 
 **恢复兜底**：如果收到 `PrefixBindingMismatch` 这类 400，去掉历史里所有的推理块（thinking、redacted_thinking，以及其他协议里 `ReasoningKind.isReasoning` 的块）后重试一次，并记日志（`context/reasoning-dropped`）。**compaction 块不去掉**：它装的是压缩后的历史，去掉它服务端就要重新处理压缩前的整段历史，可能撞上上下文上限，成本也会突增；文字和工具调用同样保留。这是一次性的恢复手段，不是常规路径。
 
+**中断前缀里的 compaction 块**：被中断的回复（`assistant/message(interrupted=true)`）进入模型视图时，去掉其中所有的 `Part.Reasoning`，compaction 块也在内。回复不完整，其中的 compaction 块不回传，之后的请求由服务端重新压缩。视图是对日志的纯函数，前缀进入视图以后，每次请求里它的样子都相同，所以不违反"Anthropic 历史只追加"。契约写在 `SessionEvent` 的 KDoc（模型视图一节），WP17 复查。
+
 ---
 
 ## 6. 测试

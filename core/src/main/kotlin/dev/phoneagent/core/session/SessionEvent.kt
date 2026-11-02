@@ -22,7 +22,10 @@ import kotlinx.serialization.Serializable
  *   steer input follows it in the reopened step), and a prefix cut by stop or a final failure
  *   joins the view with the next user input.
  *   A prefix that counts joins without its `Part.Reasoning`s (they stay in the log for the UI),
- *   and is left out when nothing else remains.
+ *   and is left out when nothing else remains. Compaction blocks are no exception: the reply was
+ *   cut, so a compaction block in it is not sent back, and the server compacts again on a later
+ *   request. The view is a pure function of the log, so every request after the prefix joined
+ *   carries it in the same form, and the history stays append-only (model-layer §5).
  * - [ToolResultRecorded] → a `Role.TOOL` message holding `result.toPart(callId)`, whatever its
  *   status (SKIPPED and CANCELLED included). Every tool call of a reply, also of one cut at the
  *   output cap, has its result before the step ends (`SessionInvariants`), so every call in the
