@@ -204,10 +204,13 @@ class ResolverTest {
             assertEquals(IntentKind.NAVIGATE, kind(call("phone_tap", "x" to 100, "y" to 100), page))
             val input = field("e2", bounds = box(0, 100, 800, 160))
             val clear = el("e3", bounds = box(700, 110, 790, 150))
-            val drawn = listOf(ocr("发送给张三", box(0, 100, 600, 160)), ocr("删除", box(700, 110, 790, 150)))
+            val drawn = listOf(ocr("发送给张三", box(0, 100, 600, 160)), ocr("清除", box(700, 110, 790, 150)))
             val form = screen(input, clear, ocr = drawn)
             assertEquals(IntentKind.NAVIGATE, kind(call("phone_tap", "x" to 300, "y" to 130), form))
             assertEquals(IntentKind.NAVIGATE, kind(call("phone_tap", "x" to 745, "y" to 130), form))
+            // "删除" drawn on the icon is a delete word, not a clearing one.
+            val deletes = screen(input, clear, ocr = listOf(ocr("删除", box(700, 110, 790, 150))))
+            assertEquals(IntentKind.DELETE, kind(call("phone_tap", "x" to 745, "y" to 130), deletes))
         }
     }
 

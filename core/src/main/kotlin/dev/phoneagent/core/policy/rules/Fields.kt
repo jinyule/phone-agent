@@ -57,9 +57,9 @@ internal class Fields(
     /**
      * Tapping [element] (whose visible text is [texts]) only edits a field (§3.3): a clear button
      * ("×", "清空", an id with "clear") inside or right next to a field; or an icon the tree says
-     * nothing about inside a field, when the only text drawn on it says clearing ("删除", "×"), or
-     * when nothing is drawn on it and the field holds text. Any other text on such an icon (a pay
-     * or send word from OCR) decides instead.
+     * nothing about inside a field, when the only text drawn on it is a clearing word ("清除",
+     * "×"), or when nothing is drawn on it and the field holds text. Never when any text on it
+     * names another risk ("支付", "发送", "删除聊天记录"): that text decides instead.
      */
     fun editsField(
         element: UiElement,
@@ -69,16 +69,19 @@ internal class Fields(
         val label = Elements.label(element, screen)
         val clears = clearWord(label) || "clear" in element.resourceId?.let(Text::idWords).orEmpty()
         val icon = label.isBlank() && element.resourceId == null
-        val drawnClear = texts.isNotEmpty() && texts.all(::saysClear)
+        val drawnClear = texts.isNotEmpty() && texts.all(::clearWord)
         val fields = screen.elements.filter { it.ref != element.ref && Elements.editable(it) }
-        return fields.any { field ->
-            val inside = Geometry.inside(element.bounds, field.bounds)
-            val iconClears = icon && inside && (drawnClear || (texts.isEmpty() && !field.value.isNullOrEmpty()))
-            iconClears || (clears && (inside || next(element, field)))
-        }
+        val near =
+            fields.any { field ->
+                val inside = Geometry.inside(element.bounds, field.bounds)
+                val iconClears = icon && inside && (drawnClear || (texts.isEmpty() && !field.value.isNullOrEmpty()))
+                iconClears || (clears && (inside || next(element, field)))
+            }
+        return near && texts.none(::namesRisk)
     }
 
-    private fun saysClear(text: String): Boolean = clearWord(text) || lexicon.classify(text)?.kind == IntentKind.DELETE
+    /** [text] on a would-be clear button names a risk other than clearing the field. */
+    private fun namesRisk(text: String): Boolean = !clearWord(text) && lexicon.ofControl(text) != null
 
     /** A [Words.FIELD_CLEAR] entry: a word ([Text.bare] form) or a symbol such as "×" ([Text.compact] form). */
     private fun clearWord(text: String): Boolean =

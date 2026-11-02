@@ -107,8 +107,18 @@ class FieldsTest {
         assertFalse(edits(icon, screen(input.copy(value = ""), icon)))
         val drawn = screen(input, icon, ocr = listOf(Fx.ocr("支付", box(610, 115, 680, 145))))
         assertFalse(edits(icon, drawn))
-        val crossed = screen(input.copy(value = null), icon, ocr = listOf(Fx.ocr("删除", box(610, 115, 680, 145))))
+        val crossed = screen(input.copy(value = null), icon, ocr = listOf(Fx.ocr("清除", box(610, 115, 680, 145))))
         assertTrue(edits(icon, crossed))
+        // Only a clearing word: "删除" or "删除聊天记录" drawn on it is a delete, not a clear button.
+        for (drawnDelete in listOf("删除", "删除聊天记录")) {
+            val deletes = screen(input, icon, ocr = listOf(Fx.ocr(drawnDelete, box(610, 115, 680, 145))))
+            assertFalse(edits(icon, deletes), drawnDelete)
+        }
+        // A clear button's id or name does not outweigh a risk word on it.
+        assertFalse(edits(byId, screen(input, byId, ocr = listOf(Fx.ocr("支付", box(725, 115, 785, 145))))))
+        assertFalse(edits(inside, screen(input, inside, ocr = listOf(Fx.ocr("发送", box(705, 115, 785, 145))))))
+        // Text that names no risk does not.
+        assertTrue(edits(inside, screen(input, inside, ocr = listOf(Fx.ocr("abc", box(705, 115, 785, 145))))))
         val mixed =
             screen(
                 input,

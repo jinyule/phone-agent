@@ -129,6 +129,31 @@ class TargetsTest {
     }
 
     @Test
+    fun `a clear button's id or place does not outweigh a pay or delete word on it`() {
+        val pay =
+            screen(
+                field("e2", bounds = box(0, 900, 999, 960)).copy(value = "abc"),
+                el("e1", bounds = box(900, 910, 990, 950)).copy(resourceId = "com.x:id/clear"),
+                flags = setOf(ScreenFlag.PAYMENT),
+                ocr = listOf(ocr("支付", box(905, 915, 985, 945))),
+            )
+        assertEquals(ConfirmReason.SPEND, reason(decide(tap("e1"), on(pay))))
+        assertEquals(ConfirmReason.SPEND, reason(decide(point(945, 930), on(pay))))
+        val delete =
+            screen(
+                field("e2", bounds = box(0, 900, 999, 960)).copy(value = "abc"),
+                el("e1", bounds = box(700, 910, 990, 950)),
+                ocr = listOf(ocr("删除聊天记录", box(705, 915, 985, 945))),
+            )
+        assertEquals(ConfirmReason.DELETE, reason(decide(tap("e1"), on(delete))))
+        assertEquals(ConfirmReason.DELETE, reason(decide(point(845, 930), on(delete))))
+        // A real clear button still only edits.
+        val clear = el("e1", "清空", bounds = box(900, 910, 990, 950))
+        val plain = screen(field("e2", bounds = box(0, 900, 999, 960)).copy(value = "abc"), clear)
+        assertEquals(Verdict.Allow, decide(tap("e1"), on(plain)))
+    }
+
+    @Test
     fun `OCR naming a sensitive settings entry refuses it`() {
         val s =
             screen(
