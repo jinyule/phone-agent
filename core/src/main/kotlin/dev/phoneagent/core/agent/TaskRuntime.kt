@@ -33,8 +33,11 @@ public interface TaskRuntime {
     public fun followup(input: UserInput)
 
     /**
-     * Queues [input] for the next step boundary and keeps the current turn from ending. Cancels an
-     * in-flight model request (its delivered prefix is kept); never interrupts a running tool.
+     * Queues [input] for the next step boundary. While it is queued, a plain final answer does not
+     * end the current turn: another step gives the model the steer. An explicit end
+     * (`end_not_done`), a failure, a `preStep` refusal, the output cap or a limit still ends the
+     * turn; the steer then stays queued and starts the next turn. Cancels an in-flight model request
+     * (its delivered prefix is kept); never interrupts a running tool.
      */
     public fun steer(input: UserInput)
 

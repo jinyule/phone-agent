@@ -409,7 +409,7 @@ interface TaskRuntime {
     val phase: StateFlow<Phase>              // Idle / Running(turn, step) / Waiting(USER|HANDOFF|LOCK, promptId) / Done / Stopped(cause)
     val events: SharedFlow<LoopEvent>        // 只读观察：每条记录、流式分片、轨迹卡
     fun followup(input: UserInput)           // 进 nextTurn：一条消息独占一个 turn
-    fun steer(input: UserInput)              // 进 nextStep：在下一个 step 边界被取走；阻止本 turn 结束
+    fun steer(input: UserInput)              // 进 nextStep：在下一个 step 边界被取走；排队期间普通最终回答不结束本 turn
     fun inject(context: ContextInput)        // 进 nextStep，不唤醒驱动器（例如定时结果、通知）
     fun changeLevel(level: SecurityLevel)    // 写 task/level-changed，之后判定的调用按新级别；级别只能这样改
     fun stop(cause: StopCause)               // USER / SHUTDOWN / LIMIT / ERROR；只停这一个任务，清空 inbox
@@ -443,7 +443,7 @@ interface TaskRuntime {
 - 单一超时真相源：工具超时（`Tool.timeoutMs`）包住整条 `toolExecute` 链（包装器也算在内），工具层先作答。等待用户的时间不计入工具超时。超时的结果是 `TIMEOUT`；非 READ 的调用还要附上"可能已生效"。
 - **刷盘**：每次模型请求前、每个非 READ 调用执行前。刷盘失败就不执行，调用记 `NOT_STARTED`，任务以 `ERROR` 停止。
 - 确认之后、执行之前，按 §3.8 的 `toolPreExecute` 在新屏幕上复核一次。
-- **steer 只打断模型 attempt 和重试前的等待**，不打断正在执行的工具。
+- **steer 只打断模型 attempt 和重试前的等待**，不打断正在执行的工具。排队中的 steer 只阻止"普通最终回答"结束当前 turn（不走 `turnStopping`，再跑一个 step 把 steer 交给模型）；显式结束（`end_not_done`）、失败、`preStep` 拒绝、max-tokens 和上限照样结束 turn，steer 留在 nextStep，开启下一个 turn。
 - **被放弃的调用绝不晚些执行**；收尾时写日志的代码放在 `withContext(NonCancellable)` 里。
 - **流被中断**：用户已经看到的部分回复写成 `assistant/message(interrupted=true)`，parts 不能为空（什么都没显示就不写）。例外：错误带 `ModelError.discardsStreamed`（回复里出现了本次的密钥，model-layer §2）时不写前缀，只写 `assistant/attempt` 和固定原因，界面撤回或标记作废已经显示的片段。前缀进不进模型视图只看后面先来的是什么：
   - 先来的是另一条 `assistant/message`（同一 step 的重试，期间没有新的用户输入）：前缀只给 UI 看。重试重发的是产生它的那个请求，回复是在没有前缀的情况下生成的；
@@ -482,7 +482,8 @@ fun interface Chain<I, O> { suspend fun proceed(input: I): O }   // 不调用 pr
 **`requestError` 默认行为**（`RetryInterceptor`）：可重试的错误每个 step 最多重试 5 次；服务端给了 retry-after 就按它等，否则从 500 ms 指数退避到 10 s，一半固定一半随机。retry-after 超过 `maxRetryAfterMs`（默认 60 s，构造时校验）**不重试**，直接按不可重试失败，不会把等待缩短到上限。重试前的等待可以被 steer 打断。
 
 **`toolPreExecute` 与 PolicyEngine**：
-- 拦截器链先跑。PolicyEngine 再用 `IntentResolver` 解析调用，在**模型看过的最新屏幕**上判定。这个屏幕从日志推导：已经有 `tool/result` 的调用所记录的最近一屏（包括接管结束后 runtime 记在那个调用名下的一屏，§7.3）；批准后复核读的屏（`callId = null`）不算。`handoff/end` 之前的屏都不算：接管后读不到屏，就是 `screen = null`。
+- 拦截器链先跑。PolicyEngine 再用 `IntentResolver` 解析调用，在 `ctx.screen` 上判定。`ctx.screen` 从日志推导：**已经有 `tool/result` 的调用所记录的最近一屏**（包括接管结束后 runtime 记在那个调用名下的一屏，§7.3）；批准后复核读的屏（`callId = null`）不算。`handoff/end` 之前的屏都不算：接管后读不到屏，就是 `screen = null`。
+  - 这一屏可能比模型看到的更新：调用的结果不一定把它记录的屏展示给模型（比如动作之后回读的屏）。这样取是有意的：用更新的屏，最坏是带 ref 的调用多一次 stale 拒绝（快照 id 对不上）；如果严格按"模型看到的屏"判，坐标点击会在过期的屏上解析，可能放行一次在当前屏上本该确认的点击。
 - 链和策略的结论取更严的（Refuse > HandOff > Confirm > Allow，平手取策略的）。每个判定都写 `policy/verdict`。
 - Refuse：原因作为结果返回给模型。HandOff：转交给用户。Confirm：显示确认卡。
 - **批准后复核**：runtime 一律尝试读一张新屏 S'（最多等 `LoopConfig.recheckScreenTimeoutMs`，默认 5 s，构造时校验），读到就记成 `screen/snapshot(callId = null)`；以 `approved = card` 重新解析、判定。
@@ -700,8 +701,11 @@ screen s12 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · 坐标 0–
 ```
 TaskRuntime 循环（每个 step，对应 §3.8 的拦截点）：
   1. 从 inbox 取出输入（turn 开始时：全部 nextStep + 1 条 nextTurn；step 之间：只取 nextStep）
-  2. preStep 链：步数上限 → runtime-context（只在变化时追加用户消息，发过的消息一律不改）
-                → 达到上下文 60% 时压缩，按协议区分（Responses / Chat Completions：在客户端裁剪旧界面结果、折叠旧往返；Anthropic：交给服务端 context editing / compaction）→ 刷盘
+  2. 步数上限 → preStep 链：runtime-context（只在变化时追加用户消息，发过的消息一律不改）
+                → 达到上下文 60% 时压缩，写 compaction/* 记录
+       preStep 不知道这次请求走哪个协议，所以协议的区分不在这里做，而在投影：deriveMessages 看最新 request/header 的协议
+       （Responses / Chat Completions：按 compaction 的 Replace 在客户端裁剪旧界面结果、折叠旧往返；
+        Anthropic：历史只追加，不应用 Replace，旧内容交给服务端 context editing / compaction）
   3. request 链选模型 → 写 request/header（有变化才写）→ deriveMessages → 刷盘 → ChatModel.complete
        steer 到来、模型请求还在进行：取消这次 attempt（已输出的部分记成 interrupted），取走 steer 后重发
        工具执行中不被插话打断

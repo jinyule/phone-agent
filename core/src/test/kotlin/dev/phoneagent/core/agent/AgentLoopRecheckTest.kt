@@ -122,8 +122,10 @@ class AgentLoopRecheckTest {
         }
 
     @Test
-    fun `the policy judges on the screen the model saw and the re-check on a fresh one`() =
+    fun `the policy judges on the newest screen a finished call recorded, the re-check on its own`() =
         runTest {
+            // look's result shows only text: the policy still judges on the screen it recorded,
+            // which can be newer than what the model saw (PolicyContexts, latestSnapshot).
             val policy = ScriptedPolicy(Verdict.Allow, Verdict.Confirm(sendCard))
             val screen = ScriptedScreen(ScriptedScreen.snapshotOf("s1"), ScriptedScreen.snapshotOf("s2"))
             val look =
@@ -147,7 +149,7 @@ class AgentLoopRecheckTest {
             assertEquals(
                 listOf(null, "s1", "s2", "s1"),
                 policy.contexts.map { it.screen?.id?.value },
-                "nothing seen yet; the look's screen; the re-check's own; the re-check's is still unseen",
+                "nothing recorded yet; what c0 recorded; the re-check's own read; that read does not count after it",
             )
             assertEquals(listOf(null, null, sendCard, null), policy.contexts.map { it.approved })
             val observed = harness.events().only<ScreenObserved>()

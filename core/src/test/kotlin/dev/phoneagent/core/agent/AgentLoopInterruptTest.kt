@@ -28,7 +28,9 @@ import dev.phoneagent.core.session.UserMessage
 import dev.phoneagent.core.testing.FakeChatModel
 import dev.phoneagent.core.testing.FakeChatModel.Companion.call
 import dev.phoneagent.core.testing.FakeTool
+import dev.phoneagent.core.tool.EndReason
 import dev.phoneagent.core.tool.RiskClass
+import dev.phoneagent.core.tool.ToolControl
 import dev.phoneagent.core.tool.ToolResult
 import dev.phoneagent.core.tool.ToolStatus
 import kotlinx.coroutines.CompletableDeferred
@@ -171,6 +173,47 @@ class AgentLoopInterruptTest {
             )
             assertEquals(
                 "也发给小王",
+                (
+                    model.requests[1]
+                        .messages
+                        .last()
+                        .parts
+                        .single() as Part.Text
+                ).text,
+            )
+        }
+
+    @Test
+    fun `an explicit end still ends the turn while a steer is queued, and the steer starts the next`() =
+        runTest {
+            val release = CompletableDeferred<Unit>()
+            val giveUp =
+                FakeTool("give_up") { _, _ ->
+                    release.await()
+                    ToolResult(
+                        ToolStatus.OK,
+                        listOf(Part.Text("ended")),
+                        control = ToolControl.EndTurn(EndReason.BLOCKED, "卡住了"),
+                    )
+                }
+            val model = FakeChatModel().calls(call("c1", "give_up")).answers("好的")
+            val harness = LoopHarness(this, model, tools = listOf(giveUp))
+            val loop = harness.start()
+
+            loop.followup(text("go"))
+            runCurrent()
+            loop.steer(text("换个办法"))
+            runCurrent()
+            release.complete(Unit)
+            advanceUntilIdle()
+
+            val events = harness.events()
+            assertEquals(
+                listOf(TurnEnded(1, TurnEndReason.END_NOT_DONE, "卡住了"), TurnEnded(2, TurnEndReason.COMPLETED)),
+                events.only<TurnEnded>(),
+            )
+            assertEquals(
+                "换个办法",
                 (
                     model.requests[1]
                         .messages
