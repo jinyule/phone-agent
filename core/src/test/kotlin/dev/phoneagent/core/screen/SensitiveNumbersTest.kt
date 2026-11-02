@@ -269,12 +269,24 @@ class SensitiveNumbersTest {
 
     @Test
     fun `many valid cards in one text cost time linear in its length`() {
-        // Not a timing threshold: a quadratic scan takes minutes on this input (about 6 s already
-        // for 4 000 cards, four times that per doubling), a linear one a fraction of a second. The
-        // bound only tells the two apart, with room for a slow machine.
+        // Not a timing threshold: rescanning the whole text before each card for an order label
+        // takes minutes on this input (about 6 s already for 4 000 cards, four times that per
+        // doubling), a linear scan a fraction of a second. The bound only tells the two apart, with
+        // room for a slow machine. The cards do not overlap: the merging is timed below.
         val text = "4111111111111111 ".repeat(MANY_CARDS)
-        val masked = assertTimeoutPreemptively(Duration.ofSeconds(MANY_CARDS_SECONDS)) { mask(text) }
+        val masked = assertTimeoutPreemptively(Duration.ofSeconds(SLOW_BOUND_SECONDS)) { mask(text) }
         assertEquals("「银行卡 尾号1111」 ".repeat(MANY_CARDS), masked)
+    }
+
+    @Test
+    fun `a long chain of overlapping numbers is merged in time linear in its length`() {
+        // Every start makes a card (15 to 18 zeros) that overlaps the next one, so the whole run is
+        // one span, extended once per group. Linear merging takes well under a second; rebuilding
+        // the span's text at each extension is quadratic, about 18 s for 40 000 groups and four
+        // times that per doubling, so minutes here. Again the bound only tells the two apart.
+        val text = "000 ".repeat(CHAIN_GROUPS)
+        val masked = assertTimeoutPreemptively(Duration.ofSeconds(SLOW_BOUND_SECONDS)) { mask(text) }
+        assertEquals("「银行卡 尾号0000」 ", masked)
     }
 
     /** Whether masking [text], which ends in [CARD_GROUPED], leaves the card wholly inside the last masked span. */
@@ -302,7 +314,10 @@ class SensitiveNumbersTest {
         const val PHONE_SAMPLES = 1000
         const val LONG_GAP = 100
         const val MANY_CARDS = 40_000
-        const val MANY_CARDS_SECONDS = 60L
+        const val CHAIN_GROUPS = 160_000
+
+        /** Far above a linear scan even on a slow machine, far below a quadratic one. */
+        const val SLOW_BOUND_SECONDS = 60L
 
         /** The 25 characters of Unicode White_Space. */
         val UNICODE_SPACES =
