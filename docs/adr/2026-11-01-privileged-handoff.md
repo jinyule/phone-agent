@@ -65,6 +65,10 @@ phase1-architecture §2.2 / §3.5 和 engineering-baseline §6 定了特权助�
 
    用掉哪个口令就只清哪个，计时用 `elapsedRealtime`。`elapsedRealtime` 每次开机从 0 开始，新开机的已运行时间可能又落回旧口令的有效窗口，所以启动口令和预约口令的时间戳旁边还存着开机标识（`Settings.Global.BOOT_COUNT`）：标识不一致或者读不到，一律当作过期。续接口令不计时，也不看开机标识。口令从不进命令行和日志（相关类型的 `toString` 都做了脱敏）。
 
+   **开机标识的来源**：`BOOT_COUNT` 是公开 API（API 24 起），带 `@Readable`，普通 App 可以直接读。写入它的是 `PowerManagerService`：在 `onBootPhase(PHASE_THIRD_PARTY_APPS_CAN_START)` 时调用 `incrementBootCount()`，值不存在就从 0 开始再加 1（AOSP 11 到 16 都是这样）。这一步发生在任何第三方 App 能启动之前，所以 App 读不到上一次开机的旧值。只有厂商删掉了这段代码，App 才会读不到；目前没有这类设备的证据。
+
+   **读不到时**（两种做法里选了"立刻失败"）：`arm` 拒绝，什么都不写，回复里带原因，`scripts/start-helper.sh` 把原因打印出来就退出，不去拉起助手；`issueLaunch` 抛 `IllegalStateException`，带同样的原因。已经在运行的助手照常用续接口令接回。代价是这样的设备上无法拉起新助手。另一种做法是用"每个进程随机生成的负数"代替开机标识，只让本进程内签发的口令有效；它能在这类设备上继续工作，但 `arm` 和交接之间 App 进程被杀就会失败，而且掩盖了配置问题。按"配置错误要大声失败"，没有选它。
+
 5. **助手生命周期**是一个纯状态机（`HelperLifecycle`），由 `HelperRuntime` 在单个 HandlerThread 上驱动：
    - 首次交接按 0/1/3/10 秒重试，仍失败就退出（退出码 1）；
    - App 拒绝：释放并退出；

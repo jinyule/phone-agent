@@ -3,6 +3,7 @@ package dev.phoneagent.privileged.handoff
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -45,7 +46,7 @@ class HandoffNoncesTest {
     /** Arms a nonce, admits helper [pid] with it and returns the resume nonce [pid] was given. */
     private fun HandoffNonces.admitArmed(pid: Int = PID): String {
         val nonce = n(ARMED_BASE + ++armings)
-        assertTrue(arm(Nonces.sha256Hex(nonce)))
+        assertNull(arm(Nonces.sha256Hex(nonce)))
         return checkNotNull(admit(nonce, pid))
     }
 
@@ -73,7 +74,7 @@ class HandoffNoncesTest {
         now = 1_000
         val launch = nonces().issueLaunch()
         val armed = n(77)
-        assertTrue(nonces().arm(Nonces.sha256Hex(armed)))
+        assertNull(nonces().arm(Nonces.sha256Hex(armed)))
         boot = 6
         now = 1_001
         val afterReboot = nonces()
@@ -83,15 +84,32 @@ class HandoffNoncesTest {
     }
 
     @Test
-    fun anUnknownBootNeverMatchesTimedNonces() {
+    fun anUnknownBootRefusesToArmAndToIssueAndChangesNothing() {
+        val gate = nonces()
+        val resume = resumeOf()
         boot = null
+        val before = store.slots
+        val saves = store.saves
+
+        val refusal = gate.arm(Nonces.sha256Hex(n(77))).orEmpty()
+        assertTrue(refusal, refusal.contains("BOOT_COUNT"))
+        val error = assertThrows(IllegalStateException::class.java) { gate.issueLaunch() }
+        assertTrue(error.message, error.message.orEmpty().contains("BOOT_COUNT"))
+
+        assertEquals(before, store.slots)
+        assertEquals(saves, store.saves)
+        assertEquals("resume nonces are not timed", NonceSlot.RESUME, gate.match(resume, PID))
+    }
+
+    @Test
+    fun aBootThatBecomesUnknownVoidsTimedNonces() {
         val gate = nonces()
         val launch = gate.issueLaunch()
         val armed = n(78)
-        assertTrue(gate.arm(Nonces.sha256Hex(armed)))
+        assertNull(gate.arm(Nonces.sha256Hex(armed)))
+        boot = null
         assertNull(gate.match(launch, PID))
         assertNull(gate.match(armed, PID))
-        assertEquals("the resume nonce is not timed", NonceSlot.RESUME, gate.match(resumeOf(), PID))
     }
 
     @Test
@@ -106,7 +124,7 @@ class HandoffNoncesTest {
         val gate = nonces(armedTtlMs = 60_000)
         val nonce = n(77)
         val hash = Nonces.sha256Hex(nonce)
-        assertTrue(gate.arm(hash))
+        assertNull(gate.arm(hash))
         assertEquals(NonceSlot.ARMED, gate.match(nonce, PID))
         assertNull("the hash itself is not a nonce", gate.match(hash, PID))
         now += 60_001
@@ -117,13 +135,13 @@ class HandoffNoncesTest {
     fun armRejectsMalformedHashesWithoutChangingState() {
         val gate = nonces()
         val good = Nonces.sha256Hex(n(5))
-        assertTrue(gate.arm(good))
+        assertNull(gate.arm(good))
         val before = store.slots
-        assertFalse(gate.arm(null))
-        assertFalse(gate.arm(good.uppercase()))
-        assertFalse(gate.arm(good.dropLast(1)))
-        assertFalse(gate.arm(good + "0"))
-        assertFalse(gate.arm(good.replaceRange(0, 1, "g")))
+        assertNotNull(gate.arm(null))
+        assertNotNull(gate.arm(good.uppercase()))
+        assertNotNull(gate.arm(good.dropLast(1)))
+        assertNotNull(gate.arm(good + "0"))
+        assertNotNull(gate.arm(good.replaceRange(0, 1, "g")))
         assertEquals(before, store.slots)
     }
 
@@ -147,7 +165,7 @@ class HandoffNoncesTest {
         val gate = nonces()
         val old = resumeOf(PID)
         val armed = n(ARMED_BASE)
-        assertTrue(gate.arm(Nonces.sha256Hex(armed)))
+        assertNull(gate.arm(Nonces.sha256Hex(armed)))
         val saves = store.saves
 
         val next = checkNotNull(gate.admit(armed, OTHER_PID))

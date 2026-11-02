@@ -13,7 +13,7 @@ mkdir -p "$work/bin"
 export FAKE_ADB_DIR="$work"
 
 # The fake adb logs every invocation (one line of arguments) and plays a device on which the app
-# admits the helper. `status` answers with the content of $FAKE_ADB_DIR/status.
+# admits the helper. `arm` and `status` answer with the content of $FAKE_ADB_DIR/arm and /status.
 cat > "$work/bin/adb" <<'FAKE'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$FAKE_ADB_DIR/calls"
@@ -25,7 +25,7 @@ case "$1 ${2:-}" in
     echo "package:/data/app/~~a==/dev.phoneagent-b==/split_config.en.apk" ;;
   "shell content")
     case "$*" in
-      *"--method arm"*) echo "Result: Bundle[{accepted=true}]" ;;
+      *"--method arm"*) cat "$FAKE_ADB_DIR/arm" ;;
       *"--method status"*) cat "$FAKE_ADB_DIR/status" ;;
     esac ;;
   "shell pidof")
@@ -54,6 +54,7 @@ run() {
   rm -f "$work/calls" "$work/stdin" "$work/launched"
   touch "$work/calls"
   echo "${reply:-Result: Bundle[{state=CONNECTED, helperPid=4321}]}" > "$work/status"
+  echo "${arm_reply:-Result: Bundle[{accepted=true}]}" > "$work/arm"
   output="$(bash "$script" "$@" 2>&1)"
   status=$?
   [ "$status" -eq "$expected" ] || fail "exit status $status, expected $expected: $output"
@@ -96,6 +97,13 @@ reply="Result: Bundle[{state=NOT_CONNECTED, helperPid=-1}]"
 run "times out with the last status" 1 -s emulator-fake --timeout 1
 reply=""
 [[ "$output" == *"timed out after 1s (Result: Bundle[{state=NOT_CONNECTED"* ]] || fail "unexpected output: $output"
+
+# An app that refuses to arm (here: no BOOT_COUNT) stops the script before the launch, with its reason.
+arm_reply="Result: Bundle[{accepted=false, reason=Settings.Global.BOOT_COUNT is unavailable on this device}]"
+run "an arm refusal stops before the launch and shows the reason" 1 -s emulator-fake --timeout 5
+arm_reply=""
+[[ "$output" == *"BOOT_COUNT is unavailable on this device"* ]] || fail "the app's reason is not shown: $output"
+[ ! -f "$work/launched" ] || fail "the helper was launched although the app refused to arm"
 
 if [ "$failures" -eq 0 ]; then
   echo "start-helper-test: all cases passed"

@@ -106,20 +106,27 @@ public class HandoffNonces(
         require(armedTtlMs > 0) { "armedTtlMs must be > 0, was $armedTtlMs" }
     }
 
-    /** Issues the nonce for a helper the app launches itself; replaces any earlier launch nonce. */
+    /**
+     * Issues the nonce for a helper the app launches itself; replaces any earlier launch nonce.
+     * Throws [IllegalStateException] ([BOOT_UNKNOWN]), changing nothing, when the boot is unknown:
+     * such a nonce could never match.
+     */
     @Synchronized
-    public fun issueLaunch(): String =
-        random().also { store.save(store.load().copy(launch = it, launchAtMs = clock(), launchBoot = boot())) }
+    public fun issueLaunch(): String {
+        val current = checkNotNull(boot()) { BOOT_UNKNOWN }
+        return random().also { store.save(store.load().copy(launch = it, launchAtMs = clock(), launchBoot = current)) }
+    }
 
     /**
      * Arms [sha256Hex] (the hash of a nonce chosen by the shell) for one handoff within the armed TTL.
-     * Returns false, and changes nothing, when it is not 64 lowercase hex characters.
+     * Returns null when armed; otherwise why not ([NOT_A_HASH], [BOOT_UNKNOWN]), and nothing changed.
      */
     @Synchronized
-    public fun arm(sha256Hex: String?): Boolean {
-        if (sha256Hex == null || !Nonces.isWellFormed(sha256Hex)) return false
-        store.save(store.load().copy(armedHash = sha256Hex, armedAtMs = clock(), armedBoot = boot()))
-        return true
+    public fun arm(sha256Hex: String?): String? {
+        if (sha256Hex == null || !Nonces.isWellFormed(sha256Hex)) return NOT_A_HASH
+        val current = boot() ?: return BOOT_UNKNOWN
+        store.save(store.load().copy(armedHash = sha256Hex, armedAtMs = clock(), armedBoot = current))
+        return null
     }
 
     /**
@@ -239,6 +246,14 @@ public class HandoffNonces(
 
         /** The computer-side script arms, launches and waits within this window. */
         public const val DEFAULT_ARMED_TTL_MS: Long = 60_000
+
+        /** [arm] refused: the value is not a nonce hash. */
+        public const val NOT_A_HASH: String = "not 64 lowercase hex characters (the SHA-256 of a nonce)"
+
+        /** [arm] and [issueLaunch] refused: their nonces are tied to the boot, which is unknown. */
+        public const val BOOT_UNKNOWN: String =
+            "Settings.Global.BOOT_COUNT is unavailable on this device, so launch and armed nonces " +
+                "cannot be tied to this boot; only a running helper can hand off again"
     }
 }
 

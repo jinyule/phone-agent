@@ -14,8 +14,10 @@ import dev.phoneagent.privileged.handoff.NonceStore
 import dev.phoneagent.privileged.handoff.Nonces
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -393,10 +395,26 @@ class HelperClientTest {
     @Test
     fun onlyTheShellCanArm() {
         val hash = Nonces.sha256Hex(Nonces.random())
-        assertFalse(client.arm(hash, 10_123).getBoolean(HandoffContract.KEY_ACCEPTED))
+        val notShell = client.arm(hash, 10_123)
+        assertFalse(notShell.getBoolean(HandoffContract.KEY_ACCEPTED))
+        assertNotNull(notShell.getString(HandoffContract.KEY_REASON))
         assertEquals(NonceSlots(), store.slots)
-        assertFalse(client.arm("not-a-hash", shell).getBoolean(HandoffContract.KEY_ACCEPTED))
+        val malformed = client.arm("not-a-hash", shell)
+        assertFalse(malformed.getBoolean(HandoffContract.KEY_ACCEPTED))
+        assertNotNull(malformed.getString(HandoffContract.KEY_REASON))
         assertTrue(client.arm(hash, shell).getBoolean(HandoffContract.KEY_ACCEPTED))
+    }
+
+    @Test
+    fun armingWithAnUnknownBootIsRefusedWithTheReasonAndChangesNothing() {
+        val unknown = HelperClient(HandoffNonces(store, { now }, { null }), { build })
+        val reply = unknown.arm(Nonces.sha256Hex(Nonces.random()), shell)
+        assertFalse(reply.getBoolean(HandoffContract.KEY_ACCEPTED))
+        val reason = reply.getString(HandoffContract.KEY_REASON).orEmpty()
+        assertTrue(reason, reason.contains("BOOT_COUNT"))
+        assertEquals(NonceSlots(), store.slots)
+        assertThrows(IllegalStateException::class.java) { unknown.issueLaunchNonce() }
+        assertEquals(NonceSlots(), store.slots)
     }
 
     @Test

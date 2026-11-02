@@ -25,6 +25,7 @@ import dev.phoneagent.privileged.handoff.HandoffContract
 import dev.phoneagent.privileged.handoff.HandoffNonces
 import dev.phoneagent.privileged.handoff.HandoffReject
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * The app's end of the helper connection: admits helpers that hand off through
@@ -82,7 +83,11 @@ class HelperClient internal constructor(
         return AutoCloseable { listeners -= listener }
     }
 
-    /** One-time nonce for a helper this app launches itself (in-app ADB); pass it on the helper's stdin. */
+    /**
+     * One-time nonce for a helper this app launches itself (in-app ADB); pass it on the helper's
+     * stdin. Throws [IllegalStateException] with the reason when the device does not report its
+     * boot ([HandoffNonces.BOOT_UNKNOWN]).
+     */
     fun issueLaunchNonce(): String = nonces.issueLaunch()
 
     /** `attach` from [HelperHandoffProvider]: admits or rejects the offered helper and returns the reply. */
@@ -104,14 +109,23 @@ class HelperClient internal constructor(
         return reply
     }
 
-    /** `arm` from the shell: [sha256Hex] commits to the nonce a computer-side script will send. */
+    /**
+     * `arm` from the shell: [sha256Hex] commits to the nonce a computer-side script will send. A
+     * refusal carries its reason in [HandoffContract.KEY_REASON], which the script prints.
+     */
     fun arm(
         sha256Hex: String?,
         callingUid: Int,
     ): Bundle {
-        val armed = callingUid == HandoffContract.SHELL_UID && nonces.arm(sha256Hex)
-        Log.i(TAG, if (armed) "armed a launch nonce for a shell-started helper" else "arm refused for uid $callingUid")
-        return Bundle().apply { putBoolean(HandoffContract.KEY_ACCEPTED, armed) }
+        val refusal = if (callingUid == HandoffContract.SHELL_UID) nonces.arm(sha256Hex) else "only the shell may arm"
+        Log.i(
+            TAG,
+            refusal?.let { "arm refused for uid $callingUid: $it" } ?: "armed a nonce for a shell-started helper",
+        )
+        return Bundle().apply {
+            putBoolean(HandoffContract.KEY_ACCEPTED, refusal == null)
+            refusal?.let { putString(HandoffContract.KEY_REASON, it) }
+        }
     }
 
     /** `status` from the shell: state name and helper pid; null for any other caller. */
@@ -257,10 +271,12 @@ class HelperClient internal constructor(
             return AppBuild(versionCode = info.longVersionCode, apkPath = app.applicationInfo.sourceDir)
         }
 
-        /** `Settings.Global.BOOT_COUNT`, or null (logged) when this device does not report it. */
+        private val bootUnknownLogged = AtomicBoolean(false)
+
+        /** `Settings.Global.BOOT_COUNT`, or null when this device does not report it (logged once per process). */
         private fun bootCount(app: Context): Int? {
             val count = Settings.Global.getInt(app.contentResolver, Settings.Global.BOOT_COUNT, -1)
-            if (count < 0) Log.e(TAG, "BOOT_COUNT is unavailable; launch and armed nonces cannot match")
+            if (count < 0 && bootUnknownLogged.compareAndSet(false, true)) Log.e(TAG, HandoffNonces.BOOT_UNKNOWN)
             return count.takeIf { it >= 0 }
         }
 

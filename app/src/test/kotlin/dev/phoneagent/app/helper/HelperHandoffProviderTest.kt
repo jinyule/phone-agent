@@ -2,6 +2,7 @@ package dev.phoneagent.app.helper
 
 import android.content.ComponentName
 import android.os.Binder
+import android.provider.Settings
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.phoneagent.privileged.handoff.HandoffBundles
@@ -77,6 +78,13 @@ class HelperHandoffProviderTest {
         assertNull(provider.call(HandoffContract.METHOD_STATUS, null, null))
 
         asCaller(HandoffContract.SHELL_UID)
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        Settings.Global.putString(context.contentResolver, Settings.Global.BOOT_COUNT, null)
+        val noBoot = provider.call(HandoffContract.METHOD_ARM, Nonces.sha256Hex("x"), null)
+        assertEquals(false, noBoot?.getBoolean(HandoffContract.KEY_ACCEPTED))
+        assertTrue(noBoot?.getString(HandoffContract.KEY_REASON).orEmpty().contains("BOOT_COUNT"))
+
+        Settings.Global.putInt(context.contentResolver, Settings.Global.BOOT_COUNT, 2)
         assertEquals(
             true,
             provider
