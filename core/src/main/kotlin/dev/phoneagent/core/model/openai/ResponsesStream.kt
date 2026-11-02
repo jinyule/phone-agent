@@ -35,8 +35,9 @@ import kotlinx.serialization.json.putJsonArray
  * the parts come from the output items in `output_index` order, finished on the stream
  * (`response.output_item.done`) or listed in the final `response.output` ([OutputItems]). Only
  * `response.completed` or `response.incomplete`, each with its response object, complete a
- * stream: a body that ends before them was cut ([ModelError.Network]), a terminal event without
- * the object or a whole JSON reply in any other state is [ModelError.BadResponse]. An incomplete
+ * stream: a body that ends before them was cut ([ModelError.Network]); a terminal event without
+ * the object, and a final response that fails [ResponsesOutput.terminal] (the same check for a
+ * whole JSON reply), is [ModelError.BadResponse]. An incomplete
  * reply stops with [StopReason.MAX_TOKENS] or [StopReason.OTHER] (a content filter is a
  * [ModelError.Refusal]); on the ChatGPT plan only `response.completed` succeeds.
  * `response.failed` and `error` events become [ModelError]s.
@@ -53,8 +54,7 @@ internal class ResponsesStream(
     private var reasoningChannel: String? = null
     private val items = OutputItems()
     private val callIdsByItem = mutableMapOf<String, String>()
-    private var final: JsonObject? = null
-    private var incomplete = false
+    private var final: FinalResponse? = null
 
     /** Consumes one SSE event; `true` once the response is final. */
     fun accept(event: SseEvent): Boolean {
@@ -71,19 +71,15 @@ internal class ResponsesStream(
     fun acceptJson(body: String) {
         val root = parse(body)
         root.obj("error")?.let { throw failure(it) }
-        val status = root.str("status")
-        if (status != COMPLETED && status != INCOMPLETE) {
-            val shown = status?.let { "'${redactor.text(it).take(SNIPPET)}'" } ?: "no status"
-            throw ModelError.BadResponse("whole response has $shown, not completed or incomplete")
-        }
-        final = root
-        incomplete = status == INCOMPLETE
+        final = ResponsesOutput.terminal(root, event = null, redactor)
     }
 
     /** The reply; throws [ModelError] for cut streams, refusals and malformed replies. */
     fun finish(): ChatResponse {
-        val response = final ?: throw ModelError.Network("stream ended before response.completed")
-        val output = items.merged(response.array("output")?.filterIsInstance<JsonObject>().orEmpty())
+        val last = final ?: throw ModelError.Network("stream ended before response.completed")
+        val response = last.response
+        val incomplete = last.incomplete
+        val output = items.merged(last.output)
         val reason = response.obj("incomplete_details")?.str("reason")
         val rawFirst = reasoningChannel == RAW_REASONING_DELTA
         val parts = ResponsesOutput.parts(output, provider, model, redactor, rawFirst)
@@ -136,8 +132,9 @@ internal class ResponsesStream(
             }
 
             "response.completed", "response.incomplete" -> {
-                final = root.obj("response") ?: throw ModelError.BadResponse("$type event without a response object")
-                incomplete = type == "response.incomplete"
+                val response =
+                    root.obj("response") ?: throw ModelError.BadResponse("$type event without a response object")
+                final = ResponsesOutput.terminal(response, type.removePrefix("response."), redactor)
             }
 
             "response.failed", "error" -> {
@@ -193,10 +190,20 @@ internal class ResponsesStream(
 
     private companion object {
         const val SNIPPET = 200
-        const val COMPLETED = "completed"
-        const val INCOMPLETE = "incomplete"
     }
 }
+
+/**
+ * A final response that passed [ResponsesOutput.terminal].
+ *
+ * @property output its `output` items (none when absent or `null`).
+ * @property incomplete whether it ended `incomplete` rather than `completed`.
+ */
+internal class FinalResponse(
+    val response: JsonObject,
+    val output: List<JsonObject>,
+    val incomplete: Boolean,
+)
 
 /**
  * The output items of one reply by `output_index` (model-layer §3.2): those the stream finished,
@@ -291,6 +298,39 @@ private const val RAW_REASONING_DELTA = "response.reasoning_text.delta"
 /** Pure readers of a finished Responses `output` and `response` object. */
 internal object ResponsesOutput {
     private const val SNIPPET = 200
+    private const val COMPLETED = "completed"
+    private const val INCOMPLETE = "incomplete"
+    private const val NOT_ITEMS = "response output is not an array of items"
+
+    /**
+     * [response] as a final response, the same rules for a stream's terminal event and a whole
+     * JSON reply. Its state is the one the terminal [event] names (`completed` / `incomplete`), or
+     * for a whole reply ([event] `null`) its own `status`, which must be one of the two; a
+     * `status` that says otherwise than the event is a contradiction (absent or `null` is not).
+     * `output`, unless absent or `null`, must be an array of items, objects with a string `type`.
+     * Anything else is [ModelError.BadResponse].
+     */
+    fun terminal(
+        response: JsonObject,
+        event: String?,
+        redactor: Redactor,
+    ): FinalResponse {
+        val status = response["status"]?.takeIf { it !is JsonNull }
+        val named = (status as? JsonPrimitive)?.takeIf { it.isString }?.content
+        val state = event ?: named
+        val shown = status?.let { redactor.text(it.toString()).take(SNIPPET) } ?: "no status"
+        val output = response["output"]?.takeIf { it !is JsonNull }
+        val items = (output as? JsonArray)?.map { it as? JsonObject }
+        val problem =
+            when {
+                state != COMPLETED && state != INCOMPLETE -> "whole response has $shown, not completed or incomplete"
+                status != null && named != state -> "response.$state event with status $shown"
+                output != null && (items == null || items.any { it?.str("type") == null }) -> NOT_ITEMS
+                else -> null
+            }
+        if (problem != null) throw ModelError.BadResponse(problem)
+        return FinalResponse(response, items.orEmpty().filterNotNull(), state == INCOMPLETE)
+    }
 
     /**
      * The parts of [output], in order: `reasoning` items verbatim (with their summary for the UI),

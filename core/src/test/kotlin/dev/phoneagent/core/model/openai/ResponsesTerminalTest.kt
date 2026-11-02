@@ -131,4 +131,61 @@ class ResponsesTerminalTest {
             )
             assertEquals(StopReason.END_TURN, model(Kit.PLAN).complete(Kit.request()).stopReason)
         }
+
+    private fun terminal(
+        type: String,
+        response: String,
+    ) = "data: {\"type\":\"$type\",\"response\":{$response}}\n\n"
+
+    @ParameterizedTest(name = "{0} with status {1}")
+    @CsvSource(
+        "response.completed, in_progress",
+        "response.completed, incomplete",
+        "response.completed, failed",
+        "response.incomplete, completed",
+        "response.incomplete, queued",
+    )
+    fun `the terminal event and the response status must agree`(
+        type: String,
+        status: String,
+    ) = runTest {
+        server.enqueueSse(terminal(type, """"status":"$status","output":[$text]"""))
+        assertThrows<ModelError.BadResponse> { model().complete(Kit.request()) }
+        server.enqueueSse(terminal(type, """"status":7,"output":[$text]"""))
+        assertThrows<ModelError.BadResponse> { model().complete(Kit.request()) }
+    }
+
+    @Test
+    fun `a terminal event without a status takes the event's state`() =
+        runTest {
+            server.enqueueSse(terminal("response.completed", """"output":[$text]"""))
+            assertEquals(StopReason.END_TURN, model().complete(Kit.request()).stopReason)
+            server.enqueueSse(terminal("response.incomplete", """"status":null,"output":[$text]"""))
+            assertEquals(StopReason.OTHER, model().complete(Kit.request()).stopReason)
+        }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["{}", "\"text\"", "[1]", "[null]", "[{\"content\":[]}]", "[{\"type\":7}]"])
+    fun `a final output that is not a list of items is a bad response, streamed or whole`(output: String) =
+        runTest {
+            server.enqueueSse(terminal("response.completed", """"status":"completed","output":$output"""))
+            assertThrows<ModelError.BadResponse> { model().complete(Kit.request()) }
+            server.enqueueSse(
+                "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":$text}\n\n" +
+                    terminal("response.completed", """"status":"completed","output":$output"""),
+            )
+            assertThrows<ModelError.BadResponse> { model().complete(Kit.request()) }
+            json("""{"status":"completed","output":$output}""")
+            assertThrows<ModelError.BadResponse> { model().complete(Kit.request()) }
+        }
+
+    @Test
+    fun `a final output that is absent or null leaves the streamed items`() =
+        runTest {
+            val done = "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":$text}\n\n"
+            server.enqueueSse(done + terminal("response.completed", """"status":"completed""""))
+            assertEquals(StopReason.END_TURN, model().complete(Kit.request()).stopReason)
+            server.enqueueSse(done + terminal("response.completed", """"status":"completed","output":null"""))
+            assertEquals(StopReason.END_TURN, model().complete(Kit.request()).stopReason)
+        }
 }
