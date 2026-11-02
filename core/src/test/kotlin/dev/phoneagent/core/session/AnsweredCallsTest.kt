@@ -3,15 +3,12 @@ package dev.phoneagent.core.session
 import dev.phoneagent.core.ids.ToolCallId
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.StopReason
-import dev.phoneagent.core.policy.ActionIntent
-import dev.phoneagent.core.policy.IntentKind
-import dev.phoneagent.core.policy.SecurityLevel
-import dev.phoneagent.core.policy.Verdict
 import dev.phoneagent.core.session.StopLogs.Companion.call
 import dev.phoneagent.core.session.StopLogs.Companion.goOn
 import dev.phoneagent.core.session.StopLogs.Companion.nextTurn
 import dev.phoneagent.core.session.StopLogs.Companion.replyWith
 import dev.phoneagent.core.session.StopLogs.Companion.result
+import dev.phoneagent.core.session.StopLogs.Companion.verdict
 import dev.phoneagent.core.tool.ToolStatus
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
@@ -25,14 +22,6 @@ import org.junit.jupiter.api.assertThrows
  */
 class AnsweredCallsTest {
     private val logs = StopLogs()
-
-    private fun verdict(id: String) =
-        PolicyVerdictRecorded(
-            ToolCallId(id),
-            SecurityLevel.STANDARD,
-            ActionIntent(IntentKind.INPUT, "com.example"),
-            Verdict.Allow,
-        )
 
     /** The first turn up to a complete reply asking for [ids] (seq 5). */
     private fun replied(vararg ids: String): List<SessionEvent> =

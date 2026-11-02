@@ -192,18 +192,23 @@ public class SessionStore private constructor(
          * only `session/resumed`, and after any stop or resume nothing that runs before the user's
          * input.
          *
-         * Recovery (the runtime's, phase1 §3.7) decides what to write before `session/resumed` from
-         * the whole of [Opened.log], never from the last stop's cause alone (a SHUTDOWN may already
-         * have been resumed; a USER stop may have been followed by a new run that then crashed):
-         * - the last `task/stopped`, and whether a `session/resumed` came after it;
-         * - whether a new run started after it, a turn the user's input opened, and was cut;
-         * - an unfinished stop (the log ends with `turn/end(STOPPED)`): write `task/stopped(ERROR)`;
-         * - an open step or turn: close it (`step/end`, `turn/end`);
-         * - calls that need a result and have none (the tool calls of every `assistant/message`
-         *   and every `tool/call`): NOT_STARTED without a `tool/started`, OUTCOME_UNKNOWN with one;
+         * Recovery (the runtime's, phase1 §3.7) decides what to write from the whole of
+         * [Opened.log], never from the last stop's cause alone (a SHUTDOWN may already have been
+         * resumed; a USER stop may have been followed by a new run that then crashed): the last
+         * `task/stopped` and whether a `session/resumed` came after it; whether a new run started
+         * after it, a turn the user's input opened, and was cut; an unfinished stop; an open step
+         * or turn; calls that need a result and have none. It then writes, in this order, the only
+         * one the store accepts:
+         * 1. a result for each call that needs one and has none (the tool calls of every
+         *    `assistant/message` and every `tool/call`): NOT_STARTED without a `tool/started`,
+         *    OUTCOME_UNKNOWN with one;
+         * 2. `step/end` for an open step;
+         * 3. `turn/end` for an open turn;
+         * 4. `task/stopped(ERROR)` after a `turn/end(STOPPED)` that has no `task/stopped` (an
+         *    unfinished stop);
+         * 5. `session/resumed`, after which the task waits for the user's input.
          *
-         * then `session/resumed`, after which the task waits for the user's input. [Opened.log] is
-         * what was read; later appends do not change it.
+         * [Opened.log] is what was read; later appends do not change it.
          */
         public suspend fun open(
             files: SessionFiles,

@@ -3,6 +3,10 @@ package dev.phoneagent.core.session
 import dev.phoneagent.core.ids.ToolCallId
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.StopReason
+import dev.phoneagent.core.policy.ActionIntent
+import dev.phoneagent.core.policy.IntentKind
+import dev.phoneagent.core.policy.SecurityLevel
+import dev.phoneagent.core.policy.Verdict
 import dev.phoneagent.core.ports.Clock
 import dev.phoneagent.core.ports.StoragePath
 import dev.phoneagent.core.testing.InMemoryStoragePort
@@ -132,6 +136,15 @@ class StopLogs {
                 "phone_tap",
                 JsonObject(emptyMap()),
                 "r",
+            )
+
+        /** An Allow verdict for [id]. */
+        fun verdict(id: String) =
+            PolicyVerdictRecorded(
+                ToolCallId(id),
+                SecurityLevel.STANDARD,
+                ActionIntent(IntentKind.INPUT, "com.example"),
+                Verdict.Allow,
             )
 
         fun tap(id: String) = Part.ToolCall(ToolCallId(id), "phone_tap", """{"ref":"e2","reason":"r"}""")

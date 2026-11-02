@@ -382,7 +382,7 @@ sealed interface Phase { data object Idle : Phase; data class Running(val turn: 
 - **半截停止**：进程在 `turn/end(STOPPED)` 和 `task/stopped` 之间退出，日志停在 `turn/end(STOPPED)`。这是合法的日志，下一条已知记录必须是 `task/stopped`。恢复时补写 `task/stopped(ERROR)`，含义是"停止收尾没有完成"（原来的原因没有落盘，不猜），再写 `session/resumed`，然后等待用户输入。
 - 未知的可忽略记录对这些规则透明：不打断配对，不结束等待，也不被拒绝。读和写用同一份不变量，store 自己写出的日志重新打开后状态一致。
 - 日志写不了的时候，`task/stopped(ERROR)` 可能缺失，按崩溃恢复处理。
-- **恢复前怎么判断**：打开日志以后看整份日志，不能只看最后一次停止的原因（SHUTDOWN 之后可能已经 resumed 过；USER 停止之后可能又跑了新 turn 再崩溃）。要同时看：最后一条 `task/stopped`；它后面有没有 `session/resumed`；之后有没有已经开始、又被截断的新运行；有没有半截停止；有没有打开的 step、turn；有没有需要答复但还没有结果的调用。修复完写 `session/resumed`，然后等待用户输入。实现归 runtime（WP02），`SessionStore.open` 的 KDoc 列了同一份清单。
+- **恢复前怎么判断**：打开日志以后看整份日志，不能只看最后一次停止的原因（SHUTDOWN 之后可能已经 resumed 过；USER 停止之后可能又跑了新 turn 再崩溃）。要同时看：最后一条 `task/stopped`；它后面有没有 `session/resumed`；之后有没有已经开始、又被截断的新运行；有没有半截停止；有没有打开的 step、turn；有没有需要答复但还没有结果的调用。修复按下面的顺序写，这也是 store 唯一接受的顺序：① 给需要答复、还没有结果的调用补结果（`NOT_STARTED` 或 `OUTCOME_UNKNOWN`，见上）；② 打开的 step 写 `step/end`；③ 打开的 turn 写 `turn/end`；④ 半截停止补 `task/stopped(ERROR)`；⑤ 写 `session/resumed`，然后等待用户输入。先关 step 再补结果会被 store 拒绝。实现归 runtime（WP02），`SessionStore.open` 的 KDoc 列了同一份清单，core 测试源码的 `RecoveryOrderTest` 按这个顺序在一次运行的每个截断点做恢复。
 - 插件或拦截器出故障，只结束当前 turn，不会让 TaskRuntime 停掉。
 
 ### 3.8 固定拦截点（主循环只能通过这些点扩展）
