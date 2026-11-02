@@ -35,7 +35,7 @@ import kotlin.math.abs
  * So an element in no list still shows the same line under the same ref, and every ref the model
  * holds is either still as it saw it, listed with its new line, or listed as void.
  */
-public class ScreenDiffer(
+public class ScreenDiffer internal constructor(
     private val config: DiffConfig = DiffConfig(),
     private val format: ScreenFormatConfig = ScreenFormatConfig(),
 ) {

@@ -6,7 +6,7 @@ package dev.phoneagent.core.tools
  *
  * @property vision the main model reads images: `phone_observe` attaches frames when asked or when
  *   the tree is poor. When `false`, no frame is ever attached and the result says so. The presenter
- *   must be built with the same capability (`ScreenFormatter(vision = …)`) so its notes never
+ *   must be built with the same capability (`ScreenComponents(vision = …)`) so its notes never
  *   suggest a screenshot the model cannot read.
  * @property stableQuietMs `phone_wait condition=stable`: the screen counts as settled after this
  *   long without a change.

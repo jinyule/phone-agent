@@ -14,10 +14,11 @@ import dev.phoneagent.core.ports.UiElement
  * [ScreenDiffer]. The surface and the page flags do not change the quality verdict: it is about
  * the tree alone (a FLAG_SECURE page can still have a good tree).
  *
- * [format] must be the config of the [ScreenFormatter] the model reads screens from: the quality
- * verdict and the diff both follow what a page line shows (absorbed texts included).
+ * Built only by [ScreenComponents], with the [format] of the [ScreenFormatter] the model reads
+ * screens from: the quality verdict and the diff both follow what a page line shows (absorbed
+ * texts included).
  */
-public class ScreenAnalyzer(
+public class ScreenAnalyzer internal constructor(
     format: ScreenFormatConfig = ScreenFormatConfig(),
     quality: TreeQualityConfig = TreeQualityConfig(),
     diff: DiffConfig = DiffConfig(),

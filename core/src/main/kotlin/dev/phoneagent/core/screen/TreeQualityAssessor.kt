@@ -17,11 +17,11 @@ import dev.phoneagent.core.ports.UiElement
  *
  * An element without text of its own is still named when it absorbs child texts the way the screen
  * format does ([PageLayout]): a row with a name and a time under it reads as a named row. So
- * [format] must be the formatter's config.
+ * [format] is the formatter's config ([ScreenComponents] builds both from one).
  *
  * Judged on the tree alone, before OCR: the verdict decides whether OCR runs and a frame is attached.
  */
-public class TreeQualityAssessor(
+public class TreeQualityAssessor internal constructor(
     private val config: TreeQualityConfig = TreeQualityConfig(),
     private val format: ScreenFormatConfig = ScreenFormatConfig(),
 ) {

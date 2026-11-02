@@ -30,9 +30,10 @@ import dev.phoneagent.core.tool.ScreenPresenter
  * says that those lines were not checked again.
  *
  * [vision] is whether the main model reads images (the same capability the tools are assembled
- * with, `ToolsConfig.vision`): without it no note suggests a screenshot.
+ * with, `ToolsConfig.vision`): without it no note suggests a screenshot. Built only by
+ * [ScreenComponents], with the [config] its analyzer reads lines with.
  */
-public class ScreenFormatter(
+public class ScreenFormatter internal constructor(
     private val config: ScreenFormatConfig = ScreenFormatConfig(),
     private val lexicon: RiskLexicon = RiskLexicon { _, _ -> null },
     vision: Boolean = true,
