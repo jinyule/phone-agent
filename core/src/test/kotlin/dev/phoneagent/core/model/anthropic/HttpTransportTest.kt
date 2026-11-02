@@ -1,6 +1,7 @@
 package dev.phoneagent.core.model.anthropic
 
 import dev.phoneagent.core.model.ModelError
+import dev.phoneagent.core.model.anthropic.Kit.base
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -8,8 +9,6 @@ import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import mockwebserver3.MockResponse
-import mockwebserver3.MockWebServer
-import mockwebserver3.junit5.StartStop
 import okhttp3.Call
 import okhttp3.Connection
 import okhttp3.EventListener
@@ -28,8 +27,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.coroutines.CoroutineContext
 
 class HttpTransportTest {
-    @StartStop
-    private val server = MockWebServer()
+    private val server = Kit.loopbackServer()
 
     private val ioThread = Executors.newSingleThreadExecutor()
     private val io = ioThread.asCoroutineDispatcher()
@@ -44,9 +42,10 @@ class HttpTransportTest {
     @AfterEach
     fun stop() {
         ioThread.shutdownNow()
+        server.close()
     }
 
-    private fun request() = Request.Builder().url(server.url("/v1/x")).build()
+    private fun request() = Request.Builder().url("${server.base()}/v1/x").build()
 
     /** Connections the pool holds that a call still owns. */
     private fun connectionsInUse() =

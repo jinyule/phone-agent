@@ -1,13 +1,13 @@
 package dev.phoneagent.core.model.anthropic
 
 import dev.phoneagent.core.model.ModelError
+import dev.phoneagent.core.model.anthropic.Kit.base
 import dev.phoneagent.core.model.anthropic.Kit.enqueueError
 import dev.phoneagent.core.model.anthropic.Kit.enqueueSse
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.MockResponse
-import mockwebserver3.MockWebServer
 import mockwebserver3.SocketEffect
-import mockwebserver3.junit5.StartStop
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -21,8 +21,10 @@ import org.junit.jupiter.api.assertThrows
  * failure; a second request would consume it.
  */
 class OneRequestPerAttemptTest {
-    @StartStop
-    private val server = MockWebServer()
+    private val server = Kit.loopbackServer()
+
+    @AfterEach
+    fun closeServer() = server.close()
 
     @Test
     fun `408 is not resent`() =
@@ -67,7 +69,7 @@ class OneRequestPerAttemptTest {
                 MockResponse
                     .Builder()
                     .code(307)
-                    .addHeader("Location", server.url("/v2/messages"))
+                    .addHeader("Location", "${server.base()}/v2/messages")
                     .build(),
             )
             server.enqueueSse(Kit.TEXT_REPLY)

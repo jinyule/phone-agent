@@ -8,8 +8,7 @@ import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.anthropic.Kit.enqueueSse
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonPrimitive
-import mockwebserver3.MockWebServer
-import mockwebserver3.junit5.StartStop
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -26,8 +25,10 @@ import org.junit.jupiter.api.assertThrows
  * change is left out. The key has no credential shape, so only the request-secret layer can catch it.
  */
 class EchoedSecretTest {
-    @StartStop
-    private val server = MockWebServer()
+    private val server = Kit.loopbackServer()
+
+    @AfterEach
+    fun closeServer() = server.close()
 
     private val key = "plain-key-without-a-known-shape-123"
     private val head = key.take(SPLIT)

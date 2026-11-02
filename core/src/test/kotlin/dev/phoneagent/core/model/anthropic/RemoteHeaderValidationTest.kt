@@ -5,9 +5,8 @@ import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.anthropic.Kit.base
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.MockResponse
-import mockwebserver3.MockWebServer
-import mockwebserver3.junit5.StartStop
 import okhttp3.OkHttpClient
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
@@ -22,8 +21,10 @@ import kotlin.coroutines.cancellation.CancellationException
  * reply is read as usual, and the response is closed either way. Assertions never print the key.
  */
 class RemoteHeaderValidationTest {
-    @StartStop
-    private val server = MockWebServer()
+    private val server = Kit.loopbackServer()
+
+    @AfterEach
+    fun closeServer() = server.close()
 
     private val client: OkHttpClient = AnthropicTimeouts().client()
 

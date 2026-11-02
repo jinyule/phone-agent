@@ -39,6 +39,7 @@ import okhttp3.OkHttpClient
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import java.io.IOException
+import java.net.InetAddress
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.CopyOnWriteArrayList
@@ -255,7 +256,18 @@ internal object Kit {
         enqueue(builder.build())
     }
 
-    fun MockWebServer.base(): String = url("/").toString().removeSuffix("/")
+    /**
+     * The address mock servers listen on and are reached at: a literal IPv4 loopback, never
+     * `localhost`, whose first address depends on the machine (and where another listener on the
+     * other one would get the request).
+     */
+    const val LOOPBACK = "127.0.0.1"
+
+    /** A started mock server listening on [LOOPBACK] only; the test closes it. */
+    fun loopbackServer(): MockWebServer = MockWebServer().apply { start(InetAddress.getByName(LOOPBACK), 0) }
+
+    /** The base URL of a [loopbackServer], by its literal address. */
+    fun MockWebServer.base(): String = "http://$LOOPBACK:$port"
 
     fun MockWebServer.next(): RecordedRequest =
         checkNotNull(takeRequest(TAKE_TIMEOUT_S, TimeUnit.SECONDS)) { "no request" }

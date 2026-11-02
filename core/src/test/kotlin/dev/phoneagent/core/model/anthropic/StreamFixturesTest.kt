@@ -13,8 +13,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import mockwebserver3.MockResponse
-import mockwebserver3.MockWebServer
-import mockwebserver3.junit5.StartStop
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.MethodSource
@@ -31,8 +30,10 @@ import kotlin.io.path.readText
  * constructed from the API reference, not recorded from Claude.
  */
 class StreamFixturesTest {
-    @StartStop
-    private val server = MockWebServer()
+    private val server = Kit.loopbackServer()
+
+    @AfterEach
+    fun closeServer() = server.close()
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("fixtures")

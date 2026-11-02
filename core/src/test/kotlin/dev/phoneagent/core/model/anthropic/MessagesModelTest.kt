@@ -26,8 +26,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import mockwebserver3.MockResponse
-import mockwebserver3.MockWebServer
-import mockwebserver3.junit5.StartStop
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
@@ -38,8 +37,10 @@ import kotlin.coroutines.cancellation.CancellationException
 
 /** The HTTP side of one `complete()`: endpoint, headers, the one request, and what comes back. */
 class MessagesModelTest {
-    @StartStop
-    private val server = MockWebServer()
+    private val server = Kit.loopbackServer()
+
+    @AfterEach
+    fun closeServer() = server.close()
 
     @Test
     fun `posts the mapped body to v1 messages with version, betas and the key`() =
