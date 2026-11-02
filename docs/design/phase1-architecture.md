@@ -442,7 +442,7 @@ interface TaskRuntime {
 **取消与超时契约**：
 - 单一超时真相源：工具超时（`Tool.timeoutMs`）包住整条 `toolExecute` 链（包装器也算在内），工具层先作答。等待用户的时间不计入工具超时。超时的结果是 `TIMEOUT`；非 READ 的调用还要附上"可能已生效"。
 - **刷盘**：每次模型请求前；每个要执行的调用（READ 也算）在写 `tool/started` 之后、调 `Tool.execute` 之前。请求前刷盘失败就不发请求，执行前刷盘失败就不执行，任务都以 `ERROR` 停止。后一种情况 `tool/started` 已经在日志里，修复只看日志，所以调用记 `OUTCOME_UNKNOWN`。
-- **执行事实写进日志**：每个要执行的调用（包括 READ）都先有 Allow 的 `policy/verdict`，没有免判的快路径。真正调用 `Tool.execute` 之前写 `tool/started(callId, verdictSeq)` 并刷盘（verdictSeq 是这个调用最新的 verdict，必须是 Allow）；execute 返回后、`toolPostExecute` 之前写 `tool/executed(callId, status)`，记原始状态（抛异常记 `ERROR`；超时或被取消的 execute 没有返回，不写）。拒绝、转交、等待或被拒的审批、拦截器短路都不写 `tool/started`。
+- **执行事实写进日志**：每个要执行的调用（包括 READ）都先有 Allow 的 `policy/verdict`，没有免判的快路径。真正调用 `Tool.execute` 之前写 `tool/started(callId, verdictSeq)` 并刷盘（verdictSeq 是这个调用最新的 verdict，必须是 Allow）；execute 返回后、`toolPostExecute` 之前写 `tool/executed(callId, status)`，记原始状态（抛异常记 `ERROR`；超时或被取消的 execute 没有返回，不写）。工具抛出的异常，结果正文只有固定文字加异常类名，不带 message、cause 或 `toString`：它们可能引用屏幕文字、输入内容或凭据，而结果会进日志、也会发给模型。拒绝、转交、等待或被拒的审批、拦截器短路都不写 `tool/started`。
 - 确认之后、执行之前，按 §3.8 的 `toolPreExecute` 在新屏幕上复核一次。
 - **steer 只打断模型 attempt 和重试前的等待**，不打断正在执行的工具。排队中的 steer 只阻止"普通最终回答"结束当前 turn（不走 `turnStopping`，再跑一个 step 把 steer 交给模型）；显式结束（`end_not_done`）、失败、`preStep` 拒绝、max-tokens 和上限照样结束 turn，steer 留在 nextStep，开启下一个 turn。
 - **被放弃的调用绝不晚些执行**；收尾时写日志的代码放在 `withContext(NonCancellable)` 里。

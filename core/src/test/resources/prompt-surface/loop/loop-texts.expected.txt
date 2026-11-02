@@ -20,5 +20,5 @@ skipped: 未执行：每条回复只执行第一个工具调用（每步一个�
 stoppedBeforeRun: 未执行：任务已经停止。
 stoppedWhileRunning: 这次调用运行期间，任务被停止了。
 timeout: 工具没有在限定时间内完成，已被取消。
-toolError: 工具执行出错：
+toolError: 工具执行出错，异常类型：
 unknownTool: 未执行：没有这个名字的可用工具：

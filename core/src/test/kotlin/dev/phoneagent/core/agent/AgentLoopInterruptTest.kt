@@ -516,7 +516,14 @@ class AgentLoopInterruptTest {
             loop.awaitPhase(Phase.Done)
             val results = harness.events().only<ToolResultRecorded>().map { it.result }
             assertEquals(listOf(ToolStatus.ERROR, ToolStatus.ERROR), results.map { it.status })
-            assertTrue((results[0].content.single() as Part.Text).text.contains("boom"))
-            assertTrue((results[1].content.single() as Part.Text).text.contains("not a stop"))
+            val texts = LoopTexts()
+            assertEquals(
+                listOf(
+                    "${texts.toolError}java.lang.IllegalStateException",
+                    "${texts.toolError}java.util.concurrent.CancellationException",
+                ),
+                results.map { (it.content.single() as Part.Text).text },
+                "the exception's class only, never its message",
+            )
         }
 }

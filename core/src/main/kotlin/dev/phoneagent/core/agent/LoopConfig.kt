@@ -106,8 +106,8 @@ public data class LoopTexts(
     val timeout: String = "工具没有在限定时间内完成，已被取消。",
     /** Appended to [timeout] and [stoppedWhileRunning] for calls that may change the phone. */
     val mayHaveTakenEffect: String = "这个操作可能已经生效：请先调用 phone_observe 确认，再做决定。",
-    /** The tool threw; followed by the error. */
-    val toolError: String = "工具执行出错：",
+    /** The tool threw; followed by the exception's class name only (never its message). */
+    val toolError: String = "工具执行出错，异常类型：",
     /** A `toolExecute` extension replaced the judged call or ran it twice. */
     val interceptorFault: String = "未按判定执行：有扩展篡改了这次调用。",
     /** The task stopped before the call ran. */

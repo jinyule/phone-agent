@@ -218,7 +218,8 @@ internal class Calls(
                 } catch (bug: Exception) {
                     // A stop propagates; a tool that throws a cancellation of its own has a bug like any other.
                     if (bug is CancellationException) currentCoroutineContext().ensureActive()
-                    ToolResult.failure(ToolStatus.ERROR, "${loop.texts.toolError}$bug")
+                    // The class only: message, cause and toString may quote the screen, input or credentials.
+                    ToolResult.failure(ToolStatus.ERROR, "${loop.texts.toolError}${bug.javaClass.name}")
                 }
             loop.log.append(ToolExecuted(id, result.status))
             return result
