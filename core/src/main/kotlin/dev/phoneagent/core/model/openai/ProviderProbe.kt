@@ -187,15 +187,12 @@ public class ProviderProbe internal constructor(
             .distinctBy { it.id }
     }
 
-    /** One listing entry, its id masked; ids that are not usable model ids are skipped. */
+    /** One listing entry, its id masked; an entry whose id is not a usable model id is skipped. */
     private fun listed(
         entry: JsonObject,
         redactor: Redactor,
     ): ListedModel? {
-        val id =
-            (entry.str("id") ?: entry.str("slug"))
-                ?.let(redactor::text)
-                ?.takeIf { it.isNotBlank() && it.length <= MAX_ID }
+        val id = (entry.str("id") ?: entry.str("slug"))?.let(redactor::text)?.let(::modelIdOf)
         id ?: return null
         val modalities =
             entry
@@ -204,12 +201,21 @@ public class ProviderProbe internal constructor(
                 ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
         val parameters = entry.array("supported_parameters")?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
         return ListedModel(
-            id = ModelId(id),
+            id = id,
             contextTokens = (entry.int("context_length") ?: entry.int("context_window"))?.takeIf { it > 0 },
             vision = modalities?.let { "image" in it },
             tools = parameters?.let { "tools" in it },
         )
     }
+
+    /** [id] as a model id, or `null` when the provider listed a name no model id can hold. */
+    private fun modelIdOf(id: String): ModelId? =
+        try {
+            ModelId(id)
+        } catch (ignoredIllegalRemoteId: IllegalArgumentException) {
+            // An illegal remote id (blank, too long, control characters): only its own entry is skipped.
+            null
+        }
 
     /**
      * Why [reply] is not the expected trial call, or `null` when it is. Only a reply that finished
@@ -274,7 +280,6 @@ public class ProviderProbe internal constructor(
         const val TRIAL_TOOL = "confirm_connection"
         const val TOKEN_LENGTH = 8
         const val SNIPPET = 300
-        const val MAX_ID = 256
         const val LISTING_LIMIT = 8L * 1024 * 1024
     }
 }
