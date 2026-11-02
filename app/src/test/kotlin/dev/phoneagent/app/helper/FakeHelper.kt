@@ -33,6 +33,9 @@ class FakeHelper(
 
     val linked: Int get() = recipients.size
 
+    /** Runs inside [unlinkToDeath], before the recipient is removed. */
+    var onUnlink: () -> Unit = {}
+
     fun die() {
         recipients.toList().forEach { it.binderDied() }
     }
@@ -48,7 +51,10 @@ class FakeHelper(
     override fun unlinkToDeath(
         recipient: IBinder.DeathRecipient,
         flags: Int,
-    ): Boolean = recipients.remove(recipient)
+    ): Boolean {
+        onUnlink()
+        return recipients.remove(recipient)
+    }
 
     override fun protocolVersion(): Int {
         calls += "protocolVersion"

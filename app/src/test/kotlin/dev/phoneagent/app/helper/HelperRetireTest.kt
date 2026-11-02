@@ -17,17 +17,26 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import java.lang.ref.WeakReference
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
 
-/** What [HelperClient] does with a helper it replaced: it keeps refusing it until that helper dies. */
+/**
+ * What [HelperClient] does with a helper it replaced: it keeps refusing it until that helper dies,
+ * and a second handoff does not get past the save until the replaced helper was told to stop.
+ */
 @RunWith(RobolectricTestRunner::class)
 class HelperRetireTest {
     private class MemoryStore : NonceStore {
         var slots = NonceSlots()
 
+        /** Runs before every save, with what is about to be saved. */
+        var onSave: (NonceSlots) -> Unit = {}
+
         override fun load(): NonceSlots = slots
 
         override fun save(slots: NonceSlots) {
+            onSave(slots)
             this.slots = slots
         }
     }
@@ -58,6 +67,8 @@ class HelperRetireTest {
         HandoffBundles.readReply(this) as HandoffBundles.Reply.Accepted
 
     private fun Bundle.rejected(): String? = (HandoffBundles.readReply(this) as? HandoffBundles.Reply.Rejected)?.reason
+
+    private fun CountDownLatch.awaitBounded() = assertTrue("barrier timed out", await(WAIT_SECONDS, TimeUnit.SECONDS))
 
     /**
      * Admits a helper, replaces it with a newer one and returns a weak handle on the first one and
@@ -121,6 +132,57 @@ class HelperRetireTest {
 
         assertEquals(0, client.retiredHelpers)
         assertEquals("it is still told to stop, in case it is not dead", "shutdown", old.calls.last())
+    }
+
+    /** Waits until [offering] waits for the handoff in progress, or has finished without waiting. */
+    private fun awaitWaitingOrDone(offering: Thread) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(WAIT_SECONDS)
+        while (offering.isAlive && offering.state != Thread.State.BLOCKED) {
+            assertTrue("the second handoff neither finished nor waited", System.nanoTime() < deadline)
+            Thread.yield()
+        }
+    }
+
+    /**
+     * The first handoff is stopped inside the retirement of the helper it replaced. A second
+     * handoff waits, and saves nothing, until that helper was told to stop. This is all the lock
+     * guarantees: replies still on their way after [HelperClient.offer] returned are not covered
+     * (HandoffCrashTest, the known gap).
+     */
+    @Test
+    fun aSecondHandoffWaitsUntilTheReplacedHelperWasToldToStop() {
+        val old = helper(pid)
+        offer(old, armed(), pid).accepted()
+        val second = helper(pid + 1)
+        val secondNonce = armed()
+        val third = helper(pid + 2)
+        val thirdNonce = client.issueLaunchNonce()
+        val retiring = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        old.onUnlink = {
+            retiring.countDown()
+            release.awaitBounded()
+        }
+        val offeringSecond = thread { offer(second, secondNonce, pid + 1).accepted() }
+        retiring.awaitBounded()
+        val before = store.slots
+        val toldToStopBeforeSave = mutableListOf<Boolean>()
+        store.onSave = { toldToStopBeforeSave += "shutdown" in old.calls }
+        var thirdReply: Bundle? = null
+        val offeringThird = thread { thirdReply = offer(third, thirdNonce, pid + 2) }
+
+        awaitWaitingOrDone(offeringThird)
+        val waited = offeringThird.isAlive
+        val unchanged = store.slots == before
+        release.countDown()
+        offeringSecond.join()
+        offeringThird.join()
+
+        assertTrue("the second handoff went ahead while the first was retiring the old helper", waited)
+        assertTrue("the second handoff saved while the first was retiring the old helper", unchanged)
+        assertEquals(listOf(true), toldToStopBeforeSave)
+        assertEquals(HelperState.Connected(third, pid + 2), client.state)
+        assertTrue(thirdReply?.let { HandoffBundles.readReply(it) } is HandoffBundles.Reply.Accepted)
     }
 
     private companion object {
