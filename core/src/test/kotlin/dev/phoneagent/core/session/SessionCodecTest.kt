@@ -1,5 +1,6 @@
 package dev.phoneagent.core.session
 
+import dev.phoneagent.core.model.ModelErrorKind
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
@@ -35,7 +36,12 @@ class SessionCodecTest {
             codec.encode(SessionRecord(3, 7, CompactionPrune(emptyList()), SurfaceOp.Replace(2, 2), listOf(1))),
         )
         assertEquals(
-            """{"seq":1,"time":0,"type":"session/resumed","ignorable":true,"data":{"droppedTailBytes":0}}""",
+            """{"seq":1,"time":0,"type":"request/retry","ignorable":true,""" +
+                """"data":{"attempt":2,"delayMs":500,"error":"NETWORK"}}""",
+            line(1, RequestRetry(2, 500, ModelErrorKind.NETWORK)),
+        )
+        assertEquals(
+            """{"seq":1,"time":0,"type":"session/resumed","data":{"droppedTailBytes":0}}""",
             line(1, SessionResumed(0)),
         )
         assertEquals(

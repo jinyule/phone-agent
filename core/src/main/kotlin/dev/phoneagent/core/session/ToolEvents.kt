@@ -104,6 +104,9 @@ public data class ToolResultRecorded(
 
 /**
  * `policy/verdict`: what PolicyEngine decided for a call, with its inputs, so replay can compare.
+ * Every call that runs has one: `tool/started` is valid only on the call's latest verdict, an
+ * Allow, READ calls included (no call skips the engine). Not ignorable: `tool/started` points at
+ * it.
  *
  * @property callId the call.
  * @property level security level in force.

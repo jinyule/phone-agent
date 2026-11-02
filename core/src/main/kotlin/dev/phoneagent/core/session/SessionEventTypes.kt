@@ -9,8 +9,9 @@ import kotlin.reflect.KClass
 /**
  * Registry of every [SessionEvent] type: its on-disk name (the `@SerialName`) and whether
  * records of that type are ignorable by readers that do not know it. Types that the model view,
- * the turn structure or the task settings depend on are not ignorable; diagnostics, prompts,
- * device facts and side requests are.
+ * the turn and run structure (`session/resumed` included), the task settings or the execution
+ * rules (`policy/verdict`, which `tool/started` points at) depend on are not ignorable;
+ * diagnostics, prompts, device facts and side requests are.
  */
 public object SessionEventTypes {
     private val all: List<EventType<*>> =
@@ -23,7 +24,7 @@ public object SessionEventTypes {
             type<StepStarted>(ignorable = false),
             type<StepEnded>(ignorable = false),
             type<InboxSpliced>(ignorable = false),
-            type<SessionResumed>(ignorable = true),
+            type<SessionResumed>(ignorable = false),
             type<UserMessage>(ignorable = false),
             type<RequestHeader>(ignorable = false),
             type<RequestRetry>(ignorable = true),
@@ -36,7 +37,7 @@ public object SessionEventTypes {
             type<ToolStarted>(ignorable = false),
             type<ToolExecuted>(ignorable = false),
             type<ToolResultRecorded>(ignorable = false),
-            type<PolicyVerdictRecorded>(ignorable = true),
+            type<PolicyVerdictRecorded>(ignorable = false),
             type<ApprovalAsked>(ignorable = true),
             type<ApprovalDecided>(ignorable = true),
             type<QuestionAsked>(ignorable = true),
