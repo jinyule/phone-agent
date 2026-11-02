@@ -1,3 +1,13 @@
+/*
+ * Portions adapted from Mika (https://github.com/wangzan101/Mika, commit
+ * 9cef3750addd20b2af9e3214a8f5e56301670174,
+ * app/src/main/java/com/wangzan101/mika/cap/phone/shell/ShellService.kt, `displayFlags` and its
+ * `FLAG_*` constants).
+ * Copyright 2026 wangzan101. Licensed under the Apache License, Version 2.0.
+ *
+ * Modified by PhoneAgent contributors: the flag set is a pure function of the API level with every
+ * flag documented, ROTATES_WITH_CONTENT is not set, and the size and density bounds were added.
+ */
 package dev.phoneagent.privileged.cap
 
 /**

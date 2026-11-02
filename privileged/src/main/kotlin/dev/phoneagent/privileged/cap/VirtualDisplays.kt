@@ -1,11 +1,13 @@
 /*
- * Portions adapted from Mika (https://github.com/wangzan101/Mika, commit 9cef375,
+ * Portions adapted from Mika (https://github.com/wangzan101/Mika, commit
+ * 9cef3750addd20b2af9e3214a8f5e56301670174,
  * app/src/main/java/com/wangzan101/mika/cap/phone/shell/ShellService.kt, `createDisplay` /
- * `releaseDisplay` / `displayFlags` / `setImePolicy`).
+ * `releaseDisplay` / `setImePolicy`).
  * Copyright 2026 wangzan101. Licensed under the Apache License, Version 2.0.
  *
- * Modified by PhoneAgent contributors: size and density are validated first, the IME policy is
- * read back, and the known size of every display is kept for the input checks.
+ * Modified by PhoneAgent contributors: the flags moved to DisplaySpec, size and density are
+ * validated first, the IME policy is read back, the known size of every display is kept for the
+ * input checks, and each display is released on its own.
  */
 package dev.phoneagent.privileged.cap
 

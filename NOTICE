@@ -33,6 +33,7 @@ Mika
       -> privileged/src/main/kotlin/dev/phoneagent/privileged/helper/ShellContext.kt
     app/src/main/java/com/wangzan101/mika/cap/phone/shell/ShellService.kt
       -> privileged/src/main/kotlin/dev/phoneagent/privileged/cap/VirtualDisplays.kt
+      -> privileged/src/main/kotlin/dev/phoneagent/privileged/cap/DisplaySpec.kt
       -> privileged/src/main/kotlin/dev/phoneagent/privileged/cap/TaskTable.kt
       -> privileged/src/main/kotlin/dev/phoneagent/privileged/cap/TaskSpec.kt
       -> privileged/src/main/kotlin/dev/phoneagent/privileged/cap/Launcher.kt
