@@ -225,6 +225,15 @@ data class WireProfile(
   - 未知名字、版本不符、凭据类型不符，都在发送前报 `InvalidRequest`。
   - beta 按需拼进 `anthropic-beta`。
   - 推荐设置：所有端点都开 adaptive thinking、`display:"summarized"` 和 `eager_input_streaming`；官方端点（`https://api.anthropic.com`）上再加 `drop_block` 和服务端降级（只对有降级的模型）。网关不发 Claude API 专有的 beta。
+  - 快照由纯函数 `AnthropicWire.snapshot(profile, model, capabilities, reasoning)` 生成，同样的输入得到同样的快照；`complete()` 不生成快照。
+  - 带工具时固定发 `disable_parallel_tool_use:true`。这是映射版本 1 的规则，不读 `parallelToolCalls`。
+- **传输**：和 OpenAI 适配器一致。
+  - 每次 attempt 只发一个请求：关掉连接失败重试和重定向跟随。
+  - 3xx 报不可重试的 `InvalidRequest(param = null)`，`detail` 里带打码、截断后的目标地址。
+  - SSE 认 LF、CRLF 和单独的 CR。
+  - `Retry-After` 只接受有限、非负的值。
+  - 取消时释放响应和连接。
+  - 回显的密钥在错误和成功回复的 `providerMetadata` 里都打码。
 - **默认模型**：主模型 `claude-opus-5-5`，可选 `claude-sonnet-5-5`；轻量模型 `claude-haiku-5-5`；看图模型默认用主模型。模型清单以服务端 `/v1/models` 返回的为准，本地只做初值。
 - **思考**：
   - Opus 5.5 的思考始终开启：不发 `thinking`，或者发 `{type:"adaptive"}`。**`budget_tokens` 和 `disabled` 都会被拒（400）**。
