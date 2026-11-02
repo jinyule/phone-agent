@@ -158,7 +158,7 @@ class AgentLoopCutHandoffTest {
             advanceTimeBy(1_500)
             val second = loop.awaitPrompt().promptId!!
             assertTrue(second != first, "the second question is waiting")
-            val openWhileAsking = openPromptsOf(harness.records(), c1)
+            val openWhileAsking = openPrompts(harness.records())
             assertTrue(loop.answer(second, UserReply.Answer("是")))
             loop.awaitPhase(Phase.Done)
 
@@ -186,7 +186,7 @@ class AgentLoopCutHandoffTest {
             val handoff = loop.awaitPrompt().promptId!!
             assertTrue(loop.answer(handoff, UserReply.HandoffDone))
             val question = loop.awaitPrompt(after = handoff).promptId!!
-            val openWhileAsking = openPromptsOf(harness.records(), c1)
+            val openWhileAsking = openPrompts(harness.records())
             assertTrue(loop.answer(question, UserReply.Answer("好了")))
             loop.awaitPhase(Phase.Done)
 

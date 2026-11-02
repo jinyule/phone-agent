@@ -213,10 +213,11 @@ fun UserInteraction.forTools(): ToolInteraction   // 运行时给 ToolContext �
   - 超时返回 `EXPIRED`；
   - 没人能回答（无人值守）时立即返回 `UNAVAILABLE`，不显示任何东西；
   - 任务在等待时被停止，调用被取消（抛 `CancellationException`，不返回结果），日志记 `prompt/withdrawn`。
-  - 等待被调用自己截断、任务没有在停止时（超出工具预算，或者工具内部的取消，比如它自己套了超时），立刻在 `NonCancellable` 里收尾，写完以后下一个提示才能打开：先写 `prompt/withdrawn`（和修复路径写的是同一种记录）；截断的是接管，再把任务收回后台屏（ticket 只归还一次：已经开始归还的不再归还；最多等 `LoopConfig.takeBackTimeoutMs`，默认 5 s）。然后原来的取消照常传播给工具。等待在截断之后才返回（比如收回本身不受取消影响、照样做完）也这样收尾：这时已经写不进结果记录。收回失败或超时，抛 `ScreenUnavailableException`（只写动作名和异常类名），这次调用以错误结束，不能在 App 还在用户那边时继续操作后台屏。`HandoffResult` 不增加新值，接管没有 `handoff/end`。区分"任务停止"和"调用内部截断"看的是任务的停止状态（stop 已经发出，或者外部 scope 已经取消），不看当前协程。
-  - 只有任务停止时，才把 App 留给用户，提示交给修复路径撤回。
-  - 提示因为意外异常（不是取消）没有关闭、调用照常有结果时，派发在写这个调用的 `tool/result` 之前补写 `prompt/withdrawn`，作为兜底。
-  - 提问和结果在方法返回前已写进日志；等待时间不计入 `timeoutMs`；每个任务同时最多一个待答提示。
+  - **单提示锁**（`Prompts`）：每个任务同时最多一个待答提示，第二个提示等第一个的锁。从提问记录、等待到终结记录（接管还包括之后的读屏）都在锁里，锁守三条不变式：
+    1. 锁只在**日志**已经关掉这个提示以后才释放。关没关按日志判断（和修复路径用同一个推导），不按内存里的标记。不论提示怎么结束（回答；调用被截断，即超出工具预算或者工具内部的取消，比如它自己套了超时；意外异常），释放锁之前都在 `NonCancellable` 里收尾：日志里提示还开着，就写 `prompt/withdrawn`（和修复路径写的是同一种记录）；终结记录已经写进去的（比如截断时它的写入已经开始），不重复写。然后原来的取消或异常照常传播给工具。
+    2. 这样结束的接管，释放锁之前先把任务收回后台屏（ticket 只归还一次；最多等 `LoopConfig.takeBackTimeoutMs`，默认 5 s），否则这次调用以收回失败结束。正常的收回已经开始、又被截断的，也算收回失败，不再归还一次。收回失败或超时，抛 `ScreenUnavailableException`（只写动作名和异常类名），这次调用以错误结束，不能在 App 还在用户那边时继续操作后台屏。`HandoffResult` 不增加新值，接管没有 `handoff/end`。
+    3. 只有两种例外：任务停止时，提示交给修复路径撤回，App 留给用户；日志写入失败时，日志的异常照常传播，任务以 `ERROR` 停止。区分"任务停止"和"调用内部截断"看的是任务的停止状态（stop 已经发出，或者外部 scope 已经取消），不看当前协程。
+  - 提问和结果在方法返回前已写进日志；等待时间不计入 `timeoutMs`。
 
 ### 3.3 屏幕端口（主屏和虚拟屏共用一套实现，按 displayId 参数化）
 
@@ -487,7 +488,7 @@ fun interface Chain<I, O> { suspend fun proceed(input: I): O }   // 不调用 pr
 | `toolPostExecute` | 每个调用有结果之后（执行、拒绝、转交都算） | `PostExecuteInput(call, tool, result)` → `PostExecuteResult(result, context)` | 替换结果；附加上下文（进 nextStep） | LoopGuard（含重复调用提醒）、OutwardPacing、KnowledgeNotice、Spill |
 | `turnStopping` | 有最终回答且 nextStep 里没有 steer 时 | `TurnStoppingInput(turn, step, continuations, reply)` → `End` / `Continue(context)` | 继续本 turn（受续跑上限约束） | TodoContinuation（M3） |
 
-主循环自带、不能被拦截器替换的部分：`preStep` 之前的步数上限；`request` 之后的刷盘；`toolPreExecute` 之后的 PolicyEngine；`toolExecute` 链最内层的执行事实（`tool/started`、刷盘、`tool/executed`），以及包住整条链的工具超时。
+主循环自带、不能被拦截器替换的部分：`preStep` 之前的步数上限；`request` 之后的刷盘；`toolPreExecute` 之后的 PolicyEngine；`toolExecute` 链最内层的执行事实（`tool/started`、刷盘、`tool/executed`），以及包住整条链的工具超时；提示的单提示锁和锁释放前的收尾（§3.2），派发不再补写 `prompt/withdrawn`。
 
 **`requestError` 默认行为**（`RetryInterceptor`）：可重试的错误每个 step 最多重试 5 次；服务端给了 retry-after 就按它等，否则从 500 ms 指数退避到 10 s，一半固定一半随机。retry-after 超过 `maxRetryAfterMs`（默认 60 s，构造时校验）**不重试**，直接按不可重试失败，不会把等待缩短到上限。重试前的等待可以被 steer 打断。
 
@@ -747,7 +748,7 @@ TaskRuntime 循环（每个 step，对应 §3.8 的拦截点）：
 
 1. 遇到 `hand_to_user`、PolicyEngine 判为转交、或检测到防截屏页时触发；
 2. 用 `moveTask` 把任务挪到主屏，同时发通知和悬浮胶囊，提示"请处理：登录 / 验证码 / 付款"；
-3. 用户点"处理好了"后，把任务挪回后台屏，并告诉模型"用户已处理，请核实结果"。每次接管结束（不论结局，也不论是 PolicyEngine 判的转交还是工具自己发起的）、下一次模型请求之前，runtime 都重新读屏（等待上限同复核，`LoopConfig.recheckScreenTimeoutMs`），记成这个调用名下的 `screen/snapshot`，之后的调用就在这一屏上判定。读不到时不报错：接管开始之前的屏一律不再算数，之后的调用以 `screen = null` 判定（§3.8），这个调用的结果末尾加上"读不到屏，先 phone_observe"（`LoopTexts.screenUnknown`）。接管没有正常结束时同样如此：停止、超出工具预算、意外异常都没有 `handoff/end`，也来不及读屏，旧屏从 `handoff/started` 起就已作废；补结果的两条路径（正常派发和 `repairOf`）都给这个调用加上同一句提示；接管被调用自己截断、任务没有在停止时，立刻写 `prompt/withdrawn` 并收回任务（§3.2），意外异常留下的由正常派发补写；停止、turn 失败和崩溃恢复时由修复路径关掉，停止时 App 留给用户；
+3. 用户点"处理好了"后，把任务挪回后台屏，并告诉模型"用户已处理，请核实结果"。每次接管结束（不论结局，也不论是 PolicyEngine 判的转交还是工具自己发起的）、下一次模型请求之前，runtime 都重新读屏（等待上限同复核，`LoopConfig.recheckScreenTimeoutMs`），记成这个调用名下的 `screen/snapshot`，之后的调用就在这一屏上判定。读不到时不报错：接管开始之前的屏一律不再算数，之后的调用以 `screen = null` 判定（§3.8），这个调用的结果末尾加上"读不到屏，先 phone_observe"（`LoopTexts.screenUnknown`）。接管没有正常结束时同样如此：停止、超出工具预算、意外异常都没有 `handoff/end`，也来不及读屏，旧屏从 `handoff/started` 起就已作废；补结果的两条路径（正常派发和 `repairOf`）都给这个调用加上同一句提示；接管被调用自己截断或者因为意外异常结束、任务没有在停止时，释放单提示锁之前写 `prompt/withdrawn` 并收回任务（§3.2）；停止、turn 失败和崩溃恢复时由修复路径关掉，停止时 App 留给用户；
 4. 同一时间只交一个 App 给用户，多个任务排队。
 
 ---

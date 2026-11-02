@@ -41,11 +41,11 @@ import org.junit.jupiter.api.Test
 
 /**
  * A prompt whose wait the call cut off (its budget, a cancellation inside the tool), or that an
- * unexpected failure left open, while the turn goes on gets `prompt/withdrawn` before the call's
- * `tool/result`, the record the repair writes for a stopped task: so no view rebuilt from the log
- * keeps it open. Closing at once and taking the task back are [AgentLoopCutHandoffTest]'s, the
- * screen side of a cut handoff is [AgentLoopHandoffScreenTest]'s; a stop or a failed turn is left
- * to the repair.
+ * unexpected failure left open, while the turn goes on gets `prompt/withdrawn` before its
+ * single-prompt lock is released, so before the call's `tool/result`: the record the repair writes
+ * for a stopped task, so no view rebuilt from the log keeps it open. Closing at once and taking the
+ * task back are [AgentLoopCutHandoffTest]'s, the lock [AgentLoopPromptLockTest]'s, the screen side
+ * of a cut handoff is [AgentLoopHandoffScreenTest]'s; a stop or a failed turn is left to the repair.
  */
 class AgentLoopCutPromptTest {
     private val c1 = ToolCallId("c1")
@@ -188,8 +188,8 @@ class AgentLoopCutPromptTest {
             val opened = events.only<HandoffStarted>().single().promptId
             assertWithdrawnBeforeResult(events, opened, loop)
             assertTrue(
-                events.indexOf(PromptWithdrawn(opened)) > events.indexOf(ToolExecuted(c1, ToolStatus.ERROR)),
-                "a failure, no cut: the dispatch withdraws it, after the tool returned",
+                events.indexOf(PromptWithdrawn(opened)) in 0..<events.indexOf(ToolExecuted(c1, ToolStatus.ERROR)),
+                "closed in the log before its lock is released, so before the tool returned",
             )
         }
 

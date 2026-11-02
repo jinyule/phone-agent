@@ -1,7 +1,6 @@
 package dev.phoneagent.core.agent
 
 import dev.phoneagent.core.ids.PromptId
-import dev.phoneagent.core.ids.ToolCallId
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.session.ApprovalAsked
 import dev.phoneagent.core.session.ApprovalDecided
@@ -65,13 +64,7 @@ internal fun repairOf(
     val dispatched = records.mapNotNull { r -> (r.event as? ToolCallRecorded)?.let { it.call.id to r.seq } }.toMap()
     val started = records.mapNotNullTo(HashSet()) { (it.event as? ToolStarted)?.callId }
     val acting = actingCalls(records)
-    val closed = records.mapNotNullTo(HashSet()) { closedPrompt(it.event) }
-    val repairs =
-        records
-            .mapNotNull {
-                openedPrompt(it.event)
-            }.filter { it !in closed }
-            .mapTo(mutableListOf()) { Repair(PromptWithdrawn(it)) }
+    val repairs = openPrompts(records).mapTo(mutableListOf()) { Repair(PromptWithdrawn(it)) }
     for (record in records) {
         val calls = (record.event as? AssistantMessage)?.parts.orEmpty().filterIsInstance<Part.ToolCall>()
         for (call in calls.filter { it.id !in answered }) {
@@ -120,27 +113,13 @@ private fun missingResult(
     }
 
 /**
- * The prompts [callId] asked (card, question, handoff) that nothing closed yet, oldest first: the
- * waits it cut off while it went on to its result (its budget, a cancellation inside the tool).
+ * The prompts the log asked (card, question, handoff) that nothing closed yet, oldest first: the
+ * log alone tells whether a prompt is still open, in-process (Prompts) and in the repair.
  */
-internal fun openPromptsOf(
-    records: List<SessionRecord>,
-    callId: ToolCallId,
-): List<PromptId> {
+internal fun openPrompts(records: List<SessionRecord>): List<PromptId> {
     val closed = records.mapNotNullTo(HashSet()) { closedPrompt(it.event) }
-    return records.mapNotNull { askedBy(it.event, callId) }.filter { it !in closed }
+    return records.mapNotNull { openedPrompt(it.event) }.filter { it !in closed }
 }
-
-private fun askedBy(
-    event: SessionEvent,
-    callId: ToolCallId,
-): PromptId? =
-    when {
-        event is ApprovalAsked && event.card.callId == callId -> event.promptId
-        event is QuestionAsked && event.callId == callId -> event.promptId
-        event is HandoffStarted && event.callId == callId -> event.promptId
-        else -> null
-    }
 
 private fun openedPrompt(event: SessionEvent): PromptId? =
     when {

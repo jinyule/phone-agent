@@ -21,8 +21,6 @@ import dev.phoneagent.core.session.QuestionAnswered
 import dev.phoneagent.core.session.QuestionAsked
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.job
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -34,9 +32,17 @@ import kotlin.coroutines.resume
 
 /**
  * The task's prompts to the user (cards, questions, handoffs) and their answers
- * ([TaskRuntime.answer]). At most one prompt is pending per task: a second one waits for the first.
- * Prompt ids are `prompt-<seq>`, after the log position where they are asked, so they are unique
- * within the task and stable across replays of the same log.
+ * ([TaskRuntime.answer]). Prompt ids are `prompt-<seq>`, after the log position where they are
+ * asked, so they are unique within the task and stable across replays of the same log.
+ *
+ * At most one prompt is pending per task: a second one waits for the first's lock (phase1 §3.2).
+ * 1. The lock is released only once the log closed the prompt, judged by the log ([openPrompts]):
+ *    its answer or end, else `prompt/withdrawn`, whatever ended it (an answer, a cut by the call's
+ *    budget or inside the tool, a failure).
+ * 2. A handoff that ended so is taken back first, or the call ends with a failed take-back; a
+ *    take-back that began and was cut off counts as failed.
+ * 3. The only exceptions: a stopping task leaves the prompt to the repair and a handed-over app
+ *    with the user; a failed log stops the task with ERROR.
  */
 internal class Prompts(
     private val loop: LoopContext,
@@ -71,40 +77,36 @@ internal class Prompts(
         override suspend fun ask(question: Question): AskResult =
             lock.withLock {
                 val id = nextId()
-                loop.log.append(QuestionAsked(id, callId, question))
-                val result =
-                    if (loop.unattended) {
-                        AskResult.Unavailable
-                    } else {
-                        closing(id) {
+                settled(id) {
+                    loop.log.append(QuestionAsked(id, callId, question))
+                    val result =
+                        if (loop.unattended) {
+                            AskResult.Unavailable
+                        } else {
                             wait.paused {
-                                awaitReply(
-                                    id,
-                                    WaitReason.USER,
-                                    loop.config.questionTimeoutMs,
-                                    ::fitQuestion,
-                                )
-                            }
-                        } ?: AskResult.Expired
-                    }
-                loop.log.append(QuestionAnswered(id, result))
-                result
+                                awaitReply(id, WaitReason.USER, loop.config.questionTimeoutMs, ::fitQuestion)
+                            } ?: AskResult.Expired
+                        }
+                    loop.log.append(QuestionAnswered(id, result))
+                    result
+                }
             }
 
         override suspend fun confirm(card: ConfirmCard): ConfirmResult =
             lock.withLock {
                 val id = nextId()
                 val timeout = loop.config.confirmTimeoutMs
-                loop.log.append(ApprovalAsked(id, card, expiresAt = loop.setup.clock.epochMillis() + timeout))
-                val result =
-                    if (loop.unattended) {
-                        ConfirmResult.UNAVAILABLE
-                    } else {
-                        closing(id) { wait.paused { awaitReply(id, WaitReason.USER, timeout, ::fitCard) } }
-                            ?: ConfirmResult.EXPIRED
-                    }
-                loop.log.append(ApprovalDecided(id, result))
-                result
+                settled(id) {
+                    loop.log.append(ApprovalAsked(id, card, expiresAt = loop.setup.clock.epochMillis() + timeout))
+                    val result =
+                        if (loop.unattended) {
+                            ConfirmResult.UNAVAILABLE
+                        } else {
+                            wait.paused { awaitReply(id, WaitReason.USER, timeout, ::fitCard) } ?: ConfirmResult.EXPIRED
+                        }
+                    loop.log.append(ApprovalDecided(id, result))
+                    result
+                }
             }
 
         override suspend fun handOff(
@@ -113,18 +115,21 @@ internal class Prompts(
         ): HandoffResult =
             lock.withLock {
                 val id = nextId()
-                loop.log.append(HandoffStarted(id, kind, reason, callId))
-                val (result, detail) =
-                    if (loop.unattended) HandoffResult.UNAVAILABLE to null else handOver(id, kind)
-                loop.log.append(HandoffEnded(id, result, detail))
-                // The user may have changed the screen: look again before the model's next request.
-                freshScreen(loop, callId)
-                result
+                val moves = loop.setup.surfaces?.let(::Moves)
+                settled(id, moves) {
+                    loop.log.append(HandoffStarted(id, kind, reason, callId))
+                    val (result, detail) =
+                        if (loop.unattended) HandoffResult.UNAVAILABLE to null else handOver(id, kind, moves)
+                    loop.log.append(HandoffEnded(id, result, detail))
+                    // The user may have changed the screen: look again before the model's next request.
+                    freshScreen(loop, callId)
+                    result
+                }
             }
 
         /**
-         * Moves the task to the user and back when there is a [SurfaceManager]; without one
-         * (main-display mode) the user acts where the task already is. Moving failures
+         * Moves the task to the user and back with [moves] when there is a [SurfaceManager];
+         * without one (main-display mode) the user acts where the task already is. Moving failures
          * ([IOException], as the ports report device trouble) end the handoff as FAILED with a
          * detail naming the move and the exception's class only (its text may quote the screen).
          * A handoff the call cuts off itself is taken back at once ([Moves.giveBack]); a stop while
@@ -133,17 +138,19 @@ internal class Prompts(
         private suspend fun handOver(
             id: PromptId,
             kind: HandoffKind,
-        ): Pair<HandoffResult, String?> {
-            val surfaces = loop.setup.surfaces ?: return closing(id) { awaitHandoff(id) } to null
-            val moves = Moves(surfaces)
-            return closing(id, moves::giveBack) { moves.handOver(id, kind) }
-        }
+            moves: Moves?,
+        ): Pair<HandoffResult, String?> = if (moves == null) awaitHandoff(id) to null else moves.handOver(id, kind)
 
-        /** The moves of one handoff over [surfaces]: its ticket is taken back at most once. */
+        /**
+         * The moves of one handoff over [surfaces]: its ticket is taken back at most once (it is no
+         * longer held once the take-back began; [giveBack] runs once, when the prompt is settled),
+         * and a take-back that began and was cut off counts as failed.
+         */
         private inner class Moves(
             private val surfaces: SurfaceManager,
-        ) {
+        ) : GiveBack {
             private var held: HandoffTicket? = null
+            private var backing = false
 
             suspend fun handOver(
                 id: PromptId,
@@ -154,21 +161,24 @@ internal class Prompts(
                         held = ticket
                         val result = awaitHandoff(id)
                         held = null
-                        moving("take back") { surfaces.takeBack(ticket) }.fold({ result to null }, ::failed)
+                        backing = true
+                        val back = moving("take back") { surfaces.takeBack(ticket) }
+                        backing = false
+                        back.fold({ result to null }, ::failed)
                     },
                     onFailure = ::failed,
                 )
 
             /**
              * Takes the task back after the call cut its handoff off, unless the app is not with
-             * the user (never handed over) or taking it back already began. Waits at most
-             * [LoopConfig.takeBackTimeoutMs]; failing or slower throws [ScreenUnavailableException]
-             * naming the move and the exception's class only, so the call ends with an error rather
-             * than go on without its screen.
+             * the user (never handed over). A take-back that already began and was cut off, or one
+             * that fails or takes longer than [LoopConfig.takeBackTimeoutMs], throws
+             * [ScreenUnavailableException] naming the move and the exception's class only, in place
+             * of the cancellation: the call must not go on as if the app were back.
              */
-            suspend fun giveBack() {
+            override suspend fun giveBack() {
+                if (backing) throw ScreenUnavailableException("take back failed: cut off")
                 val ticket = held ?: return
-                held = null
                 val back =
                     withTimeoutOrNull(loop.config.takeBackTimeoutMs) {
                         moving("take back") { surfaces.takeBack(ticket) }
@@ -194,38 +204,44 @@ internal class Prompts(
                 ?: HandoffResult.EXPIRED
     }
 
+    /** What closing a cut-off handoff does to its app, besides `prompt/withdrawn`. */
+    private fun interface GiveBack {
+        suspend fun giveBack()
+    }
+
     private fun nextId(): PromptId = PromptId("prompt-${loop.log.lastSeq + 1}")
 
     /**
-     * Runs [wait] for prompt [id]. A wait the call cuts off itself (its budget, a timeout or a
-     * cancellation inside the tool) while the task goes on is closed at once, before the next
-     * prompt may open: `prompt/withdrawn`, then [giveBack], both under NonCancellable; then the
-     * cancellation propagates (or what a failed [giveBack] throws). So is a wait that returns only
-     * after the cut (a move that finishes despite it): its answer can no longer be recorded. When
-     * the task is [stopping], the repair withdraws the prompt and a handed-over app stays with the
-     * user.
+     * Runs [prompt] for prompt [id], from its first record to its last, holding the single-prompt
+     * lock. Whatever ends it (its answer, a cut by the call's budget or a cancellation inside the
+     * tool, a failure), the prompt is closed in the log before the lock is released: when the log
+     * still has it open, `prompt/withdrawn`, then [moves]' [GiveBack.giveBack], both under
+     * NonCancellable; then what ended it propagates (a cancellation, a failure), or what a failed
+     * take-back throws instead. Judged by the log alone, so a record whose write began before the
+     * cut is never followed by a second.
+     * When the task is [stopping], the repair withdraws the prompt and a handed-over app stays with
+     * the user; when the log has failed, its exception propagates and the task stops with ERROR.
      */
-    private suspend fun <T> closing(
+    private suspend fun <T> settled(
         id: PromptId,
-        giveBack: suspend () -> Unit = {},
-        wait: suspend () -> T,
+        moves: GiveBack? = null,
+        prompt: suspend () -> T,
     ): T {
         try {
-            return wait()
+            return prompt()
         } finally {
-            closeIfCut(id, giveBack)
+            closeIfOpen(id, moves)
         }
     }
 
-    private suspend fun closeIfCut(
+    private suspend fun closeIfOpen(
         id: PromptId,
-        giveBack: suspend () -> Unit,
+        moves: GiveBack?,
     ) {
-        // Only a cancellation cuts: a failure leaves the prompt to Calls, a stop to the repair.
-        if (!currentCoroutineContext().job.isCancelled || stopping()) return
+        if (stopping()) return
         withContext(NonCancellable) {
-            loop.log.append(PromptWithdrawn(id))
-            giveBack()
+            if (id in openPrompts(loop.log.records())) loop.log.append(PromptWithdrawn(id))
+            moves?.giveBack()
         }
     }
 
