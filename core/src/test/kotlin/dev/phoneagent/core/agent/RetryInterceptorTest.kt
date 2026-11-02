@@ -56,6 +56,30 @@ class RetryInterceptorTest {
         }
 
     @Test
+    fun `a large legal base saturates at the largest backoff instead of overflowing`() =
+        runTest {
+            val huge =
+                RetryInterceptor(
+                    maxRetries = 3,
+                    baseDelayMs = Long.MAX_VALUE / 2,
+                    maxDelayMs = Long.MAX_VALUE,
+                    maxRetryAfterMs = Long.MAX_VALUE,
+                    random = FixedRandom(0.0),
+                )
+            assertEquals(
+                listOf(Long.MAX_VALUE / 4, Long.MAX_VALUE / 2, Long.MAX_VALUE / 2),
+                (0..2).map { (huge.decide(network, it) as? Recovery.Retry)?.delayMs },
+            )
+            val top =
+                RetryInterceptor(
+                    baseDelayMs = Long.MAX_VALUE,
+                    maxDelayMs = Long.MAX_VALUE,
+                    maxRetryAfterMs = Long.MAX_VALUE,
+                )
+            assertTrue((top.decide(network, 3) as Recovery.Retry).delayMs >= 0)
+        }
+
+    @Test
     fun `the server's retry-after is waited as given`() =
         runTest {
             val interceptor = RetryInterceptor(random = FixedRandom(0.0))

@@ -45,8 +45,11 @@ public class RetryInterceptor(
         return if (retry) Recovery.Retry(delayMs) else chain.proceed(input)
     }
 
+    /** Half fixed, half random below `min(maxDelayMs, baseDelayMs * 2^retries)`, saturating, never negative. */
     private fun backoff(retries: Int): Long {
-        val ceiling = minOf(maxDelayMs, baseDelayMs shl minOf(retries, MAX_SHIFT))
+        val shift = minOf(retries, MAX_SHIFT)
+        // Saturate before shifting: past this, the shift would overflow (or exceed maxDelayMs anyway).
+        val ceiling = if (baseDelayMs > maxDelayMs shr shift) maxDelayMs else baseDelayMs shl shift
         return ceiling / 2 + (ceiling / 2 * random.nextDouble()).toLong()
     }
 
