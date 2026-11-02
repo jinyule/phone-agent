@@ -81,15 +81,9 @@ class OpenAiEndToEndTest {
             },
         )
 
-    /**
-     * [text] without the API key, for anything printed or put in an assertion message. A key
-     * shorter than [Redactor.MIN_SECRET] is a placeholder to the redactor, so it is replaced here.
-     */
-    private fun redact(text: String): String {
-        val key = env["PA_E2E_API_KEY"]?.takeIf { it.isNotBlank() }
-        val masked = Redactor(listOfNotNull(key)).text(text)
-        return if (key == null) masked else masked.replace(key, Redactor.MASK)
-    }
+    /** [text] without the API key, for anything printed or put in an assertion message. */
+    private fun redact(text: String): String =
+        Redactor(listOfNotNull(env["PA_E2E_API_KEY"]?.takeIf { it.isNotBlank() })).text(text)
 
     private fun report(line: String) = println(redact(line))
 

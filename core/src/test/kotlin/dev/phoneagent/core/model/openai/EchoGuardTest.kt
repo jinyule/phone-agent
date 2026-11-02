@@ -61,8 +61,9 @@ class EchoGuardTest {
     }
 
     @Test
-    fun `without a secret long enough nothing is checked`() {
-        assertSame(EchoGuard.NONE, Redactor(listOf("tinkey")).guard())
+    fun `without a secret nothing is checked, and a short secret is checked like any other`() {
+        assertSame(EchoGuard.NONE, Redactor(emptyList()).guard())
+        assertThrows<ModelError.BadResponse> { Redactor(listOf("test")).guard().check("a test run") }
         val window = EchoGuard.NONE.Window()
         assertDoesNotThrow { window.next("tinkey") }
         assertDoesNotThrow { EchoGuard.NONE.parts(listOf(Part.Text("tinkey"))) }

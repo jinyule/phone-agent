@@ -16,9 +16,10 @@ import java.util.IdentityHashMap
  * secret in other ways (`\/`, `\u0073`) is masked after it is written back in the standard
  * escaping ([json]).
  *
- * Secrets shorter than [MIN_SECRET] characters are treated as placeholders ("1", "test",
- * "ollama", a local gateway's "tinkey"): no exit matches them exactly, since ordinary text such as
- * model ids holds them too; only the shapes apply. The length is provisional.
+ * Every secret is matched exactly, however short: a length threshold would let a short real
+ * credential through, and the shapes do not recognize values such as `test`. A local service that
+ * needs no authentication uses `Credential.None`; a placeholder key it is given anyway is a
+ * secret like any other, masked wherever it appears (and a reply that holds it is rejected).
  *
  * Content the model produced is never masked: a reply that holds a form of a secret is rejected
  * whole ([guard], [EchoGuard]).
@@ -30,7 +31,7 @@ import java.util.IdentityHashMap
 internal class Redactor(
     secrets: Iterable<String>,
 ) {
-    private val secrets = secrets.filter { it.length >= MIN_SECRET }.distinct()
+    private val secrets = secrets.filter { it.isNotEmpty() }.distinct()
 
     /** Each secret as sent and JSON-escaped; longest first, so a form that contains another is masked whole. */
     private val forms =
@@ -139,9 +140,6 @@ internal class Redactor(
     companion object {
         /** What a masked credential reads as. */
         const val MASK: String = "***"
-
-        /** Shortest secret matched exactly; shorter ones are placeholders. */
-        const val MIN_SECRET: Int = 8
 
         private const val MAX_DEPTH = 8
 

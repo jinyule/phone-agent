@@ -11,8 +11,8 @@ import kotlinx.serialization.json.Json
  * session never puts a secret in the context, so a secret in the output means something is wrong.
  * The reply fails as [CredentialEcho.error] instead.
  *
- * Matching is exact, on the [Redactor]'s forms of each secret (as sent and JSON-escaped; secrets
- * too short to match are placeholders): no credential shapes, which ordinary output may contain.
+ * Matching is exact, on the [Redactor]'s forms of each secret (as sent and JSON-escaped, however
+ * short): no credential shapes, which ordinary output may contain.
  * Deltas are checked as they are shown, not held back: each [Window] keeps the end of one delta
  * channel, one character shorter than the longest form, so a secret split over fragments is
  * caught by the fragment that completes it, before that one is shown. [parts] checks what the
@@ -80,7 +80,7 @@ internal class EchoGuard(
         }
 
     companion object {
-        /** A guard that matches nothing (no secret long enough to match). */
+        /** A guard that matches nothing (the request sent no secret). */
         val NONE: EchoGuard = EchoGuard(emptyList())
     }
 }

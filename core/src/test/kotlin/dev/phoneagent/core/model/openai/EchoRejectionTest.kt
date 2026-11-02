@@ -26,8 +26,8 @@ import org.junit.jupiter.api.assertThrows
  * rewritten (model-layer §2): text, call arguments (recovered calls too), reasoning and encrypted
  * reasoning, as sent or JSON-escaped, whole or split over deltas. The rejection carries the
  * "streamed output is not kept" marker ([CredentialEcho]) and none of the echo; the delta that
- * completes the secret is not shown, the ones before it are not held back. Secrets shorter than
- * [Redactor.MIN_SECRET] are placeholders and reject nothing. Assertions never print a secret.
+ * completes the secret is not shown, the ones before it are not held back. Every secret counts,
+ * however short. Assertions never print a secret.
  */
 class EchoRejectionTest {
     @StartStop
@@ -219,14 +219,12 @@ class EchoRejectionTest {
         }
 
     @Test
-    fun `a short placeholder key rejects nothing and leaves listed ids alone`() =
+    fun `a short key echoed is rejected like any other`() =
         runTest {
-            server.enqueueSse(chat(content("Served by ollama, model ollama/llama3.")))
-            val reply = model(secret = PLACEHOLDER).complete(Kit.request())
-            assertEquals(listOf(Part.Text("Served by ollama, model ollama/llama3.")), reply.parts)
-            server.enqueue(MockResponse.Builder().body("""{"data":[{"id":"ollama/llama3"},{"id":"qwen3"}]}""").build())
-            val models = Kit.adapters(Keys(PLACEHOLDER)).probe().listModels(Kit.profile(server.base()))
-            assertEquals(listOf("ollama/llama3", "qwen3"), models.orEmpty().map { it.id.value })
+            server.enqueueSse(chat(content("Served by ollama, key ${SHORT.take(2)}"), content(SHORT.drop(2) + ".")))
+            val deltas = Deltas()
+            assertRejected(model(secret = SHORT), SHORT, deltas)
+            assertEquals("Served by ollama, key ${SHORT.take(2)}", deltas.text)
         }
 
     @Test
@@ -247,8 +245,8 @@ class EchoRejectionTest {
         const val QUOTED = "placeholder\"with-quote-0001"
         const val SLASHED = "placeholder/with-slash-00001"
 
-        /** A secret below [Redactor.MIN_SECRET]: a placeholder. */
-        const val PLACEHOLDER = "ollama"
+        /** A short key, such as a placeholder a local service was given. */
+        const val SHORT = "tinkey"
         const val PREFIX = 8
     }
 }
