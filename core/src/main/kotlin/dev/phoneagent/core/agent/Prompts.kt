@@ -58,7 +58,7 @@ internal class Prompts(
                 val id = nextId()
                 loop.log.append(QuestionAsked(id, callId, question))
                 val result =
-                    if (loop.config.unattended) {
+                    if (loop.unattended) {
                         AskResult.Unavailable
                     } else {
                         wait.paused { awaitReply(id, WaitReason.USER, loop.config.questionTimeoutMs, ::fitQuestion) }
@@ -74,7 +74,7 @@ internal class Prompts(
                 val timeout = loop.config.confirmTimeoutMs
                 loop.log.append(ApprovalAsked(id, card, expiresAt = loop.setup.clock.epochMillis() + timeout))
                 val result =
-                    if (loop.config.unattended) {
+                    if (loop.unattended) {
                         ConfirmResult.UNAVAILABLE
                     } else {
                         wait.paused { awaitReply(id, WaitReason.USER, timeout, ::fitCard) } ?: ConfirmResult.EXPIRED
@@ -91,7 +91,7 @@ internal class Prompts(
                 val id = nextId()
                 loop.log.append(HandoffStarted(id, kind, reason, callId))
                 val (result, detail) =
-                    if (loop.config.unattended) HandoffResult.UNAVAILABLE to null else handOver(id, kind)
+                    if (loop.unattended) HandoffResult.UNAVAILABLE to null else handOver(id, kind)
                 loop.log.append(HandoffEnded(id, result, detail))
                 result
             }

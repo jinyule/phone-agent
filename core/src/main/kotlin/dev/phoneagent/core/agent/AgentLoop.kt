@@ -5,6 +5,7 @@ import dev.phoneagent.core.ids.SessionId
 import dev.phoneagent.core.ids.TaskId
 import dev.phoneagent.core.policy.IntentResolver
 import dev.phoneagent.core.policy.PolicyEngine
+import dev.phoneagent.core.policy.SecurityLevel
 import dev.phoneagent.core.ports.AppCatalog
 import dev.phoneagent.core.ports.Clock
 import dev.phoneagent.core.ports.ScreenPort
@@ -12,12 +13,12 @@ import dev.phoneagent.core.ports.SurfaceManager
 import dev.phoneagent.core.session.InboxEntry
 import dev.phoneagent.core.session.InboxEntryKind
 import dev.phoneagent.core.session.InboxQueue
-import dev.phoneagent.core.session.SessionCodec
 import dev.phoneagent.core.session.SessionFiles
 import dev.phoneagent.core.session.SessionLogException
 import dev.phoneagent.core.session.SessionRecord
 import dev.phoneagent.core.session.SessionResumed
 import dev.phoneagent.core.session.SessionStore
+import dev.phoneagent.core.session.TaskStarted
 import dev.phoneagent.core.session.TurnEnded
 import dev.phoneagent.core.session.TurnStarted
 import dev.phoneagent.core.tool.ToolRegistry
@@ -56,7 +57,6 @@ import kotlin.time.TimeSource
  * @property config limits, security level and loop texts.
  * @property interceptors the extensions at the fixed points.
  * @property timeSource measures tool timeouts (virtual time in tests).
- * @property codec the session log format.
  */
 public data class AgentSetup(
     val taskId: TaskId,
@@ -72,7 +72,6 @@ public data class AgentSetup(
     val config: LoopConfig = LoopConfig(),
     val interceptors: Interceptors = Interceptors(),
     val timeSource: TimeSource.WithComparableMarks = TimeSource.Monotonic,
-    val codec: SessionCodec = SessionCodec(),
 )
 
 /**
@@ -107,9 +106,10 @@ public class AgentLoop private constructor(
 
     private val log = LoopLog(setup, store) { eventFlow.tryEmit(LoopEvent.Recorded(it)) }
     private val inbox = Inbox.restore(records) { log.append(it) }
-    private val loop = LoopContext(setup, store.header.sessionId, log, inbox, phaseFlow, eventFlow)
+    private val loop =
+        LoopContext(setup, log, inbox, phaseFlow, eventFlow, settingsOf(records).unattended)
     private val prompts = Prompts(loop)
-    private val intake = Intake(inbox) { stop(StopCause.ERROR) }
+    private val intake = Intake(inbox, { log.append(it) }) { stop(StopCause.ERROR) }
     private val driver =
         Driver(
             loop,
@@ -147,6 +147,10 @@ public class AgentLoop private constructor(
 
     override fun inject(context: ContextInput) {
         submit(InboxQueue.NEXT_STEP, InboxEntry(InboxEntryKind.INJECT, context.parts, context.source), wake = false)
+    }
+
+    override fun changeLevel(level: SecurityLevel) {
+        if (!driver.stopped) intake.changeLevel(level)
     }
 
     override fun stop(cause: StopCause) {
@@ -197,15 +201,18 @@ public class AgentLoop private constructor(
 
         /**
          * Starts task [AgentSetup.taskId] with a new session [sessionId] in [AgentSetup.files], running
-         * in [scope]. It is idle until the first followup. Throws what `SessionStore.create` throws.
+         * in [scope], with the security level and attendance in [settings] (record 1, `task/start`;
+         * from then on the log is their only source). It is idle until the first followup. Throws
+         * what `SessionStore.create` throws.
          */
         public suspend fun start(
             setup: AgentSetup,
             sessionId: SessionId,
+            settings: TaskStarted,
             scope: CoroutineScope,
         ): AgentLoop {
-            val store = SessionStore.create(setup.files, sessionId, setup.taskId, setup.clock, setup.codec)
-            return AgentLoop(setup, store, emptyList(), scope)
+            val store = SessionStore.create(setup.files, sessionId, setup.taskId, settings, setup.clock)
+            return AgentLoop(setup, store, store.records(), scope)
         }
 
         /**
@@ -220,7 +227,7 @@ public class AgentLoop private constructor(
             setup: AgentSetup,
             scope: CoroutineScope,
         ): AgentLoop {
-            val opened = SessionStore.open(setup.files, setup.clock, setup.codec)
+            val opened = SessionStore.open(setup.files, setup.clock)
             val store = opened.store
             val owner = store.header.taskId
             if (owner != setup.taskId) store.close()

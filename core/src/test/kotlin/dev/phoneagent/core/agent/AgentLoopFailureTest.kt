@@ -88,37 +88,6 @@ class AgentLoopFailureTest {
         }
 
     @Test
-    fun `a request interceptor may not switch the main conversation to another role`() =
-        runTest {
-            val switch =
-                Interceptor<RequestPlan, RequestPlan> {
-                    plan,
-                    chain,
-                    ->
-                    chain.proceed(plan.copy(role = ModelRole.VISION))
-                }
-            val model = FakeChatModel().answers("never sent")
-            val harness =
-                LoopHarness(
-                    this,
-                    model,
-                    interceptors = Interceptors(requestError = emptyList(), request = listOf(switch)),
-                )
-            val loop = harness.start()
-            loop.followup(text("one"))
-            advanceUntilIdle()
-
-            assertEquals(Phase.Idle, loop.phase.value)
-            assertEquals(0, model.requests.size)
-            val ended = harness.events().only<TurnEnded>().single()
-            assertEquals(TurnEndReason.FAILED, ended.reason)
-            assertEquals(
-                "java.lang.IllegalStateException: a request interceptor switched the role to VISION",
-                ended.detail,
-            )
-        }
-
-    @Test
     fun `a call whose step failed before it ran is NOT_STARTED, one that ran is OUTCOME_UNKNOWN`() =
         runTest {
             val crashBefore =
@@ -451,7 +420,7 @@ class AgentLoopFailureTest {
             harness.storage.appendFailures = 1
             loop.followup(text("go"))
             assertEquals(Phase.Stopped(StopCause.ERROR), loop.awaitStopped())
-            assertTrue(harness.events().isEmpty())
+            assertEquals(listOf(LoopHarness.ATTENDED), harness.events(), "only task/start")
         }
 
     @Test
@@ -471,7 +440,14 @@ class AgentLoopFailureTest {
 
     /** Writes a log as the process left it when it died mid-turn. */
     private suspend fun crashedSession(harness: LoopHarness) {
-        val store = SessionStore.create(harness.files, LoopHarness.SESSION, LoopHarness.TASK, harness.setup.clock)
+        val store =
+            SessionStore.create(
+                harness.files,
+                LoopHarness.SESSION,
+                LoopHarness.TASK,
+                LoopHarness.ATTENDED,
+                harness.setup.clock,
+            )
         val queued = InboxEntry(InboxEntryKind.FOLLOWUP, listOf(Part.Text("later")))
         val dispatched =
             ToolCall(ToolCallId("c1"), LoopHarness.TASK, LoopHarness.SESSION, "ask", JsonObject(emptyMap()), "问一下")
@@ -561,7 +537,14 @@ class AgentLoopFailureTest {
     fun `a session of another task is not resumed`() =
         runTest {
             val harness = LoopHarness(this, FakeChatModel())
-            SessionStore.create(harness.files, LoopHarness.SESSION, TaskId("someone-else"), harness.setup.clock).close()
+            SessionStore
+                .create(
+                    harness.files,
+                    LoopHarness.SESSION,
+                    TaskId("someone-else"),
+                    LoopHarness.ATTENDED,
+                    harness.setup.clock,
+                ).close()
             val failure =
                 try {
                     harness.resume()

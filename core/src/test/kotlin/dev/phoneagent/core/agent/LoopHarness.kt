@@ -4,13 +4,13 @@ package dev.phoneagent.core.agent
 
 import dev.phoneagent.core.ids.SessionId
 import dev.phoneagent.core.ids.TaskId
-import dev.phoneagent.core.model.ModelRole
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.PromptBlock
 import dev.phoneagent.core.policy.ActionIntent
 import dev.phoneagent.core.policy.IntentKind
 import dev.phoneagent.core.policy.IntentResolver
 import dev.phoneagent.core.policy.PolicyEngine
+import dev.phoneagent.core.policy.SecurityLevel
 import dev.phoneagent.core.policy.Verdict
 import dev.phoneagent.core.ports.AppCatalog
 import dev.phoneagent.core.ports.Clock
@@ -21,8 +21,10 @@ import dev.phoneagent.core.session.SessionEvent
 import dev.phoneagent.core.session.SessionFiles
 import dev.phoneagent.core.session.SessionRecord
 import dev.phoneagent.core.session.SessionStore
+import dev.phoneagent.core.session.TaskStarted
 import dev.phoneagent.core.testing.FakeChatModel
 import dev.phoneagent.core.testing.InMemoryStoragePort
+import dev.phoneagent.core.testing.TEST_WIRE
 import dev.phoneagent.core.tool.RiskClass
 import dev.phoneagent.core.tool.Tool
 import dev.phoneagent.core.tool.ToolGroup
@@ -53,12 +55,13 @@ internal class LoopHarness(
     val surfaces: SurfaceManager? = null,
     val apps: AppCatalog? = null,
     val config: LoopConfig = LoopConfig(),
+    val settings: TaskStarted = ATTENDED,
     val interceptors: Interceptors = Interceptors(requestError = emptyList()),
     val storage: InMemoryStoragePort = InMemoryStoragePort(),
 ) {
     val files = SessionFiles(storage, StoragePath("sessions/s1"))
     val plan =
-        RequestPlan(ModelRole.MAIN, model, listOf(PromptBlock("identity", "You drive a phone.")), tools.map { it.def })
+        RequestPlan(model, TEST_WIRE, listOf(PromptBlock("identity", "You drive a phone.")), tools.map { it.def })
     val setup: AgentSetup =
         AgentSetup(
             taskId = TASK,
@@ -90,7 +93,7 @@ internal class LoopHarness(
     /** Failures that escaped the loop's coroutines (bugs); tests that provoke one assert on it. */
     val uncaught = mutableListOf<Throwable>()
 
-    suspend fun start(): AgentLoop = AgentLoop.start(setup, SESSION, loopScope)
+    suspend fun start(): AgentLoop = AgentLoop.start(setup, SESSION, settings, loopScope)
 
     suspend fun resume(): AgentLoop = AgentLoop.resume(setup, loopScope)
 
@@ -102,6 +105,8 @@ internal class LoopHarness(
     companion object {
         val TASK = TaskId("task-1")
         val SESSION = SessionId("session-1")
+        val ATTENDED = TaskStarted(SecurityLevel.STANDARD, unattended = false)
+        val UNATTENDED = TaskStarted(SecurityLevel.STANDARD, unattended = true)
 
         fun kindOf(risk: RiskClass): IntentKind =
             when (risk) {

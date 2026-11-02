@@ -115,9 +115,9 @@ internal class Gate(
     ): Verdict {
         val setup = loop.setup
         val intent = setup.intents.resolve(call, tool.risk, screen)
-        val context = policyContextOf(loop.log.records(), setup.taskId, loop.config, screen, approved)
+        val context = policyContextOf(loop.log.records(), setup.taskId, screen, approved)
         val verdict = setup.policy.evaluate(call, intent, context)
-        loop.log.append(PolicyVerdictRecorded(call.id, loop.config.level, intent, verdict))
+        loop.log.append(PolicyVerdictRecorded(call.id, context.level, intent, verdict))
         return if (strictness(requested) > strictness(verdict)) requested else verdict
     }
 

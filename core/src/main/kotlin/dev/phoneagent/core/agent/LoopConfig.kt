@@ -1,10 +1,9 @@
 package dev.phoneagent.core.agent
 
-import dev.phoneagent.core.policy.SecurityLevel
-
 /**
  * Tunable limits of one task's loop (phase1 §3.7). Validated on construction, so a bad value fails
- * where the configuration is loaded.
+ * where the configuration is loaded. The security level and attendance are task settings in the
+ * log (`task/start`, `task/level-changed`), not configuration.
  *
  * @property maxStepsPerTurn steps one turn may take; the next step ends the turn with `LIMIT`, >= 1.
  * @property maxContinuationsPerTurn times `turnStopping` may keep one turn going, >= 0.
@@ -13,8 +12,6 @@ import dev.phoneagent.core.policy.SecurityLevel
  * @property confirmTimeoutMs how long a confirmation card waits before it counts as rejected, > 0.
  * @property questionTimeoutMs how long an `ask_user` question waits, > 0.
  * @property handoffTimeoutMs how long a handed-off step waits for the user, > 0.
- * @property level the user's security level, passed to the policy.
- * @property unattended no user is watching (scheduled task): prompts return `UNAVAILABLE` at once.
  * @property texts model-visible feedback the loop writes into tool results.
  */
 public data class LoopConfig(
@@ -24,8 +21,6 @@ public data class LoopConfig(
     val confirmTimeoutMs: Long = DEFAULT_CONFIRM_TIMEOUT_MS,
     val questionTimeoutMs: Long = DEFAULT_QUESTION_TIMEOUT_MS,
     val handoffTimeoutMs: Long = DEFAULT_HANDOFF_TIMEOUT_MS,
-    val level: SecurityLevel = SecurityLevel.STANDARD,
-    val unattended: Boolean = false,
     val texts: LoopTexts = LoopTexts(),
 ) {
     init {

@@ -53,7 +53,6 @@ internal class Requests(
             if (loop.inbox.hasSteer()) takeSteers()
             state.attempt += 1
             val plan = requestChain.proceed(loop.setup.plan)
-            check(plan.role == loop.setup.plan.role) { "a request interceptor switched the role to ${plan.role}" }
             val request = assemble(plan)
             loop.log.flush()
             when (val attempt = attempt(state, plan, request)) {
@@ -88,10 +87,10 @@ internal class Requests(
         val info = plan.model.info
         val header =
             RequestHeader(
-                plan.role,
                 info.provider,
                 info.model,
                 info.protocol,
+                plan.wire,
                 plan.system,
                 plan.tools,
                 plan.cache,

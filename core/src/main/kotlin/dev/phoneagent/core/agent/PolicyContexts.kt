@@ -4,6 +4,7 @@ import dev.phoneagent.core.ids.TaskId
 import dev.phoneagent.core.ids.ToolCallId
 import dev.phoneagent.core.policy.IntentKind
 import dev.phoneagent.core.policy.PolicyContext
+import dev.phoneagent.core.policy.SecurityLevel
 import dev.phoneagent.core.ports.ConfirmCard
 import dev.phoneagent.core.ports.ConfirmReason
 import dev.phoneagent.core.ports.ConfirmResult
@@ -16,6 +17,8 @@ import dev.phoneagent.core.session.ScreenLaunched
 import dev.phoneagent.core.session.ScreenObserved
 import dev.phoneagent.core.session.SessionEvent
 import dev.phoneagent.core.session.SessionRecord
+import dev.phoneagent.core.session.TaskLevelChanged
+import dev.phoneagent.core.session.TaskStarted
 import dev.phoneagent.core.session.ToolResultRecorded
 import dev.phoneagent.core.tool.ToolStatus
 
@@ -51,7 +54,6 @@ private fun seenSnapshot(
 internal fun policyContextOf(
     records: List<SessionRecord>,
     taskId: TaskId,
-    config: LoopConfig,
     screen: ScreenSnapshot?,
     approved: ConfirmCard?,
 ): PolicyContext {
@@ -71,5 +73,16 @@ internal fun policyContextOf(
             .mapNotNull { (it.event as? ApprovalDecided)?.takeIf { d -> d.result == ConfirmResult.APPROVED } }
             .mapNotNull { cards[it.promptId]?.takeIf { card -> card.reason == ConfirmReason.OUTWARD }?.pkg }
             .toSet()
-    return PolicyContext(taskId, config.level, config.unattended, screen, operated, outward, approved)
+    return PolicyContext(taskId, levelOf(records), settingsOf(records).unattended, screen, operated, outward, approved)
 }
+
+/** The task's starting settings: `task/start`, always record 1 of a log. */
+internal fun settingsOf(records: List<SessionRecord>): TaskStarted =
+    when (val first = records.first().event) {
+        is TaskStarted -> first
+        else -> error("a session log starts with task/start, not $first")
+    }
+
+/** The security level in force after [records]: the last `task/level-changed`, else `task/start`'s. */
+internal fun levelOf(records: List<SessionRecord>): SecurityLevel =
+    records.asReversed().firstNotNullOfOrNull { (it.event as? TaskLevelChanged)?.level } ?: settingsOf(records).level

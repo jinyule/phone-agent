@@ -9,6 +9,7 @@ import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.policy.ActionIntent
 import dev.phoneagent.core.policy.PolicyContext
 import dev.phoneagent.core.policy.PolicyEngine
+import dev.phoneagent.core.policy.SecurityLevel
 import dev.phoneagent.core.policy.Verdict
 import dev.phoneagent.core.ports.AskResult
 import dev.phoneagent.core.ports.ConfirmCard
@@ -31,6 +32,8 @@ import dev.phoneagent.core.session.PolicyVerdictRecorded
 import dev.phoneagent.core.session.QuestionAnswered
 import dev.phoneagent.core.session.QuestionAsked
 import dev.phoneagent.core.session.ScreenObserved
+import dev.phoneagent.core.session.TaskLevelChanged
+import dev.phoneagent.core.session.TaskStarted
 import dev.phoneagent.core.session.ToolResultRecorded
 import dev.phoneagent.core.testing.FakeChatModel
 import dev.phoneagent.core.testing.FakeChatModel.Companion.call
@@ -44,6 +47,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -91,12 +95,14 @@ class AgentLoopPolicyTest {
                 .result
     }
 
+    @Suppress("LongParameterList") // Every parameter has a default; tests name the few they change.
     private suspend fun TestScope.send(
         policy: PolicyEngine,
         config: LoopConfig = LoopConfig(),
         interceptors: Interceptors = Interceptors(requestError = emptyList()),
         screen: ScriptedScreen? = ScriptedScreen(ScriptedScreen.snapshotOf("s1")),
         surfaces: SurfaceManager? = null,
+        settings: TaskStarted = LoopHarness.ATTENDED,
     ): Run {
         val tool = FakeTool("send", risk = RiskClass.OUTWARD)
         val model = FakeChatModel().calls(call("c1", "send")).answers("ok")
@@ -109,6 +115,7 @@ class AgentLoopPolicyTest {
                 screen = screen,
                 surfaces = surfaces,
                 config = config,
+                settings = settings,
                 interceptors = interceptors,
             )
         val loop = harness.start()
@@ -144,7 +151,7 @@ class AgentLoopPolicyTest {
                     .only<PolicyVerdictRecorded>()
                     .single()
             assertEquals(refuse, verdict.verdict)
-            assertEquals(LoopConfig().level, verdict.level)
+            assertEquals(SecurityLevel.STANDARD, verdict.level, "the level of task/start")
         }
 
     @Test
@@ -460,7 +467,7 @@ class AgentLoopPolicyTest {
                     .result,
             )
 
-            val unattended = send(ScriptedPolicy(Verdict.Confirm(sendCard)), config = LoopConfig(unattended = true))
+            val unattended = send(ScriptedPolicy(Verdict.Confirm(sendCard)), settings = LoopHarness.UNATTENDED)
             unattended.loop.awaitPhase(Phase.Done)
             assertEquals(LoopTexts().confirmUnavailable, unattended.result().text())
             assertTrue(listOf(rejected, expired, unattended).all { it.tool.calls.isEmpty() })
@@ -496,7 +503,7 @@ class AgentLoopPolicyTest {
             expired.loop.awaitPhase(Phase.Done)
             assertEquals(LoopTexts().handoffExpired, expired.result().text())
 
-            val unattended = send(ScriptedPolicy(handOff), config = LoopConfig(unattended = true))
+            val unattended = send(ScriptedPolicy(handOff), settings = LoopHarness.UNATTENDED)
             unattended.loop.awaitPhase(Phase.Done)
             assertEquals(LoopTexts().handoffUnavailable, unattended.result().text())
             assertEquals(
@@ -641,7 +648,7 @@ class AgentLoopPolicyTest {
                     this,
                     FakeChatModel().calls(call("c1", "ask")).answers("ok"),
                     tools = listOf(tool),
-                    config = LoopConfig(unattended = true),
+                    settings = LoopHarness.UNATTENDED,
                 )
             val loop = harness.start()
             loop.followup(text("go"))
@@ -690,5 +697,45 @@ class AgentLoopPolicyTest {
             assertEquals(setOf("com.example.chat"), contexts[5].outwardConfirmedPackages)
             assertEquals(LoopHarness.TASK, contexts[5].taskId)
             assertFalse(contexts[5].unattended)
+        }
+
+    @Test
+    fun `the level comes from the log and changes only through the runtime`() =
+        runTest {
+            val policy = ScriptedPolicy()
+            val tool = FakeTool("send", risk = RiskClass.OUTWARD)
+            val model =
+                FakeChatModel()
+                    .calls(call("c1", "send"))
+                    .answers("ok")
+                    .calls(call("c2", "send"))
+                    .answers("ok")
+            val harness =
+                LoopHarness(
+                    this,
+                    model,
+                    tools = listOf(tool),
+                    policy = policy,
+                    settings = TaskStarted(SecurityLevel.CAUTIOUS, unattended = false),
+                )
+            val loop = harness.start()
+            loop.followup(text("one"))
+            loop.awaitPhase(Phase.Done)
+            loop.changeLevel(SecurityLevel.AUTONOMOUS)
+            loop.followup(text("two"))
+            advanceUntilIdle()
+
+            assertEquals(listOf(SecurityLevel.CAUTIOUS, SecurityLevel.AUTONOMOUS), policy.contexts.map { it.level })
+            assertEquals(
+                listOf(SecurityLevel.CAUTIOUS, SecurityLevel.AUTONOMOUS),
+                harness.events().only<PolicyVerdictRecorded>().map { it.level },
+            )
+            assertEquals(listOf(TaskLevelChanged(SecurityLevel.AUTONOMOUS)), harness.events().only<TaskLevelChanged>())
+
+            loop.stop(StopCause.USER)
+            loop.awaitStopped()
+            loop.changeLevel(SecurityLevel.STANDARD)
+            advanceUntilIdle()
+            assertEquals(1, harness.events().only<TaskLevelChanged>().size, "ignored once stopped")
         }
 }

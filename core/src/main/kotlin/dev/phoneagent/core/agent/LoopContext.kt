@@ -18,12 +18,14 @@ import java.io.IOException
 /** What the parts of one task's loop share. Only the driver coroutine mutates turn state. */
 internal class LoopContext(
     val setup: AgentSetup,
-    val sessionId: SessionId,
     val log: LoopLog,
     val inbox: Inbox,
     val phase: MutableStateFlow<Phase>,
     private val events: MutableSharedFlow<LoopEvent>,
+    /** No user is watching (from `task/start`, fixed for the task): prompts are unavailable. */
+    val unattended: Boolean,
 ) {
+    val sessionId: SessionId get() = log.sessionId
     val config: LoopConfig get() = setup.config
     val texts: LoopTexts get() = setup.config.texts
 
@@ -104,6 +106,9 @@ internal class LoopLog(
     /** Seq of the last record. */
     val lastSeq: Long get() = store.lastSeq
 
+    /** The session this log belongs to. */
+    val sessionId: SessionId get() = store.header.sessionId
+
     suspend fun append(
         event: SessionEvent,
         surfaceOp: SurfaceOp = SurfaceOp.Append,
@@ -128,7 +133,7 @@ internal class LoopLog(
         close()
         val opened =
             try {
-                SessionStore.open(setup.files, setup.clock, setup.codec)
+                SessionStore.open(setup.files, setup.clock)
             } catch (ignored: IOException) {
                 // Storage itself is failing: nothing more can be recorded; the next open repairs the log.
                 null

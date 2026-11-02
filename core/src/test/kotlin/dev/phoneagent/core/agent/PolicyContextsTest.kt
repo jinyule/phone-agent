@@ -22,6 +22,8 @@ import dev.phoneagent.core.session.ScreenActed
 import dev.phoneagent.core.session.ScreenLaunched
 import dev.phoneagent.core.session.ScreenObserved
 import dev.phoneagent.core.session.SessionSamples
+import dev.phoneagent.core.session.TaskLevelChanged
+import dev.phoneagent.core.session.TaskStarted
 import dev.phoneagent.core.session.TurnStarted
 import dev.phoneagent.core.testing.ScriptedScreen.Companion.snapshotOf
 import dev.phoneagent.core.tool.ToolResult
@@ -29,12 +31,15 @@ import dev.phoneagent.core.tool.ToolStatus
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 
 /** The policy's inputs derived from the log (contracts addendum §8, §14). */
 class PolicyContextsTest {
     private val s1 = snapshotOf("s1")
     private val s2 = snapshotOf("s2")
     private val s3 = snapshotOf("s3")
+
+    private val start = TaskStarted(SecurityLevel.STANDARD, unattended = false)
 
     private fun id(value: String) = ToolCallId(value)
 
@@ -95,6 +100,7 @@ class PolicyContextsTest {
     fun `operated packages are those of successful non-READ calls by their last verdict`() {
         val records =
             log(
+                start,
                 verdict("tap", IntentKind.INPUT, "first"),
                 verdict("tap", IntentKind.INPUT, "app.tap"),
                 answered("tap"),
@@ -106,7 +112,7 @@ class PolicyContextsTest {
                 answered("anywhere"),
                 verdict("pending", IntentKind.INPUT, "app.pending"),
             )
-        val context = policyContextOf(records, SessionSamples.task, LoopConfig(), screen = null, approved = null)
+        val context = policyContextOf(records, SessionSamples.task, screen = null, approved = null)
         assertEquals(setOf("app.tap"), context.operatedPackages)
     }
 
@@ -123,6 +129,7 @@ class PolicyContextsTest {
         ) = ApprovalDecided(PromptId("p$n"), result)
         val records =
             log(
+                TaskStarted(SecurityLevel.STANDARD, unattended = true),
                 asked(1, card(ConfirmReason.OUTWARD, "app.sent")),
                 decided(1),
                 asked(2, card(ConfirmReason.OUTWARD, "app.rejected")),
@@ -133,15 +140,28 @@ class PolicyContextsTest {
                 decided(4),
                 decided(5),
                 asked(6, card(ConfirmReason.OUTWARD, "app.open")),
+                TaskLevelChanged(SecurityLevel.AUTONOMOUS),
+                TaskLevelChanged(SecurityLevel.CAUTIOUS),
             )
-        val config = LoopConfig(level = SecurityLevel.CAUTIOUS, unattended = true)
         val approved = card(ConfirmReason.OUTWARD, "app.sent")
-        val context = policyContextOf(records, SessionSamples.task, config, s1, approved)
+        val context = policyContextOf(records, SessionSamples.task, s1, approved)
         assertEquals(setOf("app.sent"), context.outwardConfirmedPackages)
         assertEquals(SessionSamples.task, context.taskId)
         assertEquals(SecurityLevel.CAUTIOUS, context.level)
         assertEquals(true, context.unattended)
         assertEquals(s1, context.screen)
         assertEquals(approved, context.approved)
+    }
+
+    @Test
+    fun `the level and attendance come from the log`() {
+        assertEquals(SecurityLevel.CAUTIOUS, levelOf(log(TaskStarted(SecurityLevel.CAUTIOUS, unattended = false))))
+        assertEquals(
+            SecurityLevel.AUTONOMOUS,
+            levelOf(log(start, TurnStarted(1), TaskLevelChanged(SecurityLevel.AUTONOMOUS), TurnStarted(2))),
+        )
+        assertEquals(true, settingsOf(log(TaskStarted(SecurityLevel.STANDARD, unattended = true))).unattended)
+        val headless = assertThrows<IllegalStateException> { settingsOf(log(TurnStarted(1))) }
+        assertEquals("a session log starts with task/start, not TurnStarted(turn=1)", headless.message)
     }
 }

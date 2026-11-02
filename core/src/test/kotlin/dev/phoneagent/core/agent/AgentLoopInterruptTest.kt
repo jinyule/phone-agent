@@ -255,7 +255,7 @@ class AgentLoopInterruptTest {
             assertEquals(Phase.Stopped(StopCause.USER), loop.phase.value)
             assertFalse(loop.answer(PromptId("prompt-1"), UserReply.Approve))
             assertEquals(before, harness.events())
-            assertTrue(before.isEmpty(), "an idle task has no turn to close")
+            assertEquals(listOf(LoopHarness.ATTENDED), before, "an idle task has no turn to close")
             assertEquals(0, model.started.value)
         }
 

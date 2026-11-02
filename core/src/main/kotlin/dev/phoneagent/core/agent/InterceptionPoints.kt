@@ -5,11 +5,11 @@ import dev.phoneagent.core.model.CacheLayout
 import dev.phoneagent.core.model.ChatModel
 import dev.phoneagent.core.model.ContextEditPolicy
 import dev.phoneagent.core.model.ModelError
-import dev.phoneagent.core.model.ModelRole
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.PromptBlock
 import dev.phoneagent.core.model.ReasoningLevel
 import dev.phoneagent.core.model.ToolDef
+import dev.phoneagent.core.model.WireProfile
 import dev.phoneagent.core.policy.Verdict
 import dev.phoneagent.core.session.AssistantMessage
 import dev.phoneagent.core.session.SessionEvent
@@ -106,8 +106,12 @@ public sealed interface PreStepResult {
  * Everything of one attempt's request except the messages (`request`). Becomes the
  * `request/header` (written only when it changed) plus `deriveMessages(log)`.
  *
- * @property role the model's role.
+ * The plan serves the main conversation only: vision and light requests are side requests
+ * (`side/request`), never built from it.
+ *
  * @property model the model to call; its `info` names provider, model and protocol in the header.
+ * @property wire the non-secret wire settings frozen into the header for [model] (the adapter's
+ *   rules for this provider and model).
  * @property system system prompt blocks.
  * @property tools tool definitions, normally the registry's manifest.
  * @property cache explicit cache breakpoints.
@@ -116,8 +120,8 @@ public sealed interface PreStepResult {
  * @property reasoning reasoning level, or `null` for the provider default.
  */
 public data class RequestPlan(
-    val role: ModelRole,
     val model: ChatModel,
+    val wire: WireProfile,
     val system: List<PromptBlock>,
     val tools: List<ToolDef>,
     val cache: CacheLayout = CacheLayout.DEFAULT,

@@ -1,8 +1,11 @@
 package dev.phoneagent.core.agent
 
+import dev.phoneagent.core.policy.SecurityLevel
 import dev.phoneagent.core.session.InboxEntry
 import dev.phoneagent.core.session.InboxQueue
+import dev.phoneagent.core.session.SessionEvent
 import dev.phoneagent.core.session.SessionLogException
+import dev.phoneagent.core.session.TaskLevelChanged
 import dev.phoneagent.core.session.TurnEnded
 import dev.phoneagent.core.session.TurnStarted
 import kotlinx.coroutines.CancellationException
@@ -165,11 +168,13 @@ internal class TurnEndings(
 }
 
 /**
- * Records the input methods' entries in arrival order on its own coroutine, so that
- * [TaskRuntime.followup] and friends never suspend. A log failure stops the task ([onLogFailure]).
+ * Records the input methods' entries and level changes in arrival order on its own coroutine, so
+ * that [TaskRuntime.followup] and friends never suspend. A log failure stops the task
+ * ([onLogFailure]).
  */
 internal class Intake(
     private val inbox: Inbox,
+    private val record: suspend (SessionEvent) -> Unit,
     private val onLogFailure: () -> Unit,
 ) {
     private val commands = Channel<Command>(Channel.UNLIMITED)
@@ -181,19 +186,36 @@ internal class Intake(
         entry: InboxEntry,
         wake: Boolean,
     ) {
-        commands.trySend(Command(queue, entry, wake))
+        commands.trySend(Command.Add(queue, entry, wake))
+    }
+
+    /** Queues a change of the task's security level; ignored once [close]d. */
+    fun changeLevel(level: SecurityLevel) {
+        commands.trySend(Command.Level(level))
     }
 
     /** Records submitted entries until [close]d, waking the driver for followups and steers. */
     suspend fun run() {
         for (command in commands) {
             try {
-                inbox.add(command.queue, command.entry)
+                handle(command)
             } catch (ignored: SessionLogException) {
                 // The store refuses writes from now on, so the task cannot record anything: stop it.
                 return onLogFailure()
             }
-            if (command.wake) wakes.trySend(Unit)
+        }
+    }
+
+    private suspend fun handle(command: Command) {
+        when (command) {
+            is Command.Add -> {
+                inbox.add(command.queue, command.entry)
+                if (command.wake) wakes.trySend(Unit)
+            }
+
+            is Command.Level -> {
+                record(TaskLevelChanged(command.level))
+            }
         }
     }
 
@@ -206,9 +228,15 @@ internal class Intake(
         commands.close()
     }
 
-    private class Command(
-        val queue: InboxQueue,
-        val entry: InboxEntry,
-        val wake: Boolean,
-    )
+    private sealed interface Command {
+        class Add(
+            val queue: InboxQueue,
+            val entry: InboxEntry,
+            val wake: Boolean,
+        ) : Command
+
+        class Level(
+            val level: SecurityLevel,
+        ) : Command
+    }
 }

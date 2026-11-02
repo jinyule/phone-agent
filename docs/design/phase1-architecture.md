@@ -411,12 +411,13 @@ interface TaskRuntime {
     fun followup(input: UserInput)           // 进 nextTurn：一条消息独占一个 turn
     fun steer(input: UserInput)              // 进 nextStep：在下一个 step 边界被取走；阻止本 turn 结束
     fun inject(context: ContextInput)        // 进 nextStep，不唤醒驱动器（例如定时结果、通知）
+    fun changeLevel(level: SecurityLevel)    // 写 task/level-changed，之后判定的调用按新级别；级别只能这样改
     fun stop(cause: StopCause)               // USER / SHUTDOWN / LIMIT / ERROR；只停这一个任务，清空 inbox
     fun answer(promptId: PromptId, reply: UserReply): Boolean   // Approve / Reject / Answer / Decline / HandoffDone；提示已失效或回复不匹配时返回 false
 }
 ```
 
-实现是 `core.agent.AgentLoop`：`start(setup, sessionId, scope)` 新建会话，`resume(setup, scope)` 打开已有会话。`AgentSetup.plan.model` 是**为这个会话建的** `ChatModel`：适配器的 `BlobSource` 读本会话的 blobs，所以一个会话一个 `ChatModel` 实例。
+实现是 `core.agent.AgentLoop`：`start(setup, sessionId, settings, scope)` 新建会话，`settings` 就是第 1 条记录 `task/start(level, unattended)`；`resume(setup, scope)` 打开已有会话。级别和 unattended 之后只从日志推导（`task/start`、`task/level-changed`），不是 `LoopConfig` 的配置项。`AgentSetup.plan.model` 是**为这个会话建的** `ChatModel`：适配器的 `BlobSource` 读本会话的 blobs，所以一个会话一个 `ChatModel` 实例。
 
 **输入与 Phase**：
 - 输入方法都不挂起、立即返回；先记成 `inbox/spliced`，再生效。
@@ -467,7 +468,7 @@ fun interface Chain<I, O> { suspend fun proceed(input: I): O }   // 不调用 pr
 | 拦截点 | 时机 | 输入 → 输出 | 能做什么 | 第一阶段的使用者 |
 |---|---|---|---|---|
 | `preStep` | 每个 step 之前（本 step 的输入已写入日志） | `PreStepInput(turn, step, log)` → `Proceed` / `Refuse(detail)` | **拒绝本 step**；追加 runtime-context（前台 App、时间、知识提示）；压缩 | RuntimeContext、Compaction |
-| `request` | 每次 attempt 之前 | `RequestPlan` → `RequestPlan` | 为主请求选模型、推理档位、缓存断点；看图和轻量请求走旁路（`side/*`）；**不能改消息，也不能改 role**（改了本 turn 就 `FAILED`） | ModelRouter |
+| `request` | 每次 attempt 之前 | `RequestPlan` → `RequestPlan` | 为主请求选模型、线路快照、推理档位、缓存断点；`RequestPlan` 只服务主对话，看图和轻量请求走旁路（`side/*`）；**不能改消息** | ModelRouter |
 | `requestError` | attempt 失败后（step 仍打开） | `RequestFailure(error, attempt, retries)` → `Retry(delayMs)` / `Fail` | 决定是否重试；每次重试记 `request/retry` | `RetryInterceptor`（默认）、OverflowCompaction、ImageOffload |
 | `toolPreExecute` | 每个通过校验的调用，已写 `tool/call` | `PreExecuteInput(call, tool)` → `Verdict` | allow / refuse / confirm / handoff | **PolicyEngine**（固定排在链后，不可重排、无法绕过） |
 | `toolExecute` | 包住执行体 | `ExecuteInput(call, tool, context)` → `ToolResult` | 刷盘之外的包装、spill-back 检测 | MainScreenWatch |

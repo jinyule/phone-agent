@@ -1,10 +1,14 @@
 package dev.phoneagent.core.session
 
 import dev.phoneagent.core.ids.ToolCallId
+import dev.phoneagent.core.model.CacheLayout
+import dev.phoneagent.core.model.ContextEditPolicy
 import dev.phoneagent.core.model.Message
+import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.Role
 import dev.phoneagent.core.model.StopReason
+import dev.phoneagent.core.testing.TEST_WIRE
 import dev.phoneagent.core.tool.ToolResult
 import dev.phoneagent.core.tool.ToolStatus
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -208,6 +212,134 @@ class DeriveMessagesTest {
             listOf(text(Role.USER, "x")),
             deriveMessages(log(user("x"), CompactionPrune(stub))),
             "an appended prune contributes nothing",
+        )
+    }
+
+    @Test
+    fun `every rule sample of the model view holds`() {
+        for (case in DeriveRuleSamples.cases) {
+            for (view in case.views) {
+                val prefix = case.records.filter { it.seq <= view.afterSeq }
+                assertEquals(view.messages, deriveMessages(prefix), "${case.name} after ${view.afterSeq}: ${case.rule}")
+            }
+        }
+    }
+
+    @Test
+    fun `an interrupted reply counts once a user message follows it before another reply`() {
+        val prefix = assistant(Part.Text("我先"), interrupted = true)
+        val ok = results(Part.ToolResult(c1, listOf(Part.Text("ok")), isError = false))
+        assertEquals(
+            listOf(text(Role.USER, "go"), text(Role.ASSISTANT, "我先"), ok, text(Role.USER, "next")),
+            deriveMessages(log(user("go"), prefix, result(c1, "ok"), user("next"))),
+            "results in between do not hide it",
+        )
+        assertEquals(
+            listOf(text(Role.USER, "go"), ok, text(Role.ASSISTANT, "done"), text(Role.USER, "next")),
+            deriveMessages(log(user("go"), prefix, result(c1, "ok"), assistant(Part.Text("done")), user("next"))),
+            "another reply came first",
+        )
+    }
+
+    @Test
+    fun `dropped reasoning leaves out only reasoning, and a reply left empty`() {
+        val thought = SessionSamples.reasoning
+        val records =
+            log(
+                user("go"),
+                assistant(thought, Part.Text("点发送"), tap1),
+                assistant(thought),
+                result(c1, "ok"),
+                assistant(thought, Part.Text("later")),
+                ReasoningDropped(upToSeq = 3),
+            )
+        assertEquals(
+            listOf(
+                text(Role.USER, "go"),
+                Message(Role.ASSISTANT, listOf(Part.Text("点发送"), tap1)),
+                results(Part.ToolResult(c1, listOf(Part.Text("ok")), isError = false)),
+                Message(Role.ASSISTANT, listOf(thought, Part.Text("later"))),
+            ),
+            deriveMessages(records),
+        )
+    }
+
+    private fun header(protocol: ModelProtocol): RequestHeader =
+        RequestHeader(
+            provider = SessionSamples.provider,
+            model = SessionSamples.model,
+            protocol = protocol,
+            wire = TEST_WIRE,
+            system = emptyList(),
+            tools = emptyList(),
+            cache = CacheLayout.NONE,
+            contextEdits =
+                ContextEditPolicy.ServerSide(
+                    clearToolUsesAboveTokens = 1_000,
+                    keepToolUses = 3,
+                    compactAboveTokens = null,
+                ),
+        )
+
+    @Test
+    fun `a replacement finds a moved contribution by the record that made it`() {
+        assertEquals(
+            listOf(text(Role.USER, "pruned summary")),
+            deriveMessages(
+                log(
+                    user("old"),
+                    CompactionSummary(listOf(Part.Text("summary"))),
+                    CompactionPrune(listOf(Part.Text("pruned summary"))),
+                    ops = mapOf(2 to SurfaceOp.Replace(1, 1), 3 to SurfaceOp.Replace(2, 2)),
+                ),
+            ),
+            "the prune of record 2 rewrites the summary that sits at position 1",
+        )
+        assertEquals(
+            listOf(text(Role.USER, "second"), text(Role.USER, "kept")),
+            deriveMessages(
+                log(
+                    user("one"),
+                    user("two"),
+                    CompactionSummary(listOf(Part.Text("first"))),
+                    user("kept"),
+                    CompactionSummary(listOf(Part.Text("second"))),
+                    ops = mapOf(3 to SurfaceOp.Replace(1, 2), 5 to SurfaceOp.Replace(3, 3)),
+                ),
+            ),
+            "the second summary replaces the first by its seq and takes its place",
+        )
+    }
+
+    @Test
+    fun `on the Anthropic path compaction records never change the model view`() {
+        fun records(protocol: ModelProtocol) =
+            log(
+                header(protocol),
+                user("go"),
+                assistant(tap1),
+                result(c1, "done"),
+                CompactionPrune(listOf(Part.Text("[UI pruned]"))),
+                CompactionSummary(listOf(Part.Text("summary"))),
+                ops = mapOf(5 to SurfaceOp.Replace(4, 4), 6 to SurfaceOp.Replace(2, 2)),
+            )
+        assertEquals(
+            listOf(
+                text(Role.USER, "go"),
+                Message(Role.ASSISTANT, listOf(tap1)),
+                results(Part.ToolResult(c1, listOf(Part.Text("done")), isError = false)),
+            ),
+            deriveMessages(records(ModelProtocol.ANTHROPIC_MESSAGES)),
+            "history is append-only; old content is the server's to trim",
+        )
+        assertEquals(
+            listOf(
+                text(Role.USER, "summary"),
+                Message(Role.ASSISTANT, listOf(tap1)),
+                results(Part.ToolResult(c1, listOf(Part.Text("[UI pruned]")), isError = false)),
+            ),
+            deriveMessages(records(ModelProtocol.OPENAI_RESPONSES)),
+            "other protocols apply them",
         )
     }
 }

@@ -1,56 +1,80 @@
 package dev.phoneagent.core.session
 
 import dev.phoneagent.core.model.Message
+import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.Role
-import java.util.TreeMap
 
 /**
- * The model-visible conversation recorded in [records] (phase1 §3.9 rule 1). A request is exactly
- * `header.toRequest(deriveMessages(records))`; this function is pure, so replaying a log rebuilds
- * every request byte for byte.
+ * The model-visible conversation recorded in [records] (phase1 §3.9 rule 1, [SessionEvent] "Model
+ * view"). A main request is exactly `header.toRequest(deriveMessages(records))` with the latest
+ * header; this function is pure, so replaying a log rebuilds every request byte for byte.
  *
  * What is visible:
  * - `user/message` and `compaction/summary` → a [Role.USER] message with their parts;
- * - `assistant/message` → a [Role.ASSISTANT] message. An interrupted one (the prefix the user saw
- *   before a stream was cut) is visible only when a user message follows it, so a reply is never
- *   sent with a trailing assistant message (prefill) and a retried attempt never sees the prefix
- *   of the attempt it replaces;
+ * - `assistant/message` → a [Role.ASSISTANT] message. An interrupted one counts only once a user
+ *   message follows it before any other reply: a prefix superseded by a retry of the same step is
+ *   UI-only, a prefix cut by steer, stop or a final failure joins the view with the next input;
  * - `tool/result` → a [Part.ToolResult]; consecutive results form one [Role.TOOL] message, so the
- *   results answering one reply travel together.
+ *   results answering one reply travel together;
+ * - `context/reasoning-dropped(upToSeq)` leaves out the [Part.Reasoning]s of replies with
+ *   seq <= upToSeq; a reply left without parts is left out.
  *
  * Every other event type contributes nothing. Messages are neither merged nor reordered otherwise:
  * consecutive user messages stay separate.
  *
- * A record with [SurfaceOp.Replace] removes what the records in its range contribute (including
- * contributions of earlier replacements placed there) and puts its own content at the start of
- * the range. `compaction/prune` instead rewrites each contribution in its range in place: user
- * content and tool-result content become the prune's parts (role and call ids stay); an assistant
- * message becomes the prune's parts followed by its tool calls. Compaction must replace whole
- * exchanges: this function does not repair a tool result whose call was summarized away.
+ * Compaction (records with [SurfaceOp.Replace]) acts on contributions by the record that made
+ * them, not by where they are shown: a summary removes the contributions of the records in its
+ * range (an earlier summary included, by its own seq) and is shown where the first of them was;
+ * `compaction/prune` rewrites the contributions of its range in place (user content and tool
+ * result content become the prune's parts, role and call ids stay; a reply becomes the prune's
+ * parts followed by its tool calls). On the Anthropic path (latest `request/header` with
+ * [ModelProtocol.ANTHROPIC_MESSAGES]) history is append-only (AGENTS §3.7, model-layer §5):
+ * compaction records change nothing here, the server trims old content. Compaction must replace
+ * whole exchanges: this function does not repair a tool result whose call was summarized away.
  */
 public fun deriveMessages(records: List<SessionRecord>): List<Message> {
-    val view = TreeMap<Long, Visible>()
+    val appendOnly =
+        records.asReversed().firstNotNullOfOrNull { it.event as? RequestHeader }?.protocol ==
+            ModelProtocol.ANTHROPIC_MESSAGES
+    val view = mutableListOf<Contribution>()
+    var droppedUpTo = 0L
     for (record in records) {
         val op = record.surfaceOp
         val event = record.event
         when {
-            op is SurfaceOp.Replace && event is CompactionPrune -> {
-                view.subMap(op.startSeq, true, op.endSeq, true).replaceAll { _, visible -> visible.pruned(event.parts) }
-            }
-
-            op is SurfaceOp.Replace -> {
-                view.subMap(op.startSeq, true, op.endSeq, true).clear()
-                visibleOf(event)?.let { view[op.startSeq] = it }
-            }
-
-            else -> {
-                visibleOf(event)?.let { view[record.seq] = it }
-            }
+            event is ReasoningDropped -> droppedUpTo = maxOf(droppedUpTo, event.upToSeq)
+            op is SurfaceOp.Replace -> if (!appendOnly) compact(view, record, op)
+            else -> visibleOf(event)?.let { view += Contribution(record.seq, record.seq, it) }
         }
     }
-    return assemble(view.values.toList())
+    return assemble(view.sortedWith(compareBy({ it.position }, { it.source })), droppedUpTo)
 }
+
+/** Applies the compaction [record] with range [op] to [view]. */
+private fun compact(
+    view: MutableList<Contribution>,
+    record: SessionRecord,
+    op: SurfaceOp.Replace,
+) {
+    val range = op.startSeq..op.endSeq
+    val event = record.event
+    if (event is CompactionPrune) {
+        view.replaceAll { if (it.source in range) it.copy(visible = it.visible.pruned(event.parts)) else it }
+        return
+    }
+    val removed = view.filter { it.source in range }
+    view.removeAll(removed)
+    val position = (removed.map { it.position } + op.startSeq).min()
+    visibleOf(event)?.let { view += Contribution(position, record.seq, it) }
+}
+
+/** What record [source] contributes, shown at [position] (its own seq unless a summary moved it). */
+private data class Contribution(
+    val position: Long,
+    val source: Long,
+    val visible: Visible,
+)
 
 /** One record's contribution to the model view. */
 private sealed interface Visible {
@@ -88,6 +112,11 @@ private fun visibleOf(event: SessionEvent): Visible? =
         is ToolResultRecorded -> Visible.Result(event.result.toPart(event.callId))
 
         is CompactionPrune,
+        is TaskStarted,
+        is TaskLevelChanged,
+        is ReasoningDropped,
+        is SideRequest,
+        is SideResponse,
         is TurnStarted,
         is TurnEnded,
         is StepStarted,
@@ -115,7 +144,10 @@ private fun visibleOf(event: SessionEvent): Visible? =
         -> null
     }
 
-private fun assemble(view: List<Visible>): List<Message> {
+private fun assemble(
+    view: List<Contribution>,
+    droppedUpTo: Long,
+): List<Message> {
     val messages = mutableListOf<Message>()
     val results = mutableListOf<Part>()
 
@@ -123,8 +155,8 @@ private fun assemble(view: List<Visible>): List<Message> {
         if (results.isNotEmpty()) messages += Message(Role.TOOL, results.toList())
         results.clear()
     }
-    view.forEachIndexed { index, visible ->
-        when (visible) {
+    view.forEachIndexed { index, contribution ->
+        when (val visible = contribution.visible) {
             is Visible.Result -> {
                 results += visible.part
             }
@@ -136,11 +168,24 @@ private fun assemble(view: List<Visible>): List<Message> {
 
             is Visible.Assistant -> {
                 flushResults()
-                val shown = !visible.interrupted || view.getOrNull(index + 1) is Visible.User
-                if (shown) messages += Message(Role.ASSISTANT, visible.parts)
+                val parts = if (contribution.source <= droppedUpTo) visible.parts.withoutReasoning() else visible.parts
+                val shown = !visible.interrupted || userFollows(view, index)
+                if (shown && parts.isNotEmpty()) messages += Message(Role.ASSISTANT, parts)
             }
         }
     }
     flushResults()
     return messages.toList()
 }
+
+/** Whether a user message comes after [index] before any other reply. */
+private fun userFollows(
+    view: List<Contribution>,
+    index: Int,
+): Boolean =
+    view
+        .drop(index + 1)
+        .map { it.visible }
+        .firstOrNull { it !is Visible.Result } is Visible.User
+
+private fun List<Part>.withoutReasoning(): List<Part> = filterNot { it is Part.Reasoning }

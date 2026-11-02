@@ -17,6 +17,7 @@ import dev.phoneagent.core.session.RequestHeader
 import dev.phoneagent.core.session.StepEnded
 import dev.phoneagent.core.session.StepOutcome
 import dev.phoneagent.core.session.StepStarted
+import dev.phoneagent.core.session.TaskStarted
 import dev.phoneagent.core.session.ToolCallRecorded
 import dev.phoneagent.core.session.ToolResultRecorded
 import dev.phoneagent.core.session.TurnEndReason
@@ -65,6 +66,7 @@ class AgentLoopTest {
             val events = harness.events()
             assertEquals(
                 listOf(
+                    TaskStarted::class,
                     InboxSpliced::class,
                     TurnStarted::class,
                     InboxSpliced::class,
@@ -459,7 +461,13 @@ class AgentLoopTest {
             val cards = events.filterIsInstance<LoopEvent.Card>()
             assertEquals(2, cards.size)
             assertEquals("c1", cards.first().callId.value)
-            assertEquals(harness.records(), events.filterIsInstance<LoopEvent.Recorded>().map { it.record })
+            assertEquals(
+                harness.records().drop(1),
+                events.filterIsInstance<LoopEvent.Recorded>().map {
+                    it.record
+                },
+                "task/start comes before the loop",
+            )
         }
 
     @Test
