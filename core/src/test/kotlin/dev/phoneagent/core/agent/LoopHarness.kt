@@ -35,6 +35,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 
@@ -99,7 +100,12 @@ internal class LoopHarness(
         CoroutineScope(
             SupervisorJob(scope.backgroundScope.coroutineContext.job) +
                 StandardTestDispatcher(scope.testScheduler) +
-                CoroutineExceptionHandler { _, failure -> uncaught += failure },
+                CoroutineExceptionHandler { _, failure ->
+                    uncaught += failure
+                    // A failed check (the strict replay's) fails the test now, with its message,
+                    // instead of leaving it waiting for a phase the dead driver never reaches.
+                    if (failure is AssertionError) scope.launch { throw failure }
+                },
         )
 
     /** Failures that escaped the loop's coroutines (bugs); tests that provoke one assert on it. */
