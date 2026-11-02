@@ -94,6 +94,9 @@ internal class FakeHost(
     var acceptGestures = true
     var acceptGlobal = true
     var shot: Screenshot = Screenshot.Failed(0)
+
+    /** How a screenshot is answered; by default at once with [shot]. */
+    var takeShot: suspend () -> Screenshot = { shot }
     var windowStates: List<A11yEvent> = emptyList()
     var ime: ImeConnection? = null
 
@@ -122,7 +125,7 @@ internal class FakeHost(
         return acceptGlobal
     }
 
-    override suspend fun screenshot(displayId: Int): Screenshot = shot
+    override suspend fun screenshot(displayId: Int): Screenshot = takeShot()
 
     override fun imeConnection(): ImeConnection? = ime
 }

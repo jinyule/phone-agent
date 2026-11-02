@@ -16,6 +16,8 @@ package dev.phoneagent.app.adapters.screen
  * @property clickUncertainMs a node click answered `false` after at least this long is taken as the
  *   platform's timeout (the click may have run) and not repeated with a gesture; below the
  *   platform's 5 s interaction timeout.
+ * @property screenshotWaitMs longest wait for a screenshot (the system's retry interval included);
+ *   then the frame is reported as unavailable.
  * @property snapshotsKept how many recent snapshots act(on = …) can still resolve refs against.
  */
 internal data class ScreenTimings(
@@ -29,6 +31,7 @@ internal data class ScreenTimings(
     val scrollSwipeMs: Long = 350,
     val gestureSlackMs: Long = 2_000,
     val clickUncertainMs: Long = 4_000,
+    val screenshotWaitMs: Long = 10_000,
     val snapshotsKept: Int = 8,
 ) {
     init {
@@ -44,6 +47,7 @@ internal data class ScreenTimings(
                 "scrollSwipeMs" to scrollSwipeMs,
                 "gestureSlackMs" to gestureSlackMs,
                 "clickUncertainMs" to clickUncertainMs,
+                "screenshotWaitMs" to screenshotWaitMs,
             ).filterValues { it <= 0 }
         require(positive.isEmpty()) { "ScreenTimings must be positive: $positive" }
         require(quietMs < settleCapMs) { "quietMs ($quietMs) must be shorter than settleCapMs ($settleCapMs)" }

@@ -21,26 +21,29 @@ import dev.phoneagent.app.adapters.screen.ScreenHost
 import dev.phoneagent.app.adapters.screen.Screenshot
 import dev.phoneagent.app.adapters.screen.Stroke
 import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
-import java.util.concurrent.Executors
 import kotlin.coroutines.resume
 
 /**
  * [ScreenHost] over one connection of [AgentAccessibilityService]. Lives from `onServiceConnected`
  * to `onUnbind`; after [close] its events stay silent and screenshots fail.
+ *
+ * @param convert turns a screenshot into a software bitmap and closes its hardware buffer
+ *   (`null` when it cannot); replaced in tests.
  */
 internal class ServiceScreenHost(
     private val service: AccessibilityService,
+    convert: (AccessibilityService.ScreenshotResult) -> Bitmap? = Screenshots::softwareCopy,
 ) : ScreenHost {
     // Observers that fall behind lose the oldest events; the system callback never blocks.
     private val eventFlow =
         MutableSharedFlow<A11yEvent>(extraBufferCapacity = EVENT_BUFFER, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     private val windowStates = HashMap<Int, ArrayDeque<A11yEvent>>()
-    private val shotExecutor = Executors.newSingleThreadExecutor()
+
+    private val shots = Screenshots(service, convert)
 
     @Volatile private var closed = false
 
@@ -63,10 +66,10 @@ internal class ServiceScreenHost(
         eventFlow.tryEmit(copy)
     }
 
-    /** Stops publishing and releases the screenshot thread. */
+    /** Stops publishing; screenshots in flight end as failed, and later ones fail at once. */
     fun close() {
         closed = true
-        shotExecutor.shutdown()
+        shots.close()
     }
 
     override fun windowsOn(displayId: Int): List<AccessibilityWindowInfo> =
@@ -114,38 +117,7 @@ internal class ServiceScreenHost(
 
     override fun performGlobalAction(action: Int): Boolean = service.performGlobalAction(action)
 
-    override suspend fun screenshot(displayId: Int): Screenshot {
-        val first = screenshotOnce(displayId)
-        val tooSoon =
-            first is Screenshot.Failed && first.code == AccessibilityService.ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT
-        if (!tooSoon) return first
-        // The system allows one screenshot per interval (1 s on AOSP); wait it out once.
-        delay(SCREENSHOT_INTERVAL_MS)
-        return screenshotOnce(displayId)
-    }
-
-    private suspend fun screenshotOnce(displayId: Int): Screenshot {
-        if (closed) return Screenshot.Failed(AccessibilityService.ERROR_TAKE_SCREENSHOT_INTERNAL_ERROR)
-        return suspendCancellableCoroutine { cont ->
-            service.takeScreenshot(
-                displayId,
-                shotExecutor,
-                object : AccessibilityService.TakeScreenshotCallback {
-                    override fun onSuccess(result: AccessibilityService.ScreenshotResult) {
-                        val bitmap = softwareCopy(result)
-                        val shot =
-                            bitmap?.let(Screenshot::Captured)
-                                ?: Screenshot.Failed(AccessibilityService.ERROR_TAKE_SCREENSHOT_INTERNAL_ERROR)
-                        cont.resume(shot) { _, _, _ -> bitmap?.recycle() }
-                    }
-
-                    override fun onFailure(errorCode: Int) {
-                        cont.resume(failureOf(errorCode))
-                    }
-                },
-            )
-        }
-    }
+    override suspend fun screenshot(displayId: Int): Screenshot = shots.take(displayId)
 
     override fun imeConnection(): ImeConnection? =
         if (Build.VERSION.SDK_INT >=
@@ -170,27 +142,6 @@ internal class ServiceScreenHost(
     private companion object {
         const val EVENT_BUFFER = 256
         const val WINDOW_STATES_KEPT = 8
-        const val SCREENSHOT_INTERVAL_MS = 1_000L
-
-        fun softwareCopy(result: AccessibilityService.ScreenshotResult): Bitmap? =
-            result.hardwareBuffer.use { buffer ->
-                Bitmap.wrapHardwareBuffer(buffer, result.colorSpace)?.let { hardware ->
-                    try {
-                        hardware.copy(Bitmap.Config.ARGB_8888, false)
-                    } finally {
-                        hardware.recycle()
-                    }
-                }
-            }
-
-        fun failureOf(code: Int): Screenshot =
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-                code == AccessibilityService.ERROR_TAKE_SCREENSHOT_SECURE_WINDOW
-            ) {
-                Screenshot.Secure
-            } else {
-                Screenshot.Failed(code)
-            }
     }
 }
 

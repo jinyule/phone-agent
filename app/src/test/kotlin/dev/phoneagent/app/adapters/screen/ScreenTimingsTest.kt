@@ -22,6 +22,7 @@ class ScreenTimingsTest {
     @Test
     fun waitsMustBePositive() {
         rejects("clickUncertainMs") { ScreenTimings(clickUncertainMs = 0) }
+        rejects("screenshotWaitMs") { ScreenTimings(screenshotWaitMs = 0) }
         rejects("quietMs") { ScreenTimings(quietMs = -1) }
     }
 

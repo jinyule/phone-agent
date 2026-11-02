@@ -17,6 +17,7 @@ import dev.phoneagent.core.ports.UiAction
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -128,7 +129,7 @@ internal class AndroidScreen(
             val host = host()
             geometry(host)
             // Set-of-Mark boxes arrive with OCR in M3; until then the frame reports som = false.
-            when (val shot = host.screenshot(displayId)) {
+            when (val shot = screenshotWithin(host, options.timings.screenshotWaitMs)) {
                 is Screenshot.Captured -> {
                     try {
                         FrameEncoder.encode(shot.bitmap, maxEdge)
@@ -152,6 +153,18 @@ internal class AndroidScreen(
         require(timeoutMs >= 0) { "timeoutMs must be >= 0, got $timeoutMs" }
         val host = host()
         return ChangeWatch.watching(host.events, displayId, options.timings) { it.awaitSettled(timeoutMs) }
+    }
+
+    /** A screenshot of the display, or [Screenshot.Failed] when none came within [waitMs]. */
+    private suspend fun screenshotWithin(
+        host: ScreenHost,
+        waitMs: Long,
+    ): Screenshot {
+        var taken: Screenshot? = null
+        val shot = withTimeoutOrNull(waitMs) { host.screenshot(displayId).also { taken = it } }
+        // The timeout may strike after the screenshot arrived: it is nobody's then, free it.
+        if (shot == null) taken?.release()
+        return shot ?: Screenshot.Failed(AccessibilityService.ERROR_TAKE_SCREENSHOT_INTERNAL_ERROR)
     }
 
     private fun host(): ScreenHost =

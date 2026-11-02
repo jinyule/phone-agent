@@ -38,7 +38,11 @@ internal interface ScreenHost {
     /** `AccessibilityService.performGlobalAction`; acts on the focused display. */
     fun performGlobalAction(action: Int): Boolean
 
-    /** Captures [displayId]. */
+    /**
+     * Captures [displayId]. Ends with [Screenshot.Failed] when the host closes meanwhile; throws
+     * `ScreenUnavailableException` when the connection is gone. The caller bounds the wait; a
+     * screenshot nobody waits for any more is freed.
+     */
     suspend fun screenshot(displayId: Int): Screenshot
 
     /** The service's own input connection to the focused editor (API 33+), or `null` when there is none. */
@@ -98,6 +102,11 @@ internal sealed interface Screenshot {
     data class Failed(
         val code: Int,
     ) : Screenshot
+}
+
+/** Frees what this screenshot holds (the bitmap of [Screenshot.Captured]). */
+internal fun Screenshot.release() {
+    if (this is Screenshot.Captured) bitmap.recycle()
 }
 
 /** The accessibility service's input connection to the focused editor. */
