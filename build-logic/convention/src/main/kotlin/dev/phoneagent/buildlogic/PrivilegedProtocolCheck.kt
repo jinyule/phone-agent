@@ -22,6 +22,8 @@ object PrivilegedProtocolCheck {
     private val VERSION_DECLARATION = Regex("""const\s+val\s+VERSION\s*:\s*Int\s*=\s*(\d+)""")
     private val HISTORY_LINE = Regex("""(0|[1-9]\d*)\s+([0-9a-f]{64})""")
     private val INTERFACE_HEAD = listOf("interface", "IPrivilegedCore", "{")
+    private val PACKAGE = listOf("package", "dev", ".", "phoneagent", ".", "privileged", ";")
+    private val IMPORT = Regex("""import( \w+)( \. \w+)*""")
 
     /** The value of `const val VERSION: Int = <n>` in [kotlinSource]; it must be declared exactly once. */
     fun parseVersion(kotlinSource: String): Int {
@@ -61,6 +63,14 @@ object PrivilegedProtocolCheck {
     const val FROZEN_FILE: String = "dev/phoneagent/privileged/IPrivilegedCore.aidl"
 
     /**
+     * The interface descriptor, the token every transaction starts with (`enforceInterface`). It is
+     * the package and name of the interface unless an annotation such as `@Descriptor` sets
+     * another one, so the file must start with exactly this package, have only imports after it,
+     * and nothing in front of `interface IPrivilegedCore`.
+     */
+    const val FROZEN_DESCRIPTOR: String = "dev.phoneagent.privileged.IPrivilegedCore"
+
+    /**
      * Transactions 1-4 of `IPrivilegedCore` as [AidlTokens]. Any app build relies on them to read a
      * helper's version and identity and to make it release and exit, whatever protocol the helper
      * runs (engineering-baseline §6), so they never change, whatever VERSION says.
@@ -73,30 +83,55 @@ object PrivilegedProtocolCheck {
             4 to "oneway void shutdown ( ) = 4 ;",
         )
 
-    /** Null when [FROZEN_FILE] in [files] declares exactly the [FROZEN] transactions 1-4; otherwise what differs. */
+    /**
+     * Null when [FROZEN_FILE] in [files] keeps the [FROZEN_DESCRIPTOR] and declares exactly the
+     * [FROZEN] transactions 1-4; otherwise what differs.
+     */
     fun checkFrozen(files: Map<String, String>): String? {
-        val methods = files[FROZEN_FILE]?.let { methodsOf(AidlTokens.of(it)) }
+        val tokens = files[FROZEN_FILE]?.let(AidlTokens::of)
+        val start = tokens?.windowed(INTERFACE_HEAD.size)?.indexOf(INTERFACE_HEAD) ?: -1
         val problems =
-            if (methods == null) {
+            if (tokens == null || start < 0) {
                 listOf("$FROZEN_FILE must declare `interface IPrivilegedCore`")
             } else {
-                FROZEN.mapNotNull { (id, expected) ->
-                    val found = methods.filter { it.endsWith(" = $id ;") }
-                    "transaction $id must be `$expected`, found ${found.map { "`$it`" }.ifEmpty { listOf("none") }}"
-                        .takeUnless { found == listOf(expected) }
-                }
+                listOfNotNull(headerProblem(tokens.take(start))) + transactionProblems(methodsOf(tokens, start))
             }
         return problems.takeIf { it.isNotEmpty() }?.joinToString(
             separator = "; ",
-            prefix = "IPrivilegedCore transactions 1-4 never change, whatever PrivilegedProtocol.VERSION says: ",
+            prefix =
+                "IPrivilegedCore's descriptor and transactions 1-4 never change, " +
+                    "whatever PrivilegedProtocol.VERSION says: ",
             postfix = ".",
         )
     }
 
-    /** Method declarations of `interface IPrivilegedCore` in [tokens], tokens joined by spaces; null without it. */
-    private fun methodsOf(tokens: List<String>): List<String>? {
-        val start = tokens.windowed(INTERFACE_HEAD.size).indexOf(INTERFACE_HEAD)
-        if (start < 0) return null
+    /** What in front of `interface IPrivilegedCore` ([head]) could change the descriptor, or null. */
+    private fun headerProblem(head: List<String>): String? {
+        val statements =
+            head
+                .drop(PACKAGE.size)
+                .joinToString(" ")
+                .split(";")
+                .map { it.trim() }
+        val onlyImports = statements.last().isEmpty() && statements.dropLast(1).all { IMPORT.matches(it) }
+        if (head.take(PACKAGE.size) == PACKAGE && onlyImports) return null
+        return "the descriptor must stay `$FROZEN_DESCRIPTOR`: the file starts with " +
+            "`package dev.phoneagent.privileged;`, only imports follow, and nothing " +
+            "(no annotation such as @Descriptor) precedes `interface IPrivilegedCore`"
+    }
+
+    private fun transactionProblems(methods: List<String>): List<String> =
+        FROZEN.mapNotNull { (id, expected) ->
+            val found = methods.filter { it.endsWith(" = $id ;") }
+            "transaction $id must be `$expected`, found ${found.map { "`$it`" }.ifEmpty { listOf("none") }}"
+                .takeUnless { found == listOf(expected) }
+        }
+
+    /** Method declarations of the interface whose head starts at [start] in [tokens], tokens joined by spaces. */
+    private fun methodsOf(
+        tokens: List<String>,
+        start: Int,
+    ): List<String> {
         val declarations = mutableListOf<List<String>>()
         var current = mutableListOf<String>()
         for (token in tokens.drop(start + INTERFACE_HEAD.size).takeWhile { it != "}" }) {

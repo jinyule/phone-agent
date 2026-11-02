@@ -43,6 +43,12 @@ class PrivilegedCoreTest {
     }
 
     @Test
+    fun theInterfaceDescriptorNeverChanges() {
+        // Every transaction checks this token; another descriptor makes even ids 1-4 unreachable.
+        assertEquals("dev.phoneagent.privileged.IPrivilegedCore", IPrivilegedCore.DESCRIPTOR)
+    }
+
+    @Test
     fun frozenTransactionCodesNeverMove() {
         assertEquals(IBinder.FIRST_CALL_TRANSACTION + 1, IPrivilegedCore.Stub.TRANSACTION_protocolVersion)
         assertEquals(IBinder.FIRST_CALL_TRANSACTION + 2, IPrivilegedCore.Stub.TRANSACTION_identity)

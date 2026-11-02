@@ -89,6 +89,7 @@ phase1-architecture §2.2 / §3.5 和 engineering-baseline §6 定了特权助�
    - 第一版按"去注释、压缩空白"算指纹，会把 `f()=1` 和 `f() = 1` 当成不同协议，也会把字符串里的 `//` 当成注释。评审修复（2026-11-01）改成按词元算，history 第 1 行按新算法重算了一次：当时还没有发布过带旧指纹的 APK，AIDL 本身也没改。以后再改算法，就要按改协议处理（升版本、追加一行），不能重算旧行。
    - `:privileged:verifyPrivilegedProtocol` 要求列表最后一行等于当前 `VERSION` 和当前指纹，失败时直接给出该追加的那一行。
    - 1–4 号事务的完整声明写死在检查器里（`PrivilegedProtocolCheck.FROZEN`，按词元比较），少了或改了任何一条都失败，不管版本号是多少。去掉 `shutdown` 的 `oneway` 再正常升版本、追加一行，照样失败。
+   - 接口描述符也冻结为 `dev.phoneagent.privileged.IPrivilegedCore`（`FROZEN_DESCRIPTOR`）。每个事务开头都用它做 `enforceInterface`，描述符一变，连 1–4 号事务也调不通。描述符由 package 和接口名决定，`@Descriptor` 之类的注解可以改掉它，所以检查器要求文件以 `package dev.phoneagent.privileged;` 开头、之后只有 import、`interface IPrivilegedCore` 前面什么都没有。加 `@Descriptor` 再正常升版本、追加一行，照样失败；`PrivilegedCoreTest` 另外固定了 `DESCRIPTOR` 的字面值。
    - 只追加：CI 传 `-PprivilegedProtocolBaseRef=<基线 sha>`（`pull_request` 事件用 `pull_request.base.sha`，`push` 事件用 `before`，checkout 用 `fetch-depth: 0`），检查器用 `git show` 读出基线的 history，要求它是当前 history 的前缀。基线里没有这个文件按空前缀处理；基线 sha 不在 clone 里就失败。本地不传这个属性，这一项不做。
    - 这个任务挂在 `check` 上，CI 的 `privileged-build` job 也单独跑它。
    - 反例：`PrivilegedProtocolCheckTest`（改 AIDL 不升版本、改冻结区、改写或删除 history 行）和 `VerifyPrivilegedProtocolTaskTest`（TestKit，在临时 git 仓库里跑真实任务：原地改写 history 行只在带基线时失败）。

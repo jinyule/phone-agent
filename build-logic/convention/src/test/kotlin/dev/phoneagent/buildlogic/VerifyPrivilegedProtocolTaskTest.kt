@@ -136,6 +136,21 @@ class VerifyPrivilegedProtocolTaskTest {
     }
 
     @Test
+    fun aDescriptorAnnotationFailsEvenWithABumpAndAnAppendedLine() {
+        protocol(1, aidl, "1 ${fingerprint(aidl)}\n")
+        val base = commit()
+        val renamed =
+            aidl.replace(
+                "interface IPrivilegedCore",
+                "@Descriptor(value=\"evil.Other\") interface IPrivilegedCore",
+            )
+        protocol(2, renamed, "1 ${fingerprint(aidl)}\n2 ${fingerprint(renamed)}\n")
+
+        val failure = verify("-PprivilegedProtocolBaseRef=$base").buildAndFail()
+        assertTrue(failure.output.contains("dev.phoneagent.privileged.IPrivilegedCore"), failure.output)
+    }
+
+    @Test
     fun droppingOnewayFromShutdownFailsEvenWithABump() {
         val notOneway = aidl.replace("oneway void shutdown()", "void shutdown()")
         protocol(2, notOneway, "1 ${fingerprint(aidl)}\n2 ${fingerprint(notOneway)}\n")

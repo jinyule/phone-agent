@@ -153,6 +153,35 @@ class PrivilegedProtocolCheckTest {
     }
 
     @Test
+    fun anAnnotationOnTheInterfaceFailsEvenWithABump() {
+        val annotations =
+            listOf(
+                "@Descriptor(value=\"evil.Other\") interface IPrivilegedCore",
+                "@Descriptor(value = \"dev.phoneagent.privileged.IPrivilegedCore\") interface IPrivilegedCore",
+                "@JavaDerive(toString=true) interface IPrivilegedCore",
+            )
+        for (annotated in annotations) {
+            val changed = core.replace("interface IPrivilegedCore", annotated)
+            val error = frozen(changed).orEmpty()
+            assertTrue(error.contains("dev.phoneagent.privileged.IPrivilegedCore"), "$annotated: $error")
+            val fp = PrivilegedProtocolCheck.fingerprint(mapOf(path to changed))
+            assertNull(PrivilegedProtocolCheck.verify(listOf(ProtocolEntry(1, fp1), ProtocolEntry(2, fp)), 2, fp))
+        }
+        val imports =
+            core.replace(
+                "package dev.phoneagent.privileged;",
+                "package dev.phoneagent.privileged;\nimport android.os.Bundle;",
+            )
+        assertNull(frozen(imports), "imports do not change the descriptor")
+    }
+
+    @Test
+    fun anotherPackageFails() {
+        val moved = core.replace("package dev.phoneagent.privileged;", "package dev.phoneagent.other;")
+        assertTrue(frozen(moved).orEmpty().contains("dev.phoneagent.privileged.IPrivilegedCore"), frozen(moved))
+    }
+
+    @Test
     fun theHistoryOnlyGrowsAgainstTheBaseline() {
         val fp2 = "2".repeat(64)
         val history = listOf(ProtocolEntry(1, fp1), ProtocolEntry(2, fp2))
