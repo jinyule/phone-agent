@@ -6,10 +6,11 @@ import kotlinx.serialization.Serializable
 
 /**
  * How core waits for the user (phase1 §3.2, §6, §7.3). Implemented by the task runtime, one
- * instance per tool call (prompts are bound to that call). [ask] and [handOff] are called by
- * tools (`ask_user`, `hand_to_user`) and by the runtime for `Verdict.HandOff`; [confirm] is called
- * only by the runtime, for `Verdict.Confirm`. Tools never ask for confirmation themselves:
- * `request_confirmation` gets its card from the policy like any other call.
+ * instance per tool call (prompts are bound to that call), and held by the runtime alone: it
+ * calls [confirm] for a `Verdict.Confirm` and [handOff] for a `Verdict.HandOff`. Tools reach the
+ * user only through the [ToolInteraction] view [forTools] gives (`ask_user`, `hand_to_user`), so
+ * no tool can show a confirmation card: `request_confirmation` gets its card from the policy like
+ * any other call.
  *
  * Every method suspends until the prompt is resolved and returns how it ended:
  * - the user replied: the reply (`Answered` / `Declined`, `APPROVED` / `REJECTED`, `DONE` / `DECLINED`);
@@ -24,16 +25,23 @@ import kotlinx.serialization.Serializable
  * second call waits for the first. User behaviour never throws; a failure to record the prompt
  * throws the session log's `IOException`.
  */
-public interface UserInteraction {
-    /** Asks [question] (`ask_user`). */
-    public suspend fun ask(question: Question): AskResult
-
+public interface UserInteraction : ToolInteraction {
     /**
-     * Shows [card] and waits for a decision. Called only by the runtime for a `Verdict.Confirm`,
-     * never by tools. Only [ConfirmResult.APPROVED] lets the action run, and it covers exactly
-     * [ConfirmCard.callId].
+     * Shows [card] and waits for a decision. Called only by the runtime for a `Verdict.Confirm`;
+     * tools have no way to reach it. Only [ConfirmResult.APPROVED] lets the action run, and it
+     * covers exactly this card.
      */
     public suspend fun confirm(card: ConfirmCard): ConfirmResult
+}
+
+/**
+ * What a tool may do to reach the user, through `ToolContext.interaction`: ask and hand off, with
+ * the behaviour [UserInteraction] describes. The runtime passes the view [forTools] makes, never
+ * its [UserInteraction] itself, so not even a cast reaches `confirm`.
+ */
+public interface ToolInteraction {
+    /** Asks [question] (`ask_user`). */
+    public suspend fun ask(question: Question): AskResult
 
     /**
      * Moves the task to the main display for the user to do a [kind] step, explained by [reason]
@@ -44,6 +52,23 @@ public interface UserInteraction {
         kind: HandoffKind,
         reason: String,
     ): HandoffResult
+}
+
+/**
+ * The view of this interaction a tool gets: [ToolInteraction.ask] and [ToolInteraction.handOff]
+ * pass through; the view is no [UserInteraction].
+ */
+public fun UserInteraction.forTools(): ToolInteraction = ToolView(this)
+
+private class ToolView(
+    private val interaction: UserInteraction,
+) : ToolInteraction {
+    override suspend fun ask(question: Question): AskResult = interaction.ask(question)
+
+    override suspend fun handOff(
+        kind: HandoffKind,
+        reason: String,
+    ): HandoffResult = interaction.handOff(kind, reason)
 }
 
 /**

@@ -9,13 +9,11 @@ import dev.phoneagent.core.model.ToolDef
 import dev.phoneagent.core.ports.AppCatalog
 import dev.phoneagent.core.ports.AskResult
 import dev.phoneagent.core.ports.Clock
-import dev.phoneagent.core.ports.ConfirmCard
-import dev.phoneagent.core.ports.ConfirmResult
 import dev.phoneagent.core.ports.HandoffKind
 import dev.phoneagent.core.ports.HandoffResult
 import dev.phoneagent.core.ports.Question
 import dev.phoneagent.core.ports.ScreenPort
-import dev.phoneagent.core.ports.UserInteraction
+import dev.phoneagent.core.ports.ToolInteraction
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -252,7 +250,7 @@ class ToolRegistryTest {
                     override val sessionId = SessionId("s1")
                     override val screen: ScreenPort? = null
                     override val clock = Clock { 0 }
-                    override val interaction: UserInteraction = Unattended
+                    override val interaction: ToolInteraction = Unattended
                     override val apps: AppCatalog? = null
 
                     override suspend fun storeBlob(bytes: ByteArray) = BlobRef("c".repeat(64))
@@ -271,10 +269,8 @@ class ToolRegistryTest {
         }
 
     /** What an unattended task gets: nobody can answer. */
-    private object Unattended : UserInteraction {
+    private object Unattended : ToolInteraction {
         override suspend fun ask(question: Question) = AskResult.Unavailable
-
-        override suspend fun confirm(card: ConfirmCard) = ConfirmResult.UNAVAILABLE
 
         override suspend fun handOff(
             kind: HandoffKind,

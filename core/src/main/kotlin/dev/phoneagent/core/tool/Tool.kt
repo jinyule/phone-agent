@@ -7,7 +7,7 @@ import dev.phoneagent.core.model.ToolDef
 import dev.phoneagent.core.ports.AppCatalog
 import dev.phoneagent.core.ports.Clock
 import dev.phoneagent.core.ports.ScreenPort
-import dev.phoneagent.core.ports.UserInteraction
+import dev.phoneagent.core.ports.ToolInteraction
 import kotlinx.serialization.Serializable
 
 /**
@@ -72,10 +72,11 @@ public interface ToolContext {
     public val clock: Clock
 
     /**
-     * Asking and handing off to the user, bound to this call (see [UserInteraction]). Tools do not
-     * call `confirm`: confirmations come from the policy and are shown by the runtime.
+     * Asking and handing off to the user, bound to this call: the runtime's `UserInteraction`
+     * seen through `forTools()`, so it has no `confirm`. Confirmations come from the policy and
+     * are shown by the runtime.
      */
-    public val interaction: UserInteraction
+    public val interaction: ToolInteraction
 
     /**
      * Installed apps, or `null` when this capability is missing; `phone_apps` and launching by
