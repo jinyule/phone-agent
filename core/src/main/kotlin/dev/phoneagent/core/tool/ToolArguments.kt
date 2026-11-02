@@ -6,7 +6,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
-import kotlinx.serialization.json.doubleOrNull
+import java.math.BigDecimal
 
 /**
  * Checks a model's tool arguments against the tool's JSON Schema at the boundary (phase1 §3.2:
@@ -18,6 +18,10 @@ import kotlinx.serialization.json.doubleOrNull
  * schema), `items`, `minimum`, `maximum`, `minLength`, `maxLength`, `minItems`, `maxItems`,
  * `anyOf` and `oneOf`. Other keywords (descriptions, formats, `$ref`) and unknown type names are
  * ignored, so a schema using them is checked less strictly, never more.
+ *
+ * Numbers are exact decimals, as JSON writes them: `integer` means no fractional part (`1.0` is an
+ * integer, `1.00000000000000001` is not) and bounds compare exactly, also past 2^53. `enum` and
+ * `const` compare JSON values (`1` equals `1.0`). Lengths count Unicode code points.
  */
 public object ToolArguments {
     private val types: Map<String, (JsonElement) -> Boolean> =
@@ -26,9 +30,9 @@ public object ToolArguments {
             "array" to { it is JsonArray },
             "null" to { it is JsonNull },
             "string" to { it is JsonPrimitive && it.isString },
-            "boolean" to { it.literal()?.booleanOrNull != null },
-            "integer" to { value -> value.number()?.let { it % 1.0 == 0.0 } == true },
-            "number" to { it.number() != null },
+            "boolean" to { (it as? JsonPrimitive)?.takeIf { p -> !p.isString }?.booleanOrNull != null },
+            "integer" to { value -> value.jsonNumber()?.let { it.stripTrailingZeros().scale() <= 0 } == true },
+            "number" to { it.jsonNumber() != null },
         )
 
     /** Problems of [value] against [schema]; empty when it conforms. */
@@ -46,9 +50,13 @@ public object ToolArguments {
         if (typeProblem != null) return listOf(typeProblem)
         return buildList {
             val allowed = schema["enum"] as? JsonArray
-            if (allowed != null && value !in allowed) add("$path must be one of $allowed, got $value")
+            if (allowed != null &&
+                allowed.none { sameJson(it, value) }
+            ) {
+                add("$path must be one of $allowed, got $value")
+            }
             val expected = schema["const"]
-            if (expected != null && value != expected) add("$path must be $expected, got $value")
+            if (expected != null && !sameJson(expected, value)) add("$path must be $expected, got $value")
             addAll(bounds(schema, value, path))
             if (value is JsonObject) addAll(objectProblems(schema, value, path))
             if (value is JsonArray) addAll(arrayProblems(schema, value, path))
@@ -76,14 +84,9 @@ public object ToolArguments {
         value: JsonElement,
         path: String,
     ): List<String> {
-        val number = value.number()
-        val length =
-            (value as? JsonPrimitive)
-                ?.takeIf { it.isString }
-                ?.content
-                ?.length
-                ?.toDouble()
-        val size = (value as? JsonArray)?.size?.toDouble()
+        val number = value.jsonNumber()
+        val length = value.string()?.let { BigDecimal.valueOf(it.codePointCount(0, it.length).toLong()) }
+        val size = (value as? JsonArray)?.let { BigDecimal.valueOf(it.size.toLong()) }
         val checks =
             listOf(
                 Bound("minimum", number, atLeast = true) { "$path must be >= $it, got $value" },
@@ -149,26 +152,19 @@ public object ToolArguments {
 
     private fun JsonArray.schemas(): List<JsonObject> = filterIsInstance<JsonObject>()
 
-    /** A JSON number or boolean (not a string, which JSON Schema never coerces). */
-    private fun JsonElement?.literal(): JsonPrimitive? = (this as? JsonPrimitive)?.takeIf { !it.isString }
-
-    private fun JsonElement?.number(): Double? = literal()?.doubleOrNull
-
     private fun JsonElement.string(): String? = (this as? JsonPrimitive)?.takeIf { it.isString }?.content
 
     /** One `minimum`-style keyword: [actual] (null when the keyword does not apply) against the schema's limit. */
     private class Bound(
         private val key: String,
-        private val actual: Double?,
+        private val actual: BigDecimal?,
         private val atLeast: Boolean,
         private val message: (String) -> String,
     ) {
         fun problem(schema: JsonObject): String? {
-            val limit = schema[key].number() ?: return null
-            return actual?.takeIf { if (atLeast) it < limit else it > limit }?.let { message(format(limit)) }
+            val limit = schema[key].jsonNumber() ?: return null
+            val outside = actual?.compareTo(limit)?.let { if (atLeast) it < 0 else it > 0 } == true
+            return if (outside) message(limit.stripTrailingZeros().toPlainString()) else null
         }
-
-        private fun format(number: Double): String =
-            if (number % 1.0 == 0.0) number.toLong().toString() else number.toString()
     }
 }

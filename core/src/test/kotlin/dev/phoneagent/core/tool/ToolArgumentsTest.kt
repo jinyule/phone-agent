@@ -131,4 +131,45 @@ class ToolArgumentsTest {
         assertEquals(listOf("arguments must match exactly one of the allowed forms, matches 0"), problems(one, "\"x\""))
         conforms("""{"anyOf":{},"oneOf":"x"}""", "1")
     }
+
+    @Test
+    fun `numbers are compared exactly, as their decimal values`() {
+        assertEquals(
+            listOf("arguments must be integer, got 1.00000000000000001"),
+            problems("""{"type":"integer"}""", "1.00000000000000001"),
+        )
+        conforms("""{"type":"integer"}""", "1e2", "9007199254740993", "-0.0")
+        assertEquals(
+            listOf("arguments must be <= 9007199254740992, got 9007199254740993"),
+            problems("""{"type":"integer","maximum":9007199254740992}""", "9007199254740993"),
+        )
+        assertEquals(
+            listOf("arguments must be >= 0.1, got 0.09999999999999999"),
+            problems("""{"type":"number","minimum":0.1}""", "0.09999999999999999"),
+        )
+        conforms("""{"type":"number","minimum":1e-1,"maximum":1E2}""", "0.1", "100", "1.0e2")
+    }
+
+    @Test
+    fun `enum and const compare JSON values, so 1 and 1 point 0 are equal`() {
+        conforms("""{"enum":[1,"a",[1,{"k":2}]]}""", "1.0", "1", "\"a\"", "[1.0,{\"k\":2.00}]")
+        conforms("""{"const":{"n":10}}""", "{\"n\":1e1}")
+        assertEquals(listOf("arguments must be one of [1], got \"1\""), problems("""{"enum":[1]}""", "\"1\""))
+        assertEquals(listOf("arguments must be one of [[1,2]], got [1]"), problems("""{"enum":[[1,2]]}""", "[1]"))
+        assertEquals(
+            listOf("arguments must be {\"n\":1}, got {\"m\":1}"),
+            problems("""{"const":{"n":1}}""", "{\"m\":1}"),
+        )
+        assertEquals(listOf("arguments must be true, got 1"), problems("""{"const":true}""", "1"))
+        assertEquals(listOf("arguments must be null, got 0"), problems("""{"const":null}""", "0"))
+    }
+
+    @Test
+    fun `string lengths count characters, not UTF-16 units`() {
+        conforms("""{"type":"string","maxLength":1}""", "\"😀\"", "\"好\"")
+        assertEquals(
+            listOf("arguments must have at least 2 characters"),
+            problems("""{"type":"string","minLength":2}""", "\"😀\""),
+        )
+    }
 }
