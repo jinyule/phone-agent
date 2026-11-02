@@ -20,14 +20,15 @@ import kotlinx.serialization.Serializable
  * `screen/snapshot`: an observation.
  *
  * Re-check after approval: once the user approves a confirmation card and before the call runs,
- * the runtime reads a fresh screen, records it here with `callId == null`, and only then resolves
- * and evaluates the call again on it (`PolicyContext.approved`). Replay serves this record back,
- * so the re-check reaches the same verdict. The model has not seen this screen, so outside the
- * re-check it never becomes `PolicyContext.screen`.
+ * the runtime reads a fresh screen S', records it here under the call's id, and only then
+ * resolves and evaluates the call again on it (`PolicyContext.approved`). Replay serves this record
+ * back, so the re-check reaches the same verdict. Once that call has its result, whatever it is,
+ * S' counts like any other screen recorded under a call for the screen later calls are judged on.
  *
  * @property callId the tool call that observed. A screen the runtime reads on its own is recorded
- *   under the call it reads for: the handed-off call once the handoff ended. `null` only for a
- *   screen that belongs to no call: the re-check after approval (above) and a read after resume.
+ *   under the call it reads for: S' of the re-check after the call's approval (above), and the
+ *   screen read after the call's handoff ended. `null` only for the read after resume, which
+ *   belongs to no call.
  * @property snapshot what was seen (secret values already absent).
  */
 @Serializable

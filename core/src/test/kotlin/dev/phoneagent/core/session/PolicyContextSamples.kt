@@ -84,7 +84,7 @@ object PolicyContextSamples {
             val prompt = PromptId("prompt-${++prompts}")
             add(ApprovalAsked(prompt, card, expiresAt = 900_000))
             add(ApprovalDecided(prompt, result))
-            if (result == ConfirmResult.APPROVED) add(ScreenObserved(null, SessionSamples.snapshot))
+            if (result == ConfirmResult.APPROVED) add(ScreenObserved(card.callId, SessionSamples.snapshot))
         }
 
         fun result(

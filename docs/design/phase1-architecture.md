@@ -318,7 +318,7 @@ data class PolicyContext(
   - 写类工具的参数解析不了，或者不认识的工具名且不是 READ，都按保守处理；
   - 每个要执行的调用都先有 `policy/verdict(Allow)`，`tool/started` 才合法，READ 调用也一样，没有免判的快路径。
 - **外发免确认资格**（`outwardConfirmedPackages`）：只认执行实际依据的那次批准。对每个已 `tool/started`、`tool/executed` 为 OK 的调用，取 `tool/started.verdictSeq` 那条 Allow 之前、这个调用**最后一张** APPROVED 的卡；这张卡必须是 OUTWARD，pkg 非空，并且等于那条 Allow 里 intent 的 pkg。被后来的 Confirm 取代的卡、其他 reason 的卡（例如付款）、pkg 和执行不一致的卡、`request_confirmation` 的卡都不算。
-- **批准后复核**：用户批准之后、执行之前，runtime 用新的一屏再 `resolve` 和 `evaluate` 一次，传入 `approved`。只有新算出的卡与批准的卡完全相同（`ConfirmCard` 的全部字段：callId、reason、action、target、content、amount、pkg）才 Allow；否则返回新的 Confirm，新屏要求转交或拒绝时返回 HandOff 或 Refuse。
+- **批准后复核**：用户批准之后、执行之前，runtime 读新的一屏 S′，记成这个调用 callId 下的 `screen/snapshot`，再用它 `resolve` 和 `evaluate` 一次，传入 `approved`。只有新算出的卡与批准的卡完全相同（`ConfirmCard` 的全部字段：callId、reason、action、target、content、amount、pkg）才 Allow；否则返回新的 Confirm，新屏要求转交或拒绝时返回 HandOff 或 Refuse。
 
 ### 3.7 任务运行时（turn/step 状态机 + 双队列 inbox，参考 dsh）
 
@@ -553,7 +553,7 @@ TaskRuntime 循环（每个 step，对应 §3.8 的拦截点）：
   4. 没有工具调用 → 校验（空回复 / 工具调用漏成文字 / 语言是否对）→ 作为最终回答 → turnStopping
   5. 有工具调用（每轮只执行第一个）→ 写 tool/call → toolPreExecute 链，PolicyEngine 是最后一道 guard：
        Refuse  → 原因作为结果返回给模型
-       HandOff → SurfaceManager.handToUser → 等待 → takeBack → 重新读屏
+       HandOff → SurfaceManager.handToUser → 等待 → takeBack → 重新读屏（记在交接调用的 callId 下）
        Confirm → 显示确认卡（悬浮层 / 通知 / App 内）→ 等待（15 分钟没人回按拒绝）
        Allow   ↓
   6. toolExecute 链：刷盘 → watchMainScreen(3000) → ScreenPort.act → awaitChange → 回读快照
