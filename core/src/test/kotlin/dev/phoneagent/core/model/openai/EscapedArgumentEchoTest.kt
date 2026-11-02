@@ -296,6 +296,13 @@ class EscapedArgumentEchoTest {
             assertRejected(model(ModelProtocol.OPENAI_RESPONSES, style.key), style.key)
         }
 
+    @ParameterizedTest(name = "spelling: {0}")
+    @EnumSource(Style::class)
+    fun `each spelling is its key once decoded`(style: Style) {
+        assertEquals(style.key, JsonEscapes.lenientDecode(style.wire))
+        assertFalse(style.wire.contains(style.key), "the key is not there as sent")
+    }
+
     @Test
     fun `cut or broken arguments without the key are kept as they are`() =
         runTest {
