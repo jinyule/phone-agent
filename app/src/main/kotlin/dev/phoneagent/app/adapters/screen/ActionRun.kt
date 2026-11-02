@@ -174,19 +174,30 @@ internal class ActionRun(
         watch: ChangeWatch,
     ): ActionOutcome {
         val request = TextEntry.Request(action.text, action.append, shown.text)
+        val clipboard = RestoreTracking(parts.system.clipboard)
         val entered =
-            TextEntry.enter(request, field.isPassword, levels(field, watch, shown)) { settle ->
+            TextEntry.enter(request, field.isPassword, levels(field, watch, shown, clipboard)) { settle ->
                 if (settle) watch.awaitSettled(timings.readbackCapMs)
                 TextEntry.read(field)
             }
+        // A clipboard that could not be restored is reported, and the field is not submitted.
         val result =
-            when (entered) {
-                is TextEntry.Result.Failure -> {
-                    Actuator.Result.NotDone(entered.explain(action.submit))
+            when {
+                entered is TextEntry.Result.Failure -> {
+                    val lost = if (clipboard.lost) "; the user's clipboard could not be restored" else ""
+                    Actuator.Result.NotDone(entered.explain(action.submit) + lost)
                 }
 
-                is TextEntry.Result.Entered -> {
-                    if (action.submit) submit(field) else Actuator.Result.Done(Actuator.Via.NODE)
+                clipboard.lost -> {
+                    Actuator.Result.NotDone(TextEntry.clipboardLost(action.submit))
+                }
+
+                action.submit -> {
+                    submit(field)
+                }
+
+                else -> {
+                    Actuator.Result.Done(Actuator.Via.NODE)
                 }
             }
         return finish(result, watch, if (action.submit) timings.settleCapMs else timings.quietMs)
@@ -206,6 +217,7 @@ internal class ActionRun(
         field: AccessibilityNodeInfo,
         watch: ChangeWatch,
         shownBefore: TextEntry.Shown,
+        clipboard: ClipboardAccess,
     ): List<Pair<TextEntry.Level, TextEntry.Attempt>> =
         listOf(
             TextEntry.Level.SET_TEXT to EntryLevels.setText(field),
@@ -216,7 +228,7 @@ internal class ActionRun(
                     field.refresh()
                 },
             TextEntry.Level.PASTE to
-                EntryLevels.paste(field, parts.system.clipboard) {
+                EntryLevels.paste(field, clipboard) {
                     watch.awaitUntil(timings.pasteWaitMs) { TextEntry.read(field) != shownBefore }
                 },
         )

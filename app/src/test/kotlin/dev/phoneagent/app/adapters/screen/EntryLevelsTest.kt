@@ -45,8 +45,9 @@ class EntryLevelsTest {
             return accepts
         }
 
-        override fun restore(saved: SavedClip) {
+        override fun restore(saved: SavedClip): Boolean {
             log += "restore"
+            return true
         }
     }
 

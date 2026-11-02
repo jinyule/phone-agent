@@ -112,6 +112,10 @@ internal object TextEntry {
         }
     }
 
+    /** Why typing failed although the text went in, for the model. */
+    fun clipboardLost(submitRequested: Boolean): String =
+        "the text was entered, but the user's clipboard could not be restored${notSubmitted(submitRequested)}"
+
     /** Why appending to a non-empty password field failed, for the model. */
     const val WHOLE_PASSWORD: String = "a password field can only be typed as a whole"
 
@@ -277,9 +281,12 @@ internal object EntryLevels {
 
     /**
      * Pastes through the clipboard, which holds the text only for this paste: it is restored once
-     * the field changed or [awaitChange] gave up. Skipped when the clipboard cannot be read, since
-     * it could not be restored.
+     * the field changed or [awaitChange] gave up, and also when the paste fails or is cancelled
+     * (that error stays the one thrown). Skipped when the clipboard cannot be read, since it could
+     * not be restored. Whether the restore worked is [ClipboardAccess.restore]'s to report. Any
+     * error ending the paste is caught only to restore the clip, then rethrown.
      */
+    @Suppress("TooGenericExceptionCaught")
     fun paste(
         field: AccessibilityNodeInfo,
         clipboard: ClipboardAccess,
@@ -290,11 +297,16 @@ internal object EntryLevels {
             if (saved == null) {
                 TextEntry.Sent.Skipped("the clipboard cannot be restored afterwards")
             } else {
-                try {
-                    pasteHeld(field, clipboard, request, awaitChange)
-                } finally {
-                    clipboard.restore(saved)
-                }
+                val sent =
+                    try {
+                        pasteHeld(field, clipboard, request, awaitChange)
+                    } catch (stopped: Throwable) {
+                        // Cancellation included: put the clip back, rethrow the original error.
+                        restoreAfter(stopped, clipboard, saved)
+                        throw stopped
+                    }
+                clipboard.restore(saved)
+                sent
             }
         }
 
@@ -329,6 +341,21 @@ internal object EntryLevels {
                 if (pasted) awaitChange()
                 sentIf(pasted)
             }
+        }
+    }
+
+    /** Restores [saved] after [stopped] ended the paste; anything restoring throws is attached to [stopped]. */
+    @Suppress("TooGenericExceptionCaught")
+    private fun restoreAfter(
+        stopped: Throwable,
+        clipboard: ClipboardAccess,
+        saved: SavedClip,
+    ) {
+        try {
+            clipboard.restore(saved)
+        } catch (alsoFailed: Throwable) {
+            // restore() must not throw; if it does, [stopped] stays the primary error.
+            stopped.addSuppressed(alsoFailed)
         }
     }
 
@@ -367,4 +394,15 @@ internal object EntryLevels {
     }
 
     private const val NO_CURSOR = "cannot place the cursor"
+}
+
+/** [ClipboardAccess] that remembers whether putting the user's clip back ever failed ([lost]). */
+internal class RestoreTracking(
+    private val clipboard: ClipboardAccess,
+) : ClipboardAccess by clipboard {
+    /** Some restore returned `false`. */
+    var lost: Boolean = false
+        private set
+
+    override fun restore(saved: SavedClip): Boolean = clipboard.restore(saved).also { if (!it) lost = true }
 }

@@ -15,6 +15,7 @@ import android.os.PersistableBundle
 import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.MediaStore
+import android.util.Log
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -90,8 +91,11 @@ internal interface ClipboardAccess {
         sensitive: Boolean,
     ): Boolean
 
-    /** Puts [saved] back. */
-    fun restore(saved: SavedClip)
+    /**
+     * Puts [saved] back; returns whether it is back. Never throws: when it cannot be put back, this
+     * app's own clip is cleared rather than left behind.
+     */
+    fun restore(saved: SavedClip): Boolean
 }
 
 /** A clip saved by [ClipboardAccess.save]; [clip] is `null` when the clipboard was empty. */
@@ -219,13 +223,38 @@ internal class AndroidClipboard(
         return true
     }
 
-    override fun restore(saved: SavedClip) {
-        val target = manager ?: return
+    // Restoring must never throw (ClipboardAccess contract), whatever the clipboard service throws.
+    @Suppress("TooGenericExceptionCaught")
+    override fun restore(saved: SavedClip): Boolean {
+        val target = manager ?: return false
         val clip = saved.clip
-        if (clip != null) target.setPrimaryClip(clip) else target.clearPrimaryClip()
+        val restored =
+            try {
+                if (clip != null) target.setPrimaryClip(clip) else target.clearPrimaryClip()
+                true
+            } catch (refused: RuntimeException) {
+                // The user's clip may hold a content URI this app cannot grant (SecurityException),
+                // or the clipboard service failed; the caller reports it.
+                Log.w(TAG, "the user's clip could not be put back", refused)
+                false
+            }
+        if (!restored) clearOwn(target)
+        return restored
+    }
+
+    /** Clears the clipboard while it still holds this app's clip (typed passwords must not stay). */
+    @Suppress("TooGenericExceptionCaught")
+    private fun clearOwn(target: ClipboardManager) {
+        try {
+            if (target.primaryClipDescription?.label == CLIP_LABEL) target.clearPrimaryClip()
+        } catch (failed: RuntimeException) {
+            // Nothing more can be done about the clipboard; the failure to restore is reported already.
+            Log.w(TAG, "this app's clip could not be cleared", failed)
+        }
     }
 
     private companion object {
         const val CLIP_LABEL = "PhoneAgent"
+        const val TAG = "PhoneAgentClipboard"
     }
 }

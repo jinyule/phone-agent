@@ -55,8 +55,9 @@ class EntryLevelsSafetyTest {
             sensitive: Boolean,
         ): Boolean = true.also { log += "put:$text" }
 
-        override fun restore(saved: SavedClip) {
+        override fun restore(saved: SavedClip): Boolean {
             log += "restore"
+            return true
         }
     }
 

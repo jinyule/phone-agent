@@ -24,8 +24,8 @@ import org.junit.runner.RunWith
 import org.robolectric.Shadows.shadowOf
 
 /**
- * What typing reports when the field does not end up showing the request (fix list r1 B5) and how
- * password fields are appended to (B7).
+ * What typing reports when the field does not end up showing the request (fix list r1 B5), how
+ * password fields are appended to (B7), and a clipboard that could not be restored (S3).
  */
 @RunWith(AndroidJUnit4::class)
 class TypingOutcomeTest {
@@ -59,9 +59,9 @@ class TypingOutcomeTest {
     private suspend fun TestScope.typeInto(
         field: AccessibilityNodeInfo,
         action: UiAction.Type,
+        system: TestSystem = TestSystem(),
     ): ActionOutcome {
         host.show(field)
-        val system = TestSystem()
         val analyzer = RefDiffAnalyzer()
         val surface = SurfaceRef(0, SurfaceKind.MAIN)
         val observer =
@@ -167,5 +167,38 @@ class TypingOutcomeTest {
             typeInto(field, UiAction.Type(Target.Point(500, 125), "abc", append = true))
 
             assertEquals(listOf("abc"), setTexts(field))
+        }
+
+    @Test
+    fun aPasteThatCannotGiveTheClipboardBackSaysSoAndIsNotSubmitted() =
+        runTest {
+            // Claude r1 x7 / fix list S3: the text is in, the user's clip is not back.
+            val field = field()
+            field.log.answer = { action, _ ->
+                if (action == AccessibilityNodeInfo.ACTION_PASTE) field.text = "Bye"
+                action != AccessibilityNodeInfo.ACTION_SET_TEXT
+            }
+            val system = TestSystem()
+            system.clipboard =
+                object : ClipboardAccess {
+                    override fun save(): SavedClip = SavedClip(null)
+
+                    override fun put(
+                        text: String,
+                        sensitive: Boolean,
+                    ): Boolean = true
+
+                    override fun restore(saved: SavedClip): Boolean = false
+                }
+
+            val outcome = typeInto(field, UiAction.Type(Target.Point(500, 125), "Bye", submit = true), system)
+
+            assertEquals(
+                ActionOutcome.Status.Failed(
+                    "the text was entered, but the user's clipboard could not be restored; it was not submitted",
+                ),
+                outcome.status,
+            )
+            assertFalse(AccessibilityAction.ACTION_IME_ENTER.id in field.log.ids)
         }
 }
