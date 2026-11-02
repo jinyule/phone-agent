@@ -169,7 +169,7 @@ class AndroidScreenDeviceTest {
                     dragged.after!!.elements.single { it.ref == now.ref } to now
                 }
             log("refs kept by rows still partly in view: ${reused.map { (was, now) -> "$was -> $now" }}")
-            val height = { it: UiElement -> it.bounds.bottom - it.bounds.top }
+            val height = { element: UiElement -> element.bounds.bottom - element.bounds.top }
             assertTrue(
                 "no ref of a row scrolled away is reused: $reused",
                 reused.all { (was, now) ->
