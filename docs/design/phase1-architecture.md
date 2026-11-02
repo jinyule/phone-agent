@@ -192,7 +192,7 @@ sealed interface ToolControl { data class EndTurn(val reason: EndReason, val sum
 interface ToolContext {                 // 每次调用一个，由运行时实现
     val taskId: TaskId; val sessionId: SessionId; val screen: ScreenPort?; val clock: Clock
     val interaction: ToolInteraction    // 只有提问 / 转交；工具拿不到 confirm，也就造不出确认卡
-    val apps: AppCatalog?               // 已安装 App（core.ports）；null = 没有这个能力，phone_apps 和按名字启动返回错误结果
+    val apps: AppCatalog?               // 已安装 App（core.ports）；null = 没有这个能力，phone_apps 返回错误结果，phone_launch 按给定的包名直接启动
     suspend fun storeBlob(bytes: ByteArray): BlobRef
 }
 interface ToolInteraction {             // core.ports；交给工具的那一半
@@ -566,7 +566,7 @@ screen s12 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · 坐标 0–
 | | `phone_scroll` | `screen`, `direction`, `ref?` |
 | | `phone_swipe` | `x1,y1,x2,y2`, `durationMs` |
 | | `phone_key` | `back/home/enter`（`home` 在主屏模式下由无障碍的 `performGlobalAction` 实现。助手不注入 HOME：它作用于整机而不是 agent 的屏。后台屏上由 ScreenPort（WP14）返回 Failed，原因"后台屏上没有桌面，请用 phone_launch 切换 App"） |
-| | `phone_launch` | `app` 或 `link`, `cold?` |
+| | `phone_launch` | `app`（只收包名）或 `link`, `cold?` |
 | | `phone_intent` | `kind: alarm/timer/calendar/share/dial/navigate/settings` + 对应字段（白名单，不接受任意 Intent） |
 | 通用 | `ask_user` | `question`, `options?` |
 | | `hand_to_user` | `kind: login/captcha/payment/secure_page/choose/other`, `reason` |

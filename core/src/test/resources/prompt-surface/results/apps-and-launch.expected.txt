@@ -5,7 +5,13 @@
 
 =====
 
-没有叫「微」的 App。名字相近的有：微信 · com.tencent.mm、微信读书 · com.tencent.weread、微博 · com.sina.weibo。用桌面上显示的准确名字或包名，或者先用 phone_apps 查一下。
+参数有误，这一步没有执行：
+- `app` 要填包名，如 com.tencent.mm（收到 "微信"）：先用 phone_apps 查到包名再启动
+用法：phone_launch(app 或 link, cold?)
+
+=====
+
+手机上没有包名为 com.example.missing 的可打开的 App。先用 phone_apps 查到包名再启动。
 
 =====
 

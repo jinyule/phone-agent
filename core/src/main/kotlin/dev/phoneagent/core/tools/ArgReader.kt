@@ -158,7 +158,8 @@ internal fun ArgReader.snapshot(name: String): SnapshotId? {
 private fun shown(primitive: JsonPrimitive): String =
     if (primitive.isString) "\"${clipShown(primitive.content)}\"" else clipShown(primitive.content)
 
-private fun clipShown(text: String): String = if (text.length <= SHOWN) text else text.take(SHOWN) + "…"
+/** [text] as echoed in a problem line: at most [SHOWN] characters. */
+internal fun clipShown(text: String): String = if (text.length <= SHOWN) text else text.take(SHOWN) + "…"
 
 private const val MAX_ID = 256
 private const val SHOWN = 40

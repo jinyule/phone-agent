@@ -326,17 +326,27 @@ class PromptSurfaceTest {
         }
 
     @Test
-    fun `results - apps and launching by name`() =
+    fun `results - apps and launching by package`() =
         runTest {
             val catalog = FakeCatalog(Samples.apps)
             val ctx = FakeContext(apps = catalog)
             val list = tools.getValue("phone_apps").execute(call("phone_apps", """{"query":"微"}"""), ctx)
-            val missing = tools.getValue("phone_launch").execute(call("phone_launch", """{"app":"微"}"""), ctx)
-            val launched = tools.getValue("phone_launch").execute(call("phone_launch", """{"app":"微信"}"""), ctx)
+            val byName = tools.getValue("phone_launch").execute(call("phone_launch", """{"app":"微信"}"""), ctx)
+            val missing =
+                tools
+                    .getValue(
+                        "phone_launch",
+                    ).execute(call("phone_launch", """{"app":"com.example.missing"}"""), ctx)
+            val launched =
+                tools
+                    .getValue(
+                        "phone_launch",
+                    ).execute(call("phone_launch", """{"app":"com.tencent.mm"}"""), ctx)
             Golden.assertMatches(
                 "results/apps-and-launch.expected.txt",
                 listOf(
                     list,
+                    byName,
                     missing,
                     launched,
                 ).joinToString("\n\n=====\n\n") {

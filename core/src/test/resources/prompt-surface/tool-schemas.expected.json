@@ -285,7 +285,7 @@
   },
   {
     "name": "phone_launch",
-    "description": "打开 App 或链接。app 填 App 的名字（如 微信）或包名；cold=true 先结束这个 App 再从头打开。link 填网址（https://…）或 geo:、mailto:、market: 链接；App 的深链打不开，打开 App 用 app。app 和 link 只填一个。返回打开后的一屏。",
+    "description": "打开 App 或链接。app 填包名（如 com.tencent.mm），不知道包名先用 phone_apps 查；cold=true 清掉这个 App 的任务栈，从首页重新打开（进程不重启）。link 填网址（https://…）或 geo:、mailto:、market: 链接；App 的深链打不开，打开 App 用 app。app 和 link 只填一个。返回打开后的一屏。",
     "parameters": {
       "type": "object",
       "properties": {
@@ -295,7 +295,7 @@
         },
         "app": {
           "type": "string",
-          "description": "App 名字（和桌面上显示的一样）或包名。"
+          "description": "包名，如 com.tencent.mm。只认包名，App 名字要先用 phone_apps 查到包名。"
         },
         "link": {
           "type": "string",
@@ -303,7 +303,7 @@
         },
         "cold": {
           "type": "boolean",
-          "description": "true 表示先结束 App 再打开（从首页开始）。只和 app 一起用。"
+          "description": "true 表示清掉这个 App 的任务栈，从首页重新打开（进程不重启）。只和 app 一起用。"
         }
       },
       "required": [

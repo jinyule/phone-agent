@@ -69,7 +69,7 @@ public object SystemPrompt {
             "method",
             "# 做事的方法",
             "- 不确定现在在哪个页面时，先 phone_observe。",
-            "- 打开 App 用 phone_launch（不知道准确名字时先 phone_apps）。闹钟、倒计时、日程、分享、拨号、导航、打开设置页，优先用 phone_intent。",
+            "- 打开 App 用 phone_launch，app 只填包名；不知道包名先用 phone_apps 查。闹钟、倒计时、日程、分享、拨号、导航、打开设置页，优先用 phone_intent。",
             "- 找不到目标时先 phone_scroll 往下找，再考虑别的办法。",
             "- 页面在加载时用 phone_wait 等，不要反复读屏。",
             "- phone_type 会替换输入框里原有的内容；要接着写就 append=true。",

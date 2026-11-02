@@ -135,13 +135,17 @@ public enum class SystemKey {
 /** What `ScreenPort.launch` opens. No variant accepts an arbitrary Intent (phase1 §5 `phone_intent`). */
 @Serializable
 public sealed interface LaunchTarget {
-    /** An installed app by package name; [cold] force-stops it first. */
+    /**
+     * An installed app by package name. [cold] opens it fresh: its task stack is cleared and it
+     * starts at its launcher activity. In M1 the process is not restarted (in-memory state may
+     * survive); force-stopping needs the M2 privileged helper.
+     */
     @Serializable
     @SerialName("app")
     public data class App(
         /** Android package name. */
         val packageName: String,
-        /** Restart from a clean state. */
+        /** Clear the app's task stack and start at its launcher activity; the process keeps running in M1. */
         val cold: Boolean = false,
     ) : LaunchTarget {
         init {

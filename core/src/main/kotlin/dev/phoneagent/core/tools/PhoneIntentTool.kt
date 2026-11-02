@@ -17,8 +17,10 @@ import java.time.format.ResolverStyle
 /**
  * `phone_intent(kind, …)` (phase1 §5): one of the whitelisted system intents, never an arbitrary
  * Intent. Field keys and formats are fixed by contracts addendum §13 and checked here; the
- * platform maps them to Android intents. The policy refines the risk per kind (share is
- * outward, settings changes setup).
+ * platform maps them to Android intents. Every kind only opens a prefilled system screen and
+ * submits nothing (dial does not call, share only opens the share sheet), so the policy treats
+ * every kind as navigation; whatever is then sent or changed is a separate, checked action on
+ * that screen.
  */
 internal class PhoneIntentTool(
     private val presenter: ScreenPresenter,

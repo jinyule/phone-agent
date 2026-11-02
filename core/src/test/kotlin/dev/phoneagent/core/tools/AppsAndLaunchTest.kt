@@ -15,6 +15,8 @@ import dev.phoneagent.core.tool.RiskClass
 import dev.phoneagent.core.tool.ToolResult
 import dev.phoneagent.core.tool.ToolStatus
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -108,58 +110,78 @@ class AppsAndLaunchTest {
         ) = tools.getValue("phone_launch").execute(call("phone_launch", args), FakeContext(screen, apps))
 
         @Test
-        fun `launches by exact name or package, cold when asked`() =
+        fun `launches by package name, cold when asked`() =
             runTest {
                 val screen = FakeScreen()
-                val byName = launch("""{"app":"微信"}""", screen)
-                assertEquals(ToolStatus.OK, byName.status)
-                assertTrue(byName.text().startsWith("已打开 微信（com.tencent.mm），前台换成了另一个 App。\nscreen s12"), byName.text())
+                val opened = launch("""{"app":"com.tencent.mm"}""", screen)
+                assertEquals(ToolStatus.OK, opened.status)
+                assertTrue(opened.text().startsWith("已打开 微信（com.tencent.mm），前台换成了另一个 App。\nscreen s12"), opened.text())
                 val cold = launch("""{"app":"COM.AUTONAVI.MINIMAP","cold":true}""", screen)
                 assertTrue(cold.text().startsWith("已重新打开 高德地图（com.autonavi.minimap）"), cold.text())
-                launch("""{"app":"高德 地图"}""", screen)
                 assertEquals(
-                    listOf(
-                        LaunchTarget.App("com.tencent.mm"),
-                        LaunchTarget.App("com.autonavi.minimap", cold = true),
-                        LaunchTarget.App("com.autonavi.minimap"),
-                    ),
+                    listOf(LaunchTarget.App("com.tencent.mm"), LaunchTarget.App("com.autonavi.minimap", cold = true)),
                     screen.launches,
                 )
             }
 
         @Test
-        fun `suggests near matches and asks to disambiguate, never guesses`() =
+        fun `an app name is not a package name, so it is invalid and points to phone_apps`() =
             runTest {
                 val screen = FakeScreen()
-                val near = launch("""{"app":"地图"}""", screen)
-                assertEquals(ToolStatus.ERROR, near.status)
-                assertEquals(
-                    "没有叫「地图」的 App。名字相近的有：高德地图 · com.autonavi.minimap、百度地图 · com.baidu.BaiduMap。" +
-                        "用桌面上显示的准确名字或包名，或者先用 phone_apps 查一下。",
-                    near.text(),
-                )
-                assertEquals(
-                    "没有叫「抖音」的 App。用桌面上显示的准确名字或包名，或者先用 phone_apps 查一下。",
-                    launch("""{"app":"抖音"}""", screen).text(),
-                )
-                assertEquals(
-                    "有 2 个 App 都叫「便签」：便签 · com.example.notes、便签 · com.example.notes2。用包名再试一次。",
-                    launch("""{"app":"便签"}""", screen).text(),
-                )
-                // Not launchable, so not found.
-                assertEquals(ToolStatus.ERROR, launch("""{"app":"com.android.systemui"}""", screen).status)
+                for (apps in listOf(catalog, null)) {
+                    for (name in listOf("微信", "高德 地图", "WeChat")) {
+                        val result = launch("""{"app":"$name"}""", screen, apps)
+                        assertEquals(ToolStatus.INVALID_ARGS, result.status, name)
+                        assertEquals(
+                            listOf("- `app` 要填包名，如 com.tencent.mm（收到 \"$name\"）：先用 phone_apps 查到包名再启动"),
+                            problems(result),
+                            name,
+                        )
+                    }
+                }
                 assertTrue(screen.launches.isEmpty())
             }
 
         @Test
-        fun `without a catalog only package names work`() =
+        fun `a package that is not a launchable app is an error pointing to phone_apps`() =
             runTest {
                 val screen = FakeScreen()
-                assertEquals(AppNames.NO_CATALOG_BY_NAME, launch("""{"app":"微信"}""", screen, apps = null))
+                for (pkg in listOf("com.android.systemui", "com.example.missing")) {
+                    val result = launch("""{"app":"$pkg"}""", screen)
+                    assertEquals(ToolStatus.ERROR, result.status, pkg)
+                    assertEquals("手机上没有包名为 $pkg 的可打开的 App。先用 phone_apps 查到包名再启动。", result.text())
+                }
+                assertTrue(screen.launches.isEmpty())
+            }
+
+        @Test
+        fun `without a catalog a package name is launched as given`() =
+            runTest {
+                val screen = FakeScreen()
                 val byPackage = launch("""{"app":"com.tencent.mm"}""", screen, apps = null)
                 assertTrue(byPackage.text().startsWith("已打开 com.tencent.mm，"), byPackage.text())
                 assertEquals(listOf(LaunchTarget.App("com.tencent.mm")), screen.launches)
             }
+
+        @Test
+        fun `the description asks for package names and says what cold does in M1`() {
+            val def = tools.getValue("phone_launch").def
+            val properties = def.parameters["properties"]!!.jsonObject
+            val text = { name: String ->
+                properties
+                    .getValue(name)
+                    .jsonObject
+                    .getValue("description")
+                    .jsonPrimitive.content
+            }
+            assertTrue(def.description.contains("app 填包名（如 com.tencent.mm），不知道包名先用 phone_apps 查"), def.description)
+            assertFalse(def.description.contains("名字（如 微信）"), def.description)
+            assertTrue(text("app").startsWith("包名"), text("app"))
+            for (cold in listOf(def.description, text("cold"))) {
+                assertTrue(cold.contains("清掉这个 App 的任务栈") && cold.contains("进程不重启"), cold)
+                assertFalse(cold.contains("先结束"), cold)
+            }
+        }
 
         @Test
         fun `opens web and store links, refuses intent-carrying schemes`() =
@@ -239,7 +261,7 @@ class AppsAndLaunchTest {
         @Test
         fun `no screen, an unusable screen and launch outcomes`() =
             runTest {
-                assertEquals(ToolResults.NO_SCREEN, launch("""{"app":"微信"}""", screen = null))
+                assertEquals(ToolResults.NO_SCREEN, launch("""{"app":"com.tencent.mm"}""", screen = null))
                 val gone = FakeScreen().apply { unavailable = ScreenUnavailableException("屏幕没了") }
                 assertTrue(launch("""{"link":"https://a.com"}""", gone).text().startsWith("屏幕暂时用不了"))
                 val failure = ActionOutcome(ActionOutcome.Status.Failed("没有能打开这个链接的 App"), ActionOutcome.Effect.UNKNOWN)

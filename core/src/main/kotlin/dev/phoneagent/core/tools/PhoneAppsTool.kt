@@ -66,20 +66,13 @@ internal class PhoneAppsTool(
     }
 }
 
-/** App-name matching shared by `phone_apps` and `phone_launch`. */
+/** App-name matching of `phone_apps`. */
 internal object AppNames {
     /** `ctx.apps` is `null`: the platform cannot list apps. */
     val NO_CATALOG: ToolResult =
         ToolResult.failure(
             ToolStatus.ERROR,
             "这台手机上拿不到 App 列表。可以直接用包名打开（phone_launch app=com.example.app），否则 end_not_done(cause=blocked)。",
-        )
-
-    /** Launching by name without a catalog: only package names work. */
-    val NO_CATALOG_BY_NAME: ToolResult =
-        ToolResult.failure(
-            ToolStatus.ERROR,
-            "这台手机上拿不到 App 列表，只能用包名打开（如 com.tencent.mm）。",
         )
 
     /** [text] for matching: no whitespace, lower case. */
