@@ -107,10 +107,12 @@ internal object ProviderErrors {
         redactor: Redactor,
     ): ModelError {
         if (failure.status in Status.REDIRECTS) {
-            // Redirects are not followed (one request per attempt); the address needs fixing.
-            val target = failure.headers["Location"]?.let(redactor::text) ?: "an unnamed address"
-            return ModelError.BadResponse(
-                "HTTP ${failure.status} redirect to $target: use the final address as the base URL",
+            // Redirects are not followed (one request per attempt): the same address fails again,
+            // so this is a configuration error the user fixes, not something to retry.
+            val target = failure.headers["Location"]?.let(redactor::text)?.take(LOCATION_LIMIT) ?: "an unnamed address"
+            return ModelError.InvalidRequest(
+                param = null,
+                detail = "HTTP ${failure.status} redirect to $target: check the base URL and use the final address",
             )
         }
         val error = ProviderError.parse(failure.body, redactor)
@@ -238,6 +240,7 @@ internal object ProviderErrors {
         }
 
     private const val MS_PER_SECOND = 1000.0
+    private const val LOCATION_LIMIT = 300
 
     /** "try again in 11.054s", "retry after 7 seconds", "try again after 20 seconds". */
     private val WAIT_PHRASE =

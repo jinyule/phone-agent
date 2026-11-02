@@ -11,9 +11,13 @@ import mockwebserver3.MockWebServer
 import mockwebserver3.SocketEffect
 import mockwebserver3.junit5.StartStop
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 
 /**
  * Every `complete()` attempt is exactly one HTTP request, so the caller's retry budget and log
@@ -67,19 +71,23 @@ class OneRequestPerAttemptTest {
             assertEquals(2, server.requestCount, "one request per call")
         }
 
-    @Test
-    fun `307 is not followed`() =
+    @ParameterizedTest
+    @ValueSource(ints = [301, 302, 307, 308])
+    fun `a redirect is not followed and is not retryable`(status: Int) =
         runTest {
             server.enqueue(
                 MockResponse
                     .Builder()
-                    .code(307)
+                    .code(status)
                     .addHeader("Location", server.url("/v2/chat/completions"))
                     .build(),
             )
             server.enqueueSse(success)
-            val error = assertThrows<ModelError.BadResponse> { model().complete(Kit.request()) }
-            assertTrue(error.message!!.contains("/v2/chat/completions"), "the target is named: ${error.message}")
+            val error = assertThrows<ModelError.InvalidRequest> { model().complete(Kit.request()) }
+            assertNull(error.param)
+            assertTrue(error.detail.contains("/v2/chat/completions"), "the target is named: ${error.detail}")
+            assertTrue(error.detail.contains("base URL"), "the fix is named: ${error.detail}")
+            assertFalse(error.retryable, "the caller must not resend to the same address")
             assertEquals(1, server.requestCount)
         }
 }

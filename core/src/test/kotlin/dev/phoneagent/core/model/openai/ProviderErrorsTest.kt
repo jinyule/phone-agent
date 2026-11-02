@@ -68,7 +68,7 @@ class ProviderErrorsTest {
             "429 | 请求频率超限                   | 1302                     | RATE_LIMITED",
             "429 | RPM exceeded | RateLimitExceeded.EndpointRPMExceeded     | RATE_LIMITED",
             "400 | Model access denied           | Model.AccessDenied       | INVALID_REQUEST",
-            "302 | Found                         |                          | BAD_RESPONSE",
+            "302 | Found                         |                          | INVALID_REQUEST",
         ],
     )
     fun `statuses and codes map to error kinds`(
