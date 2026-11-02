@@ -60,6 +60,7 @@ internal class TreeBuilder {
             windowPackages = emptyMap(),
             windowBounds = emptyList(),
             frontPackage = APP,
+            systemBars = emptySet(),
         )
 }
 

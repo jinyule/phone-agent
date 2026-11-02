@@ -47,6 +47,7 @@ internal class ReadElement(
  * @property windowBounds bounds in pixels of each content window by id, top-most first.
  * @property frontPackage package of the window keys act on: the focused content window, else the
  *   top-most one (`null` when unknown).
+ * @property systemBars ids of the status and navigation bar windows, which the read leaves out.
  */
 internal class TreeRead(
     val elements: List<ReadElement>,
@@ -55,6 +56,7 @@ internal class TreeRead(
     val windowPackages: Map<Int, String?>,
     val windowBounds: List<Pair<Int, Rect>>,
     val frontPackage: String?,
+    val systemBars: Set<Int>,
 ) {
     /**
      * The elements [detail] shows, with [refs] (one per element of the read) as their refs; each
@@ -84,6 +86,10 @@ internal class TreeRead(
  * [OPAQUE_LEAF_SHARE] of the display (canvas, video, WebView without accessibility) so tree
  * quality can see them. [SnapshotDetail.FULL] shows every visible node.
  *
+ * The status and navigation bars are left out ([isSystemBar]): their clock and icons change on
+ * their own and would make every screen look changed. Other system windows (dialogs, heads-up
+ * notifications, the notification shade, pickers) are kept.
+ *
  * Window filtering, ordering and the depth limit are adapted from Mika's ScreenReader (Apache-2.0,
  * see NOTICE). Modified by PhoneAgent contributors.
  */
@@ -96,6 +102,9 @@ internal object ScreenReader {
 
     /** Share of the display from which an unnamed leaf view is shown in [SnapshotDetail.BRIEF]. */
     const val OPAQUE_LEAF_SHARE: Float = 0.1f
+
+    /** Thickest a system bar may be, as a share of the display's height (or width, for a side bar). */
+    const val BAR_SHARE: Float = 0.1f
 
     private const val MIN_SIDE_PX = 2
 
@@ -119,12 +128,30 @@ internal object ScreenReader {
     fun contentWindows(windows: List<AccessibilityWindowInfo>): List<AccessibilityWindowInfo> =
         windows.filter { it.type !in SKIPPED_WINDOW_TYPES }.sortedByDescending { it.layer }
 
+    /**
+     * Whether [window] is a status or navigation bar: a system window spanning the display along
+     * one edge, at most [BAR_SHARE] thick.
+     */
+    fun isSystemBar(
+        window: AccessibilityWindowInfo,
+        geometry: DisplayGeometry,
+    ): Boolean {
+        if (window.type != AccessibilityWindowInfo.TYPE_SYSTEM) return false
+        val r = Rect().also(window::getBoundsInScreen)
+        val (width, height) = geometry.width to geometry.height
+        val acrossTopOrBottom =
+            r.left <= 0 && r.right >= width && (r.top <= 0 || r.bottom >= height) && r.height() <= height * BAR_SHARE
+        val alongASide =
+            r.top <= 0 && r.bottom >= height && (r.left <= 0 || r.right >= width) && r.width() <= width * BAR_SHARE
+        return acrossTopOrBottom || alongASide
+    }
+
     /** Reads [windows] of one display with size [geometry]. */
     fun read(
         windows: List<AccessibilityWindowInfo>,
         geometry: DisplayGeometry,
     ): TreeRead {
-        val content = contentWindows(windows)
+        val (bars, content) = contentWindows(windows).partition { isSystemBar(it, geometry) }
         val walker = Walker(geometry)
         val packages = LinkedHashMap<Int, String?>()
         val windowBounds = ArrayList<Pair<Int, Rect>>()
@@ -144,6 +171,7 @@ internal object ScreenReader {
             windowPackages = packages,
             windowBounds = windowBounds,
             frontPackage = (content.firstOrNull { it.isFocused } ?: content.firstOrNull())?.let { packages[it.id] },
+            systemBars = bars.map { it.id }.toSet(),
         )
     }
 

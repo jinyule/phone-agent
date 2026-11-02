@@ -152,7 +152,11 @@ internal class AndroidScreen(
     override suspend fun awaitChange(timeoutMs: Long): Boolean {
         require(timeoutMs >= 0) { "timeoutMs must be >= 0, got $timeoutMs" }
         val host = host()
-        return ChangeWatch.watching(host.events, displayId, options.timings) { it.awaitSettled(timeoutMs) }
+        return ChangeWatch.watching(host.events, displayId, options.timings) { watch ->
+            // Subscribed first, so nothing is missed while the bars are looked up.
+            watch.ignore(withContext(options.io) { systemBarsOf(host) })
+            watch.awaitSettled(timeoutMs)
+        }
     }
 
     /** A screenshot of the display, or [Screenshot.Failed] when none came within [waitMs]. */
@@ -165,6 +169,15 @@ internal class AndroidScreen(
         // The timeout may strike after the screenshot arrived: it is nobody's then, free it.
         if (shot == null) taken?.release()
         return shot ?: Screenshot.Failed(AccessibilityService.ERROR_TAKE_SCREENSHOT_INTERNAL_ERROR)
+    }
+
+    private fun systemBarsOf(host: ScreenHost): Set<Int> {
+        val geometry = geometry(host)
+        return host
+            .windowsOn(displayId)
+            .filter { ScreenReader.isSystemBar(it, geometry) }
+            .map { it.id }
+            .toSet()
     }
 
     private fun host(): ScreenHost =

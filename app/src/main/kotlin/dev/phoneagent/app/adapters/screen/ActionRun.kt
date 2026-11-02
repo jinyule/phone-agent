@@ -55,6 +55,7 @@ internal class ActionRun(
 
             else -> {
                 ChangeWatch.watching(host.events, displayId, timings) { watch ->
+                    watch.ignore(before.systemBars)
                     finish(gesture(action, aim, watch), watch, timings.settleCapMs)
                 }
             }
@@ -161,6 +162,7 @@ internal class ActionRun(
 
             else -> {
                 ChangeWatch.watching(host.events, displayId, timings) { watch ->
+                    watch.ignore(before.systemBars)
                     typeInto(field, shown, action, watch)
                 }
             }

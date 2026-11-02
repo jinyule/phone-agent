@@ -53,7 +53,14 @@ internal class ServiceScreenHost(
     fun onEvent(event: AccessibilityEvent) {
         val displayId = displayOf(event)
         if (closed || displayId == Display.INVALID_DISPLAY) return
-        val copy = A11yEvent(displayId, event.eventType, event.packageName?.toString(), event.className?.toString())
+        val copy =
+            A11yEvent(
+                displayId,
+                event.eventType,
+                event.packageName?.toString(),
+                event.className?.toString(),
+                event.windowId,
+            )
         if (copy.type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && copy.packageName != null &&
             copy.className != null
         ) {

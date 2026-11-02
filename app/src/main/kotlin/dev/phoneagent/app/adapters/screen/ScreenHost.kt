@@ -56,13 +56,20 @@ internal interface ScreenHost {
  * @property type `AccessibilityEvent.TYPE_*`.
  * @property packageName source package, or `null`.
  * @property className source class (an activity for window-state changes), or `null`.
+ * @property windowId window the event came from, or -1 when it has none.
  */
 internal data class A11yEvent(
     val displayId: Int,
     val type: Int,
     val packageName: String?,
     val className: String?,
-)
+    val windowId: Int = NO_WINDOW,
+) {
+    internal companion object {
+        /** [windowId] of an event without a window (`AccessibilityWindowInfo.UNDEFINED_WINDOW_ID`). */
+        const val NO_WINDOW: Int = -1
+    }
+}
 
 /**
  * One finger of a gesture in display pixels.

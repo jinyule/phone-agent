@@ -48,6 +48,7 @@ internal class LaunchRun(
     ): ActionOutcome {
         val before = parts.observer.baseline(host, geometry, base?.detail ?: SnapshotDetail.BRIEF)
         return ChangeWatch.watching(host.events, displayId, timings) { watch ->
+            watch.ignore(before.read.systemBars)
             when (val started = parts.system.start(built.intent, displayId)) {
                 StartResult.Started -> arrive(target, before, watch)
                 StartResult.NotFound -> Outcomes.failed("no app on this device opens it")

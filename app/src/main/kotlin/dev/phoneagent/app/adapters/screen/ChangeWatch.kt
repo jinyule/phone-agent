@@ -15,12 +15,28 @@ import kotlinx.coroutines.withTimeoutOrNull
  * [settleCapMs] after the first event. No polling; all waits are coroutine time.
  *
  * Open the watch before acting ([watching]) so the first events caused by the action are not missed.
+ * Events from windows passed to [ignore] (the status and navigation bars) are not a change.
  */
 internal class ChangeWatch private constructor(
     private val ticks: Channel<A11yEvent>,
     private val quietMs: Long,
     private val settleCapMs: Long,
 ) {
+    @Volatile private var ignored: Set<Int> = emptySet()
+
+    /** From now on, events of [windowIds] are not a change, including those already received. */
+    fun ignore(windowIds: Set<Int>) {
+        ignored = windowIds
+    }
+
+    /** The next event that is a change. */
+    private suspend fun next(): A11yEvent {
+        while (true) {
+            val event = ticks.receive()
+            if (event.windowId !in ignored) return event
+        }
+    }
+
     /**
      * Suspends until the display settled or [timeoutMs] passed in total. Returns whether any
      * relevant event arrived, i.e. something on the display changed.
@@ -28,10 +44,10 @@ internal class ChangeWatch private constructor(
     suspend fun awaitSettled(timeoutMs: Long): Boolean {
         var seen = false
         withTimeoutOrNull(timeoutMs) {
-            ticks.receive()
+            next()
             seen = true
             withTimeoutOrNull(settleCapMs) {
-                while (withTimeoutOrNull(quietMs) { ticks.receive() } != null) {
+                while (withTimeoutOrNull(quietMs) { next() } != null) {
                     // Another event inside the quiet window: keep waiting.
                 }
             }
@@ -50,7 +66,7 @@ internal class ChangeWatch private constructor(
         if (predicate()) return true
         return withTimeoutOrNull(timeoutMs) {
             while (true) {
-                ticks.receive()
+                next()
                 if (predicate()) return@withTimeoutOrNull true
             }
             @Suppress("UNREACHABLE_CODE")
