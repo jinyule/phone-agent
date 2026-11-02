@@ -53,15 +53,17 @@ public class ProviderProbe internal constructor(
      * tool call step still checks the address. Throws [ModelError] for every other failure, and
      * [IllegalArgumentException] for header values that are not valid HTTP.
      */
-    public suspend fun listModels(profile: ProviderProfile): List<ListedModel>? = listing(profile, adapters.env)?.models
+    public suspend fun listModels(profile: ProviderProfile): List<ListedModel>? =
+        listing(profile, adapters.env, adapters.env.secret(profile.credential, rejected = false))?.models
 
+    /** The listing [profile] gives for a request that sends [secret]. */
     private suspend fun listing(
         profile: ProviderProfile,
         env: AdapterEnv,
+        secret: String?,
     ): Listing? {
         val url = "${profile.baseUrl}/models".toHttpUrl()
         val headers = profile.httpHeaders()
-        val secret = env.secret(profile.credential, rejected = false)
         val redactor = env.redactor(secret)
         val exchange = env.exchange(env.get(url, headers, secret), redactor) { it.text(LISTING_LIMIT) }
         val body =
@@ -93,6 +95,12 @@ public class ProviderProbe internal constructor(
      * 3xx fails the trial at once). A field turned off for a trial that then fails anyway is not
      * reported. Throws [IllegalArgumentException], before any request, when [wire] recovers leaked
      * calls in a format the route does not allow ([WireOptions.allowedLeakedCalls]).
+     *
+     * A key the trial request itself contains ([TrialCall.holds]: the token, the tool's name and
+     * schema, the prompts) fails the run before any request, with
+     * [ProbeFailureReason.CREDENTIAL_IN_TRIAL]: every correct reply would repeat it and be
+     * rejected as an echo. A trial reply rejected as an echo fails with
+     * [ProbeFailureReason.CREDENTIAL_ECHOED] and the fixed text, unmasked.
      */
     public suspend fun testAndSave(
         profile: ProviderProfile,
@@ -104,17 +112,37 @@ public class ProviderProbe internal constructor(
         wire.requireFits(profile)
         // Records every secret this run's requests use: what the results must not show.
         val env = adapters.env.recording()
-        val listing =
-            try {
-                listing(profile, env)
-            } catch (e: ModelError) {
-                return ProbeResult.Failed(
-                    ProbeStep.LIST_MODELS,
-                    e.kind,
-                    Redactor(env.known()).text(e.message.orEmpty()),
-                )
-            }
-        return Trial(profile, candidate, capabilities, token, env).run(listing, wire)
+        return when (val first = firstStep(profile, env, token)) {
+            is FirstStep.Stopped -> first.result
+            is FirstStep.Listed -> Trial(profile, candidate, capabilities, token, env).run(first.listing, wire)
+        }
+    }
+
+    /** The secret checked against the trial request, then the listing; a failure of either stops the run. */
+    private suspend fun firstStep(
+        profile: ProviderProfile,
+        env: AdapterEnv,
+        token: String,
+    ): FirstStep =
+        try {
+            listedUnlessInTrial(profile, env, token)
+        } catch (e: ModelError) {
+            FirstStep.Stopped(
+                ProbeResult.Failed(ProbeStep.LIST_MODELS, e.kind, Redactor(env.known()).text(e.message.orEmpty())),
+            )
+        }
+
+    private suspend fun listedUnlessInTrial(
+        profile: ProviderProfile,
+        env: AdapterEnv,
+        token: String,
+    ): FirstStep {
+        val secret = env.secret(profile.credential, rejected = false)
+        return if (secret != null && TrialCall.holds(secret, token)) {
+            FirstStep.Stopped(IN_TRIAL)
+        } else {
+            FirstStep.Listed(listing(profile, env, secret))
+        }
     }
 
     /**
@@ -143,7 +171,7 @@ public class ProviderProbe internal constructor(
                                 NO_IMAGES,
                                 options,
                                 env,
-                            ).complete(trialRequest(token))
+                            ).complete(TrialCall.request(token))
                     } catch (e: ModelError) {
                         options =
                             WireNegotiation.without(options, profile.protocol, e, env.statusOf(e)) ?: return failed(e)
@@ -154,7 +182,17 @@ public class ProviderProbe internal constructor(
         }
 
         private fun failed(error: ModelError): ProbeResult =
-            ProbeResult.Failed(ProbeStep.TOOL_CALL, error.kind, Redactor(env.known()).text(error.message.orEmpty()))
+            if (CredentialEcho.discardsStreamed(error)) {
+                // Fixed text without provider words: masking it would only garble it (a one-letter key).
+                ProbeResult.Failed(
+                    ProbeStep.TOOL_CALL,
+                    error.kind,
+                    error.message.orEmpty(),
+                    ProbeFailureReason.CREDENTIAL_ECHOED,
+                )
+            } else {
+                ProbeResult.Failed(ProbeStep.TOOL_CALL, error.kind, Redactor(env.known()).text(error.message.orEmpty()))
+            }
 
         /**
          * The outcome of a trial that got [reply]. Every secret the run sent masks it, including
@@ -236,7 +274,7 @@ public class ProviderProbe internal constructor(
         token: String,
         redactor: Redactor,
     ): String? {
-        val call = reply.toolCalls.firstOrNull { it.name == TRIAL_TOOL }
+        val call = reply.toolCalls.firstOrNull { it.name == TrialCall.TOOL }
         val stop = reply.stopReason
         return when {
             stop != StopReason.TOOL_USE && (call != null || stop != StopReason.END_TURN) -> {
@@ -274,16 +312,7 @@ public class ProviderProbe internal constructor(
         return (args?.get("token") as? JsonPrimitive)?.contentOrNull?.trim()
     }
 
-    private fun trialRequest(token: String): ChatRequest =
-        ChatRequest(
-            system = listOf(PromptBlock("probe", "You are a connection check. Do what the user asks, using the tool.")),
-            tools = listOf(ToolDef(TRIAL_TOOL, "Confirms that the connection works.", TRIAL_SCHEMA)),
-            messages = listOf(Message(Role.USER, listOf(Part.Text("Call $TRIAL_TOOL with token \"$token\".")))),
-            cache = CacheLayout.NONE,
-        )
-
     private companion object {
-        const val TRIAL_TOOL = "confirm_connection"
         const val TOKEN_LENGTH = 8
         const val SNIPPET = 300
         const val LISTING_LIMIT = 8L * 1024 * 1024
@@ -291,6 +320,56 @@ public class ProviderProbe internal constructor(
 }
 
 private val NO_LISTING = setOf(404, 405, 501)
+
+/** Where "test and save" stopped before the trial call, or the listing it goes on with. */
+private sealed interface FirstStep {
+    class Listed(
+        val listing: Listing?,
+    ) : FirstStep
+
+    class Stopped(
+        val result: ProbeResult.Failed,
+    ) : FirstStep
+}
+
+private val IN_TRIAL =
+    ProbeResult.Failed(
+        ProbeStep.TOOL_CALL,
+        null,
+        "the API key is part of the trial request's own text, so every correct reply would repeat it and be " +
+            "rejected; use another key, or choose no key if this service needs none",
+        ProbeFailureReason.CREDENTIAL_IN_TRIAL,
+    )
+
+/** The trial call of "test and save": the request and what a correct reply repeats of it. */
+private object TrialCall {
+    const val TOOL = "confirm_connection"
+
+    fun request(token: String): ChatRequest =
+        ChatRequest(
+            system = listOf(PromptBlock("probe", "You are a connection check. Do what the user asks, using the tool.")),
+            tools = listOf(ToolDef(TOOL, "Confirms that the connection works.", TRIAL_SCHEMA)),
+            messages = listOf(Message(Role.USER, listOf(Part.Text("Call $TOOL with token \"$token\".")))),
+            cache = CacheLayout.NONE,
+        )
+
+    /**
+     * Whether [secret] is part of the trial's fixed content: the prompts, the tool's name,
+     * description and schema, and the arguments a correct reply sends (`{"token":"<token>"}`).
+     */
+    fun holds(
+        secret: String,
+        token: String,
+    ): Boolean {
+        val request = request(token)
+        val texts =
+            request.system.map { it.text } +
+                request.tools.flatMap { listOf(it.name, it.description, it.parameters.toString()) } +
+                request.messages.flatMap { message -> message.parts.filterIsInstance<Part.Text>().map { it.text } } +
+                buildJsonObject { put("token", token) }.toString()
+        return texts.any { secret in it }
+    }
+}
 
 private val TRIAL_SCHEMA: JsonObject =
     buildJsonObject {
@@ -430,12 +509,29 @@ public sealed interface ProbeResult {
      * A step failed.
      *
      * @property step which one.
-     * @property kind the classified error, or `null` when the model answered but not with the trial call.
+     * @property kind the classified error, or `null` when no request failed (the model answered but
+     *   not with the trial call, or the run stopped before the trial).
      * @property message what went wrong, with the provider's own words when it sent any.
+     * @property reason why the key made it fail, for the UI to say so without reading [message];
+     *   `null` for every other failure.
      */
     public data class Failed(
         val step: ProbeStep,
         val kind: ModelErrorKind?,
         val message: String,
+        val reason: ProbeFailureReason? = null,
     ) : ProbeResult
+}
+
+/**
+ * Why the key failed "test and save" ([ProbeResult.Failed.reason]). Keys are matched exactly,
+ * however short (model-layer §2); for both, the UI suggests another key, or no key
+ * (`Credential.None`) for a service that needs none.
+ */
+public enum class ProbeFailureReason {
+    /** The trial reply held the key (or a key the run sent before) and was rejected. */
+    CREDENTIAL_ECHOED,
+
+    /** The key is part of the trial request's own text, so no request was sent. */
+    CREDENTIAL_IN_TRIAL,
 }

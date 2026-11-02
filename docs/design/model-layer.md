@@ -104,6 +104,8 @@ fun interface BlobSource {              // 读当前会话 BlobStore 里 Part.Im
   - 增量边发边查，不推迟发布：每个通道（正文、推理、每个调用的参数）保留一个"最长形式减 1"的尾部窗口，凑出密钥的那一片不发出，之前的片段照常即时显示；流结束时再查最终的各个 part。
   - 拒绝用固定文字，带"已流出内容不保留"的标记：runtime 不把这次 attempt 已经流出的前缀记成 interrupted 的消息，只记 attempt 和固定原因；界面上已经显示的片段由 UI 按这个错误清掉。标记的正式名字由 WP01 定，合入前适配器用 `CredentialEcho.discardsStreamed` 占位。
 - 密钥不论多长都做精确匹配：设任何长度阈值，短的真实凭据都会直接漏出去，而 `test` 这类值按形状也认不出来。不需要认证的本地服务（Ollama、LM Studio 等）用 `Credential.None`，不要填占位 key：本地服务如果填了占位 key，它就和真密钥一样处理：在错误和诊断里被屏蔽，含它的模型 id（比如 key 填 `qwen`、模型叫 `qwen3:8b`）不出现在列表里，出现在模型的回复里会导致整条回复被拒。
+  - "测试并保存"替用户指出 key 本身的问题，`ProbeResult.Failed.reason` 是有类型的原因，界面据此提示，不比对文字：key 是试调用请求自身固定内容的子串时（token、工具名、描述和 schema、提示文字、正确回复的参数 `{"token":"…"}`；比如 key 填 `token`、`pa`、`a`），任何正确的回复都会回显它，所以不发任何请求，直接返回 `CREDENTIAL_IN_TRIAL`；试调用的回复因为回显密钥被拒时，返回 `CREDENTIAL_ECHOED`，文字就是固定说明，不再过 Redactor（它不含服务商原文，屏蔽它只会把 1 个字符的 key 变成乱码）。
+  - WP09/WP10 的义务：`needsKey = false` 的预设（Ollama、LM Studio）默认用 `Credential.None`，不显示 key 输入框；出现 `CREDENTIAL_IN_TRIAL` 或 `CREDENTIAL_ECHOED` 时，提示换一个 key，或者改成不需要 key。
 - 任何截断都发生在用完整密钥集合脱敏之后。错误体最多读 64 KiB：多读"最长密钥长度（JSON 转义后的形式也算）减 1"个字节，对读到的全文脱敏；正文还没读完时，去掉末尾被读取切开的 UTF-8 字符和可能是密钥开头的部分（某个密钥的前缀，或者太短、还没成形的 `sk-…`、JWT），再按字符截到上限，不切开代理对。"测试并保存"一轮里先后发出的每个密钥（换过的 key 也算）从每个请求一开始就进它的 redactor，所以 500 字的错误 detail、300 字的重定向地址和诊断片段，截断之前都已经用全部密钥脱敏过。
 - **脱敏**（本次请求用到的密钥；契约写在 `CredentialResolver` 的 KDoc，WP03、WP04 各自实现，两边规则相同）：
   - **模型产生的内容一律不改写**。密钥出现在其中任何地方（正文、调用参数、推理预览、opaque 和签名块：Anthropic 的 `thinking`、`redacted_thinking`、`tool_use`，OpenAI 的 `reasoning`、`encrypted_content`，以及其他协议里的同类内容），**整条回复按 `BadResponse` 拒绝**，返回固定文字，并设上 `ModelError.discardsStreamed`。不改写的原因：Anthropic 把 thinking 绑定到它之前的整段对话，改写已经返回的正文或 `tool_use.input`，下一次请求就会报 prefix mismatch；改写调用参数还会改掉要执行的操作。我们从不把密钥放进上下文，模型输出里出现密钥本身就说明出了问题。
