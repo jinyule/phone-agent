@@ -19,7 +19,9 @@ public interface StoragePort {
     /**
      * Replaces [path] with [bytes] atomically: readers see either the old or the new content,
      * never a mix. The content is durable (fsync) when this returns. Missing parent directories are
-     * created, and durable too.
+     * created, and durable too. When it throws, either content may be in place: a failure after
+     * the new content became visible only leaves its durability unknown, so a caller never
+     * concludes from the exception that the old content is still there.
      */
     public suspend fun writeAtomically(
         path: StoragePath,

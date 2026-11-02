@@ -93,11 +93,18 @@ class FileStoragePortTest {
         val opened = mutableListOf<FileChannel>()
         var failForce = false
         var failSync = false
+
+        /** Fails the next sync of this directory, once. */
+        var failSyncOnce: Path? = null
         var failClose = false
         var failDelete = false
 
         override fun syncDirectory(dir: Path) {
             if (failSync) throw IOException("injected sync failure")
+            if (dir == failSyncOnce) {
+                failSyncOnce = null
+                throw IOException("injected sync failure of $dir")
+            }
             synced.add(dir)
             FileOps.SYSTEM.syncDirectory(dir)
         }
@@ -137,32 +144,114 @@ class FileStoragePortTest {
         }
     }
 
+    /** The directories a new file at [dir]/<name> makes durable: [dir], each one above it, the root, its parent. */
+    private fun chain(dir: String): List<Path> =
+        generateSequence(root.resolve(dir)) { it.parent }.takeWhile { it.startsWith(root) }.toList() +
+            listOf(root.parent)
+
     @Test
-    fun `new directories are made durable from the deepest up to the first existing one`() =
+    fun `every new file makes its whole directory chain durable, up to the root's parent`() =
         runTest {
             val ops = RecordingOps()
             val storage = FileStoragePort(root, StandardTestDispatcher(testScheduler), ops)
             storage.writeAtomically(StoragePath("a/b/c/f.bin"), byteArrayOf(1))
             assertEquals(
-                listOf(root.resolve("a/b"), root.resolve("a"), root, root.resolve("a/b/c")),
+                listOf(root.resolve("a/b/c"), root.resolve("a/b"), root.resolve("a"), root, root.parent),
                 ops.synced,
-                "parents of c, b and a, then the directory holding the renamed file",
+                "the file's directory, each one above it, the root and the root's parent",
             )
             ops.synced.clear()
             storage.writeAtomically(StoragePath("a/b/c/g.bin"), byteArrayOf(2))
-            assertEquals(listOf(root.resolve("a/b/c")), ops.synced, "existing directories are not synced again")
+            assertEquals(chain("a/b/c"), ops.synced, "also when every directory already existed")
 
             ops.synced.clear()
-            storage.openAppender(StoragePath("a/d/e/log.jsonl")).close()
-            assertEquals(
-                listOf(root.resolve("a/d"), root.resolve("a"), root.resolve("a/d/e")),
-                ops.synced,
-                "parents of e and d, then the directory holding the new file",
-            )
+            storage.openAppender(StoragePath("a/d/log.jsonl")).close()
+            assertEquals(chain("a/d"), ops.synced, "a file created by openAppender")
             ops.synced.clear()
-            storage.openAppender(StoragePath("a/d/e/log.jsonl")).close()
-            assertEquals(emptyList<Path>(), ops.synced, "reopening an existing file changes no directory")
+            storage.openAppender(StoragePath("a/d/log.jsonl")).close()
+            assertEquals(chain("a/d"), ops.synced, "reopening: the file may be left by an attempt whose sync failed")
         }
+
+    @Test
+    fun `a retry after a failed directory sync makes the whole chain durable, on the same port or a new one`() =
+        runTest {
+            val dispatcher = StandardTestDispatcher(testScheduler)
+            val operations =
+                mapOf<String, suspend (FileStoragePort, StoragePath) -> Unit>(
+                    "writeAtomically" to { storage, path -> storage.writeAtomically(path, byteArrayOf(1)) },
+                    "openAppender" to { storage, path -> storage.openAppender(path).close() },
+                )
+            val incomplete = mutableListOf<String>()
+            var run = 0
+            operations.forEach { (name, operation) ->
+                listOf(false, true).forEach { newPort ->
+                    val dir = "r${run++}/b/c"
+                    chain(dir).forEach { failing ->
+                        val ops = RecordingOps().apply { failSyncOnce = failing }
+                        val first = FileStoragePort(root, dispatcher, ops)
+                        val path = StoragePath("$dir/f${chain(dir).indexOf(failing)}.bin")
+                        assertThrows<IOException>("$name fails at $failing") { operation(first, path) }
+                        ops.synced.clear()
+                        operation(if (newPort) FileStoragePort(root, dispatcher, ops) else first, path)
+                        if (ops.synced !=
+                            chain(dir)
+                        ) {
+                            incomplete += "$name, new port $newPort, failed at $failing: ${ops.synced}"
+                        }
+                    }
+                }
+            }
+            assertEquals(emptyList<String>(), incomplete, "retries that skipped part of the chain")
+        }
+
+    @Test
+    fun `a directory sync failing after the rename keeps the new content but still fails the write`() =
+        runTest {
+            val ops = RecordingOps()
+            val storage = FileStoragePort(root, StandardTestDispatcher(testScheduler), ops)
+            val path = StoragePath("d/f.bin")
+            storage.writeAtomically(path, byteArrayOf(1))
+            ops.failSync = true
+            assertThrows<IOException> { storage.writeAtomically(path, byteArrayOf(2)) }
+            ops.failSync = false
+            assertArrayEquals(byteArrayOf(2), storage.read(path), "the rename took effect; only durability is unknown")
+        }
+
+    @Test
+    fun `a relative root that does not exist yet works for atomic writes`() =
+        runTest {
+            withRelativeRoot { relative ->
+                val storage = FileStoragePort(relative, StandardTestDispatcher(testScheduler))
+                storage.writeAtomically(StoragePath("f.bin"), byteArrayOf(1))
+                storage.writeAtomically(StoragePath("d/g.bin"), byteArrayOf(2))
+                assertArrayEquals(byteArrayOf(1), storage.read(StoragePath("f.bin")))
+                assertArrayEquals(byteArrayOf(2), Files.readAllBytes(relative.resolve("d/g.bin")))
+            }
+        }
+
+    @Test
+    fun `a relative root that does not exist yet works for appenders`() =
+        runTest {
+            withRelativeRoot { relative ->
+                val storage = FileStoragePort(relative, StandardTestDispatcher(testScheduler))
+                val appender = storage.openAppender(StoragePath("log.jsonl"))
+                appender.append("x\n".encodeToByteArray())
+                appender.close()
+                assertEquals("x\n", storage.read(StoragePath("log.jsonl"))?.decodeToString())
+            }
+        }
+
+    /** Runs [block] with a one-segment relative root that does not exist yet, and removes it afterwards. */
+    private suspend fun withRelativeRoot(block: suspend (Path) -> Unit) {
+        val relative = Path.of(".file-storage-port-test-${System.nanoTime()}")
+        assertFalse(relative.isAbsolute)
+        assertFalse(Files.exists(relative))
+        try {
+            block(relative)
+        } finally {
+            relative.toFile().deleteRecursively()
+        }
+    }
 
     @Test
     fun `a failed atomic write leaves no temp file and keeps the old content`() =

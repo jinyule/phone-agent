@@ -20,17 +20,27 @@ import java.util.concurrent.atomic.AtomicReference
  * [StoragePort] on a local directory (the app's private files dir on Android, a temp dir in
  * tests). Blocking I/O runs on [io].
  *
- * Durability: directories this port creates are made durable by fsyncing the parent of each new
- * one, deepest first, up to the first directory that already existed. Atomic writes go through a
- * temp file in the same directory (fsync, rename, fsync of the directory), so a completed write
- * survives power loss; a failed one deletes its temp file and leaves the old content. A file
- * created by [openAppender] gets its directory fsynced before the appender is returned.
+ * The root may be relative and need not exist: it is resolved against the working directory when
+ * the port is built, and created on the first write.
+ *
+ * Durability: every [writeAtomically] and every [openAppender] fsyncs the whole directory chain
+ * this port controls, every time: the file's directory, each directory above it up to the root,
+ * and the root's parent. Whether a directory is new is never what decides, so a retry after a
+ * failed sync makes the chain durable even though an earlier attempt already created it.
+ *
+ * Atomic writes go through a temp file in the same directory (write, fsync, rename), then the
+ * chain is fsynced. A failure:
+ * - before the rename deletes the temp file and leaves the old content;
+ * - after the rename (fsync of a directory) leaves the new content in place but not known to be
+ *   durable: the caller cannot conclude from the exception that the content is unchanged.
  */
 public class FileStoragePort internal constructor(
-    private val root: Path,
+    root: Path,
     private val io: CoroutineDispatcher,
     private val ops: FileOps,
 ) : StoragePort {
+    private val root: Path = root.toAbsolutePath().normalize()
+
     /** A port rooted at [root], running blocking I/O on [io]. */
     public constructor(root: Path, io: CoroutineDispatcher = Dispatchers.IO) : this(root, io, FileOps.SYSTEM)
 
@@ -48,7 +58,7 @@ public class FileStoragePort internal constructor(
     ): Unit =
         withContext(io) {
             val file = fileOf(path)
-            val dir = createDirectories(file.parent)
+            val dir = Files.createDirectories(file.parent)
             val temp = Files.createTempFile(dir, ".${file.fileName}.", ".tmp")
             try {
                 replace(file, temp, bytes)
@@ -56,7 +66,7 @@ public class FileStoragePort internal constructor(
                 ops.deleteAfterFailure(temp, failure)
                 throw failure
             }
-            ops.syncDirectory(dir)
+            syncChain(dir)
         }
 
     /**
@@ -97,12 +107,10 @@ public class FileStoragePort internal constructor(
 
     private fun fileOf(path: StoragePath): Path = root.resolve(path.value)
 
-    /** Creates [dir] and its missing parents, then fsyncs the parent of each new one, deepest first. */
-    private fun createDirectories(dir: Path): Path {
-        val missing = generateSequence(dir) { it.parent }.takeWhile { !Files.isDirectory(it) }.toList()
-        Files.createDirectories(dir)
-        missing.forEach { ops.syncDirectory(it.parent) }
-        return dir
+    /** fsyncs [dir], each directory above it up to [root], and the root's parent, deepest first. */
+    private fun syncChain(dir: Path) {
+        generateSequence(dir) { it.parent }.takeWhile { it.startsWith(root) }.forEach(ops::syncDirectory)
+        root.parent?.let(ops::syncDirectory)
     }
 
     /** Writes [bytes] to [temp], fsyncs it and renames it over [file]. */
@@ -118,18 +126,18 @@ public class FileStoragePort internal constructor(
         Files.move(temp, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
     }
 
-    /** Opens [file] for appending; a file created here gets its directory entry fsynced. */
+    /**
+     * Opens [file] for appending and fsyncs its directory chain, also when the file existed: it
+     * may come from an earlier attempt whose sync failed.
+     */
     private fun openForAppend(file: Path): FileChannel {
-        val dir = createDirectories(file.parent)
-        val created = !Files.exists(file)
+        val dir = Files.createDirectories(file.parent)
         val channel = ops.openAppend(file)
-        if (created) {
-            try {
-                ops.syncDirectory(dir)
-            } catch (failure: IOException) {
-                ops.closeAfterFailure(channel, failure)
-                throw failure
-            }
+        try {
+            syncChain(dir)
+        } catch (failure: IOException) {
+            ops.closeAfterFailure(channel, failure)
+            throw failure
         }
         return channel
     }
