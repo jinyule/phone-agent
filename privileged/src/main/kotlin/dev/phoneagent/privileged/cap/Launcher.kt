@@ -15,6 +15,7 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import dev.phoneagent.privileged.StartResult
+import java.lang.reflect.Method
 
 /**
  * Starts activities on an agent display (research §2.4 step 2).
@@ -147,6 +148,21 @@ internal class Launcher(
         cold: Boolean,
         snapshot: List<TaskRow>,
     ): Int {
+        // Decided before the force-stop: a start that cannot happen must not cost the app its process.
+        val unstartable = starter.unstartable(target)
+        if (unstartable != null) {
+            Log.w(TAG, "not starting ${target.activity} on display $displayId: $unstartable")
+            return StartResult.ERROR
+        }
+        return stopThenStart(displayId, target, cold, snapshot)
+    }
+
+    private fun stopThenStart(
+        displayId: Int,
+        target: LaunchTargets.Target.Allowed,
+        cold: Boolean,
+        snapshot: List<TaskRow>,
+    ): Int {
         val coldDone = cold && restart(snapshot, target.activity.packageName, displayId)
         if (!starter.start(displayId, target, myUser)) return StartResult.ERROR
         ownership.remember(tasks.topTask(displayId))
@@ -189,68 +205,90 @@ private class ActivityStarter(
     private val bridge: SystemBridge,
     private val commands: CommandRunner,
 ) {
+    /**
+     * Why [target] cannot be started at all, known before anything is done to the app: this build
+     * has no `startActivityAsUser` to look up, and `am start` cannot carry the intent. Null when a
+     * path exists. A `startActivityAsUser` that is there but fails when called is only known by
+     * calling it; [start] then falls back as usual. Throws [CapabilityUnavailable] when the
+     * activity task manager itself cannot be reached, as [start] would.
+     */
+    fun unstartable(target: LaunchTargets.Target.Allowed): String? {
+        val missing = directMissing(bridge.activityTaskManager) ?: return null
+        return amProblem(target.intent)?.let { "$missing, and $it" }
+    }
+
+    /** Why [atm] has no `startActivityAsUser` to look up, or null when it has one. */
+    private fun directMissing(atm: Any): String? =
+        try {
+            startMethod(atm).let { null }
+        } catch (e: CapabilityUnavailable) {
+            e.message
+        }
+
     /** Starts [target] on [displayId] in [userId]; false when every path failed. */
     fun start(
         displayId: Int,
         target: LaunchTargets.Target.Allowed,
         userId: Int,
     ): Boolean {
-        val intent = target.intent
-        val options = ActivityOptions.makeBasic().setLaunchDisplayId(displayId).toBundle()
         val atm = bridge.activityTaskManager
         val answer =
             try {
-                reflecting("IActivityTaskManager.startActivityAsUser") {
-                    bridge.method(atm, "startActivityAsUser", START_PARAMETERS).invoke(
-                        atm,
-                        null,
-                        SHELL_PACKAGE,
-                        null,
-                        intent,
-                        intent.type,
-                        null,
-                        null,
-                        0,
-                        0,
-                        null,
-                        options,
-                        userId,
-                    )
-                }
+                startDirectly(atm, displayId, target.intent, userId)
             } catch (e: CapabilityUnavailable) {
                 Log.w(TAG, "startActivityAsUser unavailable, falling back to am start", e)
                 return amStart(displayId, target, userId)
             }
         // It ran: an answer that is not a start result is a failure, never a reason to start again.
         val started = answer as? Int
-        if (started == null || started < 0) Log.w(TAG, "startActivityAsUser($intent) -> $answer")
+        if (started == null || started < 0) Log.w(TAG, "startActivityAsUser(${target.intent}) -> $answer")
         return started != null && started >= 0
+    }
+
+    /** [atm]'s `startActivityAsUser`; throws [CapabilityUnavailable] when it has none. */
+    private fun startMethod(atm: Any): Method = bridge.method(atm, "startActivityAsUser", START_PARAMETERS)
+
+    /** Calls `startActivityAsUser`; throws [CapabilityUnavailable] when it is missing or fails through reflection. */
+    private fun startDirectly(
+        atm: Any,
+        displayId: Int,
+        intent: Intent,
+        userId: Int,
+    ): Any? {
+        val options = ActivityOptions.makeBasic().setLaunchDisplayId(displayId).toBundle()
+        return reflecting("IActivityTaskManager.startActivityAsUser") {
+            startMethod(
+                atm,
+            ).invoke(atm, null, SHELL_PACKAGE, null, intent, intent.type, null, null, 0, 0, null, options, userId)
+        }
     }
 
     /**
      * `am start` with the whole intent: user, component, action (MAIN too: MAIN with LAUNCHER and
      * without it are different intents), data, type, categories and flags, so it starts what
-     * `startActivityAsUser` would have. Extras and ClipData have no faithful spelling here, so an
-     * intent with either is not started this way (false).
+     * `startActivityAsUser` would have. An intent it cannot carry ([amProblem]) is not started
+     * this way (false).
      */
     private fun amStart(
         displayId: Int,
         target: LaunchTargets.Target.Allowed,
         userId: Int,
     ): Boolean {
-        val intent = target.intent
-        val problem =
-            when {
-                intent.extras?.isEmpty == false -> "am start cannot carry its extras"
-                intent.clipData != null -> "am start cannot carry its ClipData"
-                else -> null
-            }
+        val problem = amProblem(target.intent)
         if (problem != null) {
-            Log.w(TAG, "not falling back to am start for $intent: $problem")
+            Log.w(TAG, "not falling back to am start for ${target.intent}: $problem")
             return false
         }
         return commands.run(amArguments(displayId, target, userId)).ok
     }
+
+    /** What of [intent] `am start` has no faithful spelling for, or null. */
+    private fun amProblem(intent: Intent): String? =
+        when {
+            intent.extras?.isEmpty == false -> "am start cannot carry its extras"
+            intent.clipData != null -> "am start cannot carry its ClipData"
+            else -> null
+        }
 
     /** `am start` arguments for [target]. */
     private fun amArguments(

@@ -97,6 +97,26 @@ internal class FakeActivityTaskManager {
     }
 }
 
+/** An `IActivityTaskManager` of a build without `startActivityAsUser`; the rest is [atm]. */
+internal class ActivityTaskManagerWithoutStart(
+    private val atm: FakeActivityTaskManager,
+) {
+    @Suppress("unused") // Signature of IActivityTaskManager.getTasks.
+    fun getTasks(
+        maxNum: Int,
+        filterOnlyVisibleRecents: Boolean,
+        keepIntentExtra: Boolean,
+        displayId: Int,
+    ): List<ActivityManager.RunningTaskInfo> =
+        atm.getTasks(maxNum, filterOnlyVisibleRecents, keepIntentExtra, displayId)
+
+    @Suppress("unused") // Signature of IActivityTaskManager.registerTaskStackListener.
+    fun registerTaskStackListener(listener: Any?) = atm.registerTaskStackListener(listener)
+
+    @Suppress("unused") // Signature of IActivityTaskManager.unregisterTaskStackListener.
+    fun unregisterTaskStackListener(listener: Any?) = atm.unregisterTaskStackListener(listener)
+}
+
 /** Stands in for `IWindowManager`. */
 internal class FakeWindowManager {
     /** What `isKeyguardLocked` answers; null makes it throw, as a dead or changed service would. */
@@ -192,7 +212,10 @@ internal class FakeBridge(
     /** When set, the `IWindowManager` the helper sees instead of [wm]. */
     var windowManagerOverride: Any? = null
 
-    override val activityTaskManager: Any get() = atm
+    /** When set, the `IActivityTaskManager` the helper sees instead of [atm]. */
+    var activityTaskManagerOverride: Any? = null
+
+    override val activityTaskManager: Any get() = activityTaskManagerOverride ?: atm
     override val windowManager: Any get() = windowManagerOverride ?: wm
     override val inputManager: Any get() = input
     override val taskInfo: Class<*> get() = taskInfoClass

@@ -1,5 +1,6 @@
 package dev.phoneagent.privileged.cap
 
+import android.content.ClipData
 import android.content.ComponentName
 import android.content.Intent
 import android.content.IntentFilter
@@ -110,6 +111,48 @@ class AmFallbackTest {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(PAGE)).putExtra("com.example.REFERRER", "x")
         assertEquals(StartResult.ERROR, start(intent))
         assertEquals("am start cannot carry the extras", emptyList<List<String>>(), helper.commands.of("am"))
+    }
+
+    /**
+     * A cold start on a build without `startActivityAsUser` of an intent `am start` cannot carry:
+     * nothing can start it, so the app is not stopped for nothing.
+     */
+    @Test
+    fun aColdStartThatOnlyAmCouldDoAndAmCannotCarryStopsNothing() {
+        helper.bridge.activityTaskManagerOverride = ActivityTaskManagerWithoutStart(helper.bridge.atm)
+        val page = Intent(Intent.ACTION_VIEW, Uri.parse(PAGE))
+        val withExtras = Intent(page).putExtra("com.example.REFERRER", "x")
+        val withClipData = Intent(page).apply { clipData = ClipData.newRawUri("", Uri.parse(IMAGE)) }
+        for ((what, intent) in listOf("extras" to withExtras, "ClipData" to withClipData)) {
+            assertEquals(what, StartResult.ERROR, helper.core.startActivity(display, intent, 0, true))
+            assertEquals("$what: no force-stop, no am start", emptyList<List<String>>(), helper.commands.of("am"))
+            assertEquals("$what: nothing started", emptyList<Pair<Intent, Int>>(), helper.bridge.atm.started)
+        }
+    }
+
+    @Test
+    fun aColdStartOnABuildWithoutStartActivityAsUserStopsTheAppThenStartsItWithAm() {
+        helper.bridge.activityTaskManagerOverride = ActivityTaskManagerWithoutStart(helper.bridge.atm)
+        assertEquals(
+            StartResult.OK,
+            helper.core.startActivity(display, Intent(Intent.ACTION_VIEW, Uri.parse(PAGE)), 0, true),
+        )
+        val stop = listOf("am", "force-stop", "--user", "0", HANDLER)
+        assertEquals(
+            listOf(stop, am("-a", Intent.ACTION_VIEW, "-d", PAGE, "-f", "$NEW_TASK")),
+            helper.commands.of("am"),
+        )
+    }
+
+    /**
+     * Where `startActivityAsUser` is there but fails only when called, that is known only after the
+     * force-stop; the intent `am start` cannot carry then answers ERROR as before.
+     */
+    @Test
+    fun aDirectStartThatFailsOnlyWhenCalledIsKnownAfterTheForceStop() {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(PAGE)).putExtra("com.example.REFERRER", "x")
+        assertEquals(StartResult.ERROR, helper.core.startActivity(display, intent, 0, true))
+        assertEquals(listOf(listOf("am", "force-stop", "--user", "0", HANDLER)), helper.commands.of("am"))
     }
 
     private companion object {
