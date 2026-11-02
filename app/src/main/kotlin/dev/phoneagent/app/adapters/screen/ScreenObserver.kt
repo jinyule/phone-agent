@@ -10,7 +10,8 @@ import dev.phoneagent.core.ports.SurfaceRef
 
 /**
  * Builds [ScreenSnapshot]s of one surface and remembers them in [history]; [secure] holds the
- * windows found to show FLAG_SECURE content, whose snapshots say so.
+ * windows found to show FLAG_SECURE content, whose snapshots say so for as long as a capture of
+ * the window says so (each read captures a marked top window again).
  */
 internal class ScreenObserver(
     private val surface: SurfaceRef,
@@ -18,18 +19,21 @@ internal class ScreenObserver(
     private val analyzer: SnapshotAnalyzer,
     private val snapshotIds: () -> SnapshotId,
     val history: SnapshotHistory,
-    val secure: SecureWindows = SecureWindows(),
+    val secure: SecureWindows = SecureWindows(ScreenTimings().screenshotWaitMs),
 ) {
     // Highest ref number handed out by this port (RefCarrier never reuses one).
     private var lastRef = 0
 
     /** Reads the display and registers the result as a new snapshot; refs carry over from the latest one. */
-    fun observe(
+    suspend fun observe(
         host: ScreenHost,
         geometry: DisplayGeometry,
         detail: SnapshotDetail,
     ): ScreenSnapshot {
-        val read = ScreenReader.read(host.windowsOn(surface.displayId), geometry, system.ownPackage)
+        val windows = host.windowsOn(surface.displayId)
+        val read = ScreenReader.read(windows, geometry, system.ownPackage)
+        // A consumer may skip frames of SECURE screens, so the mark is checked here, not only by frame().
+        if (read.topWindow?.let { it in secure } == true) secure.probe(host, windows)
         val carried = RefCarrier.carry(history.newest()?.tree, read.elements, lastRef)
         lastRef = carried.lastUsed
         val elements = read.project(carried.refs, detail)

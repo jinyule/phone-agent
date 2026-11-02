@@ -62,6 +62,41 @@ class SecureWindowTest {
         }
 
     @Test
+    fun aWindowThatDroppedFlagSecureIsNoLongerSecureForAConsumerThatSkipsFramesOfSecureScreens() =
+        runTest {
+            // Fix list r2 S5 (Codex R2-S3): WP06 takes a frame only when the snapshot is not SECURE.
+            host.takeWindowShot = { Screenshot.Secure }
+            val port = mainPort(host)
+            val observe =
+                suspend {
+                    val snapshot = port.snapshot()
+                    snapshot.flags to if (ScreenFlag.SECURE in snapshot.flags) null else port.frame()
+                }
+            assertNull("found secure at the first frame", observe().second)
+            assertTrue(ScreenFlag.SECURE in observe().first)
+
+            host.takeWindowShot = { Screenshot.Captured(bitmap()) }
+            val (flags, frame) = observe()
+
+            assertFalse("SECURE is gone once the window can be captured", ScreenFlag.SECURE in flags)
+            assertNotNull(frame)
+        }
+
+    @Test
+    fun snapshotsCaptureOnlyWindowsMarkedSecure() =
+        runTest {
+            host.takeWindowShot = { Screenshot.Secure }
+            val port = mainPort(host)
+
+            port.snapshot()
+            assertEquals("an unmarked window is not captured by a snapshot", emptyList<Int>(), host.windowShots)
+            port.frame()
+            port.snapshot()
+
+            assertEquals("the frame's probe, then the snapshot's", listOf(1, 1), host.windowShots)
+        }
+
+    @Test
     fun aProbeThatTellsNothingKeepsWhatWasFound() =
         runTest {
             host.takeWindowShot = { Screenshot.Secure }

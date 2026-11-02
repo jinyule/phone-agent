@@ -5,9 +5,14 @@ import android.view.accessibility.AccessibilityWindowInfo
 /**
  * Windows found to show FLAG_SECURE content, by accessibility window id (ids are not reused while
  * a window lives). Only [probe] finds them, so a window is known secure from the first frame asked
- * of it; a later probe that captures it unmarks it. Bounded: the oldest marks are dropped first.
+ * of it; a later probe that captures it unmarks it. ScreenObserver probes a marked window again at
+ * every read, so the mark ends with FLAG_SECURE even when no frame is asked for any more. Bounded:
+ * the oldest marks are dropped first.
+ *
+ * @param waitMs longest wait for one window capture ([ScreenTimings.screenshotWaitMs]).
  */
 internal class SecureWindows(
+    private val waitMs: Long,
     private val keep: Int = KEPT,
 ) {
     private val marked = LinkedHashSet<Int>()
@@ -24,7 +29,6 @@ internal class SecureWindows(
     suspend fun probe(
         host: ScreenHost,
         windows: List<AccessibilityWindowInfo>,
-        waitMs: Long,
     ): Boolean {
         val top = ScreenReader.topApp(windows)?.first?.id ?: return false
         when (val shot = screenshotWithin(waitMs) { host.windowScreenshot(top) }) {

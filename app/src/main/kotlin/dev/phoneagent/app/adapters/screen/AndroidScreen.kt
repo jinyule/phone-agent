@@ -33,7 +33,8 @@ import java.util.concurrent.atomic.AtomicLong
  * - nothing here touches this app's own windows (`Refused`);
  * - FLAG_SECURE (API 34+): before every frame the top application window is captured alone; a
  *   window holding secure content gives no frame and is remembered ([SecureWindows]), so its
- *   snapshots carry `ScreenFlag.SECURE`. What to do about it is PolicyEngine's call. Below API 34
+ *   snapshots carry `ScreenFlag.SECURE`; every read captures a remembered window again, so the
+ *   flag goes once the window can be captured. What to do about it is PolicyEngine's call. Below API 34
  *   secure content is **not detected**: frames come back with it blacked out and snapshots never
  *   carry `SECURE`.
  *
@@ -76,6 +77,7 @@ internal class AndroidScreen(
                     analyzer,
                     options.snapshotIds,
                     SnapshotHistory(options.timings.snapshotsKept),
+                    SecureWindows(options.timings.screenshotWaitMs),
                 ),
             timings = options.timings,
             injector = options.injector,
@@ -133,7 +135,7 @@ internal class AndroidScreen(
             val host = host()
             geometry(host)
             val waitMs = options.timings.screenshotWaitMs
-            if (parts.observer.secure.probe(host, host.windowsOn(displayId), waitMs)) return@withContext null
+            if (parts.observer.secure.probe(host, host.windowsOn(displayId))) return@withContext null
             // Set-of-Mark boxes arrive with OCR in M3; until then the frame reports som = false.
             when (val shot = screenshotWithin(waitMs) { host.screenshot(displayId) } ?: TIMED_OUT) {
                 is Screenshot.Captured -> {
