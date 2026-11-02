@@ -10,13 +10,18 @@ import java.util.IdentityHashMap
  * (`Bearer …`, `sk-…`, JWTs) is masked whether or not this request used it. Error codes and
  * parameter names never match these shapes, so the diagnosis survives.
  *
- * Callers redact before truncating, so a cut never leaves half a secret behind.
+ * Every cut comes after masking, with the whole set of secrets the run has sent: callers redact
+ * the full text, then cut it. A reader that must stop early reads [reach] characters past its
+ * limit and drops the [openEnd] of what it read, so a cut never leaves part of a secret behind.
  */
 internal class Redactor(
     secrets: Iterable<String>,
 ) {
     // Longest first, so a secret that contains another is masked whole.
     private val secrets = secrets.filter { it.isNotEmpty() }.distinct().sortedByDescending { it.length }
+
+    /** How many UTF-8 bytes past a cut a reader must see so that every secret starting before it is whole. */
+    val reach: Int = (this.secrets.maxOfOrNull { it.encodeToByteArray().size } ?: 1) - 1
 
     /** A redactor that also masks [secret]. */
     fun with(secret: String?): Redactor = if (secret.isNullOrEmpty()) this else Redactor(secrets + secret)
@@ -28,6 +33,24 @@ internal class Redactor(
         masked = BEARER.replace(masked, "$1$MASK")
         return SHAPES.fold(masked) { acc, shape -> shape.replace(acc, MASK) }
     }
+
+    /**
+     * The length of the end of [masked] (what [text] returned for text a read limit cut off) that
+     * may be the start of a credential that went on: the longest end that begins a secret, or a
+     * `sk-` key or JWT the cut left too short for its shape. The reader drops it.
+     */
+    fun openEnd(masked: String): Int {
+        val secret =
+            (minOf(reach, masked.length) downTo 1).firstOrNull { n -> secrets.any { masked.endsWithStartOf(it, n) } }
+        val shape = OPEN_SHAPE.find(masked)?.let { masked.length - it.range.first }
+        return maxOf(secret ?: 0, shape ?: 0)
+    }
+
+    /** Whether the last [n] characters of this text are the first [n] of [secret]. */
+    private fun String.endsWithStartOf(
+        secret: String,
+        n: Int,
+    ): Boolean = secret.length > n && regionMatches(length - n, secret, 0, n)
 
     /**
      * [error] itself when no message it prints (causes and suppressed exceptions included) needs
@@ -91,5 +114,8 @@ internal class Redactor(
                 // JWTs (ChatGPT plan access tokens): header.payload.signature
                 Regex("""\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*"""),
             )
+
+        /** A credential shape still open at the end of the text (cut before [SHAPES] could match it). */
+        private val OPEN_SHAPE = Regex("""(?:\bsk-[A-Za-z0-9_-]*|\beyJ[A-Za-z0-9_.-]*)\z""")
     }
 }

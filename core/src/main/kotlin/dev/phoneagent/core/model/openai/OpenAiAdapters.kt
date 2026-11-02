@@ -22,6 +22,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.UUID
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 
 /**
@@ -67,7 +68,7 @@ public class OpenAiAdapters internal constructor(
         wire: WireOptions,
     ): ChatModel = model(profile, ModelInfo(profile.id, model, profile.protocol, capabilities), blobs, wire, env)
 
-    /** The model [info] describes, on [env] (the probe's records the secrets it hands out). */
+    /** The model [info] describes, on [env] (the probe's is [AdapterEnv.recording]). */
     internal fun model(
         profile: ProviderProfile,
         info: ModelInfo,
@@ -129,20 +130,28 @@ public data class HttpTimeouts(
             .build()
 }
 
-/** What every adapter instance shares. */
+/**
+ * What every adapter instance shares. A [recording] env (one per "test and save" run) also keeps
+ * every secret it hands out, so that each later request of the run masks them all from the start.
+ */
 internal class AdapterEnv(
     val transport: HttpTransport,
     private val credentials: CredentialResolver,
     val clock: Clock,
     val newCallId: () -> String,
+    private val sent: MutableList<String>? = null,
 ) {
-    /** This env, also handing every secret it gives out to [seen] (as sent: trimmed). */
-    fun observed(seen: (String) -> Unit): AdapterEnv {
-        val inner = credentials
-        val recording =
-            CredentialResolver { credential, rejected -> inner.secret(credential, rejected)?.also { seen(it.trim()) } }
-        return AdapterEnv(transport, recording, clock, newCallId)
-    }
+    /** A copy of this env that records the secrets it hands out ([known]). */
+    fun recording(): AdapterEnv = AdapterEnv(transport, credentials, clock, newCallId, CopyOnWriteArrayList())
+
+    /** The secrets a [recording] env has handed out so far (as sent: trimmed); none for any other env. */
+    fun known(): List<String> = sent.orEmpty().toList()
+
+    /**
+     * The redactor of a request that sends [secret]: it masks the [known] secrets as well, so every
+     * cut of the request's error text comes after masking with all of them.
+     */
+    fun redactor(secret: String?): Redactor = Redactor(known() + listOfNotNull(secret))
 
     /** The secret for [credential]; refuses values HTTP headers cannot carry (without echoing them). */
     suspend fun secret(
@@ -153,7 +162,7 @@ internal class AdapterEnv(
         if (secret != null && secret.any { it < ' ' || it > '~' }) {
             throw ModelError.Auth("the stored credential contains characters an HTTP header cannot carry")
         }
-        return secret?.takeIf { it.isNotEmpty() }
+        return secret?.takeIf { it.isNotEmpty() }?.also { sent?.add(it) }
     }
 
     /** A JSON POST to [url] with the profile's [headers] and a bearer [secret]. */
@@ -224,7 +233,7 @@ internal suspend fun <T> AdapterEnv.exchange(
         if (reply.successful) {
             Exchange.Done(read(reply))
         } else {
-            Exchange.Failed(HttpFailure(reply.status, reply.headers, redactor.text(reply.text())))
+            Exchange.Failed(HttpFailure(reply.status, reply.headers, reply.maskedText()))
         }
     }
 

@@ -236,6 +236,36 @@ internal object Kit {
     private const val TAKE_TIMEOUT_S = 5L
 }
 
+/**
+ * The "secret straddles the cut" template: [filler] up to [secret], which starts half its length
+ * before character [cut], then [tail] more filler. Text that is cut at [cut] before it is masked
+ * leaves the first half of the secret behind.
+ */
+internal object Straddle {
+    /** Shortest prefix [assertNoPrefix] looks for. */
+    private const val MIN_PREFIX = 4
+
+    fun text(
+        cut: Int,
+        secret: String,
+        filler: Char,
+        tail: Int = 0,
+    ): String = filler.toString().repeat(cut - secret.length / 2) + secret + filler.toString().repeat(tail)
+
+    /** Fails when [text] holds [secret] or a prefix of it of [MIN_PREFIX] or more characters; never prints it. */
+    fun assertNoPrefix(
+        what: String,
+        text: String,
+        secret: String,
+    ) {
+        val leaked = (secret.length downTo MIN_PREFIX).firstOrNull { text.contains(secret.take(it)) }
+        org.junit.jupiter.api.Assertions.assertNull(
+            leaked,
+            "$what holds the first $leaked characters of the secret (value not shown)",
+        )
+    }
+}
+
 /** A resolver handing out [values] in order (the last one repeats); records what was asked. */
 internal class Keys(
     private vararg val values: String? = arrayOf(Kit.FAKE_KEY),

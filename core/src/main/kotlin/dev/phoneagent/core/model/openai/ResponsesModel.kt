@@ -46,7 +46,7 @@ public class ResponsesModel internal constructor(
         val body = if (plan) PlanMode.enforce(built) else built
         var secret = env.secret(profile.credential, rejected = false)
         // Every secret sent so far: after a refresh the rejected token may still be echoed.
-        var redactor = Redactor(listOfNotNull(secret))
+        var redactor = env.redactor(secret)
         var refreshed = false
         while (true) {
             val post = env.post(endpoint, inputs.headers, secret, body)

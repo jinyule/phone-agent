@@ -47,7 +47,7 @@ public class ChatCompletionsModel internal constructor(
         WireSupport.preflight(request)
         val images = if (info.capabilities.vision) ImageData.load(request, blobs) else ImageData.NONE
         val secret = env.secret(profile.credential, rejected = false)
-        val redactor = Redactor(listOfNotNull(secret))
+        val redactor = env.redactor(secret)
         val body = wire.body(request, images, inputs.options.chat)
         val post = env.post(endpoint, inputs.headers, secret, body)
         return when (val exchange = env.exchange(post, redactor) { read(request, it, redactor, onDelta) }) {

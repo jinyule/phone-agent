@@ -36,7 +36,6 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.io.IOException
 import java.util.Locale
 import java.util.UUID
-import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * "Test and save" for OpenAI-style providers (model-layer §4.1): list the models, then let the
@@ -63,7 +62,7 @@ public class ProviderProbe internal constructor(
         val url = "${profile.baseUrl}/models".toHttpUrl()
         val headers = profile.httpHeaders()
         val secret = env.secret(profile.credential, rejected = false)
-        val redactor = Redactor(listOfNotNull(secret))
+        val redactor = env.redactor(secret)
         val exchange = env.exchange(env.get(url, headers, secret), redactor) { it.text(LISTING_LIMIT) }
         val body =
             when (exchange) {
@@ -98,21 +97,24 @@ public class ProviderProbe internal constructor(
         token: String = "pa-" + UUID.randomUUID().toString().take(TOKEN_LENGTH),
         wire: WireOptions = WireOptions.defaultsFor(profile),
     ): ProbeResult {
-        // Every secret this run's requests used: what the results must not show.
-        val secrets = CopyOnWriteArrayList<String>()
-        val env = adapters.env.observed(secrets::add)
+        // Records every secret this run's requests use: what the results must not show.
+        val env = adapters.env.recording()
         val models =
             try {
                 listModels(profile, env)
             } catch (e: ModelError) {
-                return ProbeResult.Failed(ProbeStep.LIST_MODELS, e.kind, Redactor(secrets).text(e.message.orEmpty()))
+                return ProbeResult.Failed(
+                    ProbeStep.LIST_MODELS,
+                    e.kind,
+                    Redactor(env.known()).text(e.message.orEmpty()),
+                )
             }
-        return Trial(profile, candidate, capabilities, token, env, secrets).run(models, wire)
+        return Trial(profile, candidate, capabilities, token, env).run(models, wire)
     }
 
     /**
      * The trial call of one "test and save", with the negotiation of optional fields. Its results
-     * mask the [secrets] the run sent.
+     * mask every secret the run sent ([AdapterEnv.known]).
      */
     private inner class Trial(
         val profile: ProviderProfile,
@@ -120,7 +122,6 @@ public class ProviderProbe internal constructor(
         val capabilities: ModelCapabilities,
         val token: String,
         val env: AdapterEnv,
-        val secrets: List<String>,
     ) {
         suspend fun run(
             models: List<ListedModel>?,
@@ -147,14 +148,14 @@ public class ProviderProbe internal constructor(
         }
 
         private fun failed(error: ModelError): ProbeResult =
-            ProbeResult.Failed(ProbeStep.TOOL_CALL, error.kind, Redactor(secrets).text(error.message.orEmpty()))
+            ProbeResult.Failed(ProbeStep.TOOL_CALL, error.kind, Redactor(env.known()).text(error.message.orEmpty()))
 
         private fun result(
             reply: ChatResponse,
             models: List<ListedModel>?,
             wire: WireOptions,
         ): ProbeResult {
-            val problem = checkTrialCall(reply, token, Redactor(secrets))
+            val problem = checkTrialCall(reply, token, Redactor(env.known()))
             val verified =
                 capabilities.copy(tools = true, verified = capabilities.verified + VerifiedCapability.TOOL_CALL)
             return problem?.let { ProbeResult.Failed(ProbeStep.TOOL_CALL, null, it) }
