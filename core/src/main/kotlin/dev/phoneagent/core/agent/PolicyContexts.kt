@@ -11,6 +11,8 @@ import dev.phoneagent.core.ports.ConfirmResult
 import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.session.ApprovalAsked
 import dev.phoneagent.core.session.ApprovalDecided
+import dev.phoneagent.core.session.HandoffEnded
+import dev.phoneagent.core.session.HandoffStarted
 import dev.phoneagent.core.session.PolicyVerdictRecorded
 import dev.phoneagent.core.session.ScreenActed
 import dev.phoneagent.core.session.ScreenLaunched
@@ -23,26 +25,73 @@ import dev.phoneagent.core.session.ToolResultRecorded
 import dev.phoneagent.core.tool.ToolStatus
 
 /**
- * The screen the model saw last (contracts addendum §14): the newest snapshot recorded by a tool
- * call whose `tool/result` is already in the log (an observation, or the screen read back after an
- * action or launch). Runtime observations (`callId == null`: after resume, handoff or approval)
- * and those of a call still running are not shown to the model, so they do not count. `null`
- * before the model saw any screen.
+ * The screen the policy judges a call on (contracts addendum §14): the newest snapshot recorded by
+ * a tool call whose `tool/result` is already in the log (an observation, the screen read back after
+ * an action or launch, or the runtime's look after that call's handoff). Runtime observations
+ * without a call (the re-check after approval) and those of a call still running do not count.
+ * `null` before any screen counts, and after a handoff whose screen could not be read: a
+ * `handoff/end` hides every screen before it, since the user may have changed what is shown.
  */
 internal fun latestSnapshot(records: List<SessionRecord>): ScreenSnapshot? {
     val answered = records.mapNotNullTo(HashSet()) { (it.event as? ToolResultRecorded)?.callId }
-    return records.asReversed().firstNotNullOfOrNull { seenSnapshot(it.event, answered) }
+    val seen = records.asReversed().firstNotNullOfOrNull { seenSnapshot(it.event, answered) }
+    return (seen as? Seen.Screen)?.snapshot
+}
+
+/** Whether [callId] handed off and no screen was recorded for it after its last handoff ended. */
+internal fun screenLostAfterHandoff(
+    records: List<SessionRecord>,
+    callId: ToolCallId,
+): Boolean {
+    val handoffs =
+        records
+            .mapNotNull { it.event as? HandoffStarted }
+            .filter { it.callId == callId }
+            .mapTo(HashSet()) { it.promptId }
+    val last =
+        records.lastOrNull { record ->
+            val event = record.event
+            (event is HandoffEnded && event.promptId in handoffs) || seenSnapshot(event, setOf(callId)) is Seen.Screen
+        }
+    return last?.event is HandoffEnded
+}
+
+private sealed interface Seen {
+    class Screen(
+        val snapshot: ScreenSnapshot,
+    ) : Seen
+
+    data object Hidden : Seen
 }
 
 private fun seenSnapshot(
     event: SessionEvent,
-    answered: Set<ToolCallId>,
-): ScreenSnapshot? =
+    answered: Set<ToolCallId?>,
+): Seen? =
     when {
-        event is ScreenObserved -> event.snapshot.takeIf { event.callId in answered }
-        event is ScreenActed -> event.outcome.after.takeIf { event.callId in answered }
-        event is ScreenLaunched -> event.outcome.after.takeIf { event.callId in answered }
-        else -> null
+        event is ScreenObserved -> {
+            event.snapshot.takeIf { event.callId in answered }?.let(Seen::Screen)
+        }
+
+        event is ScreenActed -> {
+            event.outcome.after
+                .takeIf { event.callId in answered }
+                ?.let(Seen::Screen)
+        }
+
+        event is ScreenLaunched -> {
+            event.outcome.after
+                .takeIf { event.callId in answered }
+                ?.let(Seen::Screen)
+        }
+
+        event is HandoffEnded -> {
+            Seen.Hidden
+        }
+
+        else -> {
+            null
+        }
     }
 
 /**

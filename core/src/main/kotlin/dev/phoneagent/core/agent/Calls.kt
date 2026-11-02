@@ -41,7 +41,9 @@ import kotlinx.serialization.json.jsonPrimitive
  *    stops the task and the call stays NOT_STARTED), then the whole `toolExecute` chain under the
  *    call's single timeout (`Tool.timeoutMs`, waiting for the user excluded). The chain's end runs
  *    the judged call only, once ([ExecutionEnd]);
- * 4. `toolPostExecute`, `tool/result`, and the attached context queued for the next step.
+ * 4. a call that handed off and whose screen could not be read afterwards gets
+ *    [LoopTexts.screenUnknown] after its result's text; then `toolPostExecute`, `tool/result`,
+ *    and the attached context queued for the next step.
  */
 internal class Calls(
     private val loop: LoopContext,
@@ -128,7 +130,17 @@ internal class Calls(
         val dispatched = loop.log.append(ToolCallRecorded(call), sources = listOf(replySeq))
         state.notStarted += call.id
         loop.emit(LoopEvent.Card(call.id, tool.presentCall(call)))
-        val result = gate.check(call, tool, prompts.interaction(call.id, UserWait.None)) ?: execute(state, tool, call)
+        val outcome = gate.check(call, tool, prompts.interaction(call.id, UserWait.None)) ?: execute(state, tool, call)
+        val result =
+            if (screenLostAfterHandoff(
+                    loop.log.records(),
+                    call.id,
+                )
+            ) {
+                outcome.noted(loop.texts.screenUnknown)
+            } else {
+                outcome
+            }
         val post = postChain.proceed(PostExecuteInput(call, tool, result))
         loop.log.append(ToolResultRecorded(call.id, call.name, post.result), sources = listOf(dispatched.seq))
         loop.emit(LoopEvent.Card(call.id, tool.presentResult(call, post.result)))
@@ -224,5 +236,20 @@ internal class Calls(
             val tool: Tool,
             val call: ToolCall,
         ) : Parsed
+    }
+}
+
+/** This result with [note] after its last text (or as a text of its own). */
+internal fun ToolResult.noted(note: String): ToolResult {
+    val last = content.lastOrNull() as? Part.Text
+    return if (last ==
+        null
+    ) {
+        copy(content = content + Part.Text(note))
+    } else {
+        copy(
+            content =
+                content.dropLast(1) + Part.Text("${last.text} $note"),
+        )
     }
 }

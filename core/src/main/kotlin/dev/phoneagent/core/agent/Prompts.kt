@@ -95,6 +95,8 @@ internal class Prompts(
                 val (result, detail) =
                     if (loop.unattended) HandoffResult.UNAVAILABLE to null else handOver(id, kind)
                 loop.log.append(HandoffEnded(id, result, detail))
+                // The user may have changed the screen: look again before the model's next request.
+                freshScreen(loop, callId)
                 result
             }
 

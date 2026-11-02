@@ -101,6 +101,8 @@ public data class LoopTexts(
     val handoffUnavailable: String = "Not done: this step needs the user, but nobody can take over now.",
     /** Moving the task to the user failed. */
     val handoffFailed: String = "Not done: handing this step to the user failed.",
+    /** Appended to a handed-off call's result when the screen could not be read after the handoff. */
+    val screenUnknown: String = "The screen could not be read after the handoff: call phone_observe first.",
     /** The tool did not finish in time. */
     val timeout: String = "The tool did not finish in time and was cancelled.",
     /** Appended to [timeout] and [stoppedWhileRunning] for calls that may change the phone. */

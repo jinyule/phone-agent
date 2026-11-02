@@ -482,7 +482,7 @@ fun interface Chain<I, O> { suspend fun proceed(input: I): O }   // 不调用 pr
 **`requestError` 默认行为**（`RetryInterceptor`）：可重试的错误每个 step 最多重试 5 次；服务端给了 retry-after 就按它等，否则从 500 ms 指数退避到 10 s，一半固定一半随机。retry-after 超过 `maxRetryAfterMs`（默认 60 s，构造时校验）**不重试**，直接按不可重试失败，不会把等待缩短到上限。重试前的等待可以被 steer 打断。
 
 **`toolPreExecute` 与 PolicyEngine**：
-- 拦截器链先跑。PolicyEngine 再用 `IntentResolver` 解析调用，在**模型看过的最新屏幕**上判定。这个屏幕从日志推导：已经有 `tool/result` 的调用所记录的最近一屏；运行时自己读的屏（`callId = null`）不算。
+- 拦截器链先跑。PolicyEngine 再用 `IntentResolver` 解析调用，在**模型看过的最新屏幕**上判定。这个屏幕从日志推导：已经有 `tool/result` 的调用所记录的最近一屏（包括接管结束后 runtime 记在那个调用名下的一屏，§7.3）；批准后复核读的屏（`callId = null`）不算。`handoff/end` 之前的屏都不算：接管后读不到屏，就是 `screen = null`。
 - 链和策略的结论取更严的（Refuse > HandOff > Confirm > Allow，平手取策略的）。每个判定都写 `policy/verdict`。
 - Refuse：原因作为结果返回给模型。HandOff：转交给用户。Confirm：显示确认卡。
 - **批准后复核**：runtime 一律尝试读一张新屏 S'（最多等 `LoopConfig.recheckScreenTimeoutMs`，默认 5 s，构造时校验），读到就记成 `screen/snapshot(callId = null)`；以 `approved = card` 重新解析、判定。
@@ -712,7 +712,7 @@ TaskRuntime 循环（每个 step，对应 §3.8 的拦截点）：
   5. 有工具调用（每轮只执行第一个，其余 SKIPPED）→ 参数校验（不过就 INVALID_ARGS，不写 tool/call）
        → 写 tool/call → toolPreExecute 链，PolicyEngine 是最后一道 guard（§3.8）：
        Refuse  → 原因作为结果返回给模型
-       HandOff → SurfaceManager.handToUser → 等待 → takeBack；结果告诉模型"用户已处理，请核实"
+       HandOff → SurfaceManager.handToUser → 等待 → takeBack → 重新读屏（§7.3）；结果告诉模型"用户已处理，请核实"
        Confirm → 显示确认卡（悬浮层 / 通知 / App 内）→ 等待（15 分钟没人回按拒绝）
                  → 批准后读新屏、在新屏上复核（读不到就以 screen=null 复核；再要确认最多再问 1 次）
        Allow   ↓
@@ -726,7 +726,7 @@ TaskRuntime 循环（每个 step，对应 §3.8 的拦截点）：
 
 1. 遇到 `hand_to_user`、PolicyEngine 判为转交、或检测到防截屏页时触发；
 2. 用 `moveTask` 把任务挪到主屏，同时发通知和悬浮胶囊，提示"请处理：登录 / 验证码 / 付款"；
-3. 用户点"处理好了"后，把任务挪回后台屏，重新读屏，并告诉模型"用户已处理，请核实结果"；
+3. 用户点"处理好了"后，把任务挪回后台屏，并告诉模型"用户已处理，请核实结果"。每次接管结束（不论结局，也不论是 PolicyEngine 判的转交还是工具自己发起的）、下一次模型请求之前，runtime 都重新读屏（等待上限同复核，`LoopConfig.recheckScreenTimeoutMs`），记成这个调用名下的 `screen/snapshot`，之后的调用就在这一屏上判定。读不到时不报错：`handoff/end` 之前的屏一律不再算数，之后的调用以 `screen = null` 判定（§3.8），这个调用的结果末尾加上"读不到屏，先 phone_observe"；
 4. 同一时间只交一个 App 给用户，多个任务排队。
 
 ---

@@ -1,5 +1,6 @@
 package dev.phoneagent.core.agent
 
+import dev.phoneagent.core.ids.ToolCallId
 import dev.phoneagent.core.policy.Verdict
 import dev.phoneagent.core.ports.ConfirmCard
 import dev.phoneagent.core.ports.ConfirmResult
@@ -143,11 +144,16 @@ internal class Gate(
 }
 
 /**
- * A screen the runtime reads for itself (not for a call), recorded as `screen/snapshot` without a
- * call id; `null` when there is no screen port, the surface is unusable, or the read takes longer
- * than [LoopConfig.recheckScreenTimeoutMs].
+ * A screen the runtime reads on its own, recorded as `screen/snapshot` under [callId]: `null` for
+ * the re-check after approval (a screen only that re-check uses), the handed-off call after a
+ * handoff (so it is `PolicyContext.screen` once that call has its result). Returns `null`, recording
+ * nothing, when there is no screen port, the surface is unusable, or the read takes longer than
+ * [LoopConfig.recheckScreenTimeoutMs].
  */
-internal suspend fun freshScreen(loop: LoopContext): ScreenSnapshot? {
+internal suspend fun freshScreen(
+    loop: LoopContext,
+    callId: ToolCallId? = null,
+): ScreenSnapshot? {
     val port = loop.setup.screen ?: return null
     val screen =
         try {
@@ -156,6 +162,6 @@ internal suspend fun freshScreen(loop: LoopContext): ScreenSnapshot? {
             // An unusable surface is no screen; the policy decides what may run without one.
             null
         }
-    screen?.let { loop.log.append(ScreenObserved(callId = null, snapshot = it)) }
+    screen?.let { loop.log.append(ScreenObserved(callId, it)) }
     return screen
 }

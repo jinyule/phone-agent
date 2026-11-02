@@ -12,11 +12,15 @@ import dev.phoneagent.core.ports.ActionOutcome
 import dev.phoneagent.core.ports.ConfirmCard
 import dev.phoneagent.core.ports.ConfirmReason
 import dev.phoneagent.core.ports.ConfirmResult
+import dev.phoneagent.core.ports.HandoffKind
+import dev.phoneagent.core.ports.HandoffResult
 import dev.phoneagent.core.ports.LaunchTarget
 import dev.phoneagent.core.ports.SystemKey
 import dev.phoneagent.core.ports.UiAction
 import dev.phoneagent.core.session.ApprovalAsked
 import dev.phoneagent.core.session.ApprovalDecided
+import dev.phoneagent.core.session.HandoffEnded
+import dev.phoneagent.core.session.HandoffStarted
 import dev.phoneagent.core.session.PolicyVerdictRecorded
 import dev.phoneagent.core.session.ScreenActed
 import dev.phoneagent.core.session.ScreenLaunched
@@ -163,5 +167,29 @@ class PolicyContextsTest {
         assertEquals(true, settingsOf(log(TaskStarted(SecurityLevel.STANDARD, unattended = true))).unattended)
         val headless = assertThrows<IllegalStateException> { settingsOf(log(TurnStarted(1))) }
         assertEquals("a session log starts with task/start, not TurnStarted(turn=1)", headless.message)
+    }
+
+    @Test
+    fun `a handoff hides earlier screens until the runtime records one for the call after it`() {
+        val c1 = ToolCallId("c1")
+        val c2 = ToolCallId("c2")
+        val asked = PromptId("prompt-3")
+        val other = PromptId("prompt-5")
+        val before =
+            log(
+                TaskStarted(SecurityLevel.STANDARD, false),
+                ScreenObserved(ToolCallId("c0"), snapshotOf("s1")),
+                answered("c0"),
+                HandoffStarted(asked, HandoffKind.LOGIN, "log in", c1),
+                HandoffStarted(other, HandoffKind.LOGIN, "log in"),
+                HandoffEnded(asked, HandoffResult.DONE),
+            )
+        assertNull(latestSnapshot(before + log(answered("c1"))), "s1 is hidden")
+        assertEquals(true, screenLostAfterHandoff(before, c1))
+        assertEquals(false, screenLostAfterHandoff(before, c2), "c2 did not hand off")
+
+        val seen = before + log(ScreenObserved(c1, snapshotOf("s2")))
+        assertEquals(false, screenLostAfterHandoff(seen, c1))
+        assertEquals("s2", latestSnapshot(seen + log(answered("c1")))?.id?.value)
     }
 }
