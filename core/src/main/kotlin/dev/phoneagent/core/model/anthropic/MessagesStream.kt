@@ -37,6 +37,8 @@ import kotlinx.serialization.json.put
  *   were shown but are dropped from the reply (they must not be echoed). `providerMetadata` then
  *   names the channels in [PREVIEW_DIVERGED] and the dropped blocks in `fallback_discarded`
  *   (which blocks, not their content); a UI re-renders from the final reply.
+ * - `end_turn` with a client tool call in the reply is [StopReason.TOOL_USE] (a translating
+ *   gateway may report a call's turn as `end_turn`); `providerMetadata` keeps the wire reason.
  * - `stop_reason: refusal` throws [ModelError.Refusal] with `stop_details.category`; a stream
  *   `error` event throws its mapped error. A body that ends before `message_stop` is
  *   [ModelError.Network] (cut off, retryable); events out of order, blocks that overlap, come with
@@ -95,7 +97,8 @@ internal class MessagesStream(
         if (reason == "refusal") throw ModelError.Refusal(facts.refusalCategory?.let(redactor::text))
         val content = blocks.assemble(bind)
         val metadata = facts.metadata(reason, content, model)
-        return ChatResponse(content.parts, stopReasonOf(reason), facts.usage(), metadata)
+        val calls = content.parts.any { it is Part.ToolCall }
+        return ChatResponse(content.parts, stopReasonOf(reason, calls), facts.usage(), metadata)
     }
 
     private fun dispatch(
@@ -149,9 +152,13 @@ internal class MessagesStream(
     private companion object {
         const val DONE = "[DONE]"
 
-        fun stopReasonOf(reason: String): StopReason =
+        /** The neutral stop reason; [calls] tells whether the reply kept a client tool call. */
+        fun stopReasonOf(
+            reason: String,
+            calls: Boolean,
+        ): StopReason =
             when (reason) {
-                "end_turn" -> StopReason.END_TURN
+                "end_turn" -> if (calls) StopReason.TOOL_USE else StopReason.END_TURN
 
                 "tool_use" -> StopReason.TOOL_USE
 

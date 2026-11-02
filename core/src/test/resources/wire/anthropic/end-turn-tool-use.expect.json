@@ -1,0 +1,35 @@
+{
+  "source": "constructed: an Anthropic-compatible gateway that translates another API's stop into end_turn while the reply carries a client tool call",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "text",
+          "text": "我查一下。"
+        },
+        {
+          "type": "tool_call",
+          "id": "toolu_01EndTurn",
+          "name": "get_weather",
+          "argsJson": "{\"city\":\"巴黎\"}"
+        }
+      ],
+      "stopReason": "TOOL_USE",
+      "usage": {
+        "inputTokens": 25,
+        "outputTokens": 15
+      },
+      "providerMetadata": {
+        "id": "msg_01Test",
+        "requested_model": "claude-opus-5-5",
+        "served_model": "claude-opus-5-5",
+        "stop_reason": "end_turn"
+      }
+    },
+    "deltas": [
+      "text: 我查一下。",
+      "started: toolu_01EndTurn get_weather",
+      "args: toolu_01EndTurn {\"city\":\"巴黎\"}"
+    ]
+  }
+}

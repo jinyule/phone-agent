@@ -129,6 +129,7 @@
     - 在它之后的，或者整条回复根本没有 `fallback` 块，报 `BadResponse`。
   - 保留下来的 thinking 必须有非空的 signature，redacted_thinking 必须有 `data`，否则报 `BadResponse`；被放弃的块不回传。
   - 终止事件缺失或无效时报 `BadResponse`；在 `message_stop` 之前断流报 `Network`。
+  - `end_turn` 而回复里有保留下来的客户端调用时，报 `StopReason.TOOL_USE`：转换网关可能把调用那一轮报成 `end_turn`，和 OpenAI 适配器"带调用就是 TOOL_USE"一致。`providerMetadata.stop_reason` 保留线路上的原值。
   - `refusal` 抛出 `ModelError.Refusal(category)`，category 先脱敏。
 - **工具参数**：保留原始 `input_json_delta` 文本，适配器不解析。按 schema 校验放在边界，即构造工具调用的地方（WP02 的 `ToolCall` 契约）。适配器报告 `MAX_TOKENS` 或 `Refusal`，主循环据此不执行工具。
 - **错误映射**：

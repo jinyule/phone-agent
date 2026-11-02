@@ -264,6 +264,7 @@ data class WireProfile(
       - 日志里的 `argsJson` 保留原文，`{}` 只出现在线路映射里，所以不破坏"模型可见 ⟺ 已记录"。
       - 不造 `{"_raw": …}` 这类字段，免得模型模仿着用。
     - `max_tokens` 和 `model_context_window_exceeded` 报成 `StopReason.MAX_TOKENS`，`refusal` 报成 `ModelError.Refusal`。主循环据此不执行工具。
+    - `end_turn` 而回复里有保留下来的客户端调用时，报 `StopReason.TOOL_USE`（转换网关可能把调用那一轮报成 `end_turn`；和 OpenAI 适配器一致）。`providerMetadata.stop_reason` 保留原值。
 - **缓存**：最多 4 个 `cache_control` 断点。建议放在：工具清单末尾、system 末尾、历史里最后一个稳定点。用 `usage.cache_read_input_tokens` 验证是否命中，结果进 Token 统计。
 - **输出与采样**：
   - 流式请求的 `max_tokens` 给足（约 64K），避免话说到一半被截断。
