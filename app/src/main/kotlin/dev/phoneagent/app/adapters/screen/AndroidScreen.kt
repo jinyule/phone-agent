@@ -9,6 +9,7 @@ import dev.phoneagent.core.ports.ScreenPort
 import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.ports.ScreenUnavailableException
 import dev.phoneagent.core.ports.SnapshotAnalyzer
+import dev.phoneagent.core.ports.SnapshotDetail
 import dev.phoneagent.core.ports.SnapshotOptions
 import dev.phoneagent.core.ports.SurfaceRef
 import dev.phoneagent.core.ports.Target
@@ -23,10 +24,12 @@ import java.util.concurrent.atomic.AtomicLong
  * [surface]'s display id; M1 verifies it on the main display.
  *
  * - snapshots read the display's windows ([ScreenReader]); ids come from [Options.snapshotIds],
- *   refs are `e1…` in reading order, quality and fingerprint come from the [SnapshotAnalyzer];
- * - actions re-read the tree first and find ref targets again by identity ([RefMatcher]); a target
- *   that no longer matches yields `StaleRef` without touching the device;
- * - after an action the display settles on accessibility events ([ChangeWatch]) and is read back;
+ *   refs are carried from screen to screen ([RefCarrier]), quality and fingerprint come from the
+ *   [SnapshotAnalyzer];
+ * - actions re-read the tree first and find ref targets again with the same identity ([RefMatcher]);
+ *   a target that no longer matches yields `StaleRef` without touching the device;
+ * - after an action the display settles on accessibility events ([ChangeWatch]) and is read back
+ *   at the detail of the screen the action was based on;
  * - nothing here touches this app's own windows (`Refused`).
  *
  * Calls are serialized by the caller (ScreenPort contract).
@@ -86,16 +89,16 @@ internal class AndroidScreen(
         withContext(options.io) {
             val host = host()
             val geometry = geometry(host)
-            val baseline = parts.observer.baseline(host, geometry)
             val planned = on?.let(parts.observer.history::get)
+            // The diff is against the screen the action was planned on, else the latest one.
+            val base = planned ?: parts.observer.history.newest()
+            val baseline = parts.observer.baseline(host, geometry, base?.detail ?: SnapshotDetail.BRIEF)
             if (action is UiAction.SetWheel) {
                 Outcomes.failed("set_wheel is not supported on this screen yet")
             } else {
                 when (val resolved = Aims.resolve(targetOf(action), on, planned, baseline.read, geometry)) {
                     is Resolution.Aimed -> {
-                        // The diff is against the screen the action was planned on, else the latest one.
-                        val compareWith = planned ?: parts.observer.history.newest()
-                        ActionRun(parts, host, geometry, baseline, compareWith).perform(action, resolved.aim)
+                        ActionRun(parts, host, geometry, baseline, base?.snapshot).perform(action, resolved.aim)
                     }
 
                     Resolution.Stale -> {
@@ -112,7 +115,7 @@ internal class AndroidScreen(
     override suspend fun launch(target: LaunchTarget): ActionOutcome =
         withContext(options.io) {
             val host = host()
-            LaunchRun(parts, host, geometry(host), compareWith = parts.observer.history.newest()).launch(target)
+            LaunchRun(parts, host, geometry(host), base = parts.observer.history.newest()).launch(target)
         }
 
     override suspend fun frame(

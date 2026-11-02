@@ -2,33 +2,53 @@ package dev.phoneagent.app.adapters.screen
 
 import dev.phoneagent.core.ports.Bounds
 import dev.phoneagent.core.ports.ElementRef
-import dev.phoneagent.core.ports.ElementRole
-import dev.phoneagent.core.ports.UiElement
 
 /**
- * Keeps refs stable from one screen to the next, so the model can keep using `@e12` and the diff of
- * two screens shows only what changed (WP06 counts a changed ref as a change).
+ * One element of a screen the port showed, as [RefCarrier] remembers it: every visible node of
+ * the read, whatever the detail shown.
+ */
+internal class TreeEntry(
+    val ref: ElementRef,
+    val identity: ElementIdentity,
+    val bounds: Bounds,
+    val parent: ElementRef?,
+)
+
+/**
+ * Keeps refs stable from one screen to the next, so the model can keep using `@e12` and a diff
+ * that pairs screens by ref (WP06) shows only what changed: a ref that appears in both screens
+ * names the same element.
  *
- * An element of the fresh read takes the ref of an element of the previous screen with the same
- * window, role, name and view id: first among those with the same bounds too (so identical rows
- * that did not move keep theirs), then in reading order (so moved and scrolled elements keep
- * theirs). Every other element gets a new number above all numbers handed out before, so a ref
- * never comes back for a different element after it disappeared. Parent refs follow.
+ * An element keeps its ref when the port can tell it is the same element: same [ElementIdentity]
+ * (window, role, view id, name, row) under the same parent, and that combination occurs exactly
+ * once in each screen; among several, only the one at the same place in both screens keeps its
+ * ref (identical rows that did not move). Parents are paired first, so an element whose parent
+ * got a new ref gets one too. Anything ambiguous gets a new number above all numbers handed out
+ * before, and its old ref is void: a ref never comes back for a different element.
+ *
+ * Refs live on every visible node, so switching between BRIEF and FULL keeps them.
  */
 internal object RefCarrier {
-    /** The renumbered [elements]; [lastUsed] is the highest number handed out so far. */
+    /**
+     * The [refs] of a read, one per element, the [tree] to remember for the next read, and
+     * [lastUsed], the highest number handed out so far.
+     */
     class Carried(
-        val elements: List<UiElement>,
+        val refs: List<ElementRef>,
+        val tree: List<TreeEntry>,
         val lastUsed: Int,
     )
 
     private const val PREFIX = "e"
 
+    /** A fresh node whose parent got no ref from [previous]: no old element can have it as parent. */
+    private data class Unpaired(
+        val index: Int,
+    )
+
     private data class Loose(
-        val window: Int?,
-        val role: ElementRole,
-        val name: String?,
-        val resourceId: String?,
+        val identity: ElementIdentity,
+        val parent: Any?,
     )
 
     private data class Exact(
@@ -37,53 +57,60 @@ internal object RefCarrier {
     )
 
     /**
-     * Renumbers [fresh] (numbered `e1…` by the reader) against [previous], the elements of the
-     * last screen of this port (`null` for the first). [lastUsed] is the highest number handed out
-     * before.
+     * Refs for [fresh] (one read, parents before children) carried from [previous], the elements
+     * of the last screen of this port (`null` for the first). [lastUsed] is the highest number
+     * handed out before.
      */
     fun carry(
-        previous: List<UiElement>?,
-        fresh: List<UiElement>,
+        previous: List<TreeEntry>?,
+        fresh: List<ReadElement>,
         lastUsed: Int,
     ): Carried {
         val old = previous.orEmpty()
-        val taken = HashSet<ElementRef>()
-        val assigned = arrayOfNulls<ElementRef>(fresh.size)
-        matchPass(old, fresh, assigned, taken) { Exact(looseOf(it), it.bounds) }
-        matchPass(old, fresh, assigned, taken, ::looseOf)
+        val paired = pair(old, fresh)
         var next = maxOf(lastUsed, old.maxOfOrNull(::numberOf) ?: 0)
-        val final = fresh.indices.map { i -> assigned[i] ?: ElementRef("$PREFIX${++next}") }
-        val byProvisional = fresh.indices.associate { fresh[it].ref to final[it] }
-        val elements =
-            fresh.mapIndexed { i, element ->
-                element.copy(ref = final[i], parent = element.parent?.let(byProvisional::get))
+        val refs = paired.map { it ?: ElementRef("$PREFIX${++next}") }
+        val tree =
+            fresh.mapIndexed { i, read ->
+                TreeEntry(refs[i], read.identity, read.element.bounds, read.parent?.let(refs::get))
             }
-        return Carried(elements, next)
+        return Carried(refs, tree, next)
     }
 
-    /** Gives each unassigned fresh element the first untaken old ref with the same [key]. */
-    private fun <K> matchPass(
-        old: List<UiElement>,
-        fresh: List<UiElement>,
-        assigned: Array<ElementRef?>,
-        taken: MutableSet<ElementRef>,
-        key: (UiElement) -> K,
-    ) {
-        val candidates = old.filter { it.ref !in taken }.groupBy(key) { it.ref }.mapValues { ArrayDeque(it.value) }
-        fresh.forEachIndexed { i, element ->
-            if (assigned[i] == null) {
-                candidates[key(element)]?.removeFirstOrNull()?.let { ref ->
-                    assigned[i] = ref
-                    taken += ref
-                }
+    /** For each element of [fresh], the ref of the element of [previous] it is, or `null` when it cannot tell. */
+    fun pair(
+        previous: List<TreeEntry>,
+        fresh: List<ReadElement>,
+    ): List<ElementRef?> {
+        val exactOld = previous.groupBy { Exact(Loose(it.identity, it.parent), it.bounds) }
+        val looseOld = previous.groupBy { Loose(it.identity, it.parent) }
+        val paired = arrayOfNulls<ElementRef>(fresh.size)
+        val looseOf = { i: Int -> Loose(fresh[i].identity, fresh[i].parent?.let { paired[it] ?: Unpaired(it) }) }
+        for (level in fresh.indices
+            .groupBy { fresh[it].depth }
+            .toSortedMap()
+            .values) {
+            val loose = level.associateWith(looseOf)
+            val exact = level.associateWith { Exact(loose.getValue(it), fresh[it].element.bounds) }
+            val looseCount = loose.values.groupingBy { it }.eachCount()
+            val exactCount = exact.values.groupingBy { it }.eachCount()
+            for (i in level) {
+                paired[i] =
+                    sole(exactOld[exact.getValue(i)], exactCount[exact.getValue(i)])
+                        ?: sole(looseOld[loose.getValue(i)], looseCount[loose.getValue(i)])
             }
         }
+        return paired.toList()
     }
 
-    private fun looseOf(element: UiElement) = Loose(element.window, element.role, element.name, element.resourceId)
+    /** The ref of the only old element, when it is also the only fresh one. */
+    private fun sole(
+        old: List<TreeEntry>?,
+        freshCount: Int?,
+    ): ElementRef? = old?.singleOrNull()?.ref?.takeIf { freshCount == 1 }
 
-    private fun numberOf(element: UiElement): Int =
-        element.ref.value
+    private fun numberOf(entry: TreeEntry): Int =
+        entry.ref.value
             .removePrefix(PREFIX)
             .toIntOrNull() ?: 0
 }

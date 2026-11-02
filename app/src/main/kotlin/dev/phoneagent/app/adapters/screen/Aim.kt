@@ -5,7 +5,6 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import dev.phoneagent.core.ids.SnapshotId
 import dev.phoneagent.core.ports.ElementRole
-import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.ports.Target
 
 /** What an action is aimed at once its target was resolved against a fresh read. */
@@ -50,7 +49,7 @@ internal object Aims {
     fun resolve(
         target: Target?,
         on: SnapshotId?,
-        planned: ScreenSnapshot?,
+        planned: Observed?,
         read: TreeRead,
         geometry: DisplayGeometry,
     ): Resolution =
@@ -72,7 +71,7 @@ internal object Aims {
     private fun resolveRef(
         target: Target.Ref,
         on: SnapshotId?,
-        planned: ScreenSnapshot?,
+        planned: Observed?,
         read: TreeRead,
     ): Resolution =
         when {
@@ -85,7 +84,7 @@ internal object Aims {
             }
 
             else -> {
-                when (val match = RefMatcher.match(planned, target.ref, read.elements)) {
+                when (val match = RefMatcher.match(planned, target.ref, read)) {
                     is RefMatcher.Match.Found -> Resolution.Aimed(Aim.AtElement(match.element))
                     RefMatcher.Match.Stale -> Resolution.Stale
                     RefMatcher.Match.UnknownRef -> Resolution.Invalid("screen $on has no element @${target.ref}")

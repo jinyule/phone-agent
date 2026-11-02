@@ -25,10 +25,10 @@ internal class ScreenObserver(
         geometry: DisplayGeometry,
         detail: SnapshotDetail,
     ): ScreenSnapshot {
-        val read = ScreenReader.read(host.windowsOn(surface.displayId), geometry, detail)
-        val carried = RefCarrier.carry(history.newest()?.elements, read.elements.map { it.element }, lastRef)
+        val read = ScreenReader.read(host.windowsOn(surface.displayId), geometry)
+        val carried = RefCarrier.carry(history.newest()?.tree, read.elements, lastRef)
         lastRef = carried.lastUsed
-        val elements = carried.elements
+        val elements = read.project(carried.refs, detail)
         val activity = activityOf(host, read.pkg)
         val flags = flagsOf(read)
         val snapshot =
@@ -43,18 +43,22 @@ internal class ScreenObserver(
                 flags = flags,
                 fingerprint = analyzer.fingerprint(read.pkg, activity, elements, ocr = null),
             )
-        history.put(snapshot)
+        history.put(Observed(snapshot, detail, carried.tree))
         return snapshot
     }
 
-    /** Reads the display before an action, keeping what the effect is judged against. Not registered. */
+    /**
+     * Reads the display before an action, keeping what the effect is judged against: the screen
+     * as [detail] shows it, which is also the detail of the read after the action. Not registered.
+     */
     fun baseline(
         host: ScreenHost,
         geometry: DisplayGeometry,
+        detail: SnapshotDetail,
     ): Baseline {
-        val read = ScreenReader.read(host.windowsOn(surface.displayId), geometry, SnapshotDetail.BRIEF)
-        val elements = read.elements.map { it.element }
-        return Baseline(read, analyzer.fingerprint(read.pkg, activityOf(host, read.pkg), elements, ocr = null))
+        val read = ScreenReader.read(host.windowsOn(surface.displayId), geometry)
+        val elements = read.provisional(detail)
+        return Baseline(read, detail, analyzer.fingerprint(read.pkg, activityOf(host, read.pkg), elements, ocr = null))
     }
 
     private fun flagsOf(read: TreeRead): Set<ScreenFlag> =
@@ -79,9 +83,13 @@ internal class ScreenObserver(
         }
 }
 
-/** The display just before an action: the fresh [read] and its [fingerprint]. */
+/**
+ * The display just before an action: the fresh [read] and the [fingerprint] of its projection at
+ * [detail] (refs left out by the analyzer).
+ */
 internal class Baseline(
     val read: TreeRead,
+    val detail: SnapshotDetail,
     val fingerprint: String,
 ) {
     /** Effect of the action that led from this baseline to [after]. */

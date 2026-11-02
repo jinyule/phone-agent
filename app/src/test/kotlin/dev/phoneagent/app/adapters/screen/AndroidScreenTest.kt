@@ -314,7 +314,7 @@ class AndroidScreenTest {
             val forgotten = screen.act(UiAction.Tap(planned.ref("OK")), SnapshotId("s99"))
             assertEquals(ActionOutcome.Status.StaleRef, forgotten.status)
             assertEquals(
-                ActionOutcome.Status.Failed("element @e1 needs the screen id it came from"),
+                ActionOutcome.Status.Failed("element @${planned.ref("OK").ref.value} needs the screen id it came from"),
                 screen.act(UiAction.Tap(planned.ref("OK")), on = null).status,
             )
             assertEquals(

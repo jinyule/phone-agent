@@ -262,11 +262,12 @@ interface SnapshotAnalyzer {            // core.ports；core.screen 实现，Scr
     fun quality(elements: List<UiElement>, surface: SurfaceRef, flags: Set<ScreenFlag>): TreeQuality
     fun diff(before: ScreenSnapshot, after: ScreenSnapshot): ScreenDiff
 }
-interface AppCatalog { suspend fun apps(): List<AppEntry> }   // AppEntry(packageName, label, launchable)；app 实现，除取消外不抛异常
+interface AppCatalog { suspend fun apps(): List<AppEntry> }   // AppEntry(packageName, label, launchable)；app 实现，除取消外不抛异常；列全部 App 靠 QUERY_ALL_PACKAGES（侧载分发，不受 Play 政策限制）
 ```
 
 实现上的几条要点：
-- **防过期引用**：动作执行前重新抓一次树，按指纹（窗口 | 角色 | 名字 | 边界）找回目标元素，找不到就返回 `STALE_REF`（参考 dsh-Go）。
+- **引用延续**：一次读屏保留全部可见节点，BRIEF / FULL 只是它的投影；ref 挂在全树上，切换详略不换号，所以 BRIEF 里的编号可以不连续。元素身份 = 窗口 | 角色 | 视图 id | 名字 | 所在行（最内层列表项子树里的前 3 个标签），不含位置、值和状态。下一屏逐层配对，父节点先配：同身份、同父、同边界且两屏各只有一个 → 沿用旧号；否则同身份、同父且两屏各只有一个 → 沿用；父节点换了号，子节点也换号；其余一律发新号（单调递增，旧号作废，不复用）。完全相同的行没挪动时保留原号；完全相同的行在原位被替换，没有可区分的信息，认不出来。
+- **防过期引用**：动作执行前重新抓一次树，用上面同一个配对函数从计划时那一屏找回目标，并要求边界和模型看到时一致；配不上、有歧义或边界变了，就返回 `STALE_REF`，不碰设备（思路参考 dsh-Go）。
 - **等界面稳定靠事件**：等到第一个无障碍事件后，再等 300ms 静默，总共最多 3s；不用固定 sleep（参考 dsh-Go 的 `EventClock`）。
 - **输入要回读**：依次尝试 SET_TEXT → 无障碍输入连接 → 自带无键盘 IME → 剪贴板粘贴（用后还原）。每一级都回读字段，字段一旦变化就停，防止重复输入（参考 DSH-Android 的 `TextInput`）。
 - **点击逐级回退**：可点击祖先的 `ACTION_CLICK` → 带 `setDisplayId` 的无障碍手势 → 助手直接注入触摸。

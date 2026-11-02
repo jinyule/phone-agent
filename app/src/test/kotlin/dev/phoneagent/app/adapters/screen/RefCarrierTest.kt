@@ -1,121 +1,165 @@
 package dev.phoneagent.app.adapters.screen
 
-import dev.phoneagent.core.ports.Bounds
+import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.phoneagent.core.ports.ElementRef
 import dev.phoneagent.core.ports.ElementRole
-import dev.phoneagent.core.ports.UiElement
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
 
 /** Refs carried from one screen to the next (WP06: the diff counts a changed ref as a change). */
+@RunWith(AndroidJUnit4::class)
 class RefCarrierTest {
-    /** Elements as the reader numbers them: e1… in reading order. */
-    private fun read(vararg elements: Triple<String, Int, String?>): List<UiElement> =
-        elements.mapIndexed { index, (name, top, parent) ->
-            UiElement(
-                ref = ElementRef("e${index + 1}"),
-                role = if (parent == null) ElementRole.LIST else ElementRole.BUTTON,
-                name = name,
-                bounds = Bounds(0, top, 999, top + 9),
-                parent = parent?.let(::ElementRef),
-                window = 1,
-            )
+    private fun RefCarrier.Carried.refOf(
+        read: TreeBuilder,
+        name: String,
+    ): String = refs[read.elements.indexOfFirst { it.element.name == name }].value
+
+    private fun first(read: TreeBuilder): RefCarrier.Carried =
+        RefCarrier.carry(previous = null, read.elements, lastUsed = 0)
+
+    private fun RefCarrier.Carried.then(read: TreeBuilder): RefCarrier.Carried =
+        RefCarrier.carry(tree, read.elements, lastUsed)
+
+    /** A feed whose rows each have a "Like", told apart by the row's person. */
+    private fun feed(vararg rows: Pair<String, Int>): TreeBuilder =
+        TreeBuilder().apply {
+            val list = add("Feed", top = 0)
+            rows.forEach { (person, top) -> add("Like", top, parent = list, row = listOf(person, "Like")) }
         }
 
-    private fun row(
-        name: String,
-        top: Int,
-    ) = Triple(name, top, "e1")
-
-    private val list = Triple("Chats", 0, null)
-
-    private fun List<UiElement>.refOf(name: String): String = single { it.name == name }.ref.value
+    /** Top-level "Like" buttons outside any row. */
+    private fun likes(vararg tops: Int): TreeBuilder =
+        TreeBuilder().apply { tops.forEach { add("Like", it, role = ElementRole.BUTTON) } }
 
     @Test
     fun theFirstScreenIsNumberedInReadingOrder() {
-        val carried = RefCarrier.carry(previous = null, read(list, row("Ada", 100), row("Bob", 200)), lastUsed = 0)
+        val carried = first(chats("Ada" to 100, "Bob" to 200))
 
-        assertEquals(listOf("e1", "e2", "e3"), carried.elements.map { it.ref.value })
+        assertEquals(listOf("e1", "e2", "e3"), carried.refs.map { it.value })
         assertEquals(3, carried.lastUsed)
+        assertEquals(listOf(null, ElementRef("e1"), ElementRef("e1")), carried.tree.map { it.parent })
     }
 
     @Test
     fun theSameScreenKeepsItsRefs() {
-        val first = RefCarrier.carry(null, read(list, row("Ada", 100), row("Bob", 200)), 0)
+        val first = first(chats("Ada" to 100, "Bob" to 200))
 
-        val again = RefCarrier.carry(first.elements, read(list, row("Ada", 100), row("Bob", 200)), first.lastUsed)
+        val again = first.then(chats("Ada" to 100, "Bob" to 200))
 
-        assertEquals(first.elements, again.elements)
+        assertEquals(first.refs, again.refs)
         assertEquals(3, again.lastUsed)
     }
 
     @Test
     fun anInsertedElementGetsANewRefAndTheOthersKeepTheirs() {
-        val first = RefCarrier.carry(null, read(list, row("Ada", 100), row("Bob", 200)), 0)
+        val next = chats("Cy" to 100, "Ada" to 200, "Bob" to 300)
 
-        val second = RefCarrier.carry(first.elements, read(list, row("Cy", 100), row("Ada", 200), row("Bob", 300)), 3)
+        val second = first(chats("Ada" to 100, "Bob" to 200)).then(next)
 
-        assertEquals("e2", second.elements.refOf("Ada"))
-        assertEquals("e3", second.elements.refOf("Bob"))
-        assertEquals("e4", second.elements.refOf("Cy"))
+        assertEquals("e2", second.refOf(next, "Ada"))
+        assertEquals("e3", second.refOf(next, "Bob"))
+        assertEquals("e4", second.refOf(next, "Cy"))
         assertEquals(4, second.lastUsed)
     }
 
     @Test
     fun scrolledElementsKeepTheirRefsAndVanishedRefsAreNotReused() {
-        val first = RefCarrier.carry(null, read(list, row("Ada", 100), row("Bob", 200)), 0)
-
         // Scrolled by one row: Ada is gone, Bob moved up, Cy is new.
-        val second = RefCarrier.carry(first.elements, read(list, row("Bob", 100), row("Cy", 200)), 3)
+        val next = chats("Bob" to 100, "Cy" to 200)
 
-        assertEquals("e3", second.elements.refOf("Bob"))
-        assertEquals("e4", second.elements.refOf("Cy"))
-        assertTrue(second.elements.none { it.ref.value == "e2" })
+        val second = first(chats("Ada" to 100, "Bob" to 200)).then(next)
+
+        assertEquals("e3", second.refOf(next, "Bob"))
+        assertEquals("e4", second.refOf(next, "Cy"))
+        assertTrue(second.refs.none { it.value == "e2" })
     }
 
     @Test
-    fun parentsFollowTheirElements() {
-        val first = RefCarrier.carry(null, read(list, row("Ada", 100)), 0)
-        val header = Triple("Archived", 0, null)
-
+    fun parentsArePairedBeforeTheirChildren() {
         // A new container is read first; the list and its row come after it.
-        val second = RefCarrier.carry(first.elements, read(header, list, Triple("Ada", 100, "e2")), 2)
+        val next =
+            TreeBuilder().apply {
+                add("Archived", top = 0)
+                val list = add("Chats", top = 0)
+                add("Ada", top = 100, parent = list)
+            }
 
-        assertEquals("e3", second.elements.refOf("Archived"))
-        assertEquals(ElementRef("e1"), second.elements.single { it.name == "Ada" }.parent)
+        val second = first(chats("Ada" to 100)).then(next)
+
+        assertEquals(listOf("e3", "e1", "e2"), second.refs.map { it.value })
+        assertEquals(ElementRef("e1"), second.tree[2].parent)
+    }
+
+    @Test
+    fun aChildOfAParentThatGotANewRefGetsOneToo() {
+        // The row Ada was replaced by Bob; their buttons look alike, but are not the same element.
+        val before = TreeBuilder().apply { add("Delete", top = 100, parent = add("Ada", top = 100)) }
+        val after = TreeBuilder().apply { add("Delete", top = 100, parent = add("Bob", top = 100)) }
+
+        val second = first(before).then(after)
+
+        assertEquals(listOf("e3", "e4"), second.refs.map { it.value })
+    }
+
+    @Test
+    fun theViewIdTellsApartElementsThatLookAlike() {
+        val before = TreeBuilder().apply { add(null, top = 100, role = ElementRole.BUTTON, resourceId = "save") }
+        val after = TreeBuilder().apply { add(null, top = 100, role = ElementRole.BUTTON, resourceId = "delete") }
+
+        assertNotEquals(first(before).refs, first(before).then(after).refs)
+    }
+
+    @Test
+    fun theRowTellsApartControlsEveryRowHas() {
+        // Scrolled by one row: Bob's Like moved up into Ada's place.
+        val second = first(feed("Ada" to 100, "Bob" to 200)).then(feed("Bob" to 100, "Cy" to 200))
+
+        assertEquals(listOf("e1", "e3", "e4"), second.refs.map { it.value })
+    }
+
+    @Test
+    fun alikeElementsThatMovedAllGetNewRefs() {
+        // Two identical Likes outside any row both moved: nothing tells which is which.
+        val second = first(likes(100, 200)).then(likes(150, 250))
+
+        assertEquals(listOf("e3", "e4"), second.refs.map { it.value })
     }
 
     @Test
     fun identicalElementsMatchTheUnmovedOnesFirst() {
-        val first = RefCarrier.carry(null, read(list, row("Like", 100), row("Like", 200)), 0)
-
         // The first "Like" disappeared; the second did not move.
-        val second = RefCarrier.carry(first.elements, read(list, row("Like", 200)), 3)
+        val next = chats("Like" to 200)
 
-        assertEquals(
-            "e3",
-            second.elements
-                .single { it.name == "Like" }
-                .ref.value,
-        )
+        val second = first(chats("Like" to 100, "Like" to 200)).then(next)
+
+        assertEquals("e3", second.refs[1].value)
     }
 
     @Test
     fun anotherWindowStartsFresh() {
-        val first = RefCarrier.carry(null, read(list, row("Ada", 100)), 0)
-        val dialog = read(list, row("Ada", 100)).map { it.copy(window = 2) }
+        val dialog =
+            TreeBuilder().apply {
+                add(
+                    "Ada",
+                    top = 100,
+                    parent = add("Chats", top = 0, window = 2),
+                    window = 2,
+                )
+            }
 
-        val second = RefCarrier.carry(first.elements, dialog, 2)
+        val second = first(chats("Ada" to 100)).then(dialog)
 
-        assertEquals(listOf("e3", "e4"), second.elements.map { it.ref.value })
-        assertEquals(ElementRef("e3"), second.elements[1].parent)
+        assertEquals(listOf("e3", "e4"), second.refs.map { it.value })
+        assertEquals(ElementRef("e3"), second.tree[1].parent)
     }
 
     @Test
     fun newRefsStayAboveEverythingHandedOutBefore() {
-        val carried = RefCarrier.carry(previous = null, read(list), lastUsed = 41)
+        val carried = RefCarrier.carry(previous = null, chats().elements, lastUsed = 41)
 
-        assertEquals(listOf("e42"), carried.elements.map { it.ref.value })
+        assertEquals(listOf("e42"), carried.refs.map { it.value })
     }
 }

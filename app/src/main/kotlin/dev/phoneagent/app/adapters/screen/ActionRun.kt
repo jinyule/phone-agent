@@ -4,7 +4,6 @@ import android.view.accessibility.AccessibilityNodeInfo
 import dev.phoneagent.core.ports.ActionOutcome
 import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.ports.SnapshotAnalyzer
-import dev.phoneagent.core.ports.SnapshotDetail
 import dev.phoneagent.core.ports.SurfaceRef
 import dev.phoneagent.core.ports.SystemKey
 import dev.phoneagent.core.ports.UiAction
@@ -21,9 +20,9 @@ internal class PortParts(
 
 /**
  * One action against one fresh read ([baseline]) of the display: perform it through the fallback
- * chains, let the display settle, read it back, and judge the effect. The outcome's diff compares
- * [compareWith] (the screen the action was planned on, else the latest one; `null` before any)
- * with the screen after.
+ * chains, let the display settle, read it back at the baseline's detail, and judge the effect.
+ * The outcome's diff compares [compareWith] (the screen the action is based on, `null` when there
+ * is none) with the screen after.
  */
 internal class ActionRun(
     private val parts: PortParts,
@@ -221,7 +220,7 @@ internal class ActionRun(
         settleMs: Long,
     ): ActionOutcome {
         watch.awaitSettled(if (result is Actuator.Result.Done) settleMs else timings.quietMs)
-        val after = parts.observer.observe(host, geometry, SnapshotDetail.BRIEF)
+        val after = parts.observer.observe(host, geometry, baseline.detail)
         val diff = compareWith?.let { parts.analyzer.diff(it, after) }
         return when (result) {
             is Actuator.Result.Done -> {

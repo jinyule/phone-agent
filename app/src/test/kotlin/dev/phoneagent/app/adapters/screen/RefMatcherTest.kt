@@ -1,14 +1,11 @@
 package dev.phoneagent.app.adapters.screen
 
-import android.graphics.Rect
-import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.phoneagent.core.ids.SnapshotId
-import dev.phoneagent.core.ports.Bounds
 import dev.phoneagent.core.ports.ElementRef
 import dev.phoneagent.core.ports.ElementRole
-import dev.phoneagent.core.ports.ElementState
 import dev.phoneagent.core.ports.ScreenSnapshot
+import dev.phoneagent.core.ports.SnapshotDetail
 import dev.phoneagent.core.ports.SurfaceKind
 import dev.phoneagent.core.ports.SurfaceRef
 import dev.phoneagent.core.ports.TreeQuality
@@ -22,97 +19,124 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class RefMatcherTest {
-    private fun element(
-        ref: String,
-        name: String?,
-        top: Int = 100,
-        role: ElementRole = ElementRole.BUTTON,
-        window: Int? = 1,
-    ) = UiElement(
-        ref = ElementRef(ref),
-        role = role,
-        name = name,
-        bounds = Bounds(0, top, 999, top + 50),
-        window = window,
+    /** [read] as the port showed it: refs from [RefCarrier], every element shown, unless [shown] says otherwise. */
+    private fun planned(
+        read: TreeBuilder,
+        shown: (ReadElement) -> Boolean = { true },
+    ): Observed {
+        val carried = RefCarrier.carry(null, read.elements, lastUsed = 0)
+        val elements =
+            read.elements.indices
+                .filter {
+                    shown(
+                        read.elements[it],
+                    )
+                }.map { read.elements[it].element.copy(ref = carried.refs[it]) }
+        return Observed(snapshot(SnapshotId("s1"), elements), SnapshotDetail.BRIEF, carried.tree)
+    }
+
+    private fun snapshot(
+        id: SnapshotId,
+        elements: List<UiElement> = emptyList(),
+    ) = ScreenSnapshot(
+        id = id,
+        surface = SurfaceRef(0, SurfaceKind.MAIN),
+        pkg = APP,
+        activity = null,
+        elements = elements,
+        ocr = null,
+        quality = TreeQuality.GOOD,
+        flags = emptySet(),
+        fingerprint = "f",
     )
 
-    private fun snapshot(vararg elements: UiElement) =
-        ScreenSnapshot(
-            id = SnapshotId("s1"),
-            surface = SurfaceRef(0, SurfaceKind.MAIN),
-            pkg = APP,
-            activity = null,
-            elements = elements.toList(),
-            ocr = null,
-            quality = TreeQuality.GOOD,
-            flags = emptySet(),
-            fingerprint = "f",
-        )
-
-    private fun fresh(vararg elements: UiElement): List<ReadElement> =
-        elements.map { ReadElement(it, AccessibilityNodeInfo(), Rect(0, 0, 10, 10), APP) }
+    private fun match(
+        planned: Observed,
+        ref: String,
+        fresh: TreeBuilder,
+    ): RefMatcher.Match = RefMatcher.match(planned, ElementRef(ref), fresh.read())
 
     @Test
-    fun findsTheSameElementUnderANewRef() {
-        val planned = snapshot(element("e1", "Title", top = 0), element("e2", "OK"))
-        val read = fresh(element("e1", "Banner", top = 500), element("e2", "Title", top = 0), element("e3", "OK"))
+    fun findsTheSameElementAtANewIndex() {
+        val planned = planned(chats("Ada" to 100, "Bob" to 200))
+        val fresh =
+            TreeBuilder().apply {
+                add("Banner", top = 500)
+                val list = add("Chats", top = 0)
+                add("Ada", top = 100, parent = list)
+                add("Bob", top = 200, parent = list)
+            }
 
-        val match = RefMatcher.match(planned, ElementRef("e2"), read)
+        val match = match(planned, "e3", fresh)
 
-        assertSame(read[2], (match as RefMatcher.Match.Found).element)
+        assertSame(fresh.elements.last(), (match as RefMatcher.Match.Found).element)
     }
 
     @Test
     fun valuesAndStatesMayChange() {
-        val planned = snapshot(element("e1", "Wi-Fi", role = ElementRole.SWITCH))
-        val toggled = element("e1", "Wi-Fi", role = ElementRole.SWITCH).copy(states = setOf(ElementState.CHECKED))
-        val typed = element("e2", "Name", role = ElementRole.INPUT).copy(value = "Ada")
+        val switch = TreeBuilder().apply { add("Wi-Fi", top = 100, role = ElementRole.SWITCH) }
+        val planned = planned(switch)
+        val toggled = TreeBuilder().apply { add("Wi-Fi", top = 100, role = ElementRole.SWITCH, value = "on") }
 
-        assertEquals(RefMatcher.Match.Found::class, RefMatcher.match(planned, ElementRef("e1"), fresh(toggled))::class)
-        val field = snapshot(element("e2", "Name", role = ElementRole.INPUT).copy(value = ""))
-        assertEquals(RefMatcher.Match.Found::class, RefMatcher.match(field, ElementRef("e2"), fresh(typed))::class)
+        assertEquals(RefMatcher.Match.Found::class, match(planned, "e1", toggled)::class)
     }
 
     @Test
-    fun aMovedRenamedOrReWindowedElementIsStale() {
-        val planned = snapshot(element("e1", "OK"))
-        val matchOk = { now: List<ReadElement> -> RefMatcher.match(planned, ElementRef("e1"), now) }
+    fun aMovedRenamedReplacedOrReWindowedElementIsStale() {
+        val planned = planned(chats("Ada" to 100))
+        val matchAda = { fresh: TreeBuilder -> match(planned, "e2", fresh) }
 
-        assertEquals(RefMatcher.Match.Found::class, matchOk(fresh(element("e7", "OK")))::class)
-        assertEquals(RefMatcher.Match.Stale, matchOk(fresh(element("e1", "OK", top = 101))))
-        assertEquals(RefMatcher.Match.Stale, matchOk(fresh(element("e1", "Cancel"))))
-        assertEquals(RefMatcher.Match.Stale, matchOk(fresh(element("e1", "OK", window = 2))))
-        assertEquals(RefMatcher.Match.Stale, matchOk(fresh(element("e1", "OK", role = ElementRole.TEXT))))
-        assertEquals(RefMatcher.Match.Stale, matchOk(fresh()))
+        assertEquals(RefMatcher.Match.Found::class, matchAda(chats("Ada" to 100))::class)
+        assertEquals(RefMatcher.Match.Stale, matchAda(chats("Ada" to 101)))
+        assertEquals(RefMatcher.Match.Stale, matchAda(chats("Bob" to 100)))
+        assertEquals(
+            RefMatcher.Match.Stale,
+            matchAda(
+                TreeBuilder().apply { add("Ada", top = 100, parent = add("Chats", top = 0, window = 2), window = 2) },
+            ),
+        )
+        assertEquals(RefMatcher.Match.Stale, matchAda(TreeBuilder()))
     }
 
     @Test
-    fun identicalElementsMatchByPositionWhileTheirCountHolds() {
-        val planned = snapshot(element("e1", "Like"), element("e2", "Like"))
-        val same = fresh(element("e1", "Like"), element("e2", "Like"))
+    fun anElementUnderAReplacedParentIsStale() {
+        val planned = planned(TreeBuilder().apply { add("Delete", top = 100, parent = add("Ada", top = 100)) })
 
-        assertSame(same[1], (RefMatcher.match(planned, ElementRef("e2"), same) as RefMatcher.Match.Found).element)
-        assertSame(same[0], (RefMatcher.match(planned, ElementRef("e1"), same) as RefMatcher.Match.Found).element)
-        val oneMore = fresh(element("e1", "Like"), element("e2", "Like"), element("e3", "Like"))
-        assertEquals(RefMatcher.Match.Stale, RefMatcher.match(planned, ElementRef("e1"), oneMore))
+        val fresh = TreeBuilder().apply { add("Delete", top = 100, parent = add("Bob", top = 100)) }
+
+        assertEquals(RefMatcher.Match.Stale, match(planned, "e2", fresh))
     }
 
     @Test
-    fun aRefTheSnapshotNeverHadIsUnknown() {
-        val planned = snapshot(element("e1", "OK"))
+    fun identicalElementsMatchOnlyWhereTheyWere() {
+        val planned = planned(chats("Like" to 100, "Like" to 200))
+        val same = chats("Like" to 100, "Like" to 200)
 
-        assertEquals(RefMatcher.Match.UnknownRef, RefMatcher.match(planned, ElementRef("e9"), fresh()))
+        assertSame(same.elements[2], (match(planned, "e3", same) as RefMatcher.Match.Found).element)
+        val oneMore = chats("Like" to 100, "Like" to 200, "Like" to 300)
+        assertSame(oneMore.elements[2], (match(planned, "e3", oneMore) as RefMatcher.Match.Found).element)
+        // Both moved: nothing tells which is the planned one.
+        assertEquals(RefMatcher.Match.Stale, match(planned, "e3", chats("Like" to 150, "Like" to 250)))
+    }
+
+    @Test
+    fun aRefTheSnapshotDidNotShowIsUnknown() {
+        val planned = planned(chats("Ada" to 100)) { it.element.name != "Chats" }
+
+        assertEquals(RefMatcher.Match.UnknownRef, match(planned, "e9", chats()))
+        assertEquals(RefMatcher.Match.UnknownRef, match(planned, "e1", chats("Ada" to 100)))
     }
 
     @Test
     fun historyKeepsTheNewestSnapshots() {
         val history = SnapshotHistory(keep = 2)
         val ids = listOf("s1", "s2", "s3").map(::SnapshotId)
-        ids.forEach { history.put(snapshot().copy(id = it)) }
+        ids.forEach { history.put(Observed(snapshot(it), SnapshotDetail.FULL, emptyList())) }
 
         assertNull(history.get(ids[0]))
-        assertEquals(ids[1], history.get(ids[1])?.id)
-        assertEquals(ids[2], history.get(ids[2])?.id)
+        assertEquals(ids[1], history.get(ids[1])?.snapshot?.id)
+        assertEquals(ids[2], history.newest()?.snapshot?.id)
+        assertEquals(SnapshotDetail.FULL, history.get(ids[2])?.detail)
         assertThrows(IllegalArgumentException::class.java) { SnapshotHistory(keep = 0) }
     }
 }

@@ -58,29 +58,36 @@ class ScreenReaderTest {
         return node("android.widget.FrameLayout", GEOMETRY.pixels).with(title, search, list, password)
     }
 
-    private fun read(
+    private fun read(vararg windows: AccessibilityWindowInfo = arrayOf(window(settingsTree(), id = 7))): TreeRead =
+        ScreenReader.read(windows.toList(), GEOMETRY)
+
+    /** What [detail] shows of [windows], with the read's own refs. */
+    private fun shown(
         detail: SnapshotDetail = SnapshotDetail.BRIEF,
         vararg windows: AccessibilityWindowInfo = arrayOf(window(settingsTree(), id = 7)),
-    ): TreeRead = ScreenReader.read(windows.toList(), GEOMETRY, detail)
+    ): List<UiElement> = read(*windows).provisional(detail)
 
     private fun TreeRead.named(name: String): UiElement = elements.map { it.element }.single { it.name == name }
 
+    private fun List<UiElement>.named(name: String): UiElement = single { it.name == name }
+
     @Test
     fun turnsTheTreeIntoElementsInReadingOrder() {
-        val elements = read().elements.map { it.element }
+        val elements = shown()
 
         assertEquals(
             listOf("Settings", null, null, "Network & internet Wi-Fi, mobile", "Network & internet", "Wi-Fi, mobile"),
             elements.take(6).map { it.name },
         )
-        assertEquals(elements.indices.map { "e${it + 1}" }, elements.map { it.ref.value })
-        assertTrue(elements.all { it.window == 7 })
+        val all = read().elements.map { it.element }
+        assertEquals(all.indices.map { "e${it + 1}" }, all.map { it.ref.value })
+        assertTrue(all.all { it.window == 7 })
     }
 
     @Test
     fun readsRolesNamesValuesAndStates() {
-        val read = read()
-        val search = read.elements.map { it.element }.single { it.role == ElementRole.INPUT && !it.secret }
+        val read = shown()
+        val search = read.single { it.role == ElementRole.INPUT && !it.secret }
 
         // The hint is shown as text: the field is empty and the hint goes to `hint`, not `value`.
         assertEquals("", search.value)
@@ -95,7 +102,7 @@ class ScreenReaderTest {
         assertEquals(ElementRole.SWITCH, toggle.role)
         assertTrue(ElementState.CHECKED in toggle.states)
 
-        val list = read.elements.map { it.element }.single { it.role == ElementRole.LIST }
+        val list = read.single { it.role == ElementRole.LIST }
         assertEquals(setOf(ElementState.SCROLLABLE), list.states)
         assertEquals(list.ref, row.parent)
         assertEquals(list.ref, toggle.parent)
@@ -126,11 +133,22 @@ class ScreenReaderTest {
 
     @Test
     fun briefDropsUnnamedLayoutsThatFullKeeps() {
-        val brief = read(SnapshotDetail.BRIEF).elements.map { it.element }
-        val full = read(SnapshotDetail.FULL).elements.map { it.element }
+        val brief = shown(SnapshotDetail.BRIEF)
+        val full = shown(SnapshotDetail.FULL)
 
         assertFalse(brief.any { it.role == ElementRole.CONTAINER })
         assertTrue(full.any { it.role == ElementRole.CONTAINER && it.bounds == Bounds(0, 0, 999, 999) })
+    }
+
+    @Test
+    fun eachShownElementHangsUnderTheNearestShownElementAbove() {
+        val brief = shown(SnapshotDetail.BRIEF)
+        val full = shown(SnapshotDetail.FULL)
+        val root = full.single { it.role == ElementRole.CONTAINER && it.bounds == Bounds(0, 0, 999, 999) }
+
+        assertEquals(root.ref, full.named("Settings").parent)
+        assertNull("the root is not shown in BRIEF", brief.named("Settings").parent)
+        assertEquals(full.named("Settings").ref, brief.named("Settings").ref)
     }
 
     @Test
@@ -139,7 +157,7 @@ class ScreenReaderTest {
         val icon = node("android.view.View", Rect(0, 1200, 50, 1250))
         val root = node("android.widget.FrameLayout", GEOMETRY.pixels).with(canvas, icon)
 
-        val elements = read(SnapshotDetail.BRIEF, window(root)).elements.map { it.element }
+        val elements = shown(SnapshotDetail.BRIEF, window(root))
 
         assertEquals(listOf(Bounds(0, 100, 999, 599)), elements.map { it.bounds })
         assertEquals(ElementRole.OTHER, elements.single().role)
@@ -150,7 +168,7 @@ class ScreenReaderTest {
         val inner = node("android.widget.TextView", Rect(0, 0, 500, 100)) { text = "OK" }
         val outer = node("android.widget.FrameLayout", Rect(0, 0, 500, 100)) { text = "OK" }.with(inner)
 
-        val elements = read(SnapshotDetail.BRIEF, window(outer)).elements
+        val elements = read(window(outer)).elements
 
         assertEquals(1, elements.size)
         assertEquals("android.widget.FrameLayout", elements.single().node.className)
@@ -165,14 +183,9 @@ class ScreenReaderTest {
         val keyboard = window(keyText, id = 3, layer = 9, type = AccessibilityWindowInfo.TYPE_INPUT_METHOD)
         val app = window(settingsTree(), id = 1, layer = 1)
 
-        val read = read(SnapshotDetail.BRIEF, app, keyboard, dialog)
+        val read = read(app, keyboard, dialog)
 
-        assertEquals(
-            "Allow?",
-            read.elements
-                .first()
-                .element.name,
-        )
+        assertEquals("Allow?", read.provisional(SnapshotDetail.BRIEF).first().name)
         assertEquals(
             2,
             read.elements
@@ -198,7 +211,7 @@ class ScreenReaderTest {
 
     @Test
     fun elementRefsAreValidAndUnique() {
-        val refs = read(SnapshotDetail.FULL).elements.map { it.element.ref }
+        val refs = read().elements.map { it.element.ref }
 
         assertEquals(refs.toSet().size, refs.size)
         assertEquals(ElementRef("e1"), refs.first())

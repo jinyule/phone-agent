@@ -2,20 +2,19 @@ package dev.phoneagent.app.adapters.screen
 
 import dev.phoneagent.core.ports.ActionOutcome
 import dev.phoneagent.core.ports.LaunchTarget
-import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.ports.SnapshotDetail
 
 /**
  * One `ScreenPort.launch`: build the whitelisted intent, start it on the surface's display
  * (`ScreenSystem.start` passes the launch display id), wait for the expected app to reach the
- * front, settle and read back. The diff compares [compareWith] (the latest screen, `null` before
- * any) with the screen after.
+ * front, settle and read back at the detail of [base] (the latest screen, `null` before any), and
+ * diff [base] with the screen after.
  */
 internal class LaunchRun(
     private val parts: PortParts,
     private val host: ScreenHost,
     private val geometry: DisplayGeometry,
-    private val compareWith: ScreenSnapshot?,
+    private val base: Observed?,
 ) {
     private val displayId = parts.surface.displayId
     private val timings = parts.timings
@@ -47,7 +46,7 @@ internal class LaunchRun(
         target: LaunchTarget,
         built: LaunchIntents.Built.Ready,
     ): ActionOutcome {
-        val before = parts.observer.baseline(host, geometry)
+        val before = parts.observer.baseline(host, geometry, base?.detail ?: SnapshotDetail.BRIEF)
         return ChangeWatch.watching(host.events, displayId, timings) { watch ->
             when (val started = parts.system.start(built.intent, displayId)) {
                 StartResult.Started -> arrive(target, before, watch)
@@ -68,7 +67,7 @@ internal class LaunchRun(
                 if (target is LaunchTarget.App) top == target.packageName else top != before.read.pkg
             }
         watch.awaitSettled(timings.settleCapMs)
-        val after = parts.observer.observe(host, geometry, SnapshotDetail.BRIEF)
+        val after = parts.observer.observe(host, geometry, before.detail)
         val status =
             if (target is LaunchTarget.App && !arrived) {
                 ActionOutcome.Status.Failed(
@@ -77,7 +76,7 @@ internal class LaunchRun(
             } else {
                 ActionOutcome.Status.Ok
             }
-        val diff = compareWith?.let { parts.analyzer.diff(it, after) }
+        val diff = base?.let { parts.analyzer.diff(it.snapshot, after) }
         return ActionOutcome(status, before.effectOf(after), after = after, diff = diff)
     }
 }

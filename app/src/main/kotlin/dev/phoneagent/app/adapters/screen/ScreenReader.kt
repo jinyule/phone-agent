@@ -5,31 +5,42 @@ import android.graphics.Rect
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import dev.phoneagent.core.ports.ElementRef
+import dev.phoneagent.core.ports.ElementRole
 import dev.phoneagent.core.ports.SnapshotDetail
 import dev.phoneagent.core.ports.UiElement
 
 /**
- * One element of a [TreeRead] with the live node it came from.
+ * One visible node of a [TreeRead] with the live node it came from.
  *
- * @property element the model-facing element.
+ * @property element the node as the model would see it; [UiElement.ref] and [UiElement.parent]
+ *   are provisional (`e<index + 1>` in this read) until [TreeRead.project] gives the port's refs.
  * @property node the node to act on; valid until the window changes.
- * @property pixels the element's bounds in display pixels, clipped to the display.
- * @property windowPackage package of the element's window, or `null` when unknown.
+ * @property pixels the node's bounds in display pixels, clipped to the display.
+ * @property windowPackage package of the node's window, or `null` when unknown.
+ * @property parent index in [TreeRead.elements] of the nearest node above it, or `null` at the top.
+ * @property depth how many nodes of the read are above it.
+ * @property brief whether [SnapshotDetail.BRIEF] shows it.
+ * @property identity who it is, for carrying and re-matching refs.
  */
 internal class ReadElement(
     val element: UiElement,
     val node: AccessibilityNodeInfo,
     val pixels: Rect,
     val windowPackage: String?,
+    val parent: Int?,
+    val depth: Int,
+    val brief: Boolean,
+    val identity: ElementIdentity,
 ) {
     /** The node and its bounds, for the actuator. */
     val target: NodeTarget get() = NodeTarget(node, pixels)
 }
 
 /**
- * The window trees of one display at one moment.
+ * The window trees of one display at one moment: every visible node, whatever the detail; a
+ * snapshot shows a projection of it ([project]).
  *
- * @property elements elements in reading order: top-most window first, then pre-order within a window.
+ * @property elements visible nodes in reading order: top-most window first, then pre-order within a window.
  * @property pkg package of the top-most application window, or `null` when there is none.
  * @property keyboard a soft keyboard window is on the display.
  * @property windowPackages package of each content window by window id (`null` when its root is unreadable).
@@ -41,16 +52,34 @@ internal class TreeRead(
     val keyboard: Boolean,
     val windowPackages: Map<Int, String?>,
     val windowBounds: List<Pair<Int, Rect>>,
-)
+) {
+    /**
+     * The elements [detail] shows, with [refs] (one per element of the read) as their refs; each
+     * parent is the nearest shown element above.
+     */
+    fun project(
+        refs: List<ElementRef>,
+        detail: SnapshotDetail,
+    ): List<UiElement> {
+        val shown = BooleanArray(elements.size) { detail == SnapshotDetail.FULL || elements[it].brief }
+        return elements.indices.filter { shown[it] }.map { i ->
+            val above = generateSequence(elements[i].parent) { elements[it].parent }.firstOrNull { shown[it] }
+            elements[i].element.copy(ref = refs[i], parent = above?.let(refs::get))
+        }
+    }
+
+    /** [project] with the provisional refs of this read. */
+    fun provisional(detail: SnapshotDetail): List<UiElement> = project(elements.map { it.element.ref }, detail)
+}
 
 /**
  * Turns accessibility windows into [UiElement]s (phase1 §3.3). Stateless; every call walks the
- * live trees again. Elements are numbered `e1…` in reading order, so refs are stable within one read.
+ * live trees again and keeps every visible node; refs are given by [RefCarrier].
  *
- * Kept in [SnapshotDetail.BRIEF]: visible nodes with a name or an interaction (clickable,
+ * Shown in [SnapshotDetail.BRIEF]: visible nodes with a name or an interaction (clickable,
  * editable, scrollable, checkable, range), and unnamed leaf views covering at least
  * [OPAQUE_LEAF_SHARE] of the display (canvas, video, WebView without accessibility) so tree
- * quality can see them. [SnapshotDetail.FULL] keeps every visible node.
+ * quality can see them. [SnapshotDetail.FULL] shows every visible node.
  *
  * Window filtering, ordering and the depth limit are adapted from Mika's ScreenReader (Apache-2.0,
  * see NOTICE). Modified by PhoneAgent contributors.
@@ -62,7 +91,7 @@ internal object ScreenReader {
     /** Most nodes visited per read; the rest of the tree is cut. */
     const val MAX_NODES: Int = 4000
 
-    /** Share of the display from which an unnamed leaf view is kept in [SnapshotDetail.BRIEF]. */
+    /** Share of the display from which an unnamed leaf view is shown in [SnapshotDetail.BRIEF]. */
     const val OPAQUE_LEAF_SHARE: Float = 0.1f
 
     private const val MIN_SIDE_PX = 2
@@ -91,10 +120,9 @@ internal object ScreenReader {
     fun read(
         windows: List<AccessibilityWindowInfo>,
         geometry: DisplayGeometry,
-        detail: SnapshotDetail,
     ): TreeRead {
         val content = contentWindows(windows)
-        val walker = Walker(geometry, detail)
+        val walker = Walker(geometry)
         val packages = LinkedHashMap<Int, String?>()
         val windowBounds = ArrayList<Pair<Int, Rect>>()
         var pkg: String? = null
@@ -107,7 +135,7 @@ internal object ScreenReader {
             if (root != null) walker.visit(root, Walker.Place(window.id, windowPackage, parent = null, depth = 0))
         }
         return TreeRead(
-            elements = walker.out,
+            elements = walker.finish(),
             pkg = pkg,
             keyboard = windows.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD },
             windowPackages = packages,
@@ -115,40 +143,70 @@ internal object ScreenReader {
         )
     }
 
-    /** One read's mutable state: numbering, the node budget and the output. */
+    /** One read's mutable state: the node budget and what was kept so far. */
     private class Walker(
         private val geometry: DisplayGeometry,
-        private val detail: SnapshotDetail,
     ) {
-        /** Where a node sits: its window, the nearest kept ancestor, its depth. */
+        /** Where a node sits: its window, the index of the nearest kept node above, its depth in the read. */
         class Place(
             val windowId: Int,
             val windowPackage: String?,
-            val parent: ElementRef?,
+            val parent: Int?,
             val depth: Int,
         )
 
-        val out = ArrayList<ReadElement>()
+        /** A kept node before identities are known. */
+        private class Kept(
+            val element: UiElement,
+            val node: AccessibilityNodeInfo,
+            val pixels: Rect,
+            val place: Place,
+            val brief: Boolean,
+            val facts: Identities.Facts,
+        )
+
+        private val kept = ArrayList<Kept>()
         private var visited = 0
+        private var treeDepth = 0
         private val seen = HashSet<List<Any?>>()
 
         fun visit(
             node: AccessibilityNodeInfo,
             place: Place,
         ) {
-            if (place.depth > MAX_DEPTH || visited >= MAX_NODES) return
+            if (treeDepth > MAX_DEPTH || visited >= MAX_NODES) return
             visited++
-            val ref = if (node.isVisibleToUser) emit(node, place) else null
-            val childPlace = Place(place.windowId, place.windowPackage, ref ?: place.parent, place.depth + 1)
+            val index = if (node.isVisibleToUser) keep(node, place) else null
+            val childPlace =
+                if (index == null) place else Place(place.windowId, place.windowPackage, index, place.depth + 1)
+            treeDepth++
             for (i in 0 until node.childCount) {
                 node.getChild(i)?.let { visit(it, childPlace) }
             }
+            treeDepth--
         }
 
-        private fun emit(
+        /** The kept nodes with their identities. */
+        fun finish(): List<ReadElement> {
+            val identities = Identities.of(kept.map { it.facts })
+            return kept.mapIndexed { i, k ->
+                ReadElement(
+                    element = k.element,
+                    node = k.node,
+                    pixels = k.pixels,
+                    windowPackage = k.place.windowPackage,
+                    parent = k.place.parent,
+                    depth = k.place.depth,
+                    brief = k.brief,
+                    identity = identities[i],
+                )
+            }
+        }
+
+        private fun keep(
             node: AccessibilityNodeInfo,
             place: Place,
-        ): ElementRef? {
+        ): Int? {
             val pixels =
                 geometry.clip(Rect().also(node::getBoundsInScreen))?.takeIf {
                     it.width() >= MIN_SIDE_PX &&
@@ -158,20 +216,17 @@ internal object ScreenReader {
             val role = NodeFacts.roleOf(node)
             val name = NodeText.nameOf(node, role)
             val value = NodeText.valueOf(node, role)
-            val keep =
+            val interactive = NodeFacts.interactive(node)
+            val unique =
                 pixels != null &&
                     bounds != null &&
-                    (
-                        name != null || NodeFacts.interactive(node) || detail == SnapshotDetail.FULL ||
-                            opaqueLeaf(node, pixels)
-                    ) &&
                     // Nested views often repeat the same text in the same box; keep the outermost.
-                    seen.add(listOf(place.windowId, role, name, value, bounds))
-            if (!keep) return null
-            val ref = ElementRef("e${out.size + 1}")
+                    seen.add(listOf(place.windowId, role, name, value, interactive, bounds))
+            if (!unique) return null
+            val index = kept.size
             val element =
                 UiElement(
-                    ref = ref,
+                    ref = provisional(index),
                     role = role,
                     name = name,
                     value = value,
@@ -179,13 +234,27 @@ internal object ScreenReader {
                     bounds = bounds,
                     states = NodeFacts.statesOf(node),
                     secret = node.isPassword,
-                    parent = place.parent,
+                    parent = place.parent?.let(::provisional),
                     window = place.windowId,
                     resourceId = node.viewIdResourceName?.substringAfter(":id/")?.ifBlank { null },
                 )
-            out += ReadElement(element, node, pixels, place.windowPackage)
-            return ref
+            val facts =
+                Identities.Facts(
+                    window = place.windowId,
+                    role = role,
+                    resourceId = element.resourceId,
+                    name = name,
+                    label = NodeText.ownLabel(node),
+                    list = role == ElementRole.LIST,
+                    bounds = bounds,
+                    parent = place.parent,
+                )
+            val brief = name != null || interactive || opaqueLeaf(node, pixels)
+            kept += Kept(element, node, pixels, place, brief, facts)
+            return index
         }
+
+        private fun provisional(index: Int) = ElementRef("e${index + 1}")
 
         private fun opaqueLeaf(
             node: AccessibilityNodeInfo,
