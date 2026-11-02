@@ -443,6 +443,86 @@ class HelperClientTest {
         assertEquals("the helper is back before the launch request was delivered", emptyList<Any>(), launches)
     }
 
+    /** Waits until [offering] waits for the handoff in progress, or has finished without waiting. */
+    private fun awaitWaitingOrDone(offering: Thread) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+        while (offering.isAlive && offering.state != Thread.State.BLOCKED) {
+            assertTrue("the second handoff neither finished nor waited", System.nanoTime() < deadline)
+            Thread.yield()
+        }
+    }
+
+    @Test
+    fun aReplacedHelperHandingOffBeforeItIsToldToStopIsRefusedAndTheNewOneStays() {
+        val old = FakeHelper()
+        val resume = client.offer(extras(old, armed()), shell, pid).accepted().nextNonce
+        val saved = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        client.addListener { changed ->
+            if (changed is HelperState.Connected && changed.pid == pid + 1 && saved.count > 0) {
+                saved.countDown()
+                release.awaitBounded()
+            }
+        }
+        val new = FakeHelper(reportedIdentity = intArrayOf(shell, pid + 1))
+        val newNonce = armed()
+        val offeringNew = thread { client.offer(extras(new, newNonce) { copy(reportedPid = pid + 1) }, shell, pid + 1) }
+        saved.awaitBounded()
+        var oldReply: Bundle? = null
+        val offeringOld = thread { oldReply = client.offer(extras(old, resume), shell, pid) }
+        awaitWaitingOrDone(offeringOld)
+        release.countDown()
+        offeringNew.join()
+        offeringOld.join()
+
+        assertEquals(HandoffReject.BAD_NONCE, oldReply?.reject())
+        assertEquals(HelperState.Connected(new, pid + 1), client.state)
+        assertFalse("the new helper keeps running", "shutdown" in new.calls)
+        assertEquals("the old helper is told to stop once", 1, old.calls.count { it == "shutdown" })
+    }
+
+    @Test
+    fun aReplacedHelperHandingOffAfterItWasToldToStopIsRefusedUntilTheAppRestarts() {
+        val old = FakeHelper()
+        val resume = client.offer(extras(old, armed()), shell, pid).accepted().nextNonce
+        val new = FakeHelper(reportedIdentity = intArrayOf(shell, pid + 1))
+        client.offer(extras(new, armed()) { copy(reportedPid = pid + 1) }, shell, pid + 1).accepted()
+        val saved = store.slots
+        val asked = old.calls.size
+
+        assertEquals(HandoffReject.BAD_NONCE, client.offer(extras(old, resume), shell, pid).reject())
+        assertEquals(HelperState.Connected(new, pid + 1), client.state)
+        assertFalse("the new helper keeps running", "shutdown" in new.calls)
+        assertEquals("nothing is written", saved, store.slots)
+        assertEquals("refused before its Binder is touched", asked, old.calls.size)
+
+        // A restarted app does not know the old helper was told to stop: it may come back once.
+        assertNull(newClient().offer(extras(old, resume), shell, pid).reject())
+    }
+
+    @Test
+    fun aHandoffStartedFromAListenerFailsInsteadOfOverlapping() {
+        client.offer(extras(FakeHelper(), armed()), shell, pid).accepted()
+        val second = FakeHelper(reportedIdentity = intArrayOf(shell, pid + 1))
+        val third = FakeHelper(reportedIdentity = intArrayOf(shell, pid + 2))
+        val nested = mutableListOf<Result<Bundle>>()
+        client.addListener { changed ->
+            if (changed is HelperState.Connected && changed.pid == pid + 1) {
+                val nonce = armed()
+                nested +=
+                    runCatching { client.offer(extras(third, nonce) { copy(reportedPid = pid + 2) }, shell, pid + 2) }
+            }
+        }
+
+        client.offer(extras(second, armed()) { copy(reportedPid = pid + 1) }, shell, pid + 1).accepted()
+
+        val failure = nested.single().exceptionOrNull()
+        assertTrue("$nested", failure is IllegalStateException)
+        assertEquals(HelperState.Connected(second, pid + 1), client.state)
+        assertFalse("shutdown" in second.calls)
+        assertEquals(emptyList<String>(), third.calls)
+    }
+
     @Test
     fun onlyTheShellCanArm() {
         val hash = Nonces.sha256Hex(Nonces.random())

@@ -24,6 +24,8 @@ import dev.phoneagent.privileged.handoff.HandoffBundles
 import dev.phoneagent.privileged.handoff.HandoffContract
 import dev.phoneagent.privileged.handoff.HandoffNonces
 import dev.phoneagent.privileged.handoff.HandoffReject
+import java.util.Collections
+import java.util.WeakHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -35,6 +37,17 @@ import java.util.concurrent.atomic.AtomicBoolean
  * and can hand off again with the resume nonce it holds (see [HandoffNonces.admit]). Dying after
  * that step and before the reply arrives leaves neither helper able to hand off; a new launch is
  * needed.
+ *
+ * Helpers are admitted one at a time: [offer] holds a lock from the decision until the replaced
+ * helper was told to shut down, so at most one admission is between its save and that step, and
+ * the one generation of resume nonce kept by [HandoffNonces.admit] is enough. A helper this process
+ * told to shut down is refused ([HandoffReject.BAD_NONCE]) if it hands off again; a restarted
+ * process does not know it, so there the old helper may come back once with the resume nonce it
+ * holds, and the newer helper is then refused when it resumes.
+ *
+ * Listeners and `onLaunchNeeded` may run inside that lock. They must not wait for another handoff
+ * (in-app launches, WP13, start the helper asynchronously): one they wait for on another thread
+ * would deadlock, and one they start on their own thread fails with [IllegalStateException].
  *
  * Thread-safe. State changes are queued under the internal lock, in the order they happen, and
  * delivered outside it, one at a time: by the thread that caused the change, or by the thread that
@@ -51,7 +64,13 @@ class HelperClient internal constructor(
     private val onLaunchNeeded: (HelperState.NeedsLaunch) -> Unit = ::logLaunchNeeded,
 ) {
     private val lock = Any()
+
+    /** Held through a whole [offer]; taken before [lock], never inside it. */
+    private val admitting = Any()
     private val admission = HandoffAdmission(nonces, appBuild)
+
+    /** Binders of helpers this process told to shut down; guarded by [lock]. Weak, so dead ones go. */
+    private val retired: MutableSet<IBinder> = Collections.newSetFromMap(WeakHashMap())
 
     /** Lives as long as this process; the helper watches its death. */
     private val token: IBinder = Binder()
@@ -92,23 +111,35 @@ class HelperClient internal constructor(
      */
     fun issueLaunchNonce(): String = nonces.issueLaunch()
 
-    /** `attach` from [HelperHandoffProvider]: admits or rejects the offered helper and returns the reply. */
+    /**
+     * `attach` from [HelperHandoffProvider]: admits or rejects the offered helper and returns the
+     * reply. Waits for a handoff in progress; throws [IllegalStateException] when called from a
+     * listener or `onLaunchNeeded` of one (see the class comment).
+     */
     fun offer(
         extras: Bundle?,
         callingUid: Int,
         callingPid: Int,
     ): Bundle {
-        val (reply, replaced) =
-            synchronized(lock) {
-                when (val decision = admission.decide(extras, callingUid, callingPid)) {
-                    is HandoffAdmission.Decision.Rejected -> HandoffBundles.rejected(decision.reason) to null
-                    is HandoffAdmission.Decision.Stale -> stale(decision.reason, callingPid) to null
-                    is HandoffAdmission.Decision.Admitted -> connect(decision, callingPid)
+        check(!Thread.holdsLock(admitting)) { "a handoff cannot start inside the delivery of another one" }
+        synchronized(admitting) {
+            val (reply, replaced) =
+                synchronized(lock) {
+                    if (HandoffBundles.binder(extras)?.let(retired::contains) == true) {
+                        Log.w(TAG, "helper $callingPid was told to shut down; it cannot hand off again")
+                        HandoffBundles.rejected(HandoffReject.BAD_NONCE) to null
+                    } else {
+                        when (val decision = admission.decide(extras, callingUid, callingPid)) {
+                            is HandoffAdmission.Decision.Rejected -> HandoffBundles.rejected(decision.reason) to null
+                            is HandoffAdmission.Decision.Stale -> stale(decision.reason, callingPid) to null
+                            is HandoffAdmission.Decision.Admitted -> connect(decision, callingPid)
+                        }
+                    }
                 }
-            }
-        deliverChanges()
-        replaced?.let(::retire)
-        return reply
+            deliverChanges()
+            replaced?.let(::retire)
+            return reply
+        }
     }
 
     /**
@@ -196,10 +227,13 @@ class HelperClient internal constructor(
 
     /**
      * A newer helper was admitted: stop following the old one and tell it to release and exit.
-     * Runs outside [lock]; a death of [previous] meanwhile is ignored, it is no longer [connection].
+     * Runs outside [lock], inside [admitting]; a death of [previous] meanwhile is ignored, it is no
+     * longer [connection]. From here on [offer] refuses it.
      */
     private fun retire(previous: Connection) {
-        previous.core.asBinder().unlinkToDeath(previous.death, 0)
+        val binder = previous.core.asBinder()
+        synchronized(lock) { retired += binder }
+        binder.unlinkToDeath(previous.death, 0)
         try {
             previous.core.shutdown()
         } catch (e: RemoteException) {

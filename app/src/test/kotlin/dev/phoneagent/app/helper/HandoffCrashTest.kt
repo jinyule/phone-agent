@@ -17,6 +17,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
 
 /**
  * The app process dies in the middle of admitting a helper: what was saved stays, nothing after it
@@ -156,6 +159,56 @@ class HandoffCrashTest {
         assertEquals("shutdown", old.calls.last())
     }
 
+    /** Bounds a barrier wait so a broken test fails instead of hanging; it never paces the test. */
+    private fun CountDownLatch.awaitBounded() = assertTrue("barrier timed out", await(WAIT_SECONDS, TimeUnit.SECONDS))
+
+    /** Waits until [offering] waits for the handoff in progress, or has finished without waiting. */
+    private fun awaitWaitingOrDone(offering: Thread) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(WAIT_SECONDS)
+        while (offering.isAlive && offering.state != Thread.State.BLOCKED) {
+            assertTrue("the second handoff neither finished nor waited", System.nanoTime() < deadline)
+            Thread.yield()
+        }
+    }
+
+    /**
+     * Two new helpers hand off and neither gets its reply: the second arrives after the first one's
+     * save, before the connected helper was told to stop, and the app dies on the second one's save
+     * (or while it waits). The connected helper was never told to stop, so it hands off again.
+     */
+    @Test
+    fun aSecondNewHelperBeforeTheFirstRetiresTheOldOneDoesNotLockTheOldOneOut() {
+        val first = process()
+        val old = FakeHelper()
+        val resume = first.offer(extras(old, first.armed()), shell, pid).nextNonce()
+        val firstSaved = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        first.addListener { changed ->
+            if (changed is HelperState.Connected && changed.pid == pid + 1) {
+                firstSaved.countDown()
+                release.awaitBounded()
+            }
+        }
+        val one = FakeHelper(reportedIdentity = intArrayOf(shell, pid + 1))
+        val oneNonce = first.armed()
+        val offeringOne = thread { runCatching { first.offer(extras(one, oneNonce, pid + 1), shell, pid + 1) } }
+        firstSaved.awaitBounded()
+        val two = FakeHelper(reportedIdentity = intArrayOf(shell, pid + 2))
+        val twoNonce = first.armed()
+        store.diesAfter = FIRST_SAVE
+        val offeringTwo = thread { runCatching { first.offer(extras(two, twoNonce, pid + 2), shell, pid + 2) } }
+        awaitWaitingOrDone(offeringTwo)
+        store.diesAfter = null // The app process is gone from here on.
+
+        assertFalse("the old helper was not told to stop", "shutdown" in old.calls)
+        val restarted = process()
+        assertNull("the old helper hands off again", restarted.offer(extras(old, resume), shell, pid).reject())
+        assertEquals(HelperState.Connected(old, pid), restarted.state)
+
+        release.countDown()
+        listOf(offeringOne, offeringTwo).forEach { it.join(TimeUnit.SECONDS.toMillis(WAIT_SECONDS)) }
+    }
+
     @Test
     fun theOlderResumeNonceStopsWorkingOnceTheHelperUsedTheNewerOne() {
         val helper = FakeHelper()
@@ -181,6 +234,7 @@ class HandoffCrashTest {
     private companion object {
         const val NOW = 1_000L
         const val BOOT = 7
+        const val WAIT_SECONDS = 10L
 
         /** The first save while admitting, whatever it writes. */
         val FIRST_SAVE: (NonceSlots, NonceSlots) -> Boolean = { _, _ -> true }

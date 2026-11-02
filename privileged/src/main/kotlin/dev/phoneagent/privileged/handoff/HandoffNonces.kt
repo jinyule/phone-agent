@@ -87,9 +87,13 @@ public enum class NonceSlot {
  *
  * Resume nonces overlap by one generation, so the app can die anywhere in an admission: before the
  * save nothing changed; after it, the reply may never arrive, and the helper still holding the
- * nonce from before can hand off again. The cost: a replaced helper's resume nonce stays valid until
- * the next admission. A replaced helper that ignores its `shutdown()` can come back once and push
- * the new helper out; there is still only one helper connected in the end.
+ * nonce from before can hand off again. One generation is enough only because the app admits one
+ * helper at a time, from the decision until the replaced helper was told to stop
+ * (`HelperClient.offer`): two admissions between their save and that step would push the nonce of
+ * the helper still running out. The cost: a replaced helper's resume nonce stays valid until the
+ * next admission. The same app process refuses a replaced helper that hands off again; after an
+ * app restart, one that ignored its `shutdown()` can come back once, and the new helper is then
+ * refused when it resumes. There is still only one helper connected in the end.
  */
 public class HandoffNonces(
     private val store: NonceStore,
