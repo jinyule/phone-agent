@@ -35,6 +35,15 @@ class SystemPromptTest {
     }
 
     @Test
+    fun `the screen format marks new elements with + only where the page does`() {
+        // A full page after a big change in the same app marks new elements; a new app's page,
+        // shown as it is, marks none (ScreenFormatter.afterAction).
+        val format = SystemPrompt.SCREEN_FORMAT.text
+        assertFalse(format.contains("换了 App 或变化很大时给完整的一屏，用 + 标出新元素"), format)
+        assertTrue(format.contains("变化很大时给完整的一屏，用 + 标出新元素；换了 App 时直接给新 App 的完整一屏，不标 +。"), format)
+    }
+
+    @Test
     fun `the screen format says masking labels are guesses`() {
         val format = SystemPrompt.SCREEN_FORMAT.text
         assertTrue(format.contains("「疑似银行卡 尾号1234」「疑似身份证 尾号123X」「已隐藏的号码」是打了码的号码"), format)
