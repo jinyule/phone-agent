@@ -168,6 +168,23 @@ class SpendingTest {
         assertEquals(Verdict.Allow, decide(tap("e1"), on(row)))
     }
 
+    @ParameterizedTest
+    @EnumSource(SecurityLevel::class)
+    fun `a pay slider drawn without any element still pays`(level: SecurityLevel) {
+        val canvas =
+            screen(
+                ocr =
+                    listOf(
+                        Fx.ocr("实付 ¥20", box(0, 700, 500, 760)),
+                        Fx.ocr("向右滑动支付", box(0, 800, 999, 880)),
+                    ),
+            )
+        val swipe = call("phone_swipe", "x1" to 50, "y1" to 840, "x2" to 950, "y2" to 840, "durationMs" to 800)
+        val confirmed = card(decide(swipe, on(canvas, level)))
+        assertEquals(ConfirmReason.SPEND to Money(2000, null), confirmed.reason to confirmed.amount)
+        assertEquals("spend.unattended", refusal(decide(swipe, on(canvas, level, unattended = true))))
+    }
+
     @Test
     fun `request_confirmation reads its own amount argument`() {
         val ask =

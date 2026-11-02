@@ -73,8 +73,9 @@ internal class ScreenIntents(
     }
 
     /**
-     * A swipe from a pay slider pays; from a slider, picker or toggle in the settings app it sets a
-     * value; sideways along a list row it may delete the row (mail and chat lists swipe to delete).
+     * A swipe from a pay slider pays, also one only drawn (OCR, canvas); from a slider, picker or
+     * toggle in the settings app it sets a value; sideways along a list row it may delete the row
+     * (mail and chat lists swipe to delete).
      */
     private fun swipe(
         step: Step.Swipe,
@@ -86,8 +87,8 @@ internal class ScreenIntents(
         val sideways = dx >= tuning.rowSwipeMin && dx > abs(step.to.y - step.from.y)
         val kind =
             when {
+                start.kind == IntentKind.SPEND -> IntentKind.SPEND
                 element == null -> IntentKind.NAVIGATE
-                start.risk?.kind == IntentKind.SPEND -> IntentKind.SPEND
                 screen.pkg == Pages.SETTINGS && element.role in SETTERS -> IntentKind.SETTINGS
                 sideways && rowLike(element, screen) -> IntentKind.DELETE
                 else -> IntentKind.NAVIGATE
