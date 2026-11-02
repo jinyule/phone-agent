@@ -162,9 +162,17 @@ class ResponsesOutputOrderTest {
     @Test
     fun `messages must agree on content types and texts`() =
         runTest {
-            for (other in listOf(text("bye"), refusal, "[]")) {
-                server.enqueueSse(done(0, message(text("hi"))) + completed(message(other)))
-                assertThrows<ModelError.BadResponse>(other) { model().complete(Kit.request()) }
+            val pairs =
+                listOf(
+                    text("hi") to text("bye"),
+                    text("hi") to refusal,
+                    text("hi") to "[]",
+                    text("hi") to text("hi").replace("output_text", "summary_text"),
+                    refusal to refusal.replace("I can't", "I won't"),
+                )
+            for ((streamed, final) in pairs) {
+                server.enqueueSse(done(0, message(streamed)) + completed(message(final)))
+                assertThrows<ModelError.BadResponse>(final) { model().complete(Kit.request()) }
             }
         }
 }
