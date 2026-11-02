@@ -27,7 +27,7 @@ class StreamProtocolTest {
         }
 
     @ParameterizedTest(name = "{0}")
-    @MethodSource("violations", "blockViolations", "messageViolations")
+    @MethodSource("violations", "blockViolations", "messageViolations", "assemblyViolations")
     fun `protocol violations are bad responses`(
         expected: String,
         events: List<String>,
@@ -113,7 +113,11 @@ class StreamProtocolTest {
             )
         val kept = reply.parts.single() as Part.Reasoning
         assertEquals("\"a2VwdA==\"", kept.opaque.jsonObject["data"].toString(), "only the served attempt's block")
-        assertEquals("1", reply.providerMetadata!!["fallback_discarded"].toString())
+        assertEquals(
+            """[{"index":0,"type":"redacted_thinking"}]""",
+            reply.providerMetadata!!["fallback_discarded"].toString(),
+            "which block was dropped, not its data",
+        )
         assertNull(reply.providerMetadata[PREVIEW_DIVERGED], "redacted thinking was never shown")
     }
 
@@ -134,7 +138,8 @@ class StreamProtocolTest {
         private const val START =
             """{"type":"message_start","message":{"id":"msg_1","model":"claude-opus-5-5","content":[]}}"""
         private const val STOP = """{"type":"message_stop"}"""
-        private val TEXT0 = blockStart(0, """{"type":"text","text":""}""")
+        private const val TEXT = """{"type":"text","text":""}"""
+        private val TEXT0 = blockStart(0, TEXT)
         private val THINK0 = blockStart(0, """{"type":"thinking","thinking":""}""")
         private val TOOL0 = blockStart(0, """{"type":"tool_use","id":"toolu_1","name":"t","input":{}}""")
         private val STOP0 = blockStop(0)
@@ -241,6 +246,46 @@ class StreamProtocolTest {
                     blockDelta(0, """{"type":"signature_delta","signature":"x"}"""),
                 ),
                 case("content_block_stop twice", START, TEXT0, STOP0, STOP0),
+            )
+
+        /** Block order, tool ids and what a kept block must carry to be echoed. */
+        @JvmStatic
+        fun assemblyViolations(): List<Array<Any>> =
+            listOf(
+                case("block 0 starts after block 1", START, blockStart(1, TEXT), blockStop(1), TEXT0),
+                case("block 1 starts while block 0 is open", START, TEXT0, blockStart(1, TEXT)),
+                case(
+                    "block 1 repeats tool id toolu_1",
+                    START,
+                    blockStart(0, """{"type":"server_tool_use","id":"toolu_1","name":"web_search","input":{}}"""),
+                    STOP0,
+                    blockStart(1, """{"type":"tool_use","id":"toolu_1","name":"t","input":{}}"""),
+                ),
+                case(
+                    "thinking block 0 has no signature",
+                    START,
+                    THINK0,
+                    blockDelta(0, """{"type":"signature_delta","signature":""}"""),
+                    STOP0,
+                    END,
+                    STOP,
+                ),
+                case(
+                    "redacted_thinking block 0 has no data",
+                    START,
+                    blockStart(0, """{"type":"redacted_thinking","data":""}"""),
+                    STOP0,
+                    END,
+                    STOP,
+                ),
+                case(
+                    "block 0 has unsupported type 'mystery'",
+                    START,
+                    blockStart(0, """{"type":"mystery"}"""),
+                    STOP0,
+                    END,
+                    STOP,
+                ),
             )
 
         @JvmStatic

@@ -1,0 +1,12 @@
+{
+  "source": "constructed: content_block_start indexes that go backwards",
+  "expect": {
+    "error": {
+      "kind": "BAD_RESPONSE",
+      "message": "bad response: block 0 starts after block 1"
+    },
+    "deltas": [
+      "text: 后"
+    ]
+  }
+}

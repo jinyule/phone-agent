@@ -26,7 +26,8 @@
       },
       "providerMetadata": {
         "id": "msg_01Test",
-        "model": "claude-opus-5-5",
+        "requested_model": "claude-opus-5-5",
+        "served_model": "claude-opus-5-5",
         "stop_reason": "end_turn",
         "context_management": {
           "applied_edits": [

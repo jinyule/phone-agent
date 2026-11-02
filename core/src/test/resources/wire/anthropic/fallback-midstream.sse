@@ -1,4 +1,7 @@
 : source: constructed from the Messages streaming reference and the Java SDK 3.3.0 event types; not verified against real Claude; mid-output server fallback (fallbacks: default): the declined attempt's thinking and tool call stay in the stream but are not echoed
+: dropped: reasoning: 先看看。
+: dropped: started: toolu_01Declined get_weather
+: dropped: args: toolu_01Declined {"city"
 
 event: message_start
 data: {"type":"message_start","message":{"id":"msg_01Test","type":"message","role":"assistant","model":"claude-opus-5-5","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":25,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1},"input_transformations":null}}

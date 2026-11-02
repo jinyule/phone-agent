@@ -1,0 +1,68 @@
+{
+  "source": "constructed from the Messages streaming reference; not verified against real Claude; an unrecognized internal block (an unpaired server_tool_use) of the declined attempt, before the fallback block: omitted",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "text",
+          "text": "我先"
+        },
+        {
+          "type": "text",
+          "text": "查一下天气。"
+        }
+      ],
+      "stopReason": "END_TURN",
+      "usage": {
+        "inputTokens": 25,
+        "outputTokens": 30
+      },
+      "providerMetadata": {
+        "id": "msg_01Test",
+        "requested_model": "claude-opus-5-5",
+        "served_model": "claude-opus-5",
+        "stop_reason": "end_turn",
+        "usage_iterations": [
+          {
+            "type": "message",
+            "model": "claude-opus-5-5",
+            "input_tokens": 25,
+            "output_tokens": 10
+          },
+          {
+            "type": "fallback_message",
+            "model": "claude-opus-5",
+            "input_tokens": 25,
+            "output_tokens": 10
+          }
+        ],
+        "fallbacks": [
+          {
+            "type": "fallback",
+            "from": {
+              "model": "claude-opus-5-5"
+            },
+            "to": {
+              "model": "claude-opus-5"
+            },
+            "trigger": {
+              "type": "refusal"
+            }
+          }
+        ],
+        "fallback_discarded": [
+          {
+            "index": 1,
+            "type": "server_tool_use",
+            "id": "srvtoolu_01Declined",
+            "name": "web_search"
+          }
+        ]
+      }
+    },
+    "deltas": [
+      "text: 我先",
+      "text: 查一下天气。"
+    ]
+  }
+}

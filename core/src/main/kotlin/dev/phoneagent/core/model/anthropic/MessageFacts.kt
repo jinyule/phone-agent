@@ -1,5 +1,6 @@
 package dev.phoneagent.core.model.anthropic
 
+import dev.phoneagent.core.ids.ModelId
 import dev.phoneagent.core.model.Usage
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -20,7 +21,7 @@ internal class MessageFacts(
 ) {
     private val usage = LinkedHashMap<String, JsonElement>()
     private var messageId: String? = null
-    private var servedModel: String? = null
+    private var startModel: String? = null
     private var stopSequence: JsonElement? = null
     private var stopDetails: JsonObject? = null
     private var inputTransformations: JsonElement? = null
@@ -36,7 +37,7 @@ internal class MessageFacts(
     /** The `message` of `message_start`; it must carry no content yet. */
     fun start(message: JsonObject) {
         messageId = message.str("id")
-        servedModel = message.str("model")
+        startModel = message.str("model")
         (message["content"] as? JsonArray)?.let { if (it.isNotEmpty()) protocol.bad("message_start with content") }
         message.obj("usage")?.let(::merge)
         extras(message)
@@ -74,17 +75,19 @@ internal class MessageFacts(
     }
 
     /**
-     * `providerMetadata`: identity, stop details, server-side edits and any fallback. Every string
-     * in it came from the server, so all of them are masked like an error body.
+     * `providerMetadata`: identity, the model asked for and the one that served, stop details,
+     * server-side edits and any fallback. Strings from the server are masked like an error body.
      */
     fun metadata(
         reason: String,
         content: ContentBlocks.Assembled,
+        requested: ModelId,
     ): JsonObject {
         val metadata =
             buildJsonObject {
                 messageId?.let { put("id", it) }
-                servedModel?.let { put("model", it) }
+                put("requested_model", requested.value)
+                servedModel(content)?.let { put("served_model", it) }
                 put("stop_reason", reason)
                 stopSequence?.let { put("stop_sequence", it) }
                 stopDetails?.let { put("stop_details", it) }
@@ -92,7 +95,7 @@ internal class MessageFacts(
                 contextManagement?.let { put("context_management", it) }
                 usage["iterations"]?.let { put("usage_iterations", it) }
                 if (content.fallbacks.isNotEmpty()) put("fallbacks", JsonArray(content.fallbacks))
-                if (content.discarded > 0) put("fallback_discarded", content.discarded)
+                if (content.dropped.isNotEmpty()) put("fallback_discarded", JsonArray(content.dropped))
                 if (content.diverged.isNotEmpty()) {
                     put(
                         PREVIEW_DIVERGED,
@@ -102,6 +105,18 @@ internal class MessageFacts(
             }
         return protocol.mask(metadata)
     }
+
+    /**
+     * The model that produced the reply: the target of the last `fallback` block, else the model of
+     * the last `fallback_message` iteration (a turn routed to the fallback model has no block), else
+     * the `message_start` model, which names the requested model when a fallback came mid-stream.
+     */
+    private fun servedModel(content: ContentBlocks.Assembled): String? =
+        content.servedBy
+            ?: (usage["iterations"] as? JsonArray)
+                ?.lastOrNull { (it as? JsonObject)?.str("type") == "fallback_message" }
+                ?.let { (it as JsonObject).str("model") }
+            ?: startModel
 
     private fun extras(source: JsonObject) {
         source["input_transformations"]?.orNull()?.let { inputTransformations = it }

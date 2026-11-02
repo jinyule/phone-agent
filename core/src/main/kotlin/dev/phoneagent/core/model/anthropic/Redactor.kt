@@ -14,10 +14,12 @@ import java.util.IdentityHashMap
  *
  * Every cut comes after masking: callers redact the full text, then cut it. A reader that must
  * stop early reads [reach] bytes past its limit and drops the [openEnd] of what it read, so a cut
- * never leaves part of a secret behind.
+ * never leaves part of a secret behind. Reply content that streams in pieces goes through a
+ * [Window] instead, which only masks the request's own secrets.
  *
  * A copy of the OpenAI adapters' redactor: capabilities may not use each other's code (package
- * rules), so the two are kept in step by hand; [reach] and [openEnd] match WP03's.
+ * rules), so the two are kept in step by hand. [prefix]-style cuts ([reach], [openEnd]) match
+ * WP03's; [Window] and [echoes] are this adapter's (reply content of Anthropic Messages).
  */
 internal class Redactor(
     secrets: Iterable<String>,
@@ -62,6 +64,73 @@ internal class Redactor(
         form: String,
         n: Int,
     ): Boolean = form.length > n && regionMatches(length - n, form, 0, n)
+
+    /** Whether [text] contains one of the request secrets. */
+    fun echoes(text: String): Boolean = secrets.any { it in text }
+
+    /**
+     * A [Window] over the request secrets; with [json], also over the forms they take inside JSON
+     * text ([forms], and those with `/` written `\/`).
+     */
+    fun window(json: Boolean = false): Window = Window(if (json) forms.flatMap(::slashForms).distinct() else secrets)
+
+    /**
+     * Masks request secrets in text that arrives in pieces (reply text, tool arguments, thinking
+     * previews): [push] returns what can be shown now, [finish] the rest. Together they add up to
+     * the text with every secret, also one split across pieces, replaced by [MASK]; only a tail that
+     * could still grow into a secret is held back meanwhile. Credential shapes are not masked here:
+     * this is reply content, and only the request's own secrets must never be in it (model-layer §2).
+     */
+    class Window internal constructor(
+        private val patterns: List<String>,
+    ) {
+        private val held = StringBuilder()
+
+        /** Whether a secret has been masked so far. */
+        var found: Boolean = false
+            private set
+
+        /** [piece] appended; returns the text that is now certain, masked. */
+        fun push(piece: String): String {
+            if (patterns.isEmpty()) return piece
+            held.append(piece)
+            val text = held.toString()
+            val spans = patterns.flatMap { occurrences(text, it) }
+            val cut = uncrossed(text.length - pending(text), spans)
+            held.delete(0, cut)
+            return masked(text, cut, spans)
+        }
+
+        /** The text still held back, masked; the window is empty afterwards. */
+        fun finish(): String {
+            val text = held.toString()
+            held.clear()
+            return masked(text, text.length, patterns.flatMap { occurrences(text, it) })
+        }
+
+        /** Length of the longest tail of [text] that begins a pattern without completing it. */
+        private fun pending(text: String): Int =
+            patterns.maxOf { pattern ->
+                (minOf(pattern.length - 1, text.length) downTo 1).firstOrNull { text.endsWith(pattern.take(it)) } ?: 0
+            }
+
+        /** The first [cut] characters of [text], each run of overlapping [spans] in them replaced by [MASK]. */
+        private fun masked(
+            text: String,
+            cut: Int,
+            spans: List<IntRange>,
+        ): String {
+            val inside = spans.filter { it.last < cut }.sortedBy { it.first }
+            if (inside.isNotEmpty()) found = true
+            val out = StringBuilder()
+            var at = 0
+            for (span in inside) {
+                if (span.first >= at) out.append(text, at, span.first).append(MASK)
+                at = maxOf(at, span.last + 1)
+            }
+            return out.append(text, at, cut).toString()
+        }
+    }
 
     /**
      * [error] itself when no message it prints (causes and suppressed exceptions included) needs
@@ -109,6 +178,31 @@ internal class Redactor(
     }
 
     companion object {
+        /** Where [pattern] occurs in [text], overlapping occurrences included. */
+        private fun occurrences(
+            text: String,
+            pattern: String,
+        ): List<IntRange> =
+            generateSequence(text.indexOf(pattern)) { at -> text.indexOf(pattern, at + 1).takeIf { it >= 0 } }
+                .takeWhile { it >= 0 }
+                .map { it until it + pattern.length }
+                .toList()
+
+        /** [cut] moved back until none of [spans] crosses it. */
+        private fun uncrossed(
+            cut: Int,
+            spans: List<IntRange>,
+        ): Int {
+            var at = cut
+            while (true) {
+                val crossing = spans.firstOrNull { it.first < at && it.last >= at } ?: return at
+                at = crossing.first
+            }
+        }
+
+        /** [form] and, when it has a `/`, the same with `/` escaped as JSON allows. */
+        private fun slashForms(form: String): List<String> = listOf(form, form.replace("/", "\\/"))
+
         /** What a masked credential reads as. */
         const val MASK: String = "***"
 

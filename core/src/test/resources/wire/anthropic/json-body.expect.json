@@ -33,7 +33,8 @@
       },
       "providerMetadata": {
         "id": "msg_01Json",
-        "model": "claude-opus-5-5",
+        "requested_model": "claude-opus-5-5",
+        "served_model": "claude-opus-5-5",
         "stop_reason": "tool_use"
       }
     },

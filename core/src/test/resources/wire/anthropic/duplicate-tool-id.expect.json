@@ -1,0 +1,13 @@
+{
+  "source": "constructed: two tool_use blocks with the same id in one reply",
+  "expect": {
+    "error": {
+      "kind": "BAD_RESPONSE",
+      "message": "bad response: block 1 repeats tool id toolu_01Twice"
+    },
+    "deltas": [
+      "started: toolu_01Twice get_weather",
+      "args: toolu_01Twice {\"city\":\"巴黎\",\"reason\":\"查天气\"}"
+    ]
+  }
+}

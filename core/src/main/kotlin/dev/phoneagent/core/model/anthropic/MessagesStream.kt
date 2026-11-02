@@ -16,22 +16,31 @@ import kotlinx.serialization.json.put
  * Assembles one streamed Messages reply (`message_start`, `content_block_*`, `message_delta`,
  * `message_stop`) into a [ChatResponse], showing fragments through `onDelta` as they arrive.
  *
- * - Blocks are kept verbatim: `thinking` (with the accumulated text and its `signature`),
- *   `redacted_thinking` and `compaction` become [Part.Reasoning] bound to this provider and the
- *   requested model; `tool_use` becomes [Part.ToolCall] whose arguments are the raw
- *   `input_json_delta` text (eager input streaming: possibly cut off or invalid, never parsed
- *   here) or, without deltas, the start's `input`. Schema validation happens where the call is
- *   built (`dev.phoneagent.core.tool.ToolCall`); [StopReason.MAX_TOKENS] tells the loop to run nothing.
- * - Deltas add up to the reply: text deltas to its text, reasoning deltas to its thinking
- *   summaries joined by a blank line, argument deltas to each call's arguments; a call is
- *   announced once with its complete name. The one exception is a mid-output server fallback:
- *   the declined attempt's thinking and tool calls before the last `fallback` block were shown
- *   but are dropped from the reply (they must not be echoed); `providerMetadata` says so.
+ * - Blocks are kept verbatim: `thinking` (with the accumulated text and its `signature`, which
+ *   must not be empty), `redacted_thinking` and `compaction` become [Part.Reasoning] bound to
+ *   this provider and the requested model; `tool_use` becomes [Part.ToolCall] whose arguments are
+ *   the raw `input_json_delta` text (eager input streaming: possibly cut off or invalid, never
+ *   parsed here) or, without deltas, the start's `input`. Schema validation happens where the
+ *   call is built (`dev.phoneagent.core.tool.ToolCall`); [StopReason.MAX_TOKENS] tells the loop to
+ *   run nothing.
+ * - The request's secrets never get into the reply (model-layer §2): in text and arguments they
+ *   are masked, also when split across deltas, and the deltas show the masked text; in a block
+ *   echoed verbatim they reject the reply with a fixed [ModelError.BadResponse], before any
+ *   preview shows them. A refusal category is masked like an error message.
+ * - Text deltas add up exactly to the reply's text. Reasoning deltas add up to its thinking
+ *   summaries joined by a blank line, call announcements (once each, with the complete name) to
+ *   its calls, argument deltas to each call's arguments; the one exception is a mid-output server
+ *   fallback: the declined attempts' thinking and tool calls before the last `fallback` block
+ *   were shown but are dropped from the reply (they must not be echoed). `providerMetadata` then
+ *   names the channels in [PREVIEW_DIVERGED] and the dropped blocks in `fallback_discarded`
+ *   (which blocks, not their content); a UI re-renders from the final reply.
  * - `stop_reason: refusal` throws [ModelError.Refusal] with `stop_details.category`; a stream
  *   `error` event throws its mapped error. A body that ends before `message_stop` is
- *   [ModelError.Network] (cut off, retryable); events out of order, blocks left open, a missing
- *   `stop_reason` or unparseable JSON are [ModelError.BadResponse]. Unknown event types are
- *   ignored (the API may add some); unknown block or delta types are refused.
+ *   [ModelError.Network] (cut off, retryable); events out of order, blocks that overlap, come with
+ *   a smaller index or repeat a tool id, blocks left open, a missing `stop_reason` or unparseable
+ *   JSON are [ModelError.BadResponse]. Unknown event types are ignored (the API may add some), so
+ *   are unknown block types before the last `fallback` block (a declined attempt's internals);
+ *   anywhere else an unknown block is refused, as is an unknown delta type for a known block.
  *
  * Not thread-safe; one instance per reply.
  */
@@ -79,9 +88,11 @@ internal class MessagesStream(
         if (!stopped) throw ModelError.Network("stream ended before message_stop")
         blocks.open()?.let { protocol.bad("message_stop with block $it still open") }
         val reason = facts.stopReason ?: protocol.bad("message_stop without a stop_reason")
-        if (reason == "refusal") throw ModelError.Refusal(facts.refusalCategory)
+        // The category is the server's text; it goes into the error's message, so it is masked.
+        if (reason == "refusal") throw ModelError.Refusal(facts.refusalCategory?.let(redactor::text))
         val content = blocks.assemble(bind)
-        return ChatResponse(content.parts, stopReasonOf(reason), facts.usage(), facts.metadata(reason, content))
+        val metadata = facts.metadata(reason, content, model)
+        return ChatResponse(content.parts, stopReasonOf(reason), facts.usage(), metadata)
     }
 
     private fun dispatch(

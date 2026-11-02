@@ -16,7 +16,8 @@
       },
       "providerMetadata": {
         "id": "msg_resp_03671491cbee6394016ae7e38b2c908197b0222d96947588a9",
-        "model": "gpt-6-luna",
+        "requested_model": "claude-opus-5-5",
+        "served_model": "gpt-6-luna",
         "stop_reason": "end_turn"
       }
     },

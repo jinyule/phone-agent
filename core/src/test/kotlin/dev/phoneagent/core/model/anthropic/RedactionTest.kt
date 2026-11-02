@@ -105,10 +105,16 @@ class RedactionTest {
         }
 
     @Test
-    fun `unparseable stream data that quotes the key`() =
+    fun `unparseable stream data that holds the key is described, not quoted`() =
         runTest {
             server.enqueueSse(Kit.sse("message_start" to """{"type":"message_start","message":{"id":"$key"""))
-            assertClean(assertThrows<ModelError.BadResponse> { model().complete(Kit.request()) })
+            val error = assertThrows<ModelError.BadResponse> { model().complete(Kit.request()) }
+            assertNoPiece(key, error.stackTraceToString())
+            assertEquals(
+                "bad response: event is not JSON: Unexpected JSON token at offset 76: " +
+                    "Expected quotation mark '\"', but had 'EOF' instead at path: \$",
+                error.message,
+            )
         }
 
     private fun assertNoPiece(
@@ -118,6 +124,16 @@ class RedactionTest {
         val pieces = secret.windowed(PIECE).filter { it in printed }
         assertTrue(pieces.isEmpty(), "part of the key leaked: $pieces")
     }
+
+    /** The JSON parser quotes the input around the error at a fixed width, which can cut the key. */
+    @Test
+    fun `unparseable stream data whose quoted input cuts the key`() =
+        runTest {
+            val data = """{"type":"message_start","message":{"id":"${"x".repeat(250)}",$key}}"""
+            server.enqueueSse(Kit.sse("message_start" to data))
+            val error = assertThrows<ModelError.BadResponse> { model().complete(Kit.request()) }
+            assertNoPiece(key, error.stackTraceToString())
+        }
 
     @Test
     fun `a successful reply whose metadata echoes the key`() =
@@ -152,6 +168,9 @@ class RedactionTest {
                     "message_start" to """{"type":"message_start","message":{"id":"m","model":"x"}}""",
                     "content_block_start" to
                         """{"type":"content_block_start","index":0,"content_block":{"type":"$key"}}""",
+                    "content_block_stop" to """{"type":"content_block_stop","index":0}""",
+                    "message_delta" to """{"type":"message_delta","delta":{"stop_reason":"end_turn"}}""",
+                    "message_stop" to """{"type":"message_stop"}""",
                 )
             server.enqueueSse(stream)
             assertClean(assertThrows<ModelError.BadResponse> { model().complete(Kit.request()) })

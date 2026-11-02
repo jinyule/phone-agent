@@ -12,7 +12,6 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.longOrNull
-import java.util.TreeMap
 
 /**
  * Reports protocol violations as [ModelError.BadResponse] and masks what the server echoed, both
@@ -22,6 +21,27 @@ internal class Protocol(
     private val redactor: Redactor,
 ) {
     fun bad(detail: String): Nothing = throw ModelError.BadResponse(redactor.text(detail))
+
+    /**
+     * Rejects a reply that repeats this request's credential where it cannot be masked (a block
+     * echoed verbatim): the message is fixed, so nothing of the reply is in it (model-layer §2).
+     */
+    fun echoed(): Nothing = throw ModelError.BadResponse(ECHO_REJECTED)
+
+    /** [echoed] when a string or key anywhere in [block] holds a request secret. */
+    fun requireUnechoed(block: JsonObject) {
+        if (echoes(block)) echoed()
+    }
+
+    private fun echoes(value: JsonElement): Boolean =
+        when (value) {
+            is JsonObject -> value.any { (key, member) -> redactor.echoes(key) || echoes(member) }
+            is JsonArray -> value.any(::echoes)
+            is JsonPrimitive -> value.isString && redactor.echoes(value.content)
+        }
+
+    /** A [Redactor.Window] over this request's secrets. */
+    fun window(json: Boolean = false): Redactor.Window = redactor.window(json)
 
     /** [value] with every string in it masked; structure, keys and other values are kept. */
     fun mask(value: JsonObject): JsonObject = JsonObject(value.mapValues { (_, member) -> masked(member) })
@@ -33,7 +53,11 @@ internal class Protocol(
             is JsonPrimitive -> if (value.isString) JsonPrimitive(redactor.text(value.content)) else value
         }
 
-    /** [text] as JSON; [what] names it in the error. */
+    /**
+     * [text] as JSON; [what] names it in the error. The parser's message quotes the input around
+     * the error cut to a fixed width, which can cut a secret where masking no longer finds it: only
+     * the description before the quote is kept, and the exception is not attached.
+     */
     fun parse(
         text: String,
         what: String,
@@ -41,7 +65,12 @@ internal class Protocol(
         try {
             Json.parseToJsonElement(text)
         } catch (e: SerializationException) {
-            throw ModelError.BadResponse(redactor.text("$what is not JSON: ${e.message}"), redactor.cause(e))
+            val description =
+                e.message
+                    .orEmpty()
+                    .substringBefore(QUOTED_INPUT)
+                    .trim()
+            throw ModelError.BadResponse(redactor.text("$what is not JSON: $description"))
         }
 
     /** The `index` of a block event. */
@@ -61,30 +90,39 @@ internal fun interface Bind {
 }
 
 /**
- * The content blocks of one reply by index, and what `onDelta` has shown of them ([MessagesStream]
- * states the contract). Each block takes only its own delta types.
+ * The content blocks of one reply, and what `onDelta` has shown of them ([MessagesStream] states
+ * the contract). Blocks come one after another with growing indexes, and the `tool_use` and
+ * `server_tool_use` ids of one reply are distinct; anything else is a protocol violation, not
+ * something to sort or deduplicate. Each block takes only its own delta types.
  */
 internal class ContentBlocks(
     private val protocol: Protocol,
     onDelta: (Delta) -> Unit,
 ) {
-    private val blocks = TreeMap<Int, Block>()
+    private val blocks = mutableListOf<Block>()
+    private val toolIds = mutableSetOf<String>()
     private val shown = Shown(onDelta)
 
     /** `content_block_start`. */
     fun start(event: JsonObject) {
         val index = protocol.index(event)
-        if (index in blocks) protocol.bad("block $index started twice")
+        if (blocks.any { it.index == index }) protocol.bad("block $index started twice")
+        blocks.lastOrNull()?.let { last ->
+            if (index < last.index) protocol.bad("block $index starts after block ${last.index}")
+            if (!last.closed) protocol.bad("block $index starts while block ${last.index} is open")
+        }
         val start = event.obj("content_block") ?: protocol.bad("block $index without content_block")
         val block = Block.of(index, start, protocol)
-        blocks[index] = block
+        block.toolId?.let { if (!toolIds.add(it)) protocol.bad("block $index repeats tool id $it") }
+        blocks += block
+        if (block is Block.Fallback) shown.newAttempt()
         block.started(shown)
     }
 
     /** `content_block_delta`. */
     fun delta(event: JsonObject) {
         val block = block(event, "content_block_delta")
-        if (block.closed) protocol.bad("delta for block ${protocol.index(event)} after its content_block_stop")
+        if (block.closed) protocol.bad("delta for block ${block.index} after its content_block_stop")
         val delta = event.obj("delta") ?: protocol.bad("content_block_delta without a delta")
         val type = delta.str("type")
         if (!block.apply(type, delta, shown, protocol)) protocol.bad("unexpected $type for a ${block.type} block")
@@ -99,25 +137,30 @@ internal class ContentBlocks(
         block: JsonElement,
     ) {
         start(JsonObject(mapOf("index" to JsonPrimitive(index), "content_block" to block)))
-        close(blocks.getValue(index))
+        close(blocks.last())
     }
 
-    /** The first block still open, or `null`. */
-    fun open(): Int? = blocks.entries.firstOrNull { !it.value.closed }?.key
+    /** The block still open, or `null`. */
+    fun open(): Int? = blocks.lastOrNull()?.takeUnless { it.closed }?.index
 
     /**
-     * The reply parts, in index order. A mid-output fallback drops the declined attempt's
-     * thinking and tool calls before the last `fallback` block; `fallback` blocks are only markers.
+     * The reply parts, in order. A mid-output fallback drops the declined attempts' thinking, tool
+     * calls and unknown blocks before the last `fallback` block (model-migration: echoing fallback
+     * turns); `fallback` blocks are only markers. A request secret in any block that would be echoed
+     * verbatim, dropped or not, rejects the reply; so does an unknown block anywhere else, or a kept
+     * thinking block without a signature.
      */
     fun assemble(bind: Bind): Assembled {
-        val ordered = blocks.values.toList()
-        val boundary = ordered.indexOfLast { it is Block.Fallback }
-        val discarded = ordered.filterIndexed { index, block -> index < boundary && block.declinedAttempt }
+        blocks.forEach { block -> block.verbatim()?.let(protocol::requireUnechoed) }
+        val boundary = blocks.indexOfLast { it is Block.Fallback }
+        val (dropped, kept) = blocks.withIndex().partition { (at, block) -> at < boundary && block.declinedAttempt }
+        val fallbacks = blocks.filterIsInstance<Block.Fallback>()
         return Assembled(
-            parts = ordered.filter { it !in discarded }.mapNotNull { it.part(bind) },
-            fallbacks = ordered.filterIsInstance<Block.Fallback>().map { it.start },
-            discarded = discarded.size,
-            diverged = shown.divergedBy(discarded),
+            parts = kept.mapNotNull { it.value.part(bind, protocol) },
+            fallbacks = fallbacks.map { it.start },
+            dropped = dropped.map { it.value.audit() },
+            diverged = shown.divergedBy(dropped.map { it.value }),
+            servedBy = fallbacks.lastOrNull()?.target,
         )
     }
 
@@ -132,222 +175,25 @@ internal class ContentBlocks(
         what: String,
     ): Block {
         val index = protocol.index(event)
-        return blocks[index] ?: protocol.bad("$what for block $index, which never started")
+        return blocks.firstOrNull { it.index == index } ?: protocol.bad("$what for block $index, which never started")
     }
 
     /**
      * The assembled reply content.
      *
      * @property fallbacks the `fallback` blocks, verbatim.
-     * @property discarded how many blocks of a declined attempt were dropped.
+     * @property dropped what is recorded of each block a fallback dropped ([Block.audit]): which
+     *   block it was, never its content, so nothing of a declined attempt can be echoed.
      * @property diverged delta channels the dropped blocks had shown.
+     * @property servedBy the model the last fallback switched to, or `null` without one.
      */
     class Assembled(
         val parts: List<Part>,
         val fallbacks: List<JsonObject>,
-        val discarded: Int,
+        val dropped: List<JsonObject>,
         val diverged: List<String>,
+        val servedBy: String?,
     )
-}
-
-/** One content block being assembled. */
-internal sealed class Block(
-    /** The wire `type` of the block. */
-    val type: String,
-) {
-    var closed = false
-
-    /** Whether a mid-output fallback drops it when it comes before the last `fallback` block. */
-    open val declinedAttempt: Boolean get() = false
-
-    /** Shows what the start carried. */
-    open fun started(shown: Shown) = Unit
-
-    /** Applies a delta of [type]; `false` when this block takes no such delta. */
-    open fun apply(
-        type: String?,
-        delta: JsonObject,
-        shown: Shown,
-        protocol: Protocol,
-    ): Boolean = false
-
-    /** Shows what only the stop makes complete. */
-    open fun stopped(shown: Shown) = Unit
-
-    /** The reply part it becomes, or `null` for none. */
-    abstract fun part(bind: Bind): Part?
-
-    class Text(
-        start: JsonObject,
-    ) : Block("text") {
-        private val value = StringBuilder(start.str("text").orEmpty())
-
-        override fun started(shown: Shown) = shown.text(value.toString())
-
-        override fun apply(
-            type: String?,
-            delta: JsonObject,
-            shown: Shown,
-            protocol: Protocol,
-        ): Boolean {
-            if (type != "text_delta") return false
-            val fragment = delta.str("text") ?: protocol.bad("text_delta without text")
-            value.append(fragment)
-            shown.text(fragment)
-            return true
-        }
-
-        override fun part(bind: Bind): Part? = value.toString().takeIf { it.isNotEmpty() }?.let(Part::Text)
-    }
-
-    class Thinking(
-        private val start: JsonObject,
-    ) : Block("thinking") {
-        val text = StringBuilder(start.str("thinking").orEmpty())
-        private var signature: String? = start.str("signature")
-
-        override val declinedAttempt: Boolean get() = true
-
-        override fun started(shown: Shown) {
-            shown.newReasoningSection()
-            shown.reasoning(text.toString())
-        }
-
-        override fun apply(
-            type: String?,
-            delta: JsonObject,
-            shown: Shown,
-            protocol: Protocol,
-        ): Boolean {
-            when (type) {
-                "thinking_delta" -> {
-                    val fragment = delta.str("thinking") ?: protocol.bad("thinking_delta without thinking")
-                    text.append(fragment)
-                    shown.reasoning(fragment)
-                }
-
-                "signature_delta" -> {
-                    signature = delta.str("signature") ?: protocol.bad("signature_delta without signature")
-                }
-
-                else -> {
-                    return false
-                }
-            }
-            return true
-        }
-
-        override fun part(bind: Bind): Part {
-            val fields = LinkedHashMap(start)
-            fields["thinking"] = JsonPrimitive(text.toString())
-            signature?.let { fields["signature"] = JsonPrimitive(it) }
-            return bind.reasoning(
-                ReasoningKind.ANTHROPIC_THINKING,
-                JsonObject(fields),
-                text.toString().ifEmpty { null },
-            )
-        }
-    }
-
-    class Redacted(
-        private val start: JsonObject,
-    ) : Block("redacted_thinking") {
-        override val declinedAttempt: Boolean get() = true
-
-        override fun part(bind: Bind): Part = bind.reasoning(ReasoningKind.ANTHROPIC_REDACTED_THINKING, start, null)
-    }
-
-    class Compaction(
-        start: JsonObject,
-    ) : Block("compaction") {
-        private val fields = LinkedHashMap(start)
-
-        /** Each compaction delta carries the whole value, as the SDK's accumulator reads it. */
-        override fun apply(
-            type: String?,
-            delta: JsonObject,
-            shown: Shown,
-            protocol: Protocol,
-        ): Boolean {
-            if (type != "compaction_delta") return false
-            delta["content"]?.let { fields["content"] = it }
-            delta["encrypted_content"]?.let { fields["encrypted_content"] = it }
-            return true
-        }
-
-        override fun part(bind: Bind): Part =
-            bind.reasoning(ReasoningKind.ANTHROPIC_COMPACTION, JsonObject(fields), null)
-    }
-
-    class ToolUse(
-        val id: ToolCallId,
-        val name: String,
-        private val startInput: JsonElement?,
-    ) : Block("tool_use") {
-        val args = StringBuilder()
-
-        override val declinedAttempt: Boolean get() = true
-
-        override fun started(shown: Shown) = shown.started(id, name)
-
-        override fun apply(
-            type: String?,
-            delta: JsonObject,
-            shown: Shown,
-            protocol: Protocol,
-        ): Boolean {
-            if (type != "input_json_delta") return false
-            val fragment = delta.str("partial_json") ?: protocol.bad("input_json_delta without partial_json")
-            args.append(fragment)
-            shown.args(id, fragment)
-            return true
-        }
-
-        /** A call whose input came whole in its start shows it now, so argument deltas still add up. */
-        override fun stopped(shown: Shown) {
-            if (args.isEmpty()) shown.args(id, argsJson())
-        }
-
-        /** The raw argument text: the streamed fragments, else the start's `input`. */
-        private fun argsJson(): String = args.toString().ifEmpty { startInput?.orNull()?.toString() ?: "{}" }
-
-        override fun part(bind: Bind): Part = Part.ToolCall(id, name, argsJson())
-    }
-
-    class Fallback(
-        val start: JsonObject,
-    ) : Block("fallback") {
-        override fun part(bind: Bind): Part? = null
-    }
-
-    companion object {
-        /** The block a `content_block_start` opens; unknown types are refused (no server tools are enabled). */
-        fun of(
-            index: Int,
-            start: JsonObject,
-            protocol: Protocol,
-        ): Block =
-            when (val type = start.str("type")) {
-                "text" -> Text(start)
-                "thinking" -> Thinking(start)
-                "redacted_thinking" -> Redacted(start)
-                "compaction" -> Compaction(start)
-                "tool_use" -> toolUse(index, start, protocol)
-                "fallback" -> Fallback(start)
-                else -> protocol.bad("block $index has unsupported type '$type'")
-            }
-
-        private fun toolUse(
-            index: Int,
-            start: JsonObject,
-            protocol: Protocol,
-        ): ToolUse {
-            val id = start.str("id")?.takeIf { it.isNotBlank() } ?: protocol.bad("tool_use block $index without an id")
-            val name =
-                start.str("name")?.takeIf { it.isNotBlank() } ?: protocol.bad("tool_use block $index without a name")
-            return ToolUse(ToolCallId(id), name, start["input"])
-        }
-    }
 }
 
 /**
@@ -371,6 +217,12 @@ internal class Shown(
         sectionPending = reasoningShown
     }
 
+    /** A fallback block: the next attempt's reasoning starts without a separator, as its summaries do. */
+    fun newAttempt() {
+        reasoningShown = false
+        sectionPending = false
+    }
+
     fun reasoning(fragment: String) {
         if (fragment.isEmpty()) return
         val text = if (sectionPending) SECTION_SEPARATOR + fragment else fragment
@@ -383,7 +235,8 @@ internal class Shown(
         id: ToolCallId,
         name: String,
     ) {
-        if (callsShown.add(id)) onDelta(Delta.ToolCallStarted(id, name))
+        callsShown += id
+        onDelta(Delta.ToolCallStarted(id, name))
     }
 
     fun args(
@@ -407,3 +260,10 @@ internal class Shown(
         const val SECTION_SEPARATOR = "\n\n"
     }
 }
+
+/** The message of a reply rejected for repeating the request's credential ([Protocol.echoed]). */
+internal const val ECHO_REJECTED: String =
+    "the reply repeats this request's credential in a block that must be echoed verbatim"
+
+/** Where a kotlinx.serialization parse error starts quoting its input. */
+private const val QUOTED_INPUT = "JSON input:"
