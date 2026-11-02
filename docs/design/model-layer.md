@@ -46,13 +46,13 @@ sealed interface Part {
     data class Image(val blob: BlobRef, val mime: String, val width: Int, val height: Int) : Part  // 每次都以 base64 发送同样的字节
     data class ToolCall(val id: ToolCallId, val name: String, val argsJson: String) : Part
     data class ToolResult(val id: ToolCallId, val parts: List<Part>, val isError: Boolean) : Part  // parts 只含 Text / Image
-    /** 服务商私有的推理内容，原样保存，只回传给同一 provider 和同一 model。 */
+    /** 服务商私有的推理内容，原样保存，只回传给同一 provider；同一 provider 换了 model 以后回不回传，由该 provider 的适配器决定（§3.2、§3.3）。model 记录是哪个模型产生的，供适配器判断，也供 UI 和诊断使用。 */
     data class Reasoning(val provider: ProviderId, val model: ModelId, val kind: ReasoningKind, val opaque: JsonElement,
                          val summary: String? = null /* 只给 UI 看，不回传 */) : Part
 }
-enum class ReasoningKind {
-    AnthropicThinking /* 带 signature */, AnthropicRedactedThinking, AnthropicCompaction /* 服务端 compaction 块，§5 */,
-    ResponsesEncrypted /* encrypted_content */, ChatReasoningField /* reasoning_content 等 */,
+enum class ReasoningKind(val isReasoning: Boolean) {   // isReasoning = false：装的是历史，context/reasoning-dropped 不去掉它
+    AnthropicThinking(true) /* 带 signature */, AnthropicRedactedThinking(true), AnthropicCompaction(false) /* 服务端 compaction 块，§5 */,
+    ResponsesEncrypted(true) /* encrypted_content */, ChatReasoningField(true) /* reasoning_content 等 */,
 }
 ```
 
@@ -93,6 +93,8 @@ fun interface BlobSource {              // 读当前会话 BlobStore 里 Part.Im
 ```
 
 - 密钥不进日志、异常消息和 `toString`。
+- **脱敏**：适配器把本次请求用到的密钥从它返回、流出和报告的一切内容里去掉（正文、增量、元数据、错误）。签名或加密的推理块改了就失效（带 `signature` 的 Anthropic `thinking` 块、`redacted_thinking` 的 `data`、Responses 的 `encrypted_content`，以及其他协议里的同类块），没法脱敏：密钥出现在这类块里时，**整条回复按 `BadResponse` 拒绝**，返回固定文字，相关的预览也不能先流出去。我们从不把密钥放进上下文，模型输出里出现密钥本身就说明出了问题。契约写在 `CredentialResolver` 的 KDoc，各适配器自己实现。
+- **流式增量**：`Delta.Text` 依次拼起来一定是最终正文的前缀；推理和工具调用的预览不作保证，服务端降级时可能不出现在最终回复里，界面以最终的 `ChatResponse` 为准重新渲染。
 - blob 按会话存放：每个会话建一个 ChatModel，或者用会话感知的 `BlobSource`，组装时决定。
 
 **线路快照**（`core.model.WireProfile`，随 `ChatRequest.wire` 传给适配器，冻结在 `request/header` 和 `side/request` 里）：
@@ -148,6 +150,7 @@ data class WireProfile(
 - **请求结构**：`instructions`（系统提示词）+ `input[]`。input 的条目类型有 message、`function_call`、`function_call_output`、`reasoning`。对话里的 system 角色一律改成 developer 消息。
 - **无状态**：`store:false`，**不用 `previous_response_id`**，每次都发完整的 input。
 - **推理**：`include:["reasoning.encrypted_content"]`，把返回的加密推理条目原样保存，下一次请求原样回传（Mika 的做法）。用户选了档位才发 `reasoning.effort`。
+  - 同一 provider 换了 model 以后，加密推理还回不回传，由 WP03 确定并写在这里（`Part.Reasoning` 的契约把这条规则交给适配器）。
 - **ChatGPT 套餐模式的硬性约束**（官方文档 *Preview limitations*，以官方为准）：
 
 | 类别 | 要求 |
@@ -170,7 +173,7 @@ data class WireProfile(
   - Opus 5.5 的思考始终开启：不发 `thinking`，或者发 `{type:"adaptive"}`。**`budget_tokens` 和 `disabled` 都会被拒（400）**。
   - 思考深度用 `output_config.effort` 控制。**Opus 5.5 的默认值是 `medium`**，所以按用途显式设置：主模型做 GUI 任务时建议从 `high` 起调，轻量判断用 `low`。
   - 要给用户看思考进度时，设 `display:"summarized"`。
-- **思考块的回传**：thinking 块（包括 signature）原样保存、原样回传，绑定 model。换了模型时服务端会静默丢弃这些块，不计费。
+- **思考块的回传**：thinking、redacted_thinking 和 compaction 块（包括 signature）原样保存、原样回传。**换了模型也不在客户端删**：API 会自己略过当前模型读不了的块；客户端删掉的话，换回原模型时这些推理就永久丢了，从中间删块还会让后面的块报 `predecessor_missing`，compaction 块装着压缩后的历史，删掉就丢了历史。这也是铁律 7（历史只追加）。
 - **preserved thinking（关键约束）**：思考块的签名绑定在它之前的整段对话前缀上（system + tools + 之前的所有消息）。
   - **改写、删除或重排更早的轮次，都会让之后所有的思考块失效**；2026-08-31 之后注册的账号会直接收到 400。
   - 对我们的影响和对策见 §5。
@@ -250,7 +253,7 @@ OpenAI 在 DevDay 2026 推出的这个通道，面向"开源、在本地运行"�
 
 **模型分工与缓存**：缓存和思考块都按模型隔离。轻量模型（意图判断、结局判定）和看图模型（描述界面、看图定位）**一律作为旁路请求**，用自己的短上下文，**不在主对话里切换模型**。
 
-**恢复兜底**：如果收到 `PrefixBindingMismatch` 这类 400，去掉历史里所有的 thinking 块后重试一次，并记日志。这是一次性的恢复手段，不是常规路径。
+**恢复兜底**：如果收到 `PrefixBindingMismatch` 这类 400，去掉历史里所有的推理块（thinking、redacted_thinking，以及其他协议里 `ReasoningKind.isReasoning` 的块）后重试一次，并记日志（`context/reasoning-dropped`）。**compaction 块不去掉**：它装的是压缩后的历史，去掉它服务端就要重新处理压缩前的整段历史，可能撞上上下文上限，成本也会突增；文字和工具调用同样保留。这是一次性的恢复手段，不是常规路径。
 
 ---
 

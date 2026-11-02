@@ -33,17 +33,19 @@ M1/M2 的主循环、OpenAI 系适配器、Anthropic 适配器、PolicyEngine、
 
 - 形如 `<域>/<名>`，全小写，单词间用 `-`（`[a-z]+(-[a-z]+)*/[a-z]+(-[a-z]+)*`），由各事件类的 `@SerialName` 给出。
 - `SessionEventTypes` 是唯一登记处，同时登记每种类型的 `ignorable`。测试核对三者一致：登记表、`SessionEvent` 密封层次、样例。
-- **`ignorable` 由类型决定，不由写入方决定。** 推导模型消息、回合结构或任务设置要用到的类型不可忽略：
-  - `task/start`、`task/level-changed`；
+- **`ignorable` 由类型决定，不由写入方决定。** 推导模型消息、回合结构、任务设置要用到的类型，以及不变量检查执行和运行规则要用到的类型，不可忽略：
+  - `task/start`、`task/level-changed`、`task/stopped`、`session/resumed`；
   - `turn/*`、`step/*`、`inbox/spliced`、`user/message`；
   - `request/header`、`assistant/message`、`context/reasoning-dropped`；
-  - `tool/call`、`tool/result`；
+  - `tool/call`、`tool/result`、`policy/verdict`、`tool/started`、`tool/executed`；
   - `compaction/summary`、`compaction/prune`。
 
   其余只用于轨迹、诊断、审计和回放，可以忽略：
   - `assistant/attempt`、`request/retry`、`side/request`、`side/response`；
-  - `policy/verdict`、`approval/*`、`question/*`、`handoff/*`；
-  - `compaction/start|end`、`screen/*`、`session/resumed`。
+  - `approval/*`、`question/*`、`handoff/*`、`prompt/withdrawn`；
+  - `compaction/start|end`、`screen/*`。
+
+  `policy/verdict` 和 `session/resumed` 在第 3 轮改为不可忽略（第 13 节）。
 - 名字和 `ignorable` 发布后不再改。改负载形状就升格式版本，并写迁移函数。
 
 ### 4. 错误分层
@@ -174,11 +176,28 @@ v1 仍未发布，fixture 和 `format-names.txt` 按新事件重新生成（生�
 - **执行事实和停止进日志**（B3）：
   - `tool/started(callId, verdictSeq)`：真正调用 `Tool.execute` 之前追加并刷盘；`verdictSeq` 必须是这个调用最新的 verdict，而且是 Allow。拒绝、转交、审批未通过、拦截器短路都没有它。修复按它区分 NOT_STARTED 和 OUTCOME_UNKNOWN。
   - `tool/executed(callId, status)`：execute 返回后、`toolPostExecute` 之前写原始状态；取消和超时不写。
-  - `task/stopped(cause)`：停止流程的最后一条。`USER`、`LIMIT` 是终态，之后的追加被拒绝，读到后面还有记录就是损坏；`SHUTDOWN`、`ERROR` 可以显式恢复。`StopCause` 从 `core.agent` 移到 `core.session`（session 在第 4 层，不能引用第 5 层的 agent）。
+  - `task/stopped(cause)`：停止流程的最后一条。第 2 轮曾把 `USER`、`LIMIT` 定为终态；**第 3 轮撤回**，四种原因都只结束当前这次运行，见第 13 节。`StopCause` 从 `core.agent` 移到 `core.session`（session 在第 4 层，不能引用第 5 层的 agent）。
   - 三者都不可忽略。`PolicyContext.operatedPackages` 和 `outwardConfirmedPackages` 改为按执行事实推导（KDoc），`PolicyContextSamples` 给出样例日志和期望值，`PolicyContextSourcesTest` 用参考推导核对样例并证明它们能区分常见的错误推导。
   - 不变量补充：结果之后不能再声明同一个调用（S7）；`tool/started` 要求已声明、没有结果、没开始过；`tool/executed` 要求已开始、没有结果、没记过。
 - **工具拿不到 `confirm`**（B4）：`ToolContext.interaction` 的类型是 `ToolInteraction`（`ask`、`handOff`）；`UserInteraction` 继承它并加上 `confirm`。运行时用 `forTools()` 包一层视图交给工具，强转也拿不到 `confirm`。确认卡只来自 PolicyEngine 的 Confirm 判定。
 - **其他**：integer 的上下界按 64 位整数比较（S3）；`retryAfterMs` 在构造时要求 ≥ 0，解析不了或为负的由适配器转成 `null`（S8）；推理去掉记录按 seq 生效、多条累加，中断前缀进视图时去掉其中的 `Part.Reasoning`（S5、S10），样例在 `DeriveRuleSamples`，参考投影核对。
+
+### 13. 修复清单第 3 轮（fix-list-r3，协调者评审）
+
+v1 仍未发布（冻结点是第一个 M1 PR）。`session/resumed` 和 `policy/verdict` 改成不可忽略，fixture 和 `format-names.txt` 重新生成（先删旧的 v1 目录），不升版本。
+
+- **停止没有终态**（A1，回到 D14）：`USER`、`LIMIT`、`SHUTDOWN`、`ERROR` 都只结束当前这次运行，同一个 session 可以继续。新的不变量放在 `core.session.RunRules`，`SessionInvariants` 在写入和读取两端都调用它：
+  - **需要答复的调用**（B2）：每条 `assistant/message` 里的工具调用（interrupted 的消息没有调用）加上每个 `tool/call`。它们在 `step/end`、`turn/end`、`task/stopped`、`session/resumed` 之前都要有 `tool/result`。停止、崩溃修复、截断跳过和模型视图配对都用这一个集合。只在 `task/stopped` 上检查不够：崩溃修复不写 `task/stopped`，缩小了范围的修复会让之后的每个请求都被服务端拒绝。
+  - `turn/end(STOPPED)` 后面紧跟 `task/stopped`；`task/stopped` 和 `session/resumed` 时没有打开的 turn；`SHUTDOWN`、`ERROR` 之后下一条已知记录是 `session/resumed`。
+  - **不自动续跑**（B1）：每个 `task/stopped` 和 `session/resumed` 之后进入"等待用户输入"，只有 turn 里一条 kind = USER 的 `user/message` 能结束它。等待期间可以先记后台消息（WP02 先记排着队的后台消息、再记用户的"继续"），但不能有 step、请求、回复、调用、提示、旁路请求或上下文改动。检查条件是"第一个 step 之前有 USER 输入"，不是"新 turn 的第一条输入是 USER"。
+  - **半截停止**（B3）：日志可以停在 `turn/end(STOPPED)`；下一条已知记录必须是 `task/stopped`，恢复时写 `task/stopped(ERROR)`，含义是"停止收尾没有完成"，不猜原因。
+  - **未知的可忽略记录对这些规则透明**（B3、A4）：store 重新打开时只从它认识的记录恢复状态，读取端如果更严，store 自己写出的日志下次就读不回来。读写两端用同一份实现，未知记录只受"第 1 条是 `task/start`"这条信封规则约束。
+  - 修复写的结果跟着落盘的 `tool/started` 走：有 `tool/started` 的不能是 NOT_STARTED，没有的不能是 OUTCOME_UNKNOWN。
+  - `session/resumed` 的定义放宽为"新的 runtime 实例接管日志"（B7）：包括进程重建，也包括同一进程里停止以后由新实例继续。
+- **截断的调用**（A8）：`MAX_TOKENS` 带调用时 `assistant/message` 原样记录，每个调用补一条 `tool/result(SKIPPED)`，不写 `tool/call`：截断的参数可能解析不出合法的 `ToolCall`，而 `tool/call` 装的是校验过的调用。`OTHER` 带调用是 BadResponse。
+- **compaction 块不随推理去掉**（A9）：`ReasoningKind.isReasoning` 标出推理类；`context/reasoning-dropped` 只去掉推理类，`ANTHROPIC_COMPACTION` 保留。没有把 compaction 从 `Part.Reasoning` 拆出去：它和推理块一样是服务商私有、只回传给同一 provider 的不透明块，拆出去要多一种 Part、改所有适配器和 v1 格式，换来的只是去掉一个布尔属性。
+- **跨模型回传**（A7）：`Part.Reasoning` 只回传给同一 provider；同一 provider 换了 model 以后回不回传由该 provider 的适配器决定。Anthropic 一律原样回传，由 API 略过当前模型读不了的块。
+- **外发免确认资格**（A2）：只认 `tool/started.verdictSeq` 那条 Allow 之前这个调用最后一张 APPROVED 的卡，并且要求它是 OUTWARD、pkg 等于那条 Allow 的 intent.pkg。
 
 ## Alternatives considered
 
@@ -215,6 +234,10 @@ v1 仍未发布，fixture 和 `format-names.txt` 按新事件重新生成（生�
 - **`ChatModel.wire(reasoning): WireProfile`，档位由调用方用 `clampTo` 自己算**（B2 的另一个选项）：钳制和映射分在两处，主循环和能力包可能各算出不同的档位；`RequestSettings` 把两者一次给出。
 - **只同步这次新建的目录，失败的记在内存里下次补**（B1 的另一个选项）：换一个 port 实例或进程重启就丢了；整条链每次都同步，不需要记状态。
 - **`ToolContext` 保留 `confirm`，运行时忽略工具造的卡**：工具造的卡仍然会显示给用户，而且"安全历史只认策略来源的卡"要在运行时另记来源；从类型上去掉更简单。
+- **`USER`、`LIMIT` 作为终态**（第 2 轮的做法，第 3 轮撤回）：和 D14 的"停止后说'继续'"冲突。用户每停一次都得重开任务，丢掉整段上下文；跨 turn 的续跑上限（`StopCause.LIMIT`）一到，session 也就再也不能继续。改用"等待用户输入"状态，用不变量保证不会自动续跑。
+- **`turn/end(STOPPED)` 和 `task/stopped` 之间不许出现未知记录**：store 重新打开时看不到未知记录，读写两端的判断就会不一致，停在这个位置的日志也无法恢复。
+- **只在 `task/stopped` 检查未答复的调用**：崩溃修复不写 `task/stopped`，漏补结果的修复拦不住；所以 `step/end`、`turn/end`、`session/resumed` 上也检查。
+- **截断的调用也写 `tool/call`**：`tool/call` 装的是校验过的 `ToolCall`，截断的参数可能根本不是 JSON；而且它们从未派发，写了反而让"有 `tool/call` = 派发过"不再成立。
 
 ## 后果
 
