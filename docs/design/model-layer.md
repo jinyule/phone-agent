@@ -30,7 +30,7 @@
 │   id、预设、baseUrl、headers   ├─ ResponsesAdapter          （OkHttp + SSE） │
 │   credential                   │    ├─ ApiKey 模式                          │
 │                                │    └─ ChatGptPlan 模式：强制套餐接口的约束 │
-│                                └─ AnthropicMessagesAdapter（官方 Java SDK） │
+│                                └─ AnthropicMessagesAdapter（OkHttp + SSE）  │
 │ Credential（sealed）：ApiKey(secretRef) | ChatGptPlan(sessionRef) | None   │
 │ CredentialStore：Android Keystore 加 AES-GCM；令牌刷新由带锁的 TokenSource │
 │ 负责                                                                        │
@@ -217,8 +217,14 @@ data class WireProfile(
 
 ### 3.3 Anthropic Messages
 
-- **实现方式**：用官方 SDK `com.anthropic:anthropic-java`（Kotlin 直接用 Java SDK），提供 baseUrl 的服务商（Anthropic 兼容端点）通过 base URL 覆盖接入。
-  - **M1 先做一个 spike**：验证 minSdk 30 下能否运行、APK 增加多少体积、和 R8 是否兼容。不过关的话，再评估用 OkHttp 直接实现线路格式，并记一条 ADR。
+- **实现方式**：用 OkHttp 直接实现 Messages 线路格式（`core.model.anthropic`），**不引入官方 SDK**。提供 baseUrl 的服务商（Anthropic 兼容端点）通过 base URL 覆盖接入。
+  - 依据是 M1 的 Android spike（ADR `2026-11-01-anthropic-adapter`）：SDK 3.3.0 能过 R8 和 API 30 检查，但让 APK 多出约 2.6 MiB、方法数多出约 1.6 万；而且它内置的 HTTP 客户端关不掉 follow-up，满足不了"每次尝试只发一个请求"。
+  - SDK 源码和 claude-api 文档只拿来核对字段名、beta 名和事件类型。
+- **线路设置**：只从请求的 `wire` 快照读取，映射版本 1。
+  - `options` 只认这八个名字：`anthropic.version`、`anthropic.auth`、`anthropic.thinking`、`anthropic.thinking_display`、`anthropic.prefix_mismatch`、`anthropic.fallbacks`、`anthropic.eager_input_streaming`、`anthropic.strict_tools`。
+  - 未知名字、版本不符、凭据类型不符，都在发送前报 `InvalidRequest`。
+  - beta 按需拼进 `anthropic-beta`。
+  - 推荐设置：所有端点都开 adaptive thinking、`display:"summarized"` 和 `eager_input_streaming`；官方端点（`https://api.anthropic.com`）上再加 `drop_block` 和服务端降级（只对有降级的模型）。网关不发 Claude API 专有的 beta。
 - **默认模型**：主模型 `claude-opus-5-5`，可选 `claude-sonnet-5-5`；轻量模型 `claude-haiku-5-5`；看图模型默认用主模型。模型清单以服务端 `/v1/models` 返回的为准，本地只做初值。
 - **思考**：
   - Opus 5.5 的思考始终开启：不发 `thinking`，或者发 `{type:"adaptive"}`。**`budget_tokens` 和 `disabled` 都会被拒（400）**。
@@ -233,6 +239,8 @@ data class WireProfile(
   - **不用强制的 `any`/`tool`**，Opus 5.5 和 Sonnet 5.5 上会返回 400。
   - 工具 schema 可以加 `strict:true`。
   - 流式时给客户端工具加 `eager_input_streaming:true`，**拿到的参数先按 schema 校验再执行**；在执行任何工具之前，先检查 `stop_reason` 是不是 `max_tokens` 或 `refusal`。
+    - 校验在边界做：构造工具调用的地方（`ToolCall` 契约）。适配器只保留原始参数文本，不解析。
+    - `max_tokens` 和 `model_context_window_exceeded` 报成 `StopReason.MAX_TOKENS`，`refusal` 报成 `ModelError.Refusal`。主循环据此不执行工具。
 - **缓存**：最多 4 个 `cache_control` 断点。建议放在：工具清单末尾、system 末尾、历史里最后一个稳定点。用 `usage.cache_read_input_tokens` 验证是否命中，结果进 Token 统计。
 - **输出与采样**：
   - 流式请求的 `max_tokens` 给足（约 64K），避免话说到一半被截断。
@@ -318,7 +326,7 @@ OpenAI 在 DevDay 2026 推出的这个通道，面向"开源、在本地运行"�
 | **SSE 回放** | 每家网关录一份原始流，放在 `core/src/test/resources/wire/<provider>/<case>.sse`，喂给解析器（参考 DSH-Android 的 gateway fixtures）；覆盖 `usage:null`、思考字段、工具参数分片、拒答、中途断流 |
 | **会话回放** | 见 `engineering-baseline.md` §3.2；fixture 里记录协议和模型，同一个场景可以在三种协议下各录一份 |
 | **真实 API** | 每种协议一个 e2e，无 key 时跳过，CI 上缺 secret 判红；ChatGPT 套餐模式只做手动的冒烟清单（需要真实账号，不进 CI） |
-| **preserved thinking 自检** | Anthropic e2e 里加一个"历史只追加"的检查：连续两次请求的 messages，前一次必须是后一次的前缀；请求里显式设 `prefix_mismatch_behavior:"error"`，这样老账号也能测到 |
+| **preserved thinking 自检** | Anthropic e2e 里加一个"历史只追加"的检查：连续两次请求的 messages，前一次必须是后一次的前缀；请求里显式设 `prefix_mismatch_behavior:"error"`，这样老账号也能测到。这个设置只在官方端点上发；网关不是 Claude，不发 |
 
 ---
 
@@ -326,6 +334,6 @@ OpenAI 在 DevDay 2026 推出的这个通道，面向"开源、在本地运行"�
 
 | 里程碑 | 内容 |
 |---|---|
-| M1 | 三种协议的 API Key 模式；`ModelRouter` 的三种用途；"测试并保存"；线路格式单测和 SSE 回放；Anthropic SDK 的 Android spike |
+| M1 | 三种协议的 API Key 模式；`ModelRouter` 的三种用途；"测试并保存"；线路格式单测和 SSE 回放；Anthropic SDK 的 Android spike（已完成，结论是不用 SDK，见 ADR `2026-11-01-anthropic-adapter`） |
 | M2 | ChatGPT 套餐登录（要先确定 §4.2 的适用范围）；Anthropic 服务端 context editing / compaction 接入；Token 和缓存命中统计 |
 | M4 | 更多协议（如 Gemini）、更多服务商预设 |
