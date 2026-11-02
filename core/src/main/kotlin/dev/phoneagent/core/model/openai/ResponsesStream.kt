@@ -396,7 +396,7 @@ internal object ResponsesOutput {
 
     /**
      * Response id, reported model, status, incomplete reason and contradicted delta channels, for
-     * the log; the provider's strings masked with [redactor].
+     * the log. A provider string that holds a credential ([Redactor.verbatim]) is left out whole.
      */
     fun metadata(
         response: JsonObject,
@@ -406,10 +406,10 @@ internal object ResponsesOutput {
     ): JsonObject? {
         val meta =
             buildJsonObject {
-                response.str("id")?.let { put("id", redactor.text(it)) }
-                response.str("model")?.let { put("model", redactor.text(it)) }
-                response.str("status")?.let { put("status", redactor.text(it)) }
-                incompleteReason?.let { put("incomplete_reason", redactor.text(it)) }
+                response.str("id")?.let(redactor::verbatim)?.let { put("id", it) }
+                response.str("model")?.let(redactor::verbatim)?.let { put("model", it) }
+                response.str("status")?.let(redactor::verbatim)?.let { put("status", it) }
+                incompleteReason?.let(redactor::verbatim)?.let { put("incomplete_reason", it) }
                 if (diverged.isNotEmpty()) putJsonArray(PREVIEW_DIVERGED) { diverged.forEach { add(it) } }
             }
         return meta.takeIf { it.isNotEmpty() }

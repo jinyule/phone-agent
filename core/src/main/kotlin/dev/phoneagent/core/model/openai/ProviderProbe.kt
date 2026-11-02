@@ -53,12 +53,12 @@ public class ProviderProbe internal constructor(
      * tool call step still checks the address. Throws [ModelError] for every other failure, and
      * [IllegalArgumentException] for header values that are not valid HTTP.
      */
-    public suspend fun listModels(profile: ProviderProfile): List<ListedModel>? = listModels(profile, adapters.env)
+    public suspend fun listModels(profile: ProviderProfile): List<ListedModel>? = listing(profile, adapters.env)?.models
 
-    private suspend fun listModels(
+    private suspend fun listing(
         profile: ProviderProfile,
         env: AdapterEnv,
-    ): List<ListedModel>? {
+    ): Listing? {
         val url = "${profile.baseUrl}/models".toHttpUrl()
         val headers = profile.httpHeaders()
         val secret = env.secret(profile.credential, rejected = false)
@@ -102,9 +102,9 @@ public class ProviderProbe internal constructor(
     ): ProbeResult {
         // Records every secret this run's requests use: what the results must not show.
         val env = adapters.env.recording()
-        val models =
+        val listing =
             try {
-                listModels(profile, env)
+                listing(profile, env)
             } catch (e: ModelError) {
                 return ProbeResult.Failed(
                     ProbeStep.LIST_MODELS,
@@ -112,7 +112,7 @@ public class ProviderProbe internal constructor(
                     Redactor(env.known()).text(e.message.orEmpty()),
                 )
             }
-        return Trial(profile, candidate, capabilities, token, env).run(models, wire)
+        return Trial(profile, candidate, capabilities, token, env).run(listing, wire)
     }
 
     /**
@@ -127,7 +127,7 @@ public class ProviderProbe internal constructor(
         val env: AdapterEnv,
     ) {
         suspend fun run(
-            models: List<ListedModel>?,
+            listing: Listing?,
             wire: WireOptions,
         ): ProbeResult {
             var options = wire
@@ -147,7 +147,7 @@ public class ProviderProbe internal constructor(
                             WireNegotiation.without(options, profile.protocol, e, env.statusOf(e)) ?: return failed(e)
                         null
                     }
-                if (reply != null) return result(reply, models, options)
+                if (reply != null) return result(reply, listing, options)
             }
         }
 
@@ -156,21 +156,21 @@ public class ProviderProbe internal constructor(
 
         private fun result(
             reply: ChatResponse,
-            models: List<ListedModel>?,
+            listing: Listing?,
             wire: WireOptions,
         ): ProbeResult {
             val problem = checkTrialCall(reply, token, Redactor(env.known()))
             val verified =
                 capabilities.copy(tools = true, verified = capabilities.verified + VerifiedCapability.TOOL_CALL)
             return problem?.let { ProbeResult.Failed(ProbeStep.TOOL_CALL, null, it) }
-                ?: ProbeResult.Passed(models, verified, models?.any { it.id == candidate }, wire)
+                ?: ProbeResult.Passed(listing?.models, verified, listing?.let { candidate in it.ids }, wire)
         }
     }
 
     private fun parseListing(
         body: String,
         redactor: Redactor,
-    ): List<ListedModel> {
+    ): Listing {
         val root =
             try {
                 Json.parseToJsonElement(body) as? JsonObject
@@ -182,17 +182,16 @@ public class ProviderProbe internal constructor(
             }
         val entries =
             root?.array("data") ?: root?.array("models") ?: throw ModelError.BadResponse("model list has no data array")
-        return entries
-            .mapNotNull { entry -> (entry as? JsonObject)?.let { listed(it, redactor) } }
-            .distinctBy { it.id }
+        val usable = entries.mapNotNull { entry -> (entry as? JsonObject)?.let(::listed) }
+        return Listing(
+            models = usable.filter { redactor.verbatim(it.id.value) != null }.distinctBy { it.id },
+            ids = usable.mapTo(HashSet()) { it.id },
+        )
     }
 
-    /** One listing entry, its id masked; an entry whose id is not a usable model id is skipped. */
-    private fun listed(
-        entry: JsonObject,
-        redactor: Redactor,
-    ): ListedModel? {
-        val id = (entry.str("id") ?: entry.str("slug"))?.let(redactor::text)?.let(::modelIdOf)
+    /** One listing entry, its id as listed; an entry whose id is not a usable model id is skipped. */
+    private fun listed(entry: JsonObject): ListedModel? {
+        val id = (entry.str("id") ?: entry.str("slug"))?.let(::modelIdOf)
         id ?: return null
         val modalities =
             entry
@@ -367,6 +366,16 @@ internal object WireNegotiation {
 
 /** Blobs of the trial request, which has none: any read fails. */
 internal val NO_IMAGES: BlobSource = BlobSource { ref -> throw IOException("probe requests carry no images ($ref)") }
+
+/**
+ * A parsed listing. [models] is what may be shown: an entry whose id holds a secret the request
+ * sent ([Redactor.verbatim]) is left out rather than shown rewritten. [ids] is every usable id as
+ * listed, for deciding whether the candidate is listed; it never goes into a result.
+ */
+private class Listing(
+    val models: List<ListedModel>,
+    val ids: Set<ModelId>,
+)
 
 /**
  * A model from a provider's listing. Capability fields are `null` when the listing does not say.

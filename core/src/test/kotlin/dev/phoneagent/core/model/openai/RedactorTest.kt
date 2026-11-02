@@ -26,6 +26,14 @@ class RedactorTest {
     }
 
     @Test
+    fun `an identifier is kept whole or not at all`() {
+        val redactor = Redactor(listOf("tinkey"))
+        assertEquals("qwen3:8b", redactor.verbatim("qwen3:8b"))
+        assertEquals(null, redactor.verbatim("tinkey-7b"))
+        assertEquals(null, redactor.verbatim("Bearer " + "abcdefghijkl"), "a shape is masked too")
+    }
+
+    @Test
     fun `credential shapes are masked without knowing the secret`() {
         // Assembled at run time so secret scanners do not take the placeholders for real tokens.
         val jwt = listOf("eyJ" + "notarealheader", "notarealpayload", "notasignature").joinToString(".")

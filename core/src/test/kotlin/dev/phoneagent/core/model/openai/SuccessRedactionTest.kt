@@ -1,11 +1,13 @@
 package dev.phoneagent.core.model.openai
 
+import dev.phoneagent.core.ids.ModelId
 import dev.phoneagent.core.model.ModelErrorKind
 import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.openai.Kit.base
 import dev.phoneagent.core.model.openai.Kit.enqueueError
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -19,8 +21,9 @@ import org.junit.jupiter.params.provider.CsvSource
 
 /**
  * What a provider echoes back in a reply that succeeds never shows the secret either (model-layer
- * §2): listed model ids and the reply metadata the log keeps are masked; a trial reply whose
- * content echoes it is rejected ([EchoRejectionTest]), so the probe result shows none of it. The
+ * §2): identifiers are never shown rewritten, so a listed model id or a reply metadata field
+ * holding it is left out whole; a trial reply whose content echoes it is rejected
+ * ([EchoRejectionTest]), so the probe result shows none of it. The
  * secret here has no credential shape, so only a redactor that knows the request's secret can mask
  * it; text is masked before it is cut, so no prefix of the secret survives a cut. Assertions never
  * print the secret.
@@ -108,26 +111,34 @@ class SuccessRedactionTest {
         }
 
     @Test
-    fun `listed model ids echoing the key are masked`() =
+    fun `listed model ids holding the key are left out, and the candidate is still found`() =
         runTest {
             val listing = """{"data":[{"id":"$ECHOED"},{"id":"m/$ECHOED"},{"id":"${Kit.MODEL.value}"}]}"""
             server.enqueue(MockResponse.Builder().body(listing).build())
-            val models = adapters.probe().listModels(Kit.profile(server.base()))
-            assertClean("the listing", models.toString())
-            assertTrue(models.orEmpty().any { it.id == Kit.MODEL }, "ordinary ids stay")
+            assertEquals(listOf(ListedModel(Kit.MODEL)), adapters.probe().listModels(Kit.profile(server.base())))
             server.enqueue(MockResponse.Builder().body(listing).build())
             server.enqueueSse(trialCall("{\"token\":\"t\"}"))
-            val result = adapters.probe().testAndSave(Kit.profile(server.base()), Kit.MODEL, Kit.capabilities(), "t")
+            val candidate = ModelId("m/$ECHOED")
+            val result = adapters.probe().testAndSave(Kit.profile(server.base()), candidate, Kit.capabilities(), "t")
             assertTrue(result is ProbeResult.Passed, "the trial passes")
+            result as ProbeResult.Passed
+            assertEquals(listOf(ListedModel(Kit.MODEL)), result.models)
+            assertEquals(true, result.candidateListed, "compared with the ids as listed")
             assertClean("the probe result", result.toString())
         }
 
     @Test
-    fun `Chat reply metadata echoing the key is masked`() =
+    fun `Chat reply metadata fields holding the key are left out`() =
         runTest {
             server.enqueueSse(
                 Kit.sse(
                     """{"id":"$ECHOED","model":"m/$ECHOED","choices":[{"index":0,"delta":{"content":"hi"}}]}""",
+                    """{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}""",
+                ),
+            )
+            server.enqueueSse(
+                Kit.sse(
+                    """{"id":"c-1","model":"m","choices":[{"index":0,"delta":{"content":"hi"}}]}""",
                     """{"choices":[{"index":0,"delta":{},"finish_reason":"$ECHOED"}]}""",
                 ),
             )
@@ -140,13 +151,12 @@ class SuccessRedactionTest {
                     Kit.blobs(),
                     WireOptions.defaultsFor(profile),
                 )
-            val reply = model.complete(Kit.request())
-            assertTrue(reply.providerMetadata != null, "metadata is kept")
-            assertClean("the metadata", reply.providerMetadata.toString())
+            assertMetadata(mapOf("finish_reason" to "stop"), model.complete(Kit.request()).providerMetadata)
+            assertMetadata(mapOf("id" to "c-1", "model" to "m"), model.complete(Kit.request()).providerMetadata)
         }
 
     @Test
-    fun `Responses reply metadata echoing the key is masked`() =
+    fun `Responses reply metadata fields holding the key are left out`() =
         runTest {
             server.enqueueSse(
                 "data: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"$ECHOED\",\"model\":\"m/$ECHOED\"," +
@@ -161,10 +171,17 @@ class SuccessRedactionTest {
                     Kit.blobs(),
                     WireOptions.defaultsFor(profile),
                 )
-            val reply = model.complete(Kit.request())
-            assertTrue(reply.providerMetadata != null, "metadata is kept")
-            assertClean("the metadata", reply.providerMetadata.toString())
+            assertMetadata(mapOf("status" to "incomplete"), model.complete(Kit.request()).providerMetadata)
         }
+
+    private fun assertMetadata(
+        expected: Map<String, String>,
+        actual: JsonObject?,
+    ) {
+        assertClean("the metadata", actual.toString())
+        assertFalse(actual.toString().contains("***"), "identifiers are left out, not rewritten")
+        assertEquals(JsonObject(expected.mapValues { JsonPrimitive(it.value) }), actual)
+    }
 
     private companion object {
         /** A placeholder secret without a credential shape. */

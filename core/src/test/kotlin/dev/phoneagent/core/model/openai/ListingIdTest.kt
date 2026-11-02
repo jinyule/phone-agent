@@ -11,7 +11,11 @@ import mockwebserver3.junit5.StartStop
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 
-/** The model ids a listing yields: only usable ones, each verbatim, one bad entry costing only itself. */
+/**
+ * The model ids a listing yields: only usable ones, each verbatim, one bad entry costing only
+ * itself. An id holding a secret the request sent is left out rather than shown rewritten;
+ * whether the candidate is listed is still decided on the ids as listed.
+ */
 class ListingIdTest {
     @StartStop
     private val server = MockWebServer()
@@ -53,7 +57,26 @@ class ListingIdTest {
             assertEquals(2, server.requestCount, "the trial call was made")
         }
 
+    @Test
+    fun `a placeholder key inside model names leaves those entries out, never rewritten`() =
+        runTest {
+            // A local service given a placeholder key that its model names happen to contain.
+            val probe = Kit.adapters(Keys(PLACEHOLDER)).probe()
+            val listing = listing("$PLACEHOLDER-7b", "other", "$PLACEHOLDER:latest")
+            server.enqueue(listing)
+            assertEquals(listOf(ListedModel(ModelId("other"))), probe.listModels(profile))
+            for ((candidate, listed) in listOf("$PLACEHOLDER-7b" to true, "other" to true, "***-7b" to false)) {
+                server.enqueue(listing)
+                server.enqueueSse(trialCall("pa-1"))
+                val result = probe.testAndSave(profile, ModelId(candidate), Kit.capabilities(), token = "pa-1")
+                result as ProbeResult.Passed
+                assertEquals(listOf(ModelId("other")), result.models?.map { it.id })
+                assertEquals(listed, result.candidateListed, candidate)
+            }
+        }
+
     private companion object {
         const val BELL = 7
+        const val PLACEHOLDER = "tinkey"
     }
 }

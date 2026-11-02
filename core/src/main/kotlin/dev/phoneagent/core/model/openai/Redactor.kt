@@ -49,6 +49,12 @@ internal class Redactor(
     /** A fresh [EchoGuard] (one per reply) for the same secrets. */
     fun guard(): EchoGuard = if (forms.isEmpty()) EchoGuard.NONE else EchoGuard(forms)
 
+    /**
+     * [value] when masking leaves it as it is, else `null`. Identifiers (listed model ids, reply
+     * ids, reported models, finish reasons) are kept whole or left out, never shown rewritten.
+     */
+    fun verbatim(value: String): String? = value.takeIf { text(it) == it }
+
     /** [text] with every credential masked. */
     fun text(text: String): String {
         var masked = text

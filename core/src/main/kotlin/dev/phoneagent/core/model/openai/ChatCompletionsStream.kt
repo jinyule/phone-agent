@@ -41,7 +41,8 @@ import kotlinx.serialization.json.putJsonArray
  * A reply whose content holds a request secret fails as [CredentialEcho] ([EchoGuard]): each delta
  * is checked before it is shown, and the reply's parts before the end shows what the deltas missed.
  *
- * @param redactor masks credentials in provider text that goes into errors and the reply metadata.
+ * @param redactor masks credentials in provider text that goes into errors; reply metadata fields
+ *   that hold one are left out ([Redactor.verbatim]).
  */
 internal class ChatCompletionsStream(
     private val provider: ProviderId,
@@ -100,7 +101,14 @@ internal class ChatCompletionsStream(
             }
         guard.parts(parts)
         val diverged = ledger.catchUp(parts)
-        val meta = metadata(responseId, reportedModel, reason?.let(redactor::text), recovered.map { it.id }, diverged)
+        val meta =
+            metadata(
+                responseId?.let(redactor::verbatim),
+                reportedModel?.let(redactor::verbatim),
+                reason?.let(redactor::verbatim),
+                recovered.map { it.id },
+                diverged,
+            )
         return ChatResponse(parts, stopReason(reason, toolCalls.isNotEmpty()), usage, meta)
     }
 
@@ -133,8 +141,8 @@ internal class ChatCompletionsStream(
             throw ProviderErrors.fromStream(ProviderError.of(root, redactor), plan = false)
         }
         chunks++
-        responseId = responseId ?: root.str("id")?.takeIf { it.isNotEmpty() }?.let(redactor::text)
-        reportedModel = reportedModel ?: root.str("model")?.takeIf { it.isNotEmpty() }?.let(redactor::text)
+        responseId = responseId ?: root.str("id")?.takeIf { it.isNotEmpty() }
+        reportedModel = reportedModel ?: root.str("model")?.takeIf { it.isNotEmpty() }
         val choice = root.array("choices")?.firstOrNull() as? JsonObject
         (usageOf(root.obj("usage")) ?: usageOf(choice?.obj("usage")))?.let { usage = it }
         choice?.str("finish_reason")?.takeIf { it.isNotEmpty() }?.let { finishReason = it }
