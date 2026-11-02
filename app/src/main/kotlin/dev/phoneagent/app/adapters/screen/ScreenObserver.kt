@@ -67,7 +67,7 @@ internal class ScreenObserver(
 
     private fun flagsOf(read: TreeRead): Set<ScreenFlag> =
         buildSet {
-            if (read.topWindow != null && read.topWindow in secure) add(ScreenFlag.SECURE)
+            if (read.topWindow?.let { it in secure } == true) add(ScreenFlag.SECURE)
             if (read.keyboard) add(ScreenFlag.KEYBOARD)
             if (read.pkg != null && read.pkg in system.pickerPackages()) add(ScreenFlag.SYSTEM_PICKER)
             if (system.locked()) add(ScreenFlag.LOCKED)

@@ -6,6 +6,9 @@ import android.graphics.Rect
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -103,14 +106,12 @@ class ClipboardRestoreTest {
         assertFalse("our text does not stay", manager.primaryClip?.getItemAt(0)?.text == "secret")
     }
 
-    /** What [block] throws, or `null`. */
-    @Suppress("TooGenericExceptionCaught")
+    /** What [block] ends with, cancellation included, or `null`; it runs as a job of its own. */
+    @OptIn(ExperimentalCoroutinesApi::class)
     private suspend fun failure(block: suspend () -> Unit): Throwable? =
-        try {
-            block()
-            null
-        } catch (thrown: Throwable) {
-            // The test inspects whatever came out, cancellation included.
-            thrown
+        supervisorScope {
+            val run = async { block() }
+            run.join()
+            run.getCompletionExceptionOrNull()
         }
 }

@@ -19,10 +19,7 @@ class ElementIdentityTest {
     ): Int {
         nodes +=
             Identities.Facts(
-                1,
-                role,
-                resourceId = null,
-                name = label,
+                ElementIdentity(1, role, resourceId = null, name = label, row = null),
                 label = label,
                 list = list,
                 bounds = bounds,

@@ -11,6 +11,9 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.phoneagent.core.ports.AppEntry
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
@@ -106,13 +109,13 @@ class AndroidAppCatalogFailureTest {
         FailingPackageManager.failure = { RuntimeException("Package manager has died") }
     }
 
-    /** The cancellation [apps] throws, or `null`. */
+    /** The cancellation [apps] ends with, or `null`; it runs as a job of its own. */
+    @OptIn(ExperimentalCoroutinesApi::class)
     private suspend fun TestScope.cancellationOfApps(): CancellationException? =
-        try {
-            AndroidAppCatalog(context, StandardTestDispatcher(testScheduler)).apps()
-            null
-        } catch (expected: CancellationException) {
-            expected
+        supervisorScope {
+            val run = async { AndroidAppCatalog(context, StandardTestDispatcher(testScheduler)).apps() }
+            run.join()
+            run.getCompletionExceptionOrNull() as? CancellationException
         }
 
     @Test

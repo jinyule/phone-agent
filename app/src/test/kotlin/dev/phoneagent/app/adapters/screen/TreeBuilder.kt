@@ -7,11 +7,21 @@ import dev.phoneagent.core.ports.ElementRef
 import dev.phoneagent.core.ports.ElementRole
 import dev.phoneagent.core.ports.UiElement
 
+/** What [TreeBuilder.add] takes beyond name, place and role. */
+internal class More(
+    val resourceId: String? = null,
+    val row: List<String>? = null,
+    val value: String? = null,
+)
+
 /**
- * One read built by hand, parents before children, with identities given directly: for testing
- * [RefCarrier] and [RefMatcher] without the reader. Needs Robolectric (each element has a node).
+ * One read built by hand in [window], parents before children, with identities given directly:
+ * for testing [RefCarrier] and [RefMatcher] without the reader. Needs Robolectric (each element
+ * has a node).
  */
-internal class TreeBuilder {
+internal class TreeBuilder(
+    private val window: Int = 1,
+) {
     val elements = ArrayList<ReadElement>()
 
     /** Adds an element under [parent] (an index returned before) and returns its index. */
@@ -20,10 +30,7 @@ internal class TreeBuilder {
         top: Int,
         parent: Int? = null,
         role: ElementRole = if (parent == null) ElementRole.LIST else ElementRole.BUTTON,
-        window: Int = 1,
-        resourceId: String? = null,
-        row: List<String>? = null,
-        value: String? = null,
+        more: More = More(),
     ): Int {
         val index = elements.size
         val element =
@@ -34,19 +41,16 @@ internal class TreeBuilder {
                 bounds = Bounds(0, top, 999, top + 9),
                 parent = parent?.let { ElementRef("e${it + 1}") },
                 window = window,
-                resourceId = resourceId,
-                value = value,
+                resourceId = more.resourceId,
+                value = more.value,
             )
         elements +=
             ReadElement(
                 element = element,
-                node = AccessibilityNodeInfo(),
-                pixels = Rect(0, top, 1000, top + 10),
-                windowPackage = APP,
-                parent = parent,
-                depth = parent?.let { elements[it].depth + 1 } ?: 0,
+                target = NodeTarget(AccessibilityNodeInfo(), Rect(0, top, 1000, top + 10)),
+                place = NodePlace(window, APP, parent, depth = parent?.let { elements[it].depth + 1 } ?: 0),
                 brief = true,
-                identity = ElementIdentity(window, role, resourceId, name, row),
+                identity = ElementIdentity(window, role, more.resourceId, name, more.row),
             )
         return index
     }
@@ -56,12 +60,8 @@ internal class TreeBuilder {
         TreeRead(
             elements.toList(),
             APP,
-            topWindow = 1,
             keyboard = false,
-            windowPackages = emptyMap(),
-            windowBounds = emptyList(),
-            frontPackage = APP,
-            systemBars = emptySet(),
+            windows = WindowFacts(emptyMap(), emptyList(), top = window, front = APP, bars = emptySet()),
         )
 }
 

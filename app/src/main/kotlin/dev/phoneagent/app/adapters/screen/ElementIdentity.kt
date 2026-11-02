@@ -36,14 +36,12 @@ internal object Identities {
     private const val MAX_WRAPPERS = 3
 
     /**
-     * What identities are made of, per node in pre-order: [parent] is the index of the node above,
-     * [label] the node's own text or description, [list] whether it lists items.
+     * What identities are made of, per node in pre-order: [base] is the identity without its row,
+     * [label] the node's own text or description, [list] whether it lists items, [parent] the index
+     * of the node above.
      */
     class Facts(
-        val window: Int,
-        val role: ElementRole,
-        val resourceId: String?,
-        val name: String?,
+        val base: ElementIdentity,
         val label: String?,
         val list: Boolean,
         val bounds: Bounds,
@@ -63,7 +61,7 @@ internal object Identities {
         val signatures = HashMap<Int, List<String>>()
         return nodes.mapIndexed { i, facts ->
             val row = itemAround[i]?.let { item -> signatures.getOrPut(item) { signature(nodes, item, end) } }
-            ElementIdentity(facts.window, facts.role, facts.resourceId, facts.name, row)
+            facts.base.copy(row = row)
         }
     }
 

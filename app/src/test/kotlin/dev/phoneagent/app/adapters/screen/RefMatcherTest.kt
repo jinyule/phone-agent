@@ -76,7 +76,15 @@ class RefMatcherTest {
     fun valuesAndStatesMayChange() {
         val switch = TreeBuilder().apply { add("Wi-Fi", top = 100, role = ElementRole.SWITCH) }
         val planned = planned(switch)
-        val toggled = TreeBuilder().apply { add("Wi-Fi", top = 100, role = ElementRole.SWITCH, value = "on") }
+        val toggled =
+            TreeBuilder().apply {
+                add(
+                    "Wi-Fi",
+                    top = 100,
+                    role = ElementRole.SWITCH,
+                    more = More(value = "on"),
+                )
+            }
 
         assertEquals(RefMatcher.Match.Found::class, match(planned, "e1", toggled)::class)
     }
@@ -92,7 +100,7 @@ class RefMatcherTest {
         assertEquals(
             RefMatcher.Match.Stale,
             matchAda(
-                TreeBuilder().apply { add("Ada", top = 100, parent = add("Chats", top = 0, window = 2), window = 2) },
+                TreeBuilder(window = 2).apply { add("Ada", top = 100, parent = add("Chats", top = 0)) },
             ),
         )
         assertEquals(RefMatcher.Match.Stale, matchAda(TreeBuilder()))

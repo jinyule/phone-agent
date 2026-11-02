@@ -27,7 +27,7 @@ class RefCarrierTest {
     private fun feed(vararg rows: Pair<String, Int>): TreeBuilder =
         TreeBuilder().apply {
             val list = add("Feed", top = 0)
-            rows.forEach { (person, top) -> add("Like", top, parent = list, row = listOf(person, "Like")) }
+            rows.forEach { (person, top) -> add("Like", top, parent = list, more = More(row = listOf(person, "Like"))) }
         }
 
     /** Top-level "Like" buttons outside any row. */
@@ -106,8 +106,24 @@ class RefCarrierTest {
 
     @Test
     fun theViewIdTellsApartElementsThatLookAlike() {
-        val before = TreeBuilder().apply { add(null, top = 100, role = ElementRole.BUTTON, resourceId = "save") }
-        val after = TreeBuilder().apply { add(null, top = 100, role = ElementRole.BUTTON, resourceId = "delete") }
+        val before =
+            TreeBuilder().apply {
+                add(
+                    null,
+                    top = 100,
+                    role = ElementRole.BUTTON,
+                    more = More(resourceId = "save"),
+                )
+            }
+        val after =
+            TreeBuilder().apply {
+                add(
+                    null,
+                    top = 100,
+                    role = ElementRole.BUTTON,
+                    more = More(resourceId = "delete"),
+                )
+            }
 
         assertNotEquals(first(before).refs, first(before).then(after).refs)
     }
@@ -141,14 +157,7 @@ class RefCarrierTest {
     @Test
     fun anotherWindowStartsFresh() {
         val dialog =
-            TreeBuilder().apply {
-                add(
-                    "Ada",
-                    top = 100,
-                    parent = add("Chats", top = 0, window = 2),
-                    window = 2,
-                )
-            }
+            TreeBuilder(window = 2).apply { add("Ada", top = 100, parent = add("Chats", top = 0)) }
 
         val second = first(chats("Ada" to 100)).then(dialog)
 

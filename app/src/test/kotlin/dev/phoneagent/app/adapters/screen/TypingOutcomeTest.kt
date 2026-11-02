@@ -70,7 +70,13 @@ class TypingOutcomeTest {
         val element = UiElement(ElementRef("e1"), ElementRole.INPUT, bounds = Bounds(0, 100, 999, 150))
         val identity = ElementIdentity(1, ElementRole.INPUT, resourceId = null, name = "Amount", row = null)
         val read =
-            ReadElement(element, field, Rect(bounds), APP, parent = null, depth = 0, brief = true, identity = identity)
+            ReadElement(
+                element,
+                NodeTarget(field, Rect(bounds)),
+                NodePlace(1, APP, parent = null, depth = 0),
+                true,
+                identity,
+            )
         val aim = Aim.AtElement(read)
         val baseline = observer.baseline(host, GEOMETRY, SnapshotDetail.BRIEF)
         return ActionRun(parts, host, GEOMETRY, baseline, compareWith = null).perform(action, aim)
