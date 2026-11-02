@@ -357,7 +357,7 @@ sealed interface Phase { data object Idle : Phase; data class Running(val turn: 
 - 单一超时真相源：工具层先作答，外层后超时。等待用户的时间不计入工具超时。
 - 挂起等待（确认、接管）之后、真正执行之前，再确认一次这个调用仍然有效。
 - **被放弃的调用绝不晚些执行**；收尾时写日志的代码放在 `withContext(NonCancellable)` 里。
-- **流被中断**：用户已经看到的部分回复写成 `assistant/message(interrupted=true)`，parts 不能为空（什么都没显示就不写）。它进不进模型视图只看后面先来的是什么：
+- **流被中断**：用户已经看到的部分回复写成 `assistant/message(interrupted=true)`，parts 不能为空（什么都没显示就不写）。例外：错误带 `ModelError.discardsStreamed`（回复里出现了本次的密钥，model-layer §2）时不写前缀，只写 `assistant/attempt` 和固定原因，界面撤回或标记作废已经显示的片段。前缀进不进模型视图只看后面先来的是什么：
   - 先来的是另一条 `assistant/message`（同一 step 的重试，期间没有新的用户输入）：前缀只给 UI 看。重试重发的是产生它的那个请求，回复是在没有前缀的情况下生成的；
   - 先来的是 `user/message`（steer 截断后重开 step，或者 stop / 最终失败之后下一个 turn 的输入）：前缀跟着这条输入进入模型视图，但去掉其中的 `Part.Reasoning`（没写完的推理块不能回传），compaction 块也一样：回复不完整，其中的 compaction 块不回传，之后的请求由服务端重新压缩。视图是对日志的纯函数，前缀进入视图以后每次请求里的样子都相同，不违反"历史只追加"（model-layer §5）。去掉后为空就整条不进；
   - 规则样例在 `core` 测试源码的 `DeriveRuleSamples`，WP02 的 `deriveMessages` 测试逐条运行。
