@@ -24,7 +24,6 @@ import dev.phoneagent.core.session.SessionStore
 import dev.phoneagent.core.session.TaskStarted
 import dev.phoneagent.core.testing.FakeChatModel
 import dev.phoneagent.core.testing.InMemoryStoragePort
-import dev.phoneagent.core.testing.TEST_WIRE
 import dev.phoneagent.core.tool.RiskClass
 import dev.phoneagent.core.tool.Tool
 import dev.phoneagent.core.tool.ToolGroup
@@ -70,7 +69,6 @@ internal class LoopHarness(
     val plan =
         RequestPlan(
             replay.wrap(model),
-            TEST_WIRE,
             listOf(PromptBlock("identity", "You drive a phone.")),
             tools.map { it.def },
         )

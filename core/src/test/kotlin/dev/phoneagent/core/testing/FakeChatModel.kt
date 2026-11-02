@@ -57,9 +57,14 @@ class FakeChatModel(
     /** Scripts not played yet. */
     val remaining: Int get() = script.size
 
+    /** Every level [prepare] was called with, in order. */
+    val prepared = mutableListOf<ReasoningLevel?>()
+
     /** The level clamped to the model's levels, with [wire] as given. */
-    override fun prepare(reasoning: ReasoningLevel?): RequestSettings =
-        RequestSettings(reasoning?.clampTo(info.capabilities.reasoningLevels), wire)
+    override fun prepare(reasoning: ReasoningLevel?): RequestSettings {
+        prepared += reasoning
+        return RequestSettings(reasoning?.clampTo(info.capabilities.reasoningLevels), wire)
+    }
 
     fun then(next: Script): FakeChatModel = apply { script.addLast(next) }
 

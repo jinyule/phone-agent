@@ -9,7 +9,6 @@ import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.PromptBlock
 import dev.phoneagent.core.model.ReasoningLevel
 import dev.phoneagent.core.model.ToolDef
-import dev.phoneagent.core.model.WireProfile
 import dev.phoneagent.core.policy.Verdict
 import dev.phoneagent.core.session.AssistantMessage
 import dev.phoneagent.core.session.SessionEvent
@@ -106,25 +105,27 @@ public sealed interface PreStepResult {
 }
 
 /**
- * Everything of one attempt's request except the messages (`request`). Becomes the
- * `request/header` (written only when it changed) plus `deriveMessages(log)`.
+ * Everything of one attempt's request except the messages and the wire settings (`request`).
+ * After the chain, the loop calls `model.prepare(reasoning)` and the result becomes the
+ * `request/header` (written only when it changed) plus `deriveMessages(log)`: the header records
+ * the wire snapshot and the effective level prepare gives, never [reasoning] as asked. A chain that
+ * changes the model or the level is prepared for what it gives.
  *
  * The plan serves the main conversation only: vision and light requests are side requests
  * (`side/request`), never built from it.
  *
- * @property model the model to call; its `info` names provider, model and protocol in the header.
- * @property wire the non-secret wire settings frozen into the header for [model] (the adapter's
- *   rules for this provider and model).
+ * @property model the model to call; its `info` names provider, model and protocol in the header,
+ *   and its `prepare` gives the wire settings.
  * @property system system prompt blocks.
  * @property tools tool definitions, normally the registry's manifest.
  * @property cache explicit cache breakpoints.
  * @property contextEdits who trims old context.
  * @property maxOutputTokens output cap, or `null` for the adapter's default.
- * @property reasoning reasoning level, or `null` for the provider default.
+ * @property reasoning reasoning level asked for, or `null` for the provider default; `prepare`
+ *   clamps it to what [model] supports.
  */
 public data class RequestPlan(
     val model: ChatModel,
-    val wire: WireProfile,
     val system: List<PromptBlock>,
     val tools: List<ToolDef>,
     val cache: CacheLayout = CacheLayout.DEFAULT,

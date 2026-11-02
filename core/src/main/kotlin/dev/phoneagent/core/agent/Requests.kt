@@ -31,8 +31,8 @@ internal sealed interface Requested {
 }
 
 /**
- * The attempt loop of one step (phase1 §3.7, §7.2 step 3): `request` chain → `request/header`
- * when it changed → `deriveMessages` → flush → `ChatModel.complete`. A steer cancels the
+ * The attempt loop of one step (phase1 §3.7, §7.2 step 3): `request` chain → `prepare` →
+ * `request/header` when it changed → `deriveMessages` → flush → `ChatModel.complete`. A steer cancels the
  * attempt in flight (or a retry wait) and the step goes on with a new attempt that includes the
  * steer; what the user already saw is kept as an interrupted `assistant/message`. A failed
  * attempt is recorded (the interrupted prefix if any, then `assistant/attempt`) and handed to the
@@ -86,21 +86,25 @@ internal class Requests(
         }
     }
 
-    /** The frozen request of [plan] over the log; writes `request/header` only when it changed. */
+    /**
+     * The frozen request of [plan] over the log, with the settings `prepare` gives for the plan's
+     * model and level; writes `request/header` only when it changed.
+     */
     private suspend fun assemble(plan: RequestPlan): ChatRequest {
         val info = plan.model.info
+        val settings = plan.model.prepare(plan.reasoning)
         val header =
             RequestHeader(
                 info.provider,
                 info.model,
                 info.protocol,
-                plan.wire,
+                settings.wire,
                 plan.system,
                 plan.tools,
                 plan.cache,
                 plan.contextEdits,
                 plan.maxOutputTokens,
-                plan.reasoning,
+                settings.reasoning,
             )
         val latest =
             loop.log
