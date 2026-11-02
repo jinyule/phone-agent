@@ -27,8 +27,20 @@ class DisplaySpecTest {
     fun api30GetsOnlyTheBaseFlags() {
         val expected =
             DisplaySpec.PUBLIC or DisplaySpec.OWN_CONTENT_ONLY or DisplaySpec.SUPPORTS_TOUCH or
-                DisplaySpec.ROTATES_WITH_CONTENT or DisplaySpec.DESTROY_CONTENT_ON_REMOVAL
+                DisplaySpec.DESTROY_CONTENT_ON_REMOVAL
         assertEquals(expected, DisplaySpec.flagsFor(30))
+    }
+
+    @Test
+    fun noVersionLetsTheDisplayRotate() {
+        listOf(30, 33, 34, 35, 36).forEach { sdk ->
+            assertFalse("API $sdk rotates with content", has(sdk, ROTATES_WITH_CONTENT))
+        }
+    }
+
+    private companion object {
+        /** `DisplayManager.VIRTUAL_DISPLAY_FLAG_ROTATES_WITH_CONTENT`. */
+        const val ROTATES_WITH_CONTENT = 1 shl 7
     }
 
     @Test

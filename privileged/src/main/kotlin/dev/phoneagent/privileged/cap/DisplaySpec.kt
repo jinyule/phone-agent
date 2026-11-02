@@ -5,6 +5,10 @@ package dev.phoneagent.privileged.cap
  *
  * The set grows with the API level; every flag is named here because several are hidden constants.
  * Pure logic so the per-version set is unit-tested instead of discovered on a device.
+ *
+ * `VIRTUAL_DISPLAY_FLAG_ROTATES_WITH_CONTENT` is deliberately not set: the display stays in the
+ * portrait size it was created with, so injected coordinates always mean the same pixels; the
+ * system letterboxes an app that wants landscape.
  */
 internal object DisplaySpec {
     /** `DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC`: other apps may read and target it. */
@@ -15,9 +19,6 @@ internal object DisplaySpec {
 
     /** `..._SUPPORTS_TOUCH`: accepts injected touches. */
     const val SUPPORTS_TOUCH = 1 shl 6
-
-    /** `..._ROTATES_WITH_CONTENT`: the app decides the orientation, not the phone's sensors. */
-    const val ROTATES_WITH_CONTENT = 1 shl 7
 
     /** `..._DESTROY_CONTENT_ON_REMOVAL`: tasks die with the display instead of moving to the main screen. */
     const val DESTROY_CONTENT_ON_REMOVAL = 1 shl 8
@@ -58,7 +59,7 @@ internal object DisplaySpec {
      * added on top of the API 33 set (phase1-architecture D2: background displays need API 34+).
      */
     fun flagsFor(sdkInt: Int): Int {
-        var flags = PUBLIC or OWN_CONTENT_ONLY or SUPPORTS_TOUCH or ROTATES_WITH_CONTENT or DESTROY_CONTENT_ON_REMOVAL
+        var flags = PUBLIC or OWN_CONTENT_ONLY or SUPPORTS_TOUCH or DESTROY_CONTENT_ON_REMOVAL
         if (sdkInt >= API_33) {
             flags = flags or TRUSTED or OWN_DISPLAY_GROUP or ALWAYS_UNLOCKED or TOUCH_FEEDBACK_DISABLED
         }

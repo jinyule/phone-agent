@@ -11,6 +11,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.shadows.ShadowLog
 
 @RunWith(RobolectricTestRunner::class)
 class VirtualDisplaysTest {
@@ -61,7 +62,24 @@ class VirtualDisplaysTest {
         assertFalse(displays.owns(id))
     }
 
+    @Test
+    fun theDisplayIsCreatedWithoutRotatingWithItsContent() {
+        val id = newDisplay()
+        val created =
+            ShadowLog
+                .getLogsForTag(
+                    "PhoneAgentHelper",
+                ).map { it.msg }
+                .single { it.startsWith("display $id:") }
+        val flags = created.substringAfter("flags 0x").toInt(HEX)
+        assertEquals("ROTATES_WITH_CONTENT is never set: $created", 0, flags and ROTATES_WITH_CONTENT)
+    }
+
     private companion object {
+        const val HEX = 16
+
+        /** `DisplayManager.VIRTUAL_DISPLAY_FLAG_ROTATES_WITH_CONTENT`. */
+        const val ROTATES_WITH_CONTENT = 1 shl 7
         const val SDK = 36
         const val WIDTH = 1_080
         const val HEIGHT = 2_340

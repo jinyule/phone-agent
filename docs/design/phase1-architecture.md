@@ -333,7 +333,7 @@ interface IPrivilegedCore {
 
 **刻意不提供**任意命令执行的接口。setup 需要的命令（授权、写无障碍列表）在助手内部写死成白名单方法，程序名也有白名单（`am`/`pm`/`appops`/`input`），参数由助手自己拼。这是针对 Mika `phone_system_command` 的教训。
 
-虚拟屏的建屏参数（flags、`setDisplayImePolicy`）、跳出回收、接管流程，按调研报告 §2.4 的配方实现：flags 按 API 递增（33+ 加 TRUSTED / OWN_DISPLAY_GROUP / ALWAYS_UNLOCKED / TOUCH_FEEDBACK_DISABLED，34+ 加 OWN_FOCUS / STEAL_TOP_FOCUS_DISABLED），建屏后把 IME 策略设成 LOCAL 并回读。
+虚拟屏的建屏参数（flags、`setDisplayImePolicy`）、跳出回收、接管流程，按调研报告 §2.4 的配方实现：屏固定竖向（不加 `ROTATES_WITH_CONTENT`，坐标始终按建屏尺寸，横屏 App 由系统 letterbox），flags 按 API 递增（33+ 加 TRUSTED / OWN_DISPLAY_GROUP / ALWAYS_UNLOCKED / TOUCH_FEEDBACK_DISABLED，34+ 加 OWN_FOCUS / STEAL_TOP_FOCUS_DISABLED），建屏后把 IME 策略设成 LOCAL 并回读。
 
 ### 3.6 安全引擎
 

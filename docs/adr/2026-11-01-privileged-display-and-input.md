@@ -52,6 +52,8 @@ phase1-architecture §3.5 列出了 `IPrivilegedCore` 的能力面，调研报�
    - 判断逻辑全部写成纯函数或纯状态类（`DisplaySpec`、`PressKeys`、`StrokeSpec`、`LaunchGate`、`TaskOwnership`、`MainScreenLog`、`AudioMuteLedger`、`GrantSpec`），JVM 单测覆盖每个分支，并用变异（去掉某项保护看测试是否变红）证明断言有效。
    - 反射和系统交互在授权的模拟器上验证，入口是 debug 构建里的自检广播（`display` 和 `launch` 两个场景），它把每一步打进 logcat 并用 `PASS`/`FAIL` 作为广播结果，可以脚本化。
 
+7. **屏固定竖向**：不加 `VIRTUAL_DISPLAY_FLAG_ROTATES_WITH_CONTENT`。坐标契约是"建屏时的尺寸"：`injectStroke` 的坐标、截图的尺寸始终是建屏的宽高，不会因为 App 要横屏而对调。想横屏的 App 由系统 letterbox。WP14 的 ScreenPort 按这个契约换算坐标。
+
 ## Alternatives considered
 
 - **助手不做任何把关，全交给 PolicyEngine**（接近 Mika 的 `phone_system_command` 思路）。一个参数写错就能打扰用户；而且助手是 uid 2000，错误代价比 App 大。现在这几条都是"不越界"而不是"判断内容"，不会和 PolicyEngine 的职责重叠。
@@ -62,6 +64,7 @@ phase1-architecture §3.5 列出了 `IPrivilegedCore` 的能力面，调研报�
 - **`createDisplay` 用 `VirtualDisplayConfig`**（API 34+ 的新接口，可以设更多属性）。它要求构造隐藏的 builder，收益只有几个暂时用不上的属性，不如 6 参数重载稳。
 - **appops / grant 用反射**。签名在 API 30–36 之间变化多（`setMode` 有 int 和 String 两种 op 形式，`unsafeCheckOpRawNoThrow` 有四个重载），而命令形式是稳定的。真要省掉一次 fork，以后可以在反射成功时优先走反射。
 - **把 `PLAY_AUDIO` 恢复成显式 `default`**。那会让 App 一直没声音（Mika 踩过）；没设置过的恢复成 `allow` 与系统默认一致，`appops get` 也回到"没有设置"的语义。
+- **屏跟着内容旋转**（`ROTATES_WITH_CONTENT`，Mika 的做法）。横屏 App 会让屏的宽高对调，agent 正在用的坐标和截图尺寸随之失效，WP14 还得跟踪旋转。固定竖向更简单，代价是横屏 App 有黑边。
 - **主屏监视用轮询**。轮询有延迟也耗电；`ITaskStackListener` 是系统主动通知，只当"变了"的信号用（各版本回调参数不同，不解析），注册不上时才退回轮询。
 - **帧在助手侧编码后经 Binder 回传**。那要在 Binder 上传大块数据，还要在助手里做图像处理。App 自己的 `ImageReader` 直接拿到 Surface，帧不多走一跳。
 
