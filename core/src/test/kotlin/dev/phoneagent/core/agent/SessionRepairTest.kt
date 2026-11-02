@@ -104,7 +104,7 @@ class SessionRepairTest {
         )
         assertEquals(
             listOf(
-                "${texts.stoppedWhileRunning} ${texts.mayHaveTakenEffect}",
+                "${texts.stoppedWhileRunning}${texts.mayHaveTakenEffect}",
                 texts.stoppedBeforeRun,
                 texts.stoppedBeforeRun,
             ),

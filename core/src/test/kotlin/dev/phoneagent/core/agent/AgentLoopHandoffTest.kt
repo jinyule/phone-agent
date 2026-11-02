@@ -109,7 +109,7 @@ class AgentLoopHandoffTest {
             val run = handOver(FakeTool("send", RiskClass.OUTWARD), Verdict.Allow, handOff, lose = true)
 
             assertNull(run.policy.contexts[2].screen, "tap is not judged on the stale s1")
-            assertEquals("${texts.handoffDone} ${texts.screenUnknown}", run.resultOf(c1).text())
+            assertEquals("${texts.handoffDone}\n${texts.screenUnknown}", run.resultOf(c1).text())
             assertEquals(1, run.events().only<ScreenObserved>().size, "only look's")
         }
 
@@ -132,13 +132,13 @@ class AgentLoopHandoffTest {
 
             val lost = handOver(FakeTool("hand", run = hand::execute), lose = true)
             assertNull(lost.policy.contexts[2].screen)
-            assertEquals("用户处理完了 ${texts.screenUnknown}", lost.resultOf(c1).text())
+            assertEquals("用户处理完了\n${texts.screenUnknown}", lost.resultOf(c1).text())
         }
 
     @Test
     fun `a note joins the result's last text, or stands as a text of its own`() {
         val image = Part.Image(BlobRef("a".repeat(64)), "image/jpeg", 720, 1280)
-        assertEquals(listOf(Part.Text("看到了 注意")), ToolResult.ok("看到了").noted("注意").content)
+        assertEquals(listOf(Part.Text("看到了\n注意")), ToolResult.ok("看到了").noted("注意").content)
         assertEquals(listOf(image, Part.Text("注意")), ToolResult(ToolStatus.OK, listOf(image)).noted("注意").content)
         assertEquals(listOf(Part.Text("注意")), ToolResult(ToolStatus.OK, emptyList()).noted("注意").content)
     }

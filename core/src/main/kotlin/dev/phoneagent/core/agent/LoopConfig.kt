@@ -63,62 +63,61 @@ public data class LoopConfig(
 
 /**
  * Feedback the loop itself puts into tool results; model-visible, so changes need the replay
- * fixtures and golden files updated in the same change (AGENTS.md §5). Texts that end with `:` are
- * followed by a space and a detail.
+ * fixtures and golden files updated in the same change (AGENTS.md §5). The defaults are Chinese.
+ * A text is joined directly to what follows it, without a separator, so each text ends with its own
+ * punctuation: texts that end with `：` are followed by a detail.
  */
 public data class LoopTexts(
     /** A call after the first one in a reply. */
     val skipped: String =
-        "Not run: only the first tool call of a reply is executed (one action per step). " +
-            "Call it again in a later step if it is still needed.",
+        "未执行：每条回复只执行第一个工具调用（每步一个动作）。如果仍然需要，请在之后的步骤里再调用。",
     /** A call in a reply that hit the output limit. */
-    val maxTokens: String = "Not run: the reply hit the output limit, so its tool calls were discarded.",
+    val maxTokens: String = "未执行：这条回复达到了输出长度上限，其中的工具调用已被丢弃。",
     /** The model named a tool that does not exist or is not available; followed by the name. */
-    val unknownTool: String = "Not run: there is no available tool with this name:",
+    val unknownTool: String = "未执行：没有这个名字的可用工具：",
     /** The arguments are not JSON; followed by the parser's message. */
-    val invalidJson: String = "Not run: the arguments are not valid JSON:",
-    /** The arguments do not match the schema; followed by the problems. */
-    val invalidArgs: String = "Not run: the arguments do not match the tool's schema:",
+    val invalidJson: String = "未执行：参数不是合法的 JSON：",
+    /** The arguments do not match the schema; followed by the problems, separated by `；`. */
+    val invalidArgs: String = "未执行：参数不符合工具的 schema：",
     /** The `reason` argument is blank. */
-    val blankReason: String = "Not run: the `reason` argument must say, in the user's language, what this step does.",
+    val blankReason: String = "未执行：`reason` 参数必须用用户的语言说明这一步要做什么。",
     /** The user rejected the confirmation card. */
-    val rejected: String = "Not run: the user rejected this action. Do not repeat it unless the user asks.",
+    val rejected: String = "未执行：用户拒绝了这个操作。除非用户要求，不要再重复。",
     /** Nobody answered the confirmation card in time. */
-    val confirmExpired: String = "Not run: nobody confirmed this action in time.",
+    val confirmExpired: String = "未执行：没有人及时确认这个操作。",
     /** The task is unattended, so nobody can confirm. */
-    val confirmUnavailable: String = "Not run: this action needs the user's confirmation, but nobody can confirm now.",
+    val confirmUnavailable: String = "未执行：这个操作需要用户确认，但现在没有人能确认。",
     /** The re-check after approval asked for a new confirmation once too often. */
     val changedSinceApproval: String =
-        "Not run: the screen changed after the user approved, so the approval no longer matches. " +
-            "Observe the screen and try again.",
+        "未执行：用户批准之后屏幕变了，这次批准已经对不上当前的操作。请先观察屏幕，再重试。",
     /** The user did a handed-off step. */
-    val handoffDone: String = "The user did this step themselves. Observe the screen before continuing.",
+    val handoffDone: String = "用户已经自己完成了这一步。继续之前请先观察屏幕。",
     /** The user gave a handed-off step back undone. */
-    val handoffDeclined: String = "Not done: the user gave this step back without doing it.",
+    val handoffDeclined: String = "未完成：用户没有做这一步，把它交还了回来。",
     /** Nobody took a handed-off step in time. */
-    val handoffExpired: String = "Not done: nobody took over this step in time.",
+    val handoffExpired: String = "未完成：没有人及时接手这一步。",
     /** The task is unattended, so nobody can take over. */
-    val handoffUnavailable: String = "Not done: this step needs the user, but nobody can take over now.",
+    val handoffUnavailable: String = "未完成：这一步需要用户来做，但现在没有人能接手。",
     /** Moving the task to the user failed. */
-    val handoffFailed: String = "Not done: handing this step to the user failed.",
-    /** Appended to a handed-off call's result when the screen could not be read after the handoff. */
-    val screenUnknown: String = "The screen could not be read after the handoff: call phone_observe first.",
+    val handoffFailed: String = "未完成：把这一步交给用户时出错了。",
+    /** Appended, on a line of its own, to a handed-off call's result when no screen could be read after it. */
+    val screenUnknown: String = "交接结束后没能读到屏幕：请先调用 phone_observe。",
     /** The tool did not finish in time. */
-    val timeout: String = "The tool did not finish in time and was cancelled.",
+    val timeout: String = "工具没有在限定时间内完成，已被取消。",
     /** Appended to [timeout] and [stoppedWhileRunning] for calls that may change the phone. */
-    val mayHaveTakenEffect: String = "It may have taken effect: call phone_observe to check before deciding.",
+    val mayHaveTakenEffect: String = "这个操作可能已经生效：请先调用 phone_observe 确认，再做决定。",
     /** The tool threw; followed by the error. */
-    val toolError: String = "The tool failed:",
+    val toolError: String = "工具执行出错：",
     /** A `toolExecute` extension replaced the judged call or ran it twice. */
-    val interceptorFault: String = "Not run as judged: an extension tampered with this call.",
+    val interceptorFault: String = "未按判定执行：有扩展篡改了这次调用。",
     /** The task stopped before the call ran. */
-    val stoppedBeforeRun: String = "Not run: the task was stopped.",
+    val stoppedBeforeRun: String = "未执行：任务已经停止。",
     /** The task stopped while the call ran. */
-    val stoppedWhileRunning: String = "The task was stopped while this call was running.",
+    val stoppedWhileRunning: String = "这次调用运行期间，任务被停止了。",
     /** Repair: the step failed before the call was dispatched. */
-    val notStarted: String = "Not run: the step failed before this call started.",
+    val notStarted: String = "未执行：这一步在调用开始之前就失败了。",
     /** Repair: the call was dispatched but no result was recorded. */
     val outcomeUnknown: String =
-        "The step failed while this call was running, so its result is unknown. " +
-            "It may have taken effect: call phone_observe to check before deciding.",
+        "这一步在调用运行期间失败了，结果未知。" +
+            "这个操作可能已经生效：请先调用 phone_observe 确认，再做决定。",
 )

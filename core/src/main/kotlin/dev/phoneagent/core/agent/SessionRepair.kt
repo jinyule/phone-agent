@@ -95,7 +95,7 @@ private fun missingResult(
     when (cause) {
         RepairCause.STOPPED -> {
             if (mayHaveRun) {
-                ToolResult.failure(ToolStatus.CANCELLED, "${texts.stoppedWhileRunning} ${texts.mayHaveTakenEffect}")
+                ToolResult.failure(ToolStatus.CANCELLED, "${texts.stoppedWhileRunning}${texts.mayHaveTakenEffect}")
             } else {
                 ToolResult.failure(ToolStatus.CANCELLED, texts.stoppedBeforeRun)
             }

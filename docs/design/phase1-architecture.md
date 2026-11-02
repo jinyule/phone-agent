@@ -761,7 +761,7 @@ TaskRuntime 循环（每个 step，对应 §3.8 的拦截点）：
 |---|---|
 | core 单测 | `FakeChatModel`（按剧本回复）+ `ScriptedScreen`（快照序列）驱动真实主循环。主循环测试的每次请求都过 `ReplayChecker`：把当时的日志从存储读回（经过编解码），用最新 `request/header` 和 `deriveMessages` 重建请求，和实际发出的逐字段比较，不一致就让测试失败 |
 | **会话回放** | 拿录下的 session 日志当 fixture：`ReplayChatModel` 按调用顺序提供回复，`ReplayScreen` 按顺序提供观察结果；断言每次请求逐字节一致、PolicyEngine 判定一致；支持 record / replay / refresh 三种模式（详见 `engineering-baseline.md` §3.2） |
-| 金样 | `prompt-surface`（系统提示词、工具定义、反馈文字的全文）作为回放 fixture 的边车文件；改动时审阅 diff |
+| 金样 | `prompt-surface`（系统提示词、工具定义、反馈文字的全文）作为回放 fixture 的边车文件；改动时审阅 diff。主循环自己的反馈（`LoopTexts` 的默认值，以及参数校验不过时模型看到的完整结果）在 `prompt-surface/loop/`；模型可见的反馈文字一律用中文 |
 | 端口契约测试 | ScreenPort 的同一套用例在 Robolectric 和真机上都跑 |
 | 真机评测 | 任务 YAML 分 read / write / outward / spend / impossible / barrier 几类，分调优池和保留池；指标：成功率、**误操作率**、步数、token、首次反馈耗时 |
 | ROM 矩阵 | 原生（Pixel 或模拟器 API 34/35/36）、HyperOS、ColorOS、OriginOS、MagicOS、OneUI；每个里程碑都跑保留池 |

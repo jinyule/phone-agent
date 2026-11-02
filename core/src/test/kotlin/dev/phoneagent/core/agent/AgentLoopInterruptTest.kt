@@ -339,7 +339,7 @@ class AgentLoopInterruptTest {
             assertTrue(results.all { it.result.status == ToolStatus.CANCELLED })
             val texts = LoopTexts()
             assertEquals(
-                "${texts.stoppedWhileRunning} ${texts.mayHaveTakenEffect}",
+                "${texts.stoppedWhileRunning}${texts.mayHaveTakenEffect}",
                 (results[0].result.content.single() as Part.Text).text,
             )
             assertEquals(texts.stoppedBeforeRun, (results[1].result.content.single() as Part.Text).text)
@@ -402,7 +402,7 @@ class AgentLoopInterruptTest {
             assertEquals(listOf(ToolStatus.TIMEOUT, ToolStatus.TIMEOUT), results.map { it.status })
             assertEquals(texts.timeout, (results[0].content.single() as Part.Text).text)
             assertEquals(
-                "${texts.timeout} ${texts.mayHaveTakenEffect}",
+                "${texts.timeout}${texts.mayHaveTakenEffect}",
                 (results[1].content.single() as Part.Text).text,
             )
             assertEquals(2_000, currentTime, "each call had exactly its own timeout")

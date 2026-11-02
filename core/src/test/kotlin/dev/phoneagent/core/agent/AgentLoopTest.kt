@@ -493,9 +493,9 @@ class AgentLoopTest {
             val texts = events.only<ToolResultRecorded>().map { (it.result.content.single() as Part.Text).text }
             assertTrue(events.only<ToolResultRecorded>().all { it.result.status == ToolStatus.INVALID_ARGS })
             val defaults = LoopTexts()
-            assertEquals("${defaults.unknownTool} missing", texts[0])
+            assertEquals("${defaults.unknownTool}missing", texts[0])
             assertTrue(texts[1].startsWith(defaults.invalidJson))
-            assertEquals("${defaults.invalidArgs} arguments.n must be integer, got \"x\"", texts[2])
+            assertEquals("${defaults.invalidArgs}arguments.n 的类型必须是 integer，实际是 \"x\"", texts[2])
             assertEquals(defaults.blankReason, texts[3])
         }
 

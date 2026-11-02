@@ -89,10 +89,10 @@ internal class Calls(
     }
 
     private fun parse(part: Part.ToolCall): Parsed {
-        val tool = loop.setup.registry[part.name] ?: return Parsed.Invalid("${loop.texts.unknownTool} ${part.name}")
+        val tool = loop.setup.registry[part.name] ?: return Parsed.Invalid("${loop.texts.unknownTool}${part.name}")
         return jsonOf(part.argsJson).fold(
             onSuccess = { args -> checked(tool, part, args) },
-            onFailure = { malformed -> Parsed.Invalid("${loop.texts.invalidJson} ${malformed.message}") },
+            onFailure = { malformed -> Parsed.Invalid("${loop.texts.invalidJson}${malformed.message}") },
         )
     }
 
@@ -109,7 +109,7 @@ internal class Calls(
         args: JsonElement,
     ): Parsed {
         val problems = ToolArguments.problems(tool.def.parameters, args)
-        if (problems.isNotEmpty()) return Parsed.Invalid("${loop.texts.invalidArgs} ${problems.joinToString("; ")}")
+        if (problems.isNotEmpty()) return Parsed.Invalid("${loop.texts.invalidArgs}${problems.joinToString("；")}")
         // The registry only admits object schemas with a required string `reason`, so both hold here.
         val fields = args.jsonObject
         val reason = fields.getValue(ToolCall.REASON).jsonPrimitive.content
@@ -172,7 +172,7 @@ internal class Calls(
     private fun withEffect(
         text: String,
         mayHaveRun: Boolean,
-    ): String = if (mayHaveRun) "$text ${loop.texts.mayHaveTakenEffect}" else text
+    ): String = if (mayHaveRun) "$text${loop.texts.mayHaveTakenEffect}" else text
 
     /**
      * The end of the `toolExecute` chain: runs [judged] (the recorded, judged call with its own
@@ -204,7 +204,7 @@ internal class Calls(
             } catch (bug: Exception) {
                 // A stop propagates; a tool that throws a cancellation of its own has a bug like any other.
                 if (bug is CancellationException) currentCoroutineContext().ensureActive()
-                ToolResult.failure(ToolStatus.ERROR, "${loop.texts.toolError} $bug")
+                ToolResult.failure(ToolStatus.ERROR, "${loop.texts.toolError}$bug")
             }
         }
     }
@@ -239,7 +239,7 @@ internal class Calls(
     }
 }
 
-/** This result with [note] after its last text (or as a text of its own). */
+/** This result with [note] on a line of its own after its last text (or as a text of its own). */
 internal fun ToolResult.noted(note: String): ToolResult {
     val last = content.lastOrNull() as? Part.Text
     return if (last ==
@@ -249,7 +249,7 @@ internal fun ToolResult.noted(note: String): ToolResult {
     } else {
         copy(
             content =
-                content.dropLast(1) + Part.Text("${last.text} $note"),
+                content.dropLast(1) + Part.Text("${last.text}\n$note"),
         )
     }
 }

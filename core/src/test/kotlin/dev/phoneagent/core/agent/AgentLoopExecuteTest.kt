@@ -132,7 +132,7 @@ class AgentLoopExecuteTest {
             val run = run(tap, wrapper = twice)
             assertEquals(1, tap.calls.size)
             assertEquals(
-                ToolResult.failure(ToolStatus.ERROR, "${texts.interceptorFault} ${texts.mayHaveTakenEffect}"),
+                ToolResult.failure(ToolStatus.ERROR, "${texts.interceptorFault}${texts.mayHaveTakenEffect}"),
                 run.result,
             )
 
@@ -179,7 +179,7 @@ class AgentLoopExecuteTest {
             val run = run(tap, wrapper = slow)
             assertEquals(1, tap.calls.size)
             assertEquals(
-                ToolResult.failure(ToolStatus.TIMEOUT, "${texts.timeout} ${texts.mayHaveTakenEffect}"),
+                ToolResult.failure(ToolStatus.TIMEOUT, "${texts.timeout}${texts.mayHaveTakenEffect}"),
                 run.result,
             )
             assertEquals(1_000, currentTime)

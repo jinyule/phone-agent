@@ -10,8 +10,9 @@ import java.math.BigDecimal
 
 /**
  * Checks a model's tool arguments against the tool's JSON Schema at the boundary (phase1 §3.2:
- * `Tool.execute` only ever sees arguments that passed). Problems are English sentences meant for
- * the model, naming the offending path, so it can fix the call.
+ * `Tool.execute` only ever sees arguments that passed). Problems are Chinese sentences meant for
+ * the model, naming the offending path, so it can fix the call; they are model-visible (AGENTS.md
+ * §5: the loop's golden files show them).
  *
  * Supported keywords: `type` (a name or a list of names: object, array, string, integer, number,
  * boolean, null), `enum`, `const`, `properties`, `required`, `additionalProperties` (`false` or a
@@ -53,10 +54,10 @@ public object ToolArguments {
             if (allowed != null &&
                 allowed.none { sameJson(it, value) }
             ) {
-                add("$path must be one of $allowed, got $value")
+                add("$path 必须是 $allowed 之一，实际是 $value")
             }
             val expected = schema["const"]
-            if (expected != null && !sameJson(expected, value)) add("$path must be $expected, got $value")
+            if (expected != null && !sameJson(expected, value)) add("$path 必须是 $expected，实际是 $value")
             addAll(bounds(schema, value, path))
             if (value is JsonObject) addAll(objectProblems(schema, value, path))
             if (value is JsonArray) addAll(arrayProblems(schema, value, path))
@@ -76,7 +77,7 @@ public object ToolArguments {
                 else -> emptyList()
             }
         val matches = names.isEmpty() || names.any { name -> types[name]?.invoke(value) ?: true }
-        return if (matches) null else "$path must be ${names.joinToString(" or ")}, got $value"
+        return if (matches) null else "$path 的类型必须是 ${names.joinToString(" 或 ")}，实际是 $value"
     }
 
     private fun bounds(
@@ -89,12 +90,12 @@ public object ToolArguments {
         val size = (value as? JsonArray)?.let { BigDecimal.valueOf(it.size.toLong()) }
         val checks =
             listOf(
-                Bound("minimum", number, atLeast = true) { "$path must be >= $it, got $value" },
-                Bound("maximum", number, atLeast = false) { "$path must be <= $it, got $value" },
-                Bound("minLength", length, atLeast = true) { "$path must have at least $it characters" },
-                Bound("maxLength", length, atLeast = false) { "$path must have at most $it characters" },
-                Bound("minItems", size, atLeast = true) { "$path must have at least $it items" },
-                Bound("maxItems", size, atLeast = false) { "$path must have at most $it items" },
+                Bound("minimum", number, atLeast = true) { "$path 必须 >= $it，实际是 $value" },
+                Bound("maximum", number, atLeast = false) { "$path 必须 <= $it，实际是 $value" },
+                Bound("minLength", length, atLeast = true) { "$path 至少要有 $it 个字符，实际有 $length 个" },
+                Bound("maxLength", length, atLeast = false) { "$path 最多只能有 $it 个字符，实际有 $length 个" },
+                Bound("minItems", size, atLeast = true) { "$path 至少要有 $it 项，实际有 $size 项" },
+                Bound("maxItems", size, atLeast = false) { "$path 最多只能有 $it 项，实际有 $size 项" },
             )
         return checks.mapNotNull { it.problem(schema) }
     }
@@ -109,12 +110,12 @@ public object ToolArguments {
         val additional = schema["additionalProperties"]
         val closed = additional == JsonPrimitive(false)
         return buildList {
-            required.filter { it !in value }.forEach { add("$path.$it is required") }
+            required.filter { it !in value }.forEach { add("缺少必填参数 $path.$it") }
             for ((key, child) in value) {
                 val childSchema = properties[key] as? JsonObject ?: additional as? JsonObject
                 when {
                     childSchema != null -> addAll(check(childSchema, child, "$path.$key"))
-                    closed && key !in properties -> add("$path.$key is not a known argument")
+                    closed && key !in properties -> add("$path.$key 不是已知的参数")
                     else -> Unit
                 }
             }
@@ -140,13 +141,13 @@ public object ToolArguments {
             if (anyOf != null) {
                 val failures = anyOf.map { check(it, value, path) }
                 if (failures.none { it.isEmpty() }) {
-                    add("$path matches none of the allowed forms: ${failures.flatten().distinct()}")
+                    add("$path 不符合任何一种允许的形式（${failures.flatten().distinct().joinToString("；")}）")
                 }
             }
             val oneOf = (schema["oneOf"] as? JsonArray)?.schemas()
             if (oneOf != null) {
                 val matching = oneOf.count { check(it, value, path).isEmpty() }
-                if (matching != 1) add("$path must match exactly one of the allowed forms, matches $matching")
+                if (matching != 1) add("$path 必须恰好符合一种允许的形式，实际符合 $matching 种")
             }
         }
 
