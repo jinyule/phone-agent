@@ -53,7 +53,7 @@ public class SessionStore private constructor(
     private val invariants = SessionInvariants.after(initial)
     private var failure: String? = null
 
-    /** Seq of the last record in the log (0 when empty), including skipped ignorable records. */
+    /** Seq of the last record in the log, including skipped ignorable records; 1 (`task/start`) after [create]. */
     public val lastSeq: Long get() = lastSeqValue
 
     /** Every known record, loaded and appended, in seq order. A copy; safe to keep. */
@@ -184,7 +184,9 @@ public class SessionStore private constructor(
          * (atomic rewrite of the valid prefix) and reported in [Opened.log]. Acquiring the appender
          * is the last step. Throws what [read]
          * throws, [UnsupportedSessionVersionException] for a log not in [SessionCodec.currentVersion],
-         * and [SessionWriteException] when the repair or opening fails.
+         * and [SessionWriteException] when the repair or opening fails. A log that ends with a final
+         * `task/stopped` (USER, LIMIT) still opens and reads, but every append is refused, so such a
+         * task is never resumed.
          */
         public suspend fun open(
             files: SessionFiles,

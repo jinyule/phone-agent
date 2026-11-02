@@ -33,6 +33,41 @@ public data class TaskLevelChanged(
     val level: SecurityLevel,
 ) : SessionEvent
 
+/**
+ * `task/stopped`: the task stopped before finishing. Written last when a stop is handled: the
+ * results of pending calls (CANCELLED), `prompt/withdrawn` and `turn/end` come before it. Not
+ * ignorable: whether the log may continue depends on it.
+ *
+ * Resume: [StopCause.USER] and [StopCause.LIMIT] are final. No record may follow (the store
+ * refuses the append; a log with one is corrupt), so such a task is never resumed and its log
+ * stays readable as it is. After [StopCause.SHUTDOWN] or [StopCause.ERROR] the runtime may resume
+ * the task explicitly: repair, then `session/resumed`. When writing the log itself failed, the
+ * record may be missing and the log ends like a crashed one.
+ *
+ * @property cause why it stopped.
+ */
+@Serializable
+@SerialName("task/stopped")
+public data class TaskStopped(
+    val cause: StopCause,
+) : SessionEvent
+
+/** Why a task was stopped (`TaskRuntime.stop`, [TaskStopped]). */
+@Serializable
+public enum class StopCause {
+    /** The user pressed stop. Final. */
+    USER,
+
+    /** The app or service is shutting down. Resumable. */
+    SHUTDOWN,
+
+    /** The step or continuation limit was reached. Final. */
+    LIMIT,
+
+    /** An unrecoverable error (e.g. the session log could not be flushed). Resumable. */
+    ERROR,
+}
+
 /** `turn/start`: a turn began after inputs were taken from the inbox. [turn] counts from 1. */
 @Serializable
 @SerialName("turn/start")
@@ -196,6 +231,7 @@ public enum class InboxEntryKind {
 /**
  * `session/resumed`: the log was reopened after the process ended, possibly by a crash.
  * Written by the runtime after repair; the model must observe the screen again before acting.
+ * Never after a final [TaskStopped] (USER, LIMIT): the store refuses it.
  *
  * @property droppedTailBytes bytes of a torn last line that were discarded (0 when the log was clean).
  */

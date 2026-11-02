@@ -175,7 +175,15 @@ object SessionSamples {
             ),
         )
 
-    private val head: List<SessionEvent> =
+    private val allowed =
+        PolicyVerdictRecorded(
+            call,
+            SecurityLevel.STANDARD,
+            ActionIntent(IntentKind.OUTWARD, "com.example.chat", element),
+            Verdict.Allow,
+        )
+
+    private val beforeStart: List<SessionEvent> =
         listOf(
             start,
             TaskLevelChanged(SecurityLevel.CAUTIOUS),
@@ -220,12 +228,6 @@ object SessionSamples {
             ToolCallRecorded(toolCall),
             PolicyVerdictRecorded(
                 call,
-                SecurityLevel.STANDARD,
-                ActionIntent(IntentKind.OUTWARD, "com.example.chat", element),
-                Verdict.Allow,
-            ),
-            PolicyVerdictRecorded(
-                call,
                 SecurityLevel.CAUTIOUS,
                 ActionIntent(IntentKind.SPEND, amount = Money(1999)),
                 Verdict.Confirm(card),
@@ -242,6 +244,12 @@ object SessionSamples {
                 ActionIntent(IntentKind.SETTINGS),
                 Verdict.Refuse("hard-deny", "Not allowed."),
             ),
+            allowed,
+        )
+
+    /** From the start of the call on its Allow ([allowed], the last record of [beforeStart]). */
+    private val afterStart: List<SessionEvent> =
+        listOf(
             ApprovalAsked(prompt, card, expiresAt = 901_000),
             ApprovalDecided(prompt, ConfirmResult.APPROVED),
             QuestionAsked(prompt, call, Question("哪个张三？", listOf("同事", "同学"))),
@@ -317,6 +325,7 @@ object SessionSamples {
                 ActionOutcome(ActionOutcome.Status.Ok, ActionOutcome.Effect.CHANGED),
             ),
             ScreenFrame(blob, "image/jpeg", 720, 1280, som = true, snapshotId = SnapshotId("s1")),
+            ToolExecuted(call, ToolStatus.OK),
             ToolResultRecorded(
                 call,
                 "phone_tap",
@@ -348,6 +357,8 @@ object SessionSamples {
             StepEnded(1, 1, StepOutcome.COMPLETED),
         )
 
+    private val head: List<SessionEvent> = beforeStart + ToolStarted(call, beforeStart.size.toLong()) + afterStart
+
     private val tail: List<SessionEvent> =
         listOf(
             CompactionStarted(CompactionTrigger.PRESSURE, 120_000),
@@ -356,7 +367,9 @@ object SessionSamples {
             CompactionEnded(CompactionOutcome.COMPLETED, 40_000),
             TurnEnded(1, TurnEndReason.COMPLETED),
             TurnEnded(2, TurnEndReason.FAILED, detail = "flush failed"),
+            TaskStopped(StopCause.ERROR),
             SessionResumed(droppedTailBytes = 17),
+            TaskStopped(StopCause.USER),
         )
 
     val events: List<SessionEvent> =

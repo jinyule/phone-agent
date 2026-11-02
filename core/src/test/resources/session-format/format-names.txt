@@ -35,6 +35,7 @@ enum session.CompactionTrigger: PRESSURE, OVERFLOW, MANUAL
 enum session.InboxEntryKind: FOLLOWUP, STEER, INJECT
 enum session.InboxQueue: NEXT_TURN, NEXT_STEP
 enum session.StepOutcome: COMPLETED, FAILED, CANCELLED
+enum session.StopCause: USER, SHUTDOWN, LIMIT, ERROR
 enum session.TurnEndReason: COMPLETED, END_NOT_DONE, MAX_TOKENS, PRE_STEP_REFUSED, LIMIT, STOPPED, FAILED
 enum session.UserMessageKind: USER, RUNTIME_CONTEXT, INJECTED
 enum tool.EndReason: IMPOSSIBLE, BLOCKED, USER_STOPPED, OTHER
@@ -48,7 +49,7 @@ sealed ports.AskResult: answered, declined, expired, unavailable
 sealed ports.LaunchTarget: app, link, system
 sealed ports.Target: point, ref
 sealed ports.UiAction: key, scroll, set_wheel, swipe, tap, type
-sealed session.SessionEvent: approval/asked, approval/decided, assistant/attempt, assistant/message, compaction/end, compaction/prune, compaction/start, compaction/summary, handoff/end, handoff/start, inbox/spliced, policy/verdict, prompt/withdrawn, question/answered, question/asked, context/reasoning-dropped, request/header, request/retry, screen/action, screen/frame, screen/launch, screen/snapshot, session/resumed, side/request, side/response, step/end, step/start, task/level-changed, task/start, tool/call, tool/result, turn/end, turn/start, user/message
+sealed session.SessionEvent: approval/asked, approval/decided, assistant/attempt, assistant/message, compaction/end, compaction/prune, compaction/start, compaction/summary, handoff/end, handoff/start, inbox/spliced, policy/verdict, prompt/withdrawn, question/answered, question/asked, context/reasoning-dropped, request/header, request/retry, screen/action, screen/frame, screen/launch, screen/snapshot, session/resumed, side/request, side/response, step/end, step/start, task/level-changed, task/start, task/stopped, tool/call, tool/executed, tool/result, tool/started, turn/end, turn/start, user/message
 sealed session.SideOutcome: completed, failed
 sealed session.SurfaceOp: append, replace
 sealed tool.ToolControl: end_turn
@@ -81,8 +82,11 @@ event step/end ignorable=false
 event step/start ignorable=false
 event task/level-changed ignorable=false
 event task/start ignorable=false
+event task/stopped ignorable=false
 event tool/call ignorable=false
+event tool/executed ignorable=false
 event tool/result ignorable=false
+event tool/started ignorable=false
 event turn/end ignorable=false
 event turn/start ignorable=false
 event user/message ignorable=false

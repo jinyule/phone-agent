@@ -3,6 +3,7 @@ package dev.phoneagent.core.agent
 import dev.phoneagent.core.ids.PromptId
 import dev.phoneagent.core.ids.TaskId
 import dev.phoneagent.core.model.Part
+import dev.phoneagent.core.session.StopCause
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -31,7 +32,10 @@ public interface TaskRuntime {
     /** Queues background [context] for the next step without waking an idle driver. */
     public fun inject(context: ContextInput)
 
-    /** Stops this task only, for [cause]; clears the inbox. Pending tool calls end CANCELLED. */
+    /**
+     * Stops this task only, for [cause]; clears the inbox. Pending tool calls end CANCELLED, and
+     * `task/stopped` is recorded last (it says whether the task may be resumed).
+     */
     public fun stop(cause: StopCause)
 
     /**
@@ -117,21 +121,6 @@ public data class ContextInput(
         require(parts.isNotEmpty()) { "ContextInput must not be empty" }
         require(parts.all { it is Part.Text || it is Part.Image }) { "ContextInput may hold text and images only" }
     }
-}
-
-/** Why a task was stopped. */
-public enum class StopCause {
-    /** The user pressed stop. */
-    USER,
-
-    /** The app or service is shutting down. */
-    SHUTDOWN,
-
-    /** The step or continuation limit was reached. */
-    LIMIT,
-
-    /** An unrecoverable error (e.g. the session log could not be flushed). */
-    ERROR,
 }
 
 /**

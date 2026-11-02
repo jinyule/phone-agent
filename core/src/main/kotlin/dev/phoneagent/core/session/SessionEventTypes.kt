@@ -17,6 +17,7 @@ public object SessionEventTypes {
         listOf(
             type<TaskStarted>(ignorable = false),
             type<TaskLevelChanged>(ignorable = false),
+            type<TaskStopped>(ignorable = false),
             type<TurnStarted>(ignorable = false),
             type<TurnEnded>(ignorable = false),
             type<StepStarted>(ignorable = false),
@@ -32,6 +33,8 @@ public object SessionEventTypes {
             type<SideRequest>(ignorable = true),
             type<SideResponse>(ignorable = true),
             type<ToolCallRecorded>(ignorable = false),
+            type<ToolStarted>(ignorable = false),
+            type<ToolExecuted>(ignorable = false),
             type<ToolResultRecorded>(ignorable = false),
             type<PolicyVerdictRecorded>(ignorable = true),
             type<ApprovalAsked>(ignorable = true),

@@ -111,7 +111,8 @@ public sealed interface Verdict {
  * Everything besides the call that the matrix depends on. Not serializable on purpose: it is
  * never persisted (the log records the resulting `policy/verdict` with level and intent), but it
  * must be derivable from the session log alone, so replay reproduces every verdict. The runtime
- * computes it; the policy documents which fields its rules read.
+ * computes it; the policy documents which fields its rules read. Samples of the two package sets
+ * on small logs are in the core test sources (`PolicyContextSamples`).
  *
  * Re-check after approval: once the user approves a card and before the call runs, the runtime
  * resolves and evaluates the call again on a fresh screen with [approved] set. The engine returns
@@ -124,10 +125,14 @@ public sealed interface Verdict {
  * @property level user-selected security level.
  * @property unattended no user is watching (scheduled tasks): spending is always refused.
  * @property screen the snapshot the call was planned on, or `null` for non-screen tools.
- * @property operatedPackages the `intent.pkg` of every non-READ call already executed in this task,
- *   including the target package of `phone_launch`.
- * @property outwardConfirmedPackages the `card.pkg` of every card in this task whose result was
- *   `ConfirmResult.APPROVED` and whose reason was `ConfirmReason.OUTWARD`.
+ * @property operatedPackages the `intent.pkg` of every non-READ call that started in this task
+ *   (`tool/started`), taking the intent of the verdict it started on (`verdictSeq`); this includes
+ *   the target package of `phone_launch`. A refused or handed-off call, one waiting for or denied
+ *   an approval, and one an interceptor answered never started and count nothing.
+ * @property outwardConfirmedPackages the `card.pkg` of every card with reason `ConfirmReason.OUTWARD`
+ *   that was `ConfirmResult.APPROVED` for a call that then started and was executed with
+ *   `ToolStatus.OK` (`tool/executed` of the same call id). A `request_confirmation` card has no
+ *   pkg and grants nothing.
  * @property approved the card the user just approved for this call, during the re-check; `null` otherwise.
  */
 public data class PolicyContext(

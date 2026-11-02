@@ -4,6 +4,7 @@ import dev.phoneagent.core.ids.BlobRef
 import dev.phoneagent.core.ids.PromptId
 import dev.phoneagent.core.ids.ToolCallId
 import dev.phoneagent.core.model.Part
+import dev.phoneagent.core.session.StopCause
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test

@@ -13,13 +13,18 @@ import dev.phoneagent.core.ports.HandoffResult
 import dev.phoneagent.core.ports.Question
 import dev.phoneagent.core.tool.ToolCall
 import dev.phoneagent.core.tool.ToolResult
+import dev.phoneagent.core.tool.ToolStatus
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
- * `tool/call`: dispatch of a validated call began (before `toolPreExecute`). Repair treats a
- * call with this record but no `tool/result` as OUTCOME_UNKNOWN, and a call without it as
- * NOT_STARTED (D14). Sources: the `assistant/message` that requested it.
+ * `tool/call`: dispatch of a validated call began (before `toolPreExecute`). Sources: the
+ * `assistant/message` that requested it.
+ *
+ * Repair (D14) gives every call without a `tool/result` one, decided by [ToolStarted]:
+ * NOT_STARTED when the call has no `tool/started`, OUTCOME_UNKNOWN when it has one (it may have
+ * taken effect: observe first). A call ended by a stop is CANCELLED instead, as `TaskRuntime.stop`
+ * says, whether it started or not.
  */
 @Serializable
 @SerialName("tool/call")
@@ -27,6 +32,53 @@ public data class ToolCallRecorded(
     /** The call, with its task id. */
     val call: ToolCall,
 ) : SessionEvent
+
+/**
+ * `tool/started`: the call crossed the persisted execution boundary. The loop writes it right
+ * before `Tool.execute`, in this order: append, flush, execute. Not ignorable: policy context
+ * (`PolicyContext.operatedPackages`) and repair are derived from it.
+ *
+ * It does not say the effect happened: after a crash between this record and the action, the
+ * call counts as "may have started". A call that never reaches `Tool.execute` has none: refused,
+ * handed off, waiting for or denied an approval, or answered by an interceptor.
+ *
+ * @property callId the call.
+ * @property verdictSeq seq of the `policy/verdict` the call runs on (>= 1): the call's latest
+ *   verdict, an Allow; after a re-check, the re-check's.
+ */
+@Serializable
+@SerialName("tool/started")
+public data class ToolStarted(
+    val callId: ToolCallId,
+    val verdictSeq: Long,
+) : SessionEvent {
+    init {
+        require(verdictSeq >= 1) { "tool/started: verdictSeq must be >= 1, got $verdictSeq" }
+    }
+}
+
+/**
+ * `tool/executed`: `Tool.execute` returned [status] (written before `toolPostExecute`, which may
+ * still change the final `tool/result`). A tool that threw is recorded as [ToolStatus.ERROR].
+ * Nothing is written when execute did not return: cancelled by a stop or by the loop's timeout,
+ * the `tool/result` alone says CANCELLED or TIMEOUT. Not ignorable: `PolicyContext.outwardConfirmedPackages`
+ * is derived from it.
+ *
+ * @property callId the call.
+ * @property status what execute returned; never a status only repair writes (NOT_STARTED, OUTCOME_UNKNOWN).
+ */
+@Serializable
+@SerialName("tool/executed")
+public data class ToolExecuted(
+    val callId: ToolCallId,
+    val status: ToolStatus,
+) : SessionEvent {
+    init {
+        require(status != ToolStatus.NOT_STARTED && status != ToolStatus.OUTCOME_UNKNOWN) {
+            "tool/executed: $status is written by repair, not returned by a tool"
+        }
+    }
+}
 
 /**
  * `tool/result`: the final result of a call, including results the loop writes itself (invalid
