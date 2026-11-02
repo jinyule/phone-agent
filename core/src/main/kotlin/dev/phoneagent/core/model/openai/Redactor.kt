@@ -2,9 +2,6 @@ package dev.phoneagent.core.model.openai
 
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import java.util.Collections
 import java.util.IdentityHashMap
@@ -16,7 +13,8 @@ import java.util.IdentityHashMap
  * string escaping (`"` → `\"`, `\` → `\\`: [forms]); then text shaped like a credential
  * (`Bearer …`, `sk-…`, JWTs) is masked whether or not this request used it. Error codes and
  * parameter names never match these shapes, so the diagnosis survives. JSON that may escape a
- * secret in other ways (`\/`, `\u0073`) is masked string by string ([json]).
+ * secret in other ways (`\/`, `\u0073`) is masked after it is written back in the standard
+ * escaping ([json]).
  *
  * Every cut comes after masking, with the whole set of secrets the run has sent: callers redact
  * the full text, then cut it. A reader that must stop early reads [reach] characters past its
@@ -49,9 +47,10 @@ internal class Redactor(
     }
 
     /**
-     * [json] (text that should be JSON, such as call arguments) with every credential masked:
-     * when it parses, each string in it (keys too) is masked as decoded, then the whole is written
-     * back and masked as [text]; otherwise it is masked as [text].
+     * [json] (text that should be JSON, such as call arguments) with every credential masked as
+     * [text] masks it, after JSON that parses is written back in the standard escaping. Standard
+     * escaping goes character by character, so a string (or key) that holds a secret then holds
+     * its escaped form: masking the strings one by one would mask nothing more.
      */
     fun json(json: String): String {
         val parsed =
@@ -61,15 +60,8 @@ internal class Redactor(
                 // Not JSON: no escapes to decode, the text is all there is to mask.
                 null
             }
-        return text(parsed?.let(::masked)?.toString() ?: json)
+        return text(parsed?.toString() ?: json)
     }
-
-    private fun masked(element: JsonElement): JsonElement =
-        when (element) {
-            is JsonObject -> JsonObject(element.entries.associate { (key, value) -> text(key) to masked(value) })
-            is JsonArray -> JsonArray(element.map(::masked))
-            is JsonPrimitive -> if (element.isString) JsonPrimitive(text(element.content)) else element
-        }
 
     /**
      * The length of the end of [masked] (what [text] returned for text a read limit cut off) that

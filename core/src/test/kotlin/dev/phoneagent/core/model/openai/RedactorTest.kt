@@ -64,14 +64,15 @@ class RedactorTest {
     }
 
     @Test
-    fun `JSON is masked string by string, whatever escapes it uses`() {
+    fun `JSON is masked in its standard escaping, whatever escapes it came with`() {
         val slashed = "placeholder/with-slash-00001"
         val redactor = Redactor(listOf(slashed))
         // `\/` and `\u0070` hide the secret from a scan of the text; keys are masked too.
         assertEquals(
             """{"token":"***","***":[1,null,"***"]}""",
             redactor.json(
-                """{"token":"placeholder\/with-slash-00001","$slashed":[1,null,"\u0070laceholder/with-slash-00001"]}""",
+                """{"token":"placeholder\/with-slash-00001",""" +
+                    """"placeholder\/with-slash-00001":[1,null,"\u0070laceholder/with-slash-00001"]}""",
             ),
         )
         // Assembled at run time so secret scanners do not take the placeholder for a real key.
