@@ -35,7 +35,10 @@ internal class Actuator(
             val settled: Boolean = false,
         ) : Result
 
-        /** Not performed; [reason] is for the model, in English. */
+        /**
+         * Not done as requested: it may have partly happened, or whether it happened cannot be
+         * told; [reason] says what is known, for the model, in English.
+         */
         data class NotDone(
             val reason: String,
         ) : Result

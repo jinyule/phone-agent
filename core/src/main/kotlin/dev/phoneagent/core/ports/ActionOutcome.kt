@@ -27,7 +27,10 @@ public data class ActionOutcome(
         @SerialName("ok")
         public data object Ok : Status
 
-        /** Attempted but did not happen; [reason] is for the model, in English. */
+        /**
+         * Not done as requested: it may have partly happened, or whether it happened cannot be
+         * told; [reason] says what is known, for the model, in English.
+         */
         @Serializable
         @SerialName("failed")
         public data class Failed(
