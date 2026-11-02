@@ -46,9 +46,10 @@ import kotlin.time.TimeSource
  *
  * @property taskId the task; every tool call carries it.
  * @property files the session directory (log and blobs).
- * @property plan the request plan every attempt starts from (`request` interceptors may change
- *   everything but its role). Its model is built for this session: the adapter's
- *   `BlobSource` reads [files]' blobs, so each session gets its own `ChatModel`.
+ * @property plan the request plan every attempt starts from (`request` interceptors may change any
+ *   of it; the runtime then asks the plan's model to `prepare` the settings). Its model is built
+ *   for this session: the adapter's `BlobSource` reads [files]' blobs, so each session gets its
+ *   own `ChatModel`.
  * @property registry the tools; only visible ones can be called.
  * @property policy the safety engine, the last guard of `toolPreExecute`.
  * @property intents resolves what a call would do, for the policy.
@@ -57,7 +58,8 @@ import kotlin.time.TimeSource
  *   user acts on the screen the task already uses.
  * @property apps installed apps for `phone_apps` and launching by name, or `null` when missing.
  * @property clock timestamps of log records and card expiry.
- * @property config limits, security level and loop texts.
+ * @property config limits, timeouts and loop texts (the security level and attendance are not
+ *   configuration: they come from the log, `task/start` and `task/level-changed`).
  * @property interceptors the extensions at the fixed points.
  * @property timeSource measures tool timeouts (virtual time in tests).
  */

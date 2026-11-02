@@ -65,14 +65,14 @@ class PolicyContextsTest {
     ) = ScreenLaunched(id(call), LaunchTarget.App("com.example.chat"), outcome(after))
 
     @Test
-    fun `the latest screen is the newest one a finished call showed the model`() {
+    fun `the latest screen is the newest one recorded by a call that has its result`() {
         assertNull(latestSnapshot(log()))
         assertNull(latestSnapshot(log(ScreenObserved(id("c1"), s1))), "its call has no result yet")
         assertEquals(s1, latestSnapshot(log(ScreenObserved(id("c1"), s1), answered("c1"))))
         assertEquals(
             s1,
             latestSnapshot(log(ScreenObserved(id("c1"), s1), answered("c1"), ScreenObserved(null, s2), TurnStarted(2))),
-            "a runtime observation is not shown to the model",
+            "a snapshot without a call does not count",
         )
         assertEquals(s2, latestSnapshot(log(acted("c1", s1), launched("c2", s2), answered("c1"), answered("c2"))))
         assertEquals(s1, latestSnapshot(log(acted("c1", s1), launched("c2", s2), answered("c1"))))
