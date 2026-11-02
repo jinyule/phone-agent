@@ -10,7 +10,9 @@ import android.content.pm.ResolveInfo
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.phoneagent.core.ports.AppEntry
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -52,10 +54,13 @@ class FailingPackageManager : ShadowApplicationPackageManager() {
     private fun <T> failOr(
         call: ManagerCall,
         real: () -> T,
-    ): T = if (call in failing) throw RuntimeException("Package manager has died") else real()
+    ): T = if (call in failing) throw failure() else real()
 
     companion object {
         var failing: Set<ManagerCall> = emptySet()
+
+        /** What a failing call throws. */
+        var failure: () -> RuntimeException = { RuntimeException("Package manager has died") }
     }
 }
 
@@ -98,7 +103,38 @@ class AndroidAppCatalogFailureTest {
     @After
     fun heal() {
         FailingPackageManager.failing = emptySet()
+        FailingPackageManager.failure = { RuntimeException("Package manager has died") }
     }
+
+    /** The cancellation [apps] throws, or `null`. */
+    private suspend fun TestScope.cancellationOfApps(): CancellationException? =
+        try {
+            AndroidAppCatalog(context, StandardTestDispatcher(testScheduler)).apps()
+            null
+        } catch (expected: CancellationException) {
+            expected
+        }
+
+    @Test
+    fun aCancellationIsPassedOnNotSwallowed() =
+        runTest {
+            // Codex r1 S1 / Claude x6 / fix list S4: a CancellationException is a RuntimeException too.
+            installMailAndService()
+            FailingPackageManager.failing = setOf(ManagerCall.LAUNCHER_QUERY)
+            FailingPackageManager.failure = { CancellationException("stop") }
+
+            assertEquals("stop", cancellationOfApps()?.message)
+        }
+
+    @Test
+    fun aCancellationWhileReadingALabelIsPassedOn() =
+        runTest {
+            install("com.example.resources", { labelRes = LABEL_RES }, launcher = false)
+            FailingPackageManager.failing = setOf(ManagerCall.LABEL)
+            FailingPackageManager.failure = { CancellationException("stop") }
+
+            assertEquals("stop", cancellationOfApps()?.message)
+        }
 
     @Test
     fun aFailedLauncherQueryStillListsTheInstalledApps() =

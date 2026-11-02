@@ -9,6 +9,7 @@ import android.os.Build
 import android.util.Log
 import dev.phoneagent.core.ports.AppCatalog
 import dev.phoneagent.core.ports.AppEntry
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -21,7 +22,7 @@ import kotlinx.coroutines.withContext
  * falls back to the package name.
  *
  * Failures: when a package manager query fails (it died, or its reply was too large) that part
- * of the list is left out and logged; [apps] returns the rest.
+ * of the list is left out and logged; [apps] returns the rest. Cancellation is passed on.
  */
 internal class AndroidAppCatalog(
     context: Context,
@@ -63,6 +64,9 @@ internal class AndroidAppCatalog(
     ): List<T> =
         try {
             query()
+        } catch (cancelled: CancellationException) {
+            // A RuntimeException too, but never a package manager failure: passed on.
+            throw cancelled
         } catch (managerFailed: RuntimeException) {
             Log.w(TAG, "Could not read the $what; listing the rest", managerFailed)
             emptyList()
@@ -76,6 +80,9 @@ internal class AndroidAppCatalog(
     ): CharSequence? =
         try {
             load(pm)
+        } catch (cancelled: CancellationException) {
+            // A RuntimeException too, but never a label failure: passed on.
+            throw cancelled
         } catch (labelFailed: RuntimeException) {
             Log.w(TAG, "Could not read the label of $pkg; showing the package name", labelFailed)
             null
