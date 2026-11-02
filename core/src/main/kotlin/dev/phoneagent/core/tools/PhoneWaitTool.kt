@@ -30,6 +30,10 @@ import kotlinx.serialization.json.put
  *   next read always sees it; and a screen that changes every frame still costs one read per
  *   interval. At the deadline the last page is checked once more, so a condition that came true
  *   in the meantime is reported as met.
+ *
+ *   The wait between reads is not raced against [ScreenPort.awaitChange] ("whichever comes
+ *   first"): the minimum read interval is also the longest wait, so a change event could never
+ *   bring a read forward; racing would only add one port call per round, with the same result.
  * - **stable**: [ScreenPort.awaitChange] until a quiet period of [stableQuietMs]; each look after
  *   a change takes at least [readIntervalMs], so a port that reports changes without suspending
  *   cannot spin the loop or hold off cancellation.

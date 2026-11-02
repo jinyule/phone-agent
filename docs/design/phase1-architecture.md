@@ -574,7 +574,7 @@ screen s12 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · 坐标 0–
 
 所有工具都带 `reason` 参数。模型回复里不带工具调用，就视为最终回答。每轮只执行第一个工具调用。
 
-`phone_wait` 的等法（不依赖 `ScreenPort.awaitChange` 报告调用之前的变化）：appear / disappear 每隔 `ToolsConfig.waitReadIntervalMs`（默认 250ms）读一屏判断一次，变化最迟一个间隔内被发现，画面一直在动也只按间隔读；截止时用最后一屏再判断一次，条件那时已经成立就算等到了。stable 用 `awaitChange` 等一段 `stableQuietMs` 的安静期，每次看到变化后至少隔一个读屏间隔再看，端口不挂起也不会空转。全部用协程时间，可取消。
+`phone_wait` 的等法（不依赖 `ScreenPort.awaitChange` 报告调用之前的变化）：appear / disappear 每隔 `ToolsConfig.waitReadIntervalMs`（默认 250ms）读一屏判断一次，变化最迟一个间隔内被发现，画面一直在动也只按间隔读；截止时用最后一屏再判断一次，条件那时已经成立就算等到了。两次读屏之间只等固定间隔，**不和 `awaitChange` 取先到的那个**：最小读屏间隔同时就是最长等待，变化事件没法让读屏提前，取先到只会每轮多一次端口调用，结果一样。stable 用 `awaitChange` 等一段 `stableQuietMs` 的安静期，每次看到变化后至少隔一个读屏间隔再看，端口不挂起也不会空转。全部用协程时间，可取消。
 
 元素编号参数（`ref`）写 `@e5` 或 `e5`，裸数字不算编号。`phone_launch` 的 `link` 只接受 `LaunchTarget.Link.SCHEMES`（https、http、geo、mailto、market；`core.ports` 里唯一的一份，工具和适配器都用它），适配器只把它当作可浏览的 `ACTION_VIEW` + Uri 打开，不解析成任意 Intent；App 深链（如 `weixin://`）不在里面，打开 App 用 `app`。`request_confirmation` 的风险等级是 WRITE（保守下限）：只有 PolicyEngine 给出 Confirm、用户批准、复核为 Allow 之后才执行，所以它的结果是"用户已确认"。
 
