@@ -115,16 +115,18 @@ class SuccessRedactionTest {
         runTest {
             val listing = """{"data":[{"id":"$ECHOED"},{"id":"m/$ECHOED"},{"id":"${Kit.MODEL.value}"}]}"""
             server.enqueue(MockResponse.Builder().body(listing).build())
-            assertEquals(listOf(ListedModel(Kit.MODEL)), adapters.probe().listModels(Kit.profile(server.base())))
+            val models = adapters.probe().listModels(Kit.profile(server.base()))
+            assertClean("the listing", models.toString())
+            assertEquals(listOf(ListedModel(Kit.MODEL)), models)
             server.enqueue(MockResponse.Builder().body(listing).build())
             server.enqueueSse(trialCall("{\"token\":\"t\"}"))
             val candidate = ModelId("m/$ECHOED")
             val result = adapters.probe().testAndSave(Kit.profile(server.base()), candidate, Kit.capabilities(), "t")
+            assertClean("the probe result", result.toString())
             assertTrue(result is ProbeResult.Passed, "the trial passes")
             result as ProbeResult.Passed
             assertEquals(listOf(ListedModel(Kit.MODEL)), result.models)
             assertEquals(true, result.candidateListed, "compared with the ids as listed")
-            assertClean("the probe result", result.toString())
         }
 
     @Test
