@@ -105,7 +105,7 @@ class WireProfileTest {
                 "echoReasoning" to base.copy(echoReasoning = true),
                 "reasoningEffort" to base.copy(reasoningEffort = WireSetting("reasoning_effort", "high")),
                 "maxTokensField" to base.copy(maxTokensField = "max_completion_tokens"),
-                "parallelToolCalls" to base.copy(parallelToolCalls = true),
+                "disableParallelToolCalls" to base.copy(disableParallelToolCalls = true),
                 "streamOptions" to base.copy(streamOptions = true),
                 "includeEncryptedReasoning" to base.copy(includeEncryptedReasoning = true),
                 "recoverLeakedToolCalls" to base.copy(recoverLeakedToolCalls = true),

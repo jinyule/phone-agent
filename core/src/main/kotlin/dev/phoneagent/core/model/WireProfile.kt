@@ -32,7 +32,9 @@ import kotlinx.serialization.Serializable
  *   when no reasoning setting is sent; `ChatRequest.reasoning` is the neutral level it came from.
  * @property maxTokensField the field carrying `ChatRequest.maxOutputTokens` (`max_tokens`,
  *   `max_completion_tokens`, `max_output_tokens`), or `null` when the cap is not sent.
- * @property parallelToolCalls send `parallel_tool_calls`.
+ * @property disableParallelToolCalls ask for at most one tool call per reply. `true`: Chat
+ *   Completions and Responses send `parallel_tool_calls: false`, Anthropic Messages sends
+ *   `tool_choice.disable_parallel_tool_use: true`; `false`: neither field is sent.
  * @property streamOptions send `stream_options` (usage in the stream).
  * @property includeEncryptedReasoning Responses: ask for `include: ["reasoning.encrypted_content"]`.
  * @property recoverLeakedToolCalls turn complete tool-call markup leaked into the reply text back
@@ -50,7 +52,7 @@ public data class WireProfile(
     val echoReasoning: Boolean = false,
     val reasoningEffort: WireSetting? = null,
     val maxTokensField: String? = null,
-    val parallelToolCalls: Boolean = false,
+    val disableParallelToolCalls: Boolean = false,
     val streamOptions: Boolean = false,
     val includeEncryptedReasoning: Boolean = false,
     val recoverLeakedToolCalls: Boolean = false,
@@ -69,7 +71,8 @@ public data class WireProfile(
     override fun toString(): String =
         "WireProfile(mappingVersion=$mappingVersion, credential=$credential, headers=${headers.keys}, " +
             "images=$images, reasoningField=$reasoningField, echoReasoning=$echoReasoning, " +
-            "reasoningEffort=$reasoningEffort, maxTokensField=$maxTokensField, parallelToolCalls=$parallelToolCalls, " +
+            "reasoningEffort=$reasoningEffort, maxTokensField=$maxTokensField, " +
+            "disableParallelToolCalls=$disableParallelToolCalls, " +
             "streamOptions=$streamOptions, includeEncryptedReasoning=$includeEncryptedReasoning, " +
             "recoverLeakedToolCalls=$recoverLeakedToolCalls, options=$options)"
 }

@@ -92,7 +92,7 @@ object SessionSamples {
             echoReasoning = true,
             reasoningEffort = WireSetting("output_config.effort", "high"),
             maxTokensField = "max_tokens",
-            parallelToolCalls = true,
+            disableParallelToolCalls = true,
             streamOptions = true,
             includeEncryptedReasoning = true,
             recoverLeakedToolCalls = true,
