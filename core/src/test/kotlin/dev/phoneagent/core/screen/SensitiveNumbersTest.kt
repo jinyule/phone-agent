@@ -36,6 +36,10 @@ class SensitiveNumbersTest {
         // Too short, glued to letters, or split into tiny groups.
         assertEquals("电话 13800138000", mask("电话 13800138000"))
         assertEquals("AB6222021234567894", mask("AB6222021234567894"))
+        // Glued at the end too, also when only the last group is: that group is part of a token.
+        assertEquals("6222021234567894ab", mask("6222021234567894ab"))
+        assertEquals("6222 0212 3456 7894ab", mask("6222 0212 3456 7894ab"))
+        assertEquals("身份证 110105 19491231 002Xa", mask("身份证 110105 19491231 002Xa"))
         assertEquals("6 2 2 2 0 2 1 2 3 4 5 6 7 8 9 4", mask("6 2 2 2 0 2 1 2 3 4 5 6 7 8 9 4"))
         assertEquals("20 位 62220212345678941234", mask("20 位 62220212345678941234"))
         assertEquals("短文本 123", mask("短文本 123"))
