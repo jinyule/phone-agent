@@ -16,7 +16,10 @@ public object StartResult {
     /** Nothing can handle the intent (no launcher entry, no matching activity, no such component). */
     public const val NOT_FOUND: Int = 2
 
-    /** The helper could not inspect or start it; the reason is in logcat. */
+    /**
+     * The helper could not inspect or start it; the reason is in logcat. This includes an intent
+     * the `am start` fallback cannot carry: extras (protocol 4) or ClipData (protocol 6).
+     */
     public const val ERROR: Int = 3
 
     /** Started, but the requested cold start was downgraded: the app has tasks elsewhere. */
@@ -29,7 +32,10 @@ public object StartResult {
      * Refused by the helper: not its own display, another user, a malformed intent, or (protocol
      * 2) an intent that may carry another intent (from protocol 4: any extra of a type not on the
      * helper's list), has several handlers, or names an activity the app itself could not start
-     * (not exported, or guarded by a permission the app lacks).
+     * (not exported, or guarded by a permission the app lacks). From protocol 6 the last is the
+     * activity manager's whole check for the app's uid: the application's permission when the
+     * activity declares none, the app op of that permission, and the runtime permission an action
+     * such as ACTION_CALL is tied to.
      */
     public const val REFUSED: Int = 6
 
