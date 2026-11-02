@@ -21,7 +21,9 @@ import dev.phoneagent.core.session.SessionEvent
 import dev.phoneagent.core.session.SessionRecord
 import dev.phoneagent.core.session.TaskLevelChanged
 import dev.phoneagent.core.session.TaskStarted
+import dev.phoneagent.core.session.ToolExecuted
 import dev.phoneagent.core.session.ToolResultRecorded
+import dev.phoneagent.core.session.ToolStarted
 import dev.phoneagent.core.tool.ToolStatus
 
 /**
@@ -102,10 +104,15 @@ private fun seenSnapshot(
     }
 
 /**
- * The policy's view of the task, derived from the log only (so replay rebuilds it):
- * - `operatedPackages`: the `intent.pkg` of every non-READ call whose `tool/result` is OK (the
- *   last verdict of a call counts; launches resolve to their target package);
- * - `outwardConfirmedPackages`: the `card.pkg` of every APPROVED card whose reason is OUTWARD.
+ * The policy's view of the task, derived from the log only (so replay rebuilds it). Both package
+ * sets follow the execution facts, never a call's final result (an interceptor or a hand-off can
+ * make that OK without the tool running):
+ * - `operatedPackages`: the `intent.pkg` of every call that has a `tool/started`, for a non-READ
+ *   intent of the verdict it started on (`verdictSeq`; a launch resolves to its target package);
+ * - `outwardConfirmedPackages`: for every call that started and whose `tool/executed` is OK, the
+ *   pkg of the last card approved for it before that verdict, the approval it ran on, when that
+ *   card is OUTWARD and its pkg is the started intent's. An approval alone, a card replaced by a
+ *   later confirmation (another App, another reason), or a failed send qualifies nothing.
  */
 internal fun policyContextOf(
     records: List<SessionRecord>,
@@ -113,23 +120,51 @@ internal fun policyContextOf(
     screen: ScreenSnapshot?,
     approved: ConfirmCard?,
 ): PolicyContext {
-    val succeeded =
-        records.mapNotNullTo(HashSet()) { r ->
-            (r.event as? ToolResultRecorded)?.takeIf { it.result.status == ToolStatus.OK }?.callId
+    val bySeq = records.associateBy { it.seq }
+    // The log's invariants make verdictSeq the seq of this call's Allow (SessionInvariants).
+    val ran =
+        records.mapNotNull { it.event as? ToolStarted }.map {
+            it to
+                bySeq.getValue(it.verdictSeq).event as PolicyVerdictRecorded
         }
-    val intents = records.mapNotNull { it.event as? PolicyVerdictRecorded }.associate { it.callId to it.intent }
     val operated =
-        intents
-            .filter { (callId, intent) -> callId in succeeded && intent.kind != IntentKind.READ }
-            .values
+        ran
+            .map { (_, verdict) -> verdict.intent }
+            .filter { it.kind != IntentKind.READ }
             .mapNotNullTo(HashSet()) { it.pkg }
-    val cards = records.mapNotNull { it.event as? ApprovalAsked }.associate { it.promptId to it.card }
+    val sent =
+        records.mapNotNullTo(HashSet()) {
+            (it.event as? ToolExecuted)
+                ?.takeIf { e ->
+                    e.status == ToolStatus.OK
+                }?.callId
+        }
+    val approvals = approvalsOf(records)
     val outward =
-        records
-            .mapNotNull { (it.event as? ApprovalDecided)?.takeIf { d -> d.result == ConfirmResult.APPROVED } }
-            .mapNotNull { cards[it.promptId]?.takeIf { card -> card.reason == ConfirmReason.OUTWARD }?.pkg }
-            .toSet()
+        ran
+            .filter { (started, _) -> started.callId in sent }
+            .mapNotNullTo(HashSet()) { (started, verdict) ->
+                approvals
+                    .lastOrNull { (seq, card) -> seq < started.verdictSeq && card.callId == started.callId }
+                    ?.let { (_, card) ->
+                        card.takeIf {
+                            it.reason == ConfirmReason.OUTWARD &&
+                                it.pkg == verdict.intent.pkg
+                        }
+                    }?.pkg
+            }
     return PolicyContext(taskId, levelOf(records), settingsOf(records).unattended, screen, operated, outward, approved)
+}
+
+/** Every approved card with the seq of its `approval/decided`, in log order. */
+private fun approvalsOf(records: List<SessionRecord>): List<Pair<Long, ConfirmCard>> {
+    val cards = records.mapNotNull { it.event as? ApprovalAsked }.associate { it.promptId to it.card }
+    return records.mapNotNull { record ->
+        (record.event as? ApprovalDecided)
+            ?.takeIf { it.result == ConfirmResult.APPROVED }
+            ?.let { cards[it.promptId] }
+            ?.let { record.seq to it }
+    }
 }
 
 /** The task's starting settings: `task/start`, always record 1 of a log. */

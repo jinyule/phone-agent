@@ -253,7 +253,7 @@ public class AgentLoop private constructor(
             require(
                 owner == setup.taskId,
             ) { "session ${store.header.sessionId} belongs to task $owner, not ${setup.taskId}" }
-            val repairs = repairOf(store.records(), RepairCause.FAILED, emptySet(), RESUMED_DETAIL, setup.config.texts)
+            val repairs = repairOf(store.records(), RepairCause.FAILED, RESUMED_DETAIL, setup.config.texts)
             for (repair in repairs) store.append(repair.event, sources = repair.sources)
             store.append(SessionResumed(opened.log.truncatedTail?.bytes ?: 0))
             store.flush()

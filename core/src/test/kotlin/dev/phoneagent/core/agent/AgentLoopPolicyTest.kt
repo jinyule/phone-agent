@@ -380,7 +380,16 @@ class AgentLoopPolicyTest {
                 )
             val intents =
                 dev.phoneagent.core.policy.IntentResolver { call, risk, _ ->
-                    ActionIntent(LoopHarness.kindOf(risk), "pkg.${call.name}")
+                    ActionIntent(
+                        LoopHarness.kindOf(risk),
+                        if (call.name ==
+                            "send"
+                        ) {
+                            sendCard.pkg
+                        } else {
+                            "pkg.${call.name}"
+                        },
+                    )
                 }
             val model =
                 FakeChatModel()
@@ -400,8 +409,12 @@ class AgentLoopPolicyTest {
             assertEquals(6, contexts.size, "c1 is judged twice (before and after approval)")
             assertTrue(contexts[0].operatedPackages.isEmpty())
             assertTrue(contexts[0].outwardConfirmedPackages.isEmpty())
-            assertEquals(setOf("pkg.send"), contexts[4].operatedPackages, "READ and failed calls do not count")
-            assertEquals(setOf("pkg.send", "pkg.tap"), contexts[5].operatedPackages)
+            assertEquals(
+                setOf("com.example.chat", "pkg.broken"),
+                contexts[4].operatedPackages,
+                "READ calls do not count; a failed one ran",
+            )
+            assertEquals(setOf("com.example.chat", "pkg.broken", "pkg.tap"), contexts[5].operatedPackages)
             assertEquals(setOf("com.example.chat"), contexts[5].outwardConfirmedPackages)
             assertEquals(LoopHarness.TASK, contexts[5].taskId)
             assertFalse(contexts[5].unattended)

@@ -1,7 +1,6 @@
 package dev.phoneagent.core.agent
 
 import dev.phoneagent.core.ids.SessionId
-import dev.phoneagent.core.ids.ToolCallId
 import dev.phoneagent.core.model.Delta
 import dev.phoneagent.core.model.ModelInfo
 import dev.phoneagent.core.model.Part
@@ -42,9 +41,6 @@ internal class TurnState(
     var step: Int = 0
     var attempt: Int = 0
     var continuations: Int = 0
-
-    /** Calls with a `tool/call` record that certainly have not started running (repair says NOT_STARTED). */
-    val notStarted: MutableSet<ToolCallId> = mutableSetOf()
 
     /** The attempt in flight, until it records its own outcome; an abnormal end records its prefix. */
     var streaming: Streaming? = null

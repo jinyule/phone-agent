@@ -1,7 +1,6 @@
 package dev.phoneagent.core.agent
 
 import dev.phoneagent.core.ids.PromptId
-import dev.phoneagent.core.ids.ToolCallId
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.session.ApprovalAsked
 import dev.phoneagent.core.session.ApprovalDecided
@@ -18,6 +17,7 @@ import dev.phoneagent.core.session.StepOutcome
 import dev.phoneagent.core.session.StepStarted
 import dev.phoneagent.core.session.ToolCallRecorded
 import dev.phoneagent.core.session.ToolResultRecorded
+import dev.phoneagent.core.session.ToolStarted
 import dev.phoneagent.core.session.TurnEndReason
 import dev.phoneagent.core.session.TurnEnded
 import dev.phoneagent.core.session.TurnStarted
@@ -42,10 +42,10 @@ internal class Repair(
 /**
  * What closes everything an abnormal end left open in [records] (phase1 §3.7, D14), in this order:
  * - every prompt without a result gets `prompt/withdrawn`;
- * - every tool call of a reply without a `tool/result` gets one. With a `tool/call` record (it was
- *   dispatched, and is not in [notStarted]) it may have run: `CANCELLED` when stopped, else
- *   `OUTCOME_UNKNOWN`, both telling the model to observe first. Otherwise it never ran:
- *   `CANCELLED` when stopped, else `NOT_STARTED`;
+ * - every tool call of a reply without a `tool/result` gets one, decided by the log alone. With a
+ *   `tool/started` it may have run: `CANCELLED` when stopped, else `OUTCOME_UNKNOWN`, both telling
+ *   the model to observe first. Without one it never ran: `CANCELLED` when stopped, else
+ *   `NOT_STARTED`. The result's source is the call's `tool/call`, else the reply;
  * - an open step gets `step/end` (`CANCELLED` when stopped, else `FAILED`);
  * - an open turn gets `turn/end` (`STOPPED` when stopped, else `FAILED`) with [detail].
  *
@@ -54,12 +54,12 @@ internal class Repair(
 internal fun repairOf(
     records: List<SessionRecord>,
     cause: RepairCause,
-    notStarted: Set<ToolCallId>,
     detail: String?,
     texts: LoopTexts,
 ): List<Repair> {
     val answered = records.mapNotNullTo(HashSet()) { (it.event as? ToolResultRecorded)?.callId }
     val dispatched = records.mapNotNull { r -> (r.event as? ToolCallRecorded)?.let { it.call.id to r.seq } }.toMap()
+    val started = records.mapNotNullTo(HashSet()) { (it.event as? ToolStarted)?.callId }
     val closed = records.mapNotNullTo(HashSet()) { closedPrompt(it.event) }
     val repairs =
         records
@@ -71,7 +71,7 @@ internal fun repairOf(
         val calls = (record.event as? AssistantMessage)?.parts.orEmpty().filterIsInstance<Part.ToolCall>()
         for (call in calls.filter { it.id !in answered }) {
             val callSeq = dispatched[call.id]
-            val result = missingResult(cause, callSeq != null && call.id !in notStarted, texts)
+            val result = missingResult(cause, call.id in started, texts)
             repairs += Repair(ToolResultRecorded(call.id, call.name, result), listOf(callSeq ?: record.seq))
         }
     }

@@ -40,28 +40,28 @@ internal class Gate(
         loop.setup.interceptors.toolPreExecute
             .chain { Verdict.Allow }
 
-    /** The result standing in for running [call], or `null` when it may run now. */
+    /** Whether [call] may run now, and on which verdict, or the result standing in for running it. */
     suspend fun check(
         call: ToolCall,
         tool: Tool,
         interaction: UserInteraction,
-    ): ToolResult? {
+    ): Ruling {
         val requested = chain.proceed(PreExecuteInput(call, tool))
-        val verdict = judge(call, tool, latestSnapshot(loop.log.records()), approved = null, requested)
-        return decided(call, tool, verdict, interaction, reconfirmed = 0)
+        val judged = judge(call, tool, latestSnapshot(loop.log.records()), approved = null, requested)
+        return decided(call, tool, judged, interaction, reconfirmed = 0)
     }
 
-    /** Carries out [verdict]; [reconfirmed] counts the confirmations asked again for this call. */
+    /** Carries out [judged]; [reconfirmed] counts the confirmations asked again for this call. */
     private suspend fun decided(
         call: ToolCall,
         tool: Tool,
-        verdict: Verdict,
+        judged: Judged,
         interaction: UserInteraction,
         reconfirmed: Int,
-    ): ToolResult? =
-        when (verdict) {
+    ): Ruling =
+        when (val verdict = judged.verdict) {
             Verdict.Allow -> {
-                null
+                Ruling.Run(judged.seq)
             }
 
             is Verdict.Refuse -> {
@@ -69,7 +69,7 @@ internal class Gate(
             }
 
             is Verdict.HandOff -> {
-                handedOff(interaction.handOff(verdict.kind, verdict.hint))
+                Ruling.Answered(handedOff(interaction.handOff(verdict.kind, verdict.hint)))
             }
 
             is Verdict.Confirm -> {
@@ -88,48 +88,58 @@ internal class Gate(
         card: ConfirmCard,
         interaction: UserInteraction,
         reconfirmed: Int,
-    ): ToolResult? {
+    ): Ruling {
         val screen = freshScreen(loop)
-        val verdict = judge(call, tool, screen, card, Verdict.Allow)
-        val exhausted = verdict is Verdict.Confirm && reconfirmed >= loop.config.maxReconfirmations
+        val judged = judge(call, tool, screen, card, Verdict.Allow)
+        val exhausted = judged.verdict is Verdict.Confirm && reconfirmed >= loop.config.maxReconfirmations
         return if (exhausted) {
             refused(loop.texts.changedSinceApproval)
         } else {
             decided(
                 call,
                 tool,
-                verdict,
+                judged,
                 interaction,
                 reconfirmed + 1,
             )
         }
     }
 
+    /**
+     * Records the policy's verdict on [call] and returns the stricter of it and [requested] with
+     * the record's seq. Allow comes out only when the policy allowed, so [Judged.seq] is then the
+     * call's latest verdict, an Allow: the one `tool/started` names.
+     */
     private suspend fun judge(
         call: ToolCall,
         tool: Tool,
         screen: ScreenSnapshot?,
         approved: ConfirmCard?,
         requested: Verdict,
-    ): Verdict {
+    ): Judged {
         val setup = loop.setup
         val intent = setup.intents.resolve(call, tool.risk, screen)
         val context = policyContextOf(loop.log.records(), setup.taskId, screen, approved)
         val verdict = setup.policy.evaluate(call, intent, context)
-        loop.log.append(PolicyVerdictRecorded(call.id, context.level, intent, verdict))
-        return if (strictness(requested) > strictness(verdict)) requested else verdict
+        val record = loop.log.append(PolicyVerdictRecorded(call.id, context.level, intent, verdict))
+        return Judged(if (strictness(requested) > strictness(verdict)) requested else verdict, record.seq)
     }
+
+    private class Judged(
+        val verdict: Verdict,
+        val seq: Long,
+    )
 
     private fun handedOff(result: HandoffResult): ToolResult =
         when (result) {
             HandoffResult.DONE -> ToolResult.ok(loop.texts.handoffDone)
-            HandoffResult.DECLINED -> refused(loop.texts.handoffDeclined)
-            HandoffResult.EXPIRED -> refused(loop.texts.handoffExpired)
-            HandoffResult.UNAVAILABLE -> refused(loop.texts.handoffUnavailable)
-            HandoffResult.FAILED -> refused(loop.texts.handoffFailed)
+            HandoffResult.DECLINED -> ToolResult.failure(ToolStatus.REFUSED, loop.texts.handoffDeclined)
+            HandoffResult.EXPIRED -> ToolResult.failure(ToolStatus.REFUSED, loop.texts.handoffExpired)
+            HandoffResult.UNAVAILABLE -> ToolResult.failure(ToolStatus.REFUSED, loop.texts.handoffUnavailable)
+            HandoffResult.FAILED -> ToolResult.failure(ToolStatus.REFUSED, loop.texts.handoffFailed)
         }
 
-    private fun refused(text: String): ToolResult = ToolResult.failure(ToolStatus.REFUSED, text)
+    private fun refused(text: String): Ruling = Ruling.Answered(ToolResult.failure(ToolStatus.REFUSED, text))
 
     private fun strictness(verdict: Verdict): Strictness =
         when (verdict) {
@@ -141,6 +151,19 @@ internal class Gate(
 
     /** Verdicts from least to most strict. */
     private enum class Strictness { ALLOW, CONFIRM, HAND_OFF, REFUSE }
+}
+
+/** What the [Gate] decided for a call. */
+internal sealed interface Ruling {
+    /** The call may run, on the Allow recorded at [verdictSeq]. */
+    class Run(
+        val verdictSeq: Long,
+    ) : Ruling
+
+    /** The call does not run; [result] stands in for it (refused, handed off, or not approved). */
+    class Answered(
+        val result: ToolResult,
+    ) : Ruling
 }
 
 /**

@@ -161,7 +161,7 @@ internal class TurnEndings(
         val prefix = state.streaming?.interrupted()
         state.streaming = null
         prefix?.let { loop.log.append(it) }
-        for (repair in repairOf(loop.log.records(), cause, state.notStarted, detail, loop.texts)) {
+        for (repair in repairOf(loop.log.records(), cause, detail, loop.texts)) {
             loop.log.append(repair.event, sources = repair.sources)
         }
         loop.log.flush()

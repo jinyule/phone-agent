@@ -12,6 +12,10 @@ import dev.phoneagent.core.model.ModelErrorKind
 import dev.phoneagent.core.model.ModelRole
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.StopReason
+import dev.phoneagent.core.policy.ActionIntent
+import dev.phoneagent.core.policy.IntentKind
+import dev.phoneagent.core.policy.SecurityLevel
+import dev.phoneagent.core.policy.Verdict
 import dev.phoneagent.core.ports.Question
 import dev.phoneagent.core.session.AssistantAttempt
 import dev.phoneagent.core.session.AssistantMessage
@@ -19,6 +23,7 @@ import dev.phoneagent.core.session.InboxEntry
 import dev.phoneagent.core.session.InboxEntryKind
 import dev.phoneagent.core.session.InboxQueue
 import dev.phoneagent.core.session.InboxSpliced
+import dev.phoneagent.core.session.PolicyVerdictRecorded
 import dev.phoneagent.core.session.PromptWithdrawn
 import dev.phoneagent.core.session.QuestionAsked
 import dev.phoneagent.core.session.RequestRetry
@@ -31,6 +36,7 @@ import dev.phoneagent.core.session.StepStarted
 import dev.phoneagent.core.session.StopCause
 import dev.phoneagent.core.session.ToolCallRecorded
 import dev.phoneagent.core.session.ToolResultRecorded
+import dev.phoneagent.core.session.ToolStarted
 import dev.phoneagent.core.session.TurnEndReason
 import dev.phoneagent.core.session.TurnEnded
 import dev.phoneagent.core.session.TurnStarted
@@ -239,28 +245,7 @@ class AgentLoopFailureTest {
         }
 
     @Test
-    fun `a failed flush before a write action leaves the call NOT_STARTED`() =
-        runTest {
-            lateinit var harness: LoopHarness
-            val tap = FakeTool("tap", risk = RiskClass.WRITE)
-            val model =
-                FakeChatModel().then { _, _ ->
-                    harness.storage.syncFailures = 1
-                    ChatResponse(listOf(call("c1", "tap")), StopReason.TOOL_USE)
-                }
-            harness = LoopHarness(this, model, tools = listOf(tap))
-            val loop = harness.start()
-            loop.followup(text("go"))
-            loop.awaitStopped()
-
-            assertTrue(tap.calls.isEmpty())
-            val result = harness.events().only<ToolResultRecorded>().single()
-            assertEquals(ToolStatus.NOT_STARTED, result.result.status)
-            assertEquals(Phase.Stopped(StopCause.ERROR), loop.phase.value)
-        }
-
-    @Test
-    fun `only actions that may change the phone are flushed before they run`() =
+    fun `every call is flushed before it runs, READ ones too, since it records tool-started first`() =
         runTest {
             lateinit var harness: LoopHarness
             var atReply = 0
@@ -287,7 +272,7 @@ class AgentLoopFailureTest {
             val loop = harness.start()
             loop.followup(text("go"))
             loop.awaitPhase(Phase.Done)
-            assertEquals(mapOf("look" to 0, "tap" to 1), flushes)
+            assertEquals(mapOf("look" to 1, "tap" to 1), flushes)
         }
 
     @Test
@@ -473,7 +458,18 @@ class AgentLoopFailureTest {
                 StopReason.TOOL_USE,
             ),
         )
-        store.append(ToolCallRecorded(dispatched), sources = listOf(6))
+        store.append(ToolCallRecorded(dispatched), sources = listOf(7))
+        val allowed =
+            store.append(
+                PolicyVerdictRecorded(
+                    ToolCallId("c1"),
+                    SecurityLevel.STANDARD,
+                    ActionIntent(IntentKind.READ),
+                    Verdict.Allow,
+                ),
+            )
+        // c1 ran (it asked from inside the tool); c2 was never dispatched.
+        store.append(ToolStarted(ToolCallId("c1"), allowed.seq))
         store.append(QuestionAsked(PromptId("prompt-8"), ToolCallId("c1"), Question("谁？")))
         store.append(InboxSpliced(InboxQueue.NEXT_TURN, 0, listOf(queued)))
         store.flush()

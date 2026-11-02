@@ -99,7 +99,7 @@ internal class Steps(
         toolCalls: List<Part.ToolCall>,
         replySeq: Long,
     ): TurnEnd? {
-        val control = calls.run(state, toolCalls.first(), replySeq)
+        val control = calls.run(toolCalls.first(), replySeq)
         toolCalls.drop(1).forEach { calls.skip(it, loop.texts.skipped, replySeq) }
         endStep(state, StepOutcome.COMPLETED)
         return when (control) {

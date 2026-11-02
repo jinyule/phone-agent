@@ -24,6 +24,7 @@ import dev.phoneagent.core.session.StepEnded
 import dev.phoneagent.core.session.StepOutcome
 import dev.phoneagent.core.session.StepStarted
 import dev.phoneagent.core.session.ToolResultRecorded
+import dev.phoneagent.core.session.ToolStarted
 import dev.phoneagent.core.session.TurnEndReason
 import dev.phoneagent.core.session.TurnEnded
 import dev.phoneagent.core.session.TurnStarted
@@ -38,8 +39,7 @@ class SessionRepairTest {
     private fun repair(
         cause: RepairCause,
         vararg events: SessionEvent,
-        notStarted: Set<String> = emptySet(),
-    ): List<Repair> = repairOf(log(*events), cause, notStarted.mapTo(HashSet(), ::ToolCallId), "why", texts)
+    ): List<Repair> = repairOf(log(*events), cause, "why", texts)
 
     private fun prompt(n: Int) = PromptId("prompt-$n")
 
@@ -84,18 +84,19 @@ class SessionRepairTest {
     }
 
     @Test
-    fun `missing results say whether the call may have run`() {
+    fun `missing results say whether the call may have run, by its tool-started alone`() {
         val events =
             arrayOf(
                 TurnStarted(1),
                 StepStarted(1, 1),
                 reply("ran", "queued", "never", "done"),
                 dispatched("ran"),
+                ToolStarted(ToolCallId("ran"), verdictSeq = 4),
                 dispatched("queued"),
                 dispatched("done"),
                 answered("done"),
             )
-        val stopped = repair(RepairCause.STOPPED, *events, notStarted = setOf("queued"))
+        val stopped = repair(RepairCause.STOPPED, *events)
         val results = stopped.mapNotNull { it.event as? ToolResultRecorded }
         assertEquals(listOf("ran", "queued", "never"), results.map { it.callId.value })
         assertEquals(
@@ -115,7 +116,7 @@ class SessionRepairTest {
             },
         )
         assertEquals(
-            listOf(listOf(4L), listOf(5L), listOf(3L)),
+            listOf(listOf(4L), listOf(6L), listOf(3L)),
             stopped.take(3).map { it.sources },
             "call record, else reply",
         )
@@ -124,7 +125,7 @@ class SessionRepairTest {
             stopped.drop(3).map { it.event },
         )
 
-        val failed = repair(RepairCause.FAILED, *events, notStarted = setOf("queued"))
+        val failed = repair(RepairCause.FAILED, *events)
         assertEquals(
             listOf(ToolStatus.OUTCOME_UNKNOWN, ToolStatus.NOT_STARTED, ToolStatus.NOT_STARTED),
             failed.mapNotNull { (it.event as? ToolResultRecorded)?.result?.status },

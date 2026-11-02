@@ -13,7 +13,9 @@ import dev.phoneagent.core.session.InboxEntry
 import dev.phoneagent.core.session.InboxEntryKind
 import dev.phoneagent.core.session.InboxQueue
 import dev.phoneagent.core.session.ToolCallRecorded
+import dev.phoneagent.core.session.ToolExecuted
 import dev.phoneagent.core.session.ToolResultRecorded
+import dev.phoneagent.core.session.ToolStarted
 import dev.phoneagent.core.tool.RiskClass
 import dev.phoneagent.core.tool.Tool
 import dev.phoneagent.core.tool.ToolArguments
@@ -38,10 +40,11 @@ import kotlinx.serialization.json.jsonPrimitive
  * 1. validate at the boundary: known tool, JSON arguments, schema, non-blank `reason`; a call that
  *    fails gets an INVALID_ARGS result and is never dispatched;
  * 2. `tool/call`, then the [Gate] (`toolPreExecute` + policy, confirmation, handoff);
- * 3. when allowed: flush first for anything but a READ tool (phase1 §3.9 rule 3; a failed flush
- *    stops the task and the call stays NOT_STARTED), then the whole `toolExecute` chain under the
- *    call's single timeout (`Tool.timeoutMs`, waiting for the user excluded). The chain's end runs
- *    the judged call only, once ([ExecutionEnd]);
+ * 3. when allowed: the whole `toolExecute` chain under the call's single timeout (`Tool.timeoutMs`,
+ *    waiting for the user excluded). The chain's end runs the judged call only, once, and writes
+ *    the execution facts around it ([ExecutionEnd]): `tool/started` is flushed before the tool
+ *    runs, READ tools included. A failed flush stops the task before the tool runs; the log
+ *    already says it started, so repair gives it OUTCOME_UNKNOWN;
  * 4. a call that handed off and whose screen could not be read afterwards gets
  *    [LoopTexts.screenUnknown] after its result's text; then `toolPostExecute`, `tool/result`,
  *    and the attached context queued for the next step.
@@ -57,7 +60,6 @@ internal class Calls(
 
     /** Runs [part] of the reply recorded at [replySeq]; returns its result's control signal. */
     suspend fun run(
-        state: TurnState,
         part: Part.ToolCall,
         replySeq: Long,
     ): ToolControl? =
@@ -68,7 +70,7 @@ internal class Calls(
             }
 
             is Parsed.Valid -> {
-                dispatch(state, parsed.tool, parsed.call, replySeq)
+                dispatch(parsed.tool, parsed.call, replySeq)
             }
         }
 
@@ -123,15 +125,17 @@ internal class Calls(
     }
 
     private suspend fun dispatch(
-        state: TurnState,
         tool: Tool,
         call: ToolCall,
         replySeq: Long,
     ): ToolControl? {
         val dispatched = loop.log.append(ToolCallRecorded(call), sources = listOf(replySeq))
-        state.notStarted += call.id
         loop.emit(LoopEvent.Card(call.id, tool.presentCall(call)))
-        val outcome = gate.check(call, tool, prompts.interaction(call.id, UserWait.None)) ?: execute(state, tool, call)
+        val outcome =
+            when (val ruling = gate.check(call, tool, prompts.interaction(call.id, UserWait.None))) {
+                is Ruling.Run -> execute(tool, call, ruling.verdictSeq)
+                is Ruling.Answered -> ruling.result
+            }
         val result =
             if (screenLostAfterHandoff(
                     loop.log.records(),
@@ -152,14 +156,13 @@ internal class Calls(
     }
 
     private suspend fun execute(
-        state: TurnState,
         tool: Tool,
         call: ToolCall,
+        verdictSeq: Long,
     ): ToolResult {
-        if (tool.risk != RiskClass.READ) loop.log.flush()
         val budget = TimeoutBudget(tool.timeoutMs, loop.setup.timeSource)
         val judged = ExecuteInput(call, tool, CallContext(call, prompts.interaction(call.id, budget).forTools()))
-        val end = ExecutionEnd(state, judged)
+        val end = ExecutionEnd(judged, verdictSeq)
         val chain = interceptors.toolExecute.chain(end::run)
         val result = budget.run { chain.proceed(judged) }
         val mayHaveRun = end.started && tool.risk != RiskClass.READ
@@ -179,10 +182,15 @@ internal class Calls(
      * The end of the `toolExecute` chain: runs [judged] (the recorded, judged call with its own
      * context) at most once. Any other input, or a second `proceed`, runs nothing and marks the
      * call [faulted]: it is then recorded ERROR whatever the chain returns.
+     *
+     * The execution facts are written here, so nothing else produces them (an interceptor that
+     * answers without `proceed` runs nothing): `tool/started` on [verdictSeq], flushed, then
+     * `Tool.execute`, then `tool/executed` with the status it returned (ERROR when it threw),
+     * before `toolPostExecute`. A cancelled or timed-out execute gets no `tool/executed`.
      */
     private inner class ExecutionEnd(
-        private val state: TurnState,
         private val judged: ExecuteInput,
+        private val verdictSeq: Long,
     ) {
         private var used = false
         var started = false
@@ -198,15 +206,20 @@ internal class Calls(
                 return ToolResult.failure(ToolStatus.ERROR, loop.texts.interceptorFault)
             }
             used = true
+            val id = judged.call.id
+            loop.log.append(ToolStarted(id, verdictSeq))
             started = true
-            state.notStarted -= judged.call.id
-            return try {
-                judged.tool.execute(judged.call, judged.context)
-            } catch (bug: Exception) {
-                // A stop propagates; a tool that throws a cancellation of its own has a bug like any other.
-                if (bug is CancellationException) currentCoroutineContext().ensureActive()
-                ToolResult.failure(ToolStatus.ERROR, "${loop.texts.toolError}$bug")
-            }
+            loop.log.flush()
+            val result =
+                try {
+                    judged.tool.execute(judged.call, judged.context)
+                } catch (bug: Exception) {
+                    // A stop propagates; a tool that throws a cancellation of its own has a bug like any other.
+                    if (bug is CancellationException) currentCoroutineContext().ensureActive()
+                    ToolResult.failure(ToolStatus.ERROR, "${loop.texts.toolError}$bug")
+                }
+            loop.log.append(ToolExecuted(id, result.status))
+            return result
         }
     }
 

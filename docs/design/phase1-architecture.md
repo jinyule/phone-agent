@@ -30,7 +30,7 @@
 | D10 | 分发：GitHub Releases 自更新，校验 SHA-256、包名和签名证书；内置国产 ROM 保活引导 | 不上商店 | Mika / DSH-Android |
 | D11 | 锁屏：不支持。熄屏或锁屏时任务暂停，通知用户"解锁后继续" | 产品约束 | — |
 | D12 | **主循环采用 turn/step 两层状态机 + 双队列 inbox**（followup / steer / inject），只能通过**固定拦截点**扩展（§3.8）；**设步数上限和续跑次数上限** | dsh 的主循环约 2400 行，靠固定钩子就撑起了所有扩展；但 dsh 没有步数上限，这一点要补 | dsh |
-| D13 | **事件溯源的 session 日志**：模型可见 ⟺ 已记录；模型请求就是对日志做一次纯函数推导；JSONL 存储，截图存成 blob 并在日志里引用；在模型请求前和写动作执行前刷盘（§3.9） | 可回放、可恢复，日志本身还能直接当测试 fixture | dsh |
+| D13 | **事件溯源的 session 日志**：模型可见 ⟺ 已记录；模型请求就是对日志做一次纯函数推导；JSONL 存储，截图存成 blob 并在日志里引用；在模型请求前和每个调用执行前刷盘（§3.9） | 可回放、可恢复，日志本身还能直接当测试 fixture | dsh |
 | D14 | **失败语义**：保留中断时已输出的前缀；没启动的工具调用补写 `NOT_STARTED`，已启动但没结果的补写 `OUTCOME_UNKNOWN`；**恢复后要求先重新读屏**；不自动续跑 | GUI 动作不幂等 | dsh + Mika |
 
 **待定（不阻塞设计）**
@@ -389,7 +389,7 @@ data class PolicyContext(
     val taskId: TaskId, val level: SecurityLevel, val unattended: Boolean,
     val screen: ScreenSnapshot?,                             // 所属调用已有结果的、最新记录的那一屏（含复核的 S′），之后没有作废边界；交接开始起之前的屏全部作废，边界清单见 KDoc；复核时是 S′；没有时为 null
     val operatedPackages: Set<String> = emptySet(),          // 本任务写过 tool/started 的非 READ 调用的 intent.pkg（intent 取 verdictSeq 那条 verdict；含 phone_launch 的目标）
-    val outwardConfirmedPackages: Set<String> = emptySet(),  // 只认执行实际依据的那次批准，见下文
+    val outwardConfirmedPackages: Set<String> = emptySet(),  // 已 started、tool/executed 为 OK 的调用：取 verdictSeq 之前给它批准的最后一张卡，reason = OUTWARD 且 pkg 等于执行 intent 的 pkg 才算；request_confirmation 不算
     val approved: ConfirmCard? = null,                       // 批准后复核时传入刚批准的卡
 )   // 不序列化，但必须能从 session 日志推导，回放才能得到同样的 verdict
 ```
@@ -441,7 +441,8 @@ interface TaskRuntime {
 
 **取消与超时契约**：
 - 单一超时真相源：工具超时（`Tool.timeoutMs`）包住整条 `toolExecute` 链（包装器也算在内），工具层先作答。等待用户的时间不计入工具超时。超时的结果是 `TIMEOUT`；非 READ 的调用还要附上"可能已生效"。
-- **刷盘**：每次模型请求前、每个非 READ 调用执行前。刷盘失败就不执行，调用记 `NOT_STARTED`，任务以 `ERROR` 停止。
+- **刷盘**：每次模型请求前；每个要执行的调用（READ 也算）在写 `tool/started` 之后、调 `Tool.execute` 之前。请求前刷盘失败就不发请求，执行前刷盘失败就不执行，任务都以 `ERROR` 停止。后一种情况 `tool/started` 已经在日志里，修复只看日志，所以调用记 `OUTCOME_UNKNOWN`。
+- **执行事实写进日志**：每个要执行的调用（包括 READ）都先有 Allow 的 `policy/verdict`，没有免判的快路径。真正调用 `Tool.execute` 之前写 `tool/started(callId, verdictSeq)` 并刷盘（verdictSeq 是这个调用最新的 verdict，必须是 Allow）；execute 返回后、`toolPostExecute` 之前写 `tool/executed(callId, status)`，记原始状态（抛异常记 `ERROR`；超时或被取消的 execute 没有返回，不写）。拒绝、转交、等待或被拒的审批、拦截器短路都不写 `tool/started`。
 - 确认之后、执行之前，按 §3.8 的 `toolPreExecute` 在新屏幕上复核一次。
 - **steer 只打断模型 attempt 和重试前的等待**，不打断正在执行的工具。排队中的 steer 只阻止"普通最终回答"结束当前 turn（不走 `turnStopping`，再跑一个 step 把 steer 交给模型）；显式结束（`end_not_done`）、失败、`preStep` 拒绝、max-tokens 和上限照样结束 turn，steer 留在 nextStep，开启下一个 turn。
 - **被放弃的调用绝不晚些执行**；收尾时写日志的代码放在 `withContext(NonCancellable)` 里。
@@ -452,7 +453,7 @@ interface TaskRuntime {
 - **去掉 thinking 重试**：签名失效等情况下，`requestError` 先写 `context/reasoning-dropped(upToSeq)`，之后的请求不再带 seq ≤ upToSeq 的 `Part.Reasoning`，文字、工具调用和工具结果不变。多条去掉记录累加；只剩推理的回复整条不进；upToSeq 之后的推理照常带上。
 - **异常结束要修复日志**：停止、step 失败、进程被杀后恢复，三种情况用同一个对日志的纯函数（`repairOf`）推导修复内容，按顺序写入：
   1. 未作答的提示写 `prompt/withdrawn`；
-  2. 缺结果的调用补 `tool/result`。有 `tool/call` 的（可能执行过）：停止时记 `CANCELLED` 并附"可能已生效"，失败或恢复时记 `OUTCOME_UNKNOWN` 并附"这一步可能已经生效，先 `phone_observe` 核实再决定"。没有 `tool/call` 的，或确知还没开始的：停止时记 `CANCELLED`，否则记 `NOT_STARTED`；
+  2. 缺结果的调用补 `tool/result`，是否执行过只看有没有 `tool/started`。有的（可能已经生效）：停止时记 `CANCELLED`，失败或恢复时记 `OUTCOME_UNKNOWN`，两种都附"可能已经生效，先 `phone_observe` 核实再决定"。没有的（没执行过）：停止时记 `CANCELLED`，否则记 `NOT_STARTED`；
   3. 写 `step/end` 和 `turn/end`：停止时是 `CANCELLED` / `STOPPED`，否则是 `FAILED`。
 - 停止时：取消在途请求，撤回待答提示，补完上面的修复。停止前已接受的输入，先记录、再记为移除。最后关闭日志。外部 scope 被取消（`SHUTDOWN`）也一样：收尾在 `NonCancellable` 里进行，先停止接受输入，等录入协程写完手上那一条（每条命令先完整记录、再移除），然后由收尾者自己记录剩下已接受的命令。收尾者是唯一的，不会和录入协程同时写。
 - **不自动续跑**：恢复时修复日志，写 `session/resumed`，然后等新输入。
@@ -473,11 +474,11 @@ fun interface Chain<I, O> { suspend fun proceed(input: I): O }   // 不调用 pr
 | `request` | 每次 attempt 之前 | `RequestPlan` → `RequestPlan` | 为主请求选模型、推理档位、缓存断点（线路快照不在计划里：链之后由 runtime 调 `model.prepare(reasoning)` 生成，头里记它给的快照和钳制后的档位）；`RequestPlan` 只服务主对话，看图和轻量请求走旁路（`side/*`）；**不能改消息** | ModelRouter |
 | `requestError` | attempt 失败后（step 仍打开；回复没过边界校验也算，按 `BadResponse`） | `RequestFailure(error, attempt, retries, log)` → `Retry(delayMs)` / `Fail` | 决定是否重试；每次重试记 `request/retry`。`log` 和 `preStep` 的是同一份允许清单，例如签名失效时先写 `context/reasoning-dropped` 再重试，下一次 attempt 按写入后的日志组装 | `RetryInterceptor`（默认）、OverflowCompaction、ImageOffload |
 | `toolPreExecute` | 每个通过校验的调用，已写 `tool/call` | `PreExecuteInput(call, tool)` → `Verdict` | allow / refuse / confirm / handoff | **PolicyEngine**（固定排在链后，不可重排、无法绕过） |
-| `toolExecute` | 包住执行体，在工具超时之内 | `ExecuteInput(call, tool, context)` → `ToolResult` | 包装、延后或短路这个调用，spill-back 检测；**不能替换调用**：`proceed` 只接受判定过的那一组 call、tool、context，而且只能调一次，否则什么都不执行，调用记 `ERROR` | MainScreenWatch |
+| `toolExecute` | 包住执行体，在工具超时之内 | `ExecuteInput(call, tool, context)` → `ToolResult` | 包装、延后或短路这个调用，spill-back 检测；**不能替换调用**：`proceed` 只接受判定过的那一组 call、tool、context，而且只能调一次，否则什么都不执行，调用记 `ERROR`。链的最内层由运行时写 `tool/started`（刷盘后再调 `Tool.execute`）和 `tool/executed`，拦截器短路不产生这两条 | MainScreenWatch |
 | `toolPostExecute` | 每个调用有结果之后（执行、拒绝、转交都算） | `PostExecuteInput(call, tool, result)` → `PostExecuteResult(result, context)` | 替换结果；附加上下文（进 nextStep） | LoopGuard（含重复调用提醒）、OutwardPacing、KnowledgeNotice、Spill |
 | `turnStopping` | 有最终回答且 nextStep 里没有 steer 时 | `TurnStoppingInput(turn, step, continuations, reply)` → `End` / `Continue(context)` | 继续本 turn（受续跑上限约束） | TodoContinuation（M3） |
 
-主循环自带、不能被拦截器替换的部分：`preStep` 之前的步数上限；`request` 之后的刷盘；`toolPreExecute` 之后的 PolicyEngine；`toolExecute` 链之前的非 READ 刷盘，以及包住整条链的工具超时。
+主循环自带、不能被拦截器替换的部分：`preStep` 之前的步数上限；`request` 之后的刷盘；`toolPreExecute` 之后的 PolicyEngine；`toolExecute` 链最内层的执行事实（`tool/started`、刷盘、`tool/executed`），以及包住整条链的工具超时。
 
 **`requestError` 默认行为**（`RetryInterceptor`）：可重试的错误每个 step 最多重试 5 次；服务端给了 retry-after 就按它等，否则从 500 ms 指数退避到 10 s，一半固定一半随机。retry-after 超过 `maxRetryAfterMs`（默认 60 s，构造时校验）**不重试**，直接按不可重试失败，不会把等待缩短到上限。重试前的等待可以被 steer 打断。
 
@@ -524,7 +525,7 @@ sealed interface SessionEvent   // task/start|level-changed、turn/start|end、s
 2. **大对象存 blob**：截图存为 `blobs/<sha256>`（不带扩展名），日志里只记引用、mime 和尺寸。**旧截图怎么瘦身按协议区分**（见 `model-layer.md` §5）：
    - Responses / Chat Completions：越过阈值时在客户端做一次 Replace，只保留最近 N 张图（默认 3），更早的换成文字占位。
    - Anthropic：**不在客户端改写历史**，因为 preserved thinking 会让之后的思考块失效。改用服务端 context editing / compaction，Replace 只用于 UI 投影。
-3. **刷盘时机**：模型请求发出前、写动作执行前（追加写 + fsync）。**刷盘失败就不执行**。
+3. **刷盘时机**：模型请求发出前、每个调用执行前（写完 `tool/started` 之后，READ 也算；追加写 + fsync）。**刷盘失败就不执行**。
 4. **格式版本**：用一个整数版本号，每对相邻版本写一个迁移函数；**已提交的旧版本 fixture 永不改写**。
 5. **投影**：轨迹 UI、Token 统计、任务列表都是对事件的纯函数折叠，可以缓存（缓存失效靠 `stateVersion`）。
 6. **隐私**：日志和 blob 都存在 App 私有目录，按保留策略清理；**不上传**（不采用 dsh 默认附带会话日志的做法）。
@@ -721,7 +722,7 @@ TaskRuntime 循环（每个 step，对应 §3.8 的拦截点）：
        Confirm → 显示确认卡（悬浮层 / 通知 / App 内）→ 等待（15 分钟没人回按拒绝）
                  → 批准后读新屏、在新屏上复核（读不到就以 screen=null 复核；再要确认最多再问 1 次）
        Allow   ↓
-  6. 刷盘（非 READ）→ 工具超时内跑 toolExecute 链：watchMainScreen(3000) → ScreenPort.act → awaitChange → 回读快照
+  6. 工具超时内跑 toolExecute 链：watchMainScreen(3000) → [写 tool/started → 刷盘 → ScreenPort.act → awaitChange → 回读快照 → 写 tool/executed]
        → mainArrivals：期间有非用户打开的任务冒到主屏 → moveTask 挪回 → effect = SPILLED_BACK
   7. toolPostExecute 链：计算差分与效果 → LoopGuard → 节奏控制 → 知识提示 → 写 tool/result
   8. 附加的上下文进 nextStep → step/end → 下一个 step

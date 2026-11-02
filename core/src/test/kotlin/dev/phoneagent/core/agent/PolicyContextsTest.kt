@@ -21,13 +21,17 @@ import dev.phoneagent.core.session.ApprovalAsked
 import dev.phoneagent.core.session.ApprovalDecided
 import dev.phoneagent.core.session.HandoffEnded
 import dev.phoneagent.core.session.HandoffStarted
+import dev.phoneagent.core.session.PolicyContextSamples
 import dev.phoneagent.core.session.PolicyVerdictRecorded
 import dev.phoneagent.core.session.ScreenActed
 import dev.phoneagent.core.session.ScreenLaunched
 import dev.phoneagent.core.session.ScreenObserved
+import dev.phoneagent.core.session.SessionEvent
 import dev.phoneagent.core.session.SessionSamples
 import dev.phoneagent.core.session.TaskLevelChanged
 import dev.phoneagent.core.session.TaskStarted
+import dev.phoneagent.core.session.ToolExecuted
+import dev.phoneagent.core.session.ToolStarted
 import dev.phoneagent.core.session.TurnStarted
 import dev.phoneagent.core.testing.ScriptedScreen.Companion.snapshotOf
 import dev.phoneagent.core.tool.ToolResult
@@ -96,60 +100,112 @@ class PolicyContextsTest {
     ) = PolicyVerdictRecorded(id(call), SecurityLevel.STANDARD, ActionIntent(kind, pkg), Verdict.Allow)
 
     private fun card(
+        call: String,
         reason: ConfirmReason,
         pkg: String?,
-    ) = ConfirmCard(id("c9"), reason, "do", pkg = pkg)
+    ) = ConfirmCard(id(call), reason, "do", pkg = pkg)
 
     @Test
-    fun `operated packages are those of successful non-READ calls by their last verdict`() {
-        val records =
-            log(
-                start,
-                verdict("tap", IntentKind.INPUT, "first"),
-                verdict("tap", IntentKind.INPUT, "app.tap"),
-                answered("tap"),
-                verdict("look", IntentKind.READ, "app.look"),
-                answered("look"),
-                verdict("broken", IntentKind.INPUT, "app.broken"),
-                answered("broken", ToolResult.failure(ToolStatus.ERROR, "no")),
-                verdict("anywhere", IntentKind.NAVIGATE, null),
-                answered("anywhere"),
-                verdict("pending", IntentKind.INPUT, "app.pending"),
-            )
-        val context = policyContextOf(records, SessionSamples.task, screen = null, approved = null)
-        assertEquals(setOf("app.tap"), context.operatedPackages)
+    fun `the package sets follow the execution facts of every sample`() {
+        val wrong =
+            PolicyContextSamples.cases.mapNotNull { case ->
+                val context = policyContextOf(case.records, SessionSamples.task, screen = null, approved = null)
+                val derived = context.operatedPackages to context.outwardConfirmedPackages
+                if (derived ==
+                    case.operatedPackages to case.outwardConfirmedPackages
+                ) {
+                    null
+                } else {
+                    "${case.name}: $derived"
+                }
+            }
+        assertEquals(emptyList<String>(), wrong)
+    }
+
+    /** A log under construction for one call at a time; [add] returns the seq it gave. */
+    private class Log {
+        val events = mutableListOf<SessionEvent>(TaskStarted(SecurityLevel.STANDARD, unattended = true))
+        private var prompts = 0
+
+        fun add(event: SessionEvent): Long {
+            events += event
+            return events.size.toLong()
+        }
+
+        fun approve(
+            card: ConfirmCard,
+            result: ConfirmResult = ConfirmResult.APPROVED,
+        ) {
+            val prompt = PromptId("p${++prompts}")
+            add(ApprovalAsked(prompt, card, expiresAt = 0))
+            add(ApprovalDecided(prompt, result))
+        }
+
+        /** [call] starts on an Allow for [kind] in [pkg] and returns [status]. */
+        fun ran(
+            call: String,
+            kind: IntentKind,
+            pkg: String?,
+            status: ToolStatus? = ToolStatus.OK,
+        ) {
+            val allowed =
+                add(
+                    PolicyVerdictRecorded(
+                        ToolCallId(call),
+                        SecurityLevel.STANDARD,
+                        ActionIntent(kind, pkg),
+                        Verdict.Allow,
+                    ),
+                )
+            add(ToolStarted(ToolCallId(call), allowed))
+            status?.let { add(ToolExecuted(ToolCallId(call), it)) }
+        }
     }
 
     @Test
-    fun `outward-confirmed packages come from approved OUTWARD cards only`() {
-        fun asked(
-            n: Int,
-            card: ConfirmCard,
-        ) = ApprovalAsked(PromptId("p$n"), card, expiresAt = 0)
+    fun `operated packages are those of started non-READ calls by the verdict they started on`() {
+        val log = Log()
+        log.add(verdict("refused", IntentKind.INPUT, "app.refused"))
+        log.ran("tap", IntentKind.INPUT, "app.tap", ToolStatus.ERROR)
+        log.ran("look", IntentKind.READ, "app.look")
+        log.ran("anywhere", IntentKind.NAVIGATE, null)
+        log.ran("hung", IntentKind.INPUT, "app.hung", status = null)
+        val context =
+            policyContextOf(log(*log.events.toTypedArray()), SessionSamples.task, screen = null, approved = null)
+        assertEquals(setOf("app.tap", "app.hung"), context.operatedPackages)
+        assertEquals(emptySet<String>(), context.outwardConfirmedPackages, "no approval, no qualification")
+    }
 
-        fun decided(
-            n: Int,
-            result: ConfirmResult = ConfirmResult.APPROVED,
-        ) = ApprovalDecided(PromptId("p$n"), result)
-        val records =
-            log(
-                TaskStarted(SecurityLevel.STANDARD, unattended = true),
-                asked(1, card(ConfirmReason.OUTWARD, "app.sent")),
-                decided(1),
-                asked(2, card(ConfirmReason.OUTWARD, "app.rejected")),
-                decided(2, ConfirmResult.REJECTED),
-                asked(3, card(ConfirmReason.SPEND, "app.paid")),
-                decided(3),
-                asked(4, card(ConfirmReason.OUTWARD, null)),
-                decided(4),
-                decided(5),
-                asked(6, card(ConfirmReason.OUTWARD, "app.open")),
-                TaskLevelChanged(SecurityLevel.AUTONOMOUS),
-                TaskLevelChanged(SecurityLevel.CAUTIOUS),
-            )
-        val approved = card(ConfirmReason.OUTWARD, "app.sent")
+    @Test
+    fun `outward qualification comes from the approval a sent call ran on`() {
+        val log = Log()
+        // c1: approved for A, re-confirmed and approved for B, sent in B.
+        log.approve(card("c1", ConfirmReason.OUTWARD, "app.a"))
+        log.approve(card("c1", ConfirmReason.OUTWARD, "app.b"))
+        log.ran("c1", IntentKind.OUTWARD, "app.b")
+        // c2: an OUTWARD approval replaced by a SPEND one.
+        log.approve(card("c2", ConfirmReason.OUTWARD, "app.c"))
+        log.approve(card("c2", ConfirmReason.SPEND, "app.c"))
+        log.ran("c2", IntentKind.OUTWARD, "app.c")
+        // c3: approved for D, ran in E; c4: approved without a package; c5: rejected, then an
+        // answer to a prompt never asked; c6: approved and started, not executed.
+        log.approve(card("c3", ConfirmReason.OUTWARD, "app.d"))
+        log.ran("c3", IntentKind.OUTWARD, "app.e")
+        log.approve(card("c4", ConfirmReason.OUTWARD, null))
+        log.ran("c4", IntentKind.OUTWARD, null)
+        log.approve(card("c5", ConfirmReason.OUTWARD, "app.f"), ConfirmResult.REJECTED)
+        log.add(ApprovalDecided(PromptId("never-asked"), ConfirmResult.APPROVED))
+        log.ran("c5", IntentKind.OUTWARD, "app.f")
+        log.approve(card("c6", ConfirmReason.OUTWARD, "app.g"))
+        log.ran("c6", IntentKind.OUTWARD, "app.g", status = null)
+        // c8: an approval after the verdict it ran on is not the one it ran on.
+        log.ran("c8", IntentKind.OUTWARD, "app.i")
+        log.approve(card("c8", ConfirmReason.OUTWARD, "app.i"))
+        val approved = card("c7", ConfirmReason.OUTWARD, "app.h")
+        val records = log(*log.events.toTypedArray(), TaskLevelChanged(SecurityLevel.CAUTIOUS))
         val context = policyContextOf(records, SessionSamples.task, s1, approved)
-        assertEquals(setOf("app.sent"), context.outwardConfirmedPackages)
+
+        assertEquals(setOf("app.b"), context.outwardConfirmedPackages)
         assertEquals(SessionSamples.task, context.taskId)
         assertEquals(SecurityLevel.CAUTIOUS, context.level)
         assertEquals(true, context.unattended)
