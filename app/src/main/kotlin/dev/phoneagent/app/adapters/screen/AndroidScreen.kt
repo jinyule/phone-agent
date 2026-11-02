@@ -90,8 +90,9 @@ internal class AndroidScreen(
             val host = host()
             val geometry = geometry(host)
             val planned = on?.let(parts.observer.history::get)
-            // The diff is against the screen the action was planned on, else the latest one.
-            val base = planned ?: parts.observer.history.newest()
+            // The screen the action was planned on; only without one named, the latest. A named
+            // screen that was forgotten gives no diff rather than a diff against another screen.
+            val base = if (on == null) parts.observer.history.newest() else planned
             val baseline = parts.observer.baseline(host, geometry, base?.detail ?: SnapshotDetail.BRIEF)
             if (action is UiAction.SetWheel) {
                 Outcomes.failed("set_wheel is not supported on this screen yet")

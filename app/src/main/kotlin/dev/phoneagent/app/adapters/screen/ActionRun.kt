@@ -21,8 +21,9 @@ internal class PortParts(
 /**
  * One action against one fresh read ([baseline]) of the display: perform it through the fallback
  * chains, let the display settle, read it back at the baseline's detail, and judge the effect.
- * The outcome's diff compares [compareWith] (the screen the action is based on, `null` when there
- * is none) with the screen after.
+ * The outcome's diff compares [compareWith] (the screen the action was planned on, the latest one
+ * when none was named, `null` when the named one was forgotten or there is none) with the screen
+ * after.
  */
 internal class ActionRun(
     private val parts: PortParts,
