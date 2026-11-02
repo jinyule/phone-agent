@@ -14,6 +14,7 @@ import dev.phoneagent.core.ports.Clock
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.serialization.json.JsonObject
+import okhttp3.ConnectionPool
 import okhttp3.Headers
 import okhttp3.Headers.Companion.toHeaders
 import okhttp3.HttpUrl
@@ -25,11 +26,14 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * Entry point of the OpenAI-style adapters (Chat Completions and Responses, model-layer §2–§4).
- * One instance per app: it owns the HTTP client (connection pool) that every model it creates
- * shares. OkHttp stays an implementation detail of `:core`.
+ * One instance per app: it owns the HTTP client (connection pool, idle connections kept for
+ * [HttpTimeouts.idleConnectionKeepAlive]) that every model it creates shares. OkHttp stays an
+ * implementation detail of `:core`.
  */
 public class OpenAiAdapters internal constructor(
     http: OkHttpClient,
@@ -97,27 +101,37 @@ public class OpenAiAdapters internal constructor(
 }
 
 /**
- * HTTP timeouts of the adapters, in milliseconds. [readMs] is the longest silence allowed between
- * two bytes of a stream: reasoning models can think for minutes without sending anything.
+ * HTTP timeouts of the adapters, in milliseconds, and how long an idle connection is kept.
+ * [readMs] is the longest silence allowed between two bytes of a stream: reasoning models can
+ * think for minutes without sending anything. All are checked on construction.
  *
  * @property connectMs TCP and TLS connect, > 0.
  * @property readMs idle time between received bytes, > 0.
  * @property writeMs idle time while sending the request (large screenshots), > 0.
+ * @property idleConnectionKeepAlive how long a connection stays in the pool between requests for
+ *   reuse, from zero (the default: no connection is reused) to five minutes. A server can close an
+ *   idle connection without saying so, and the next request on it then fails (OkHttp's resend is
+ *   off, model-layer §3.1); raise it only for a server whose own idle timeout is known to be
+ *   longer.
  */
 public data class HttpTimeouts(
     val connectMs: Long = 15_000,
     val readMs: Long = 300_000,
     val writeMs: Long = 60_000,
+    val idleConnectionKeepAlive: Duration = Duration.ZERO,
 ) {
     init {
         require(connectMs > 0 && readMs > 0 && writeMs > 0) { "HTTP timeouts must be > 0 ms: $this" }
+        require(idleConnectionKeepAlive >= Duration.ZERO && idleConnectionKeepAlive <= MAX_KEEP_ALIVE) {
+            "idleConnectionKeepAlive must be between 0 and $MAX_KEEP_ALIVE: $idleConnectionKeepAlive"
+        }
     }
 
     /**
      * The adapters' client. Every `complete()` attempt is one HTTP request: the caller retries
      * (`requestError`) and logs each attempt, so OkHttp's own resends are off — connection-failure
      * retries, redirects (a 307/308 would resend the POST) and the 503 `Retry-After: 0` follow-up
-     * ([RetryAfterStash]).
+     * ([RetryAfterStash]). Its pool keeps idle connections for [idleConnectionKeepAlive].
      */
     internal fun client(): OkHttpClient =
         OkHttpClient
@@ -125,12 +139,26 @@ public data class HttpTimeouts(
             .connectTimeout(connectMs, TimeUnit.MILLISECONDS)
             .readTimeout(readMs, TimeUnit.MILLISECONDS)
             .writeTimeout(writeMs, TimeUnit.MILLISECONDS)
+            .connectionPool(pool())
             .retryOnConnectionFailure(false)
             .followRedirects(false)
             .followSslRedirects(false)
             .addNetworkInterceptor(RetryAfterStash)
             .build()
+
+    /** OkHttp needs a positive keep-alive, so "none" is a pool that keeps no idle connection. */
+    private fun pool(): ConnectionPool =
+        if (idleConnectionKeepAlive == Duration.ZERO) {
+            ConnectionPool(0, 1, TimeUnit.NANOSECONDS)
+        } else {
+            ConnectionPool(MAX_IDLE_CONNECTIONS, idleConnectionKeepAlive.inWholeNanoseconds, TimeUnit.NANOSECONDS)
+        }
 }
+
+private val MAX_KEEP_ALIVE: Duration = 5.minutes
+
+/** OkHttp's default. */
+private const val MAX_IDLE_CONNECTIONS = 5
 
 /**
  * What every adapter instance shares. A [recording] env (one per "test and save" run) also keeps

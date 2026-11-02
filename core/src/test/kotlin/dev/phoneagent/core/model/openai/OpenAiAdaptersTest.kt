@@ -10,6 +10,9 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.nanoseconds
 
 class OpenAiAdaptersTest {
     @StartStop
@@ -83,7 +86,7 @@ class OpenAiAdaptersTest {
                 Keys(),
             ).unprobed(Kit.profile(server.base()), Kit.MODEL, Kit.capabilities(), Kit.blobs())
         assertEquals(Kit.MODEL, model.info.model)
-        assertEquals(HttpTimeouts(15_000, 300_000, 60_000), HttpTimeouts())
+        assertEquals(HttpTimeouts(15_000, 300_000, 60_000, Duration.ZERO), HttpTimeouts())
     }
 
     @Test
@@ -100,6 +103,27 @@ class OpenAiAdaptersTest {
         assertEquals(listOf(false, false, false), resends, "OkHttp never resends on its own")
         assertTrue(RetryAfterStash in client.networkInterceptors)
     }
+
+    @Test
+    fun `the idle keep-alive is checked and decides whether a connection stays in the pool`() =
+        runTest {
+            assertThrows<IllegalArgumentException> { HttpTimeouts(idleConnectionKeepAlive = (-1).nanoseconds) }
+            assertThrows<IllegalArgumentException> {
+                HttpTimeouts(idleConnectionKeepAlive = 5.minutes + 1.nanoseconds)
+            }
+            assertEquals(Duration.ZERO, HttpTimeouts().idleConnectionKeepAlive, "no reuse by default")
+            for ((keepAlive, idle) in listOf(Duration.ZERO to 0, 5.minutes to 1)) {
+                server.enqueueSse(
+                    Kit.sse("""{"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}"""),
+                )
+                val client = HttpTimeouts(idleConnectionKeepAlive = keepAlive).client()
+                Kit
+                    .adapters(client = client)
+                    .unprobed(Kit.profile(server.base()), Kit.MODEL, Kit.capabilities(), Kit.blobs())
+                    .complete(Kit.request())
+                assertEquals(idle, client.connectionPool.idleConnectionCount(), "idle connections with $keepAlive")
+            }
+        }
 
     @Test
     fun `retry-after is stashed from OkHttp and restored for the mapper`() {

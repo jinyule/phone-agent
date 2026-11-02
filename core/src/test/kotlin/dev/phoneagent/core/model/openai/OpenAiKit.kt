@@ -42,6 +42,7 @@ import java.nio.file.Path
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import javax.net.ServerSocketFactory
 
 /** Shared fixtures of the OpenAI adapter tests. Secrets are obvious placeholders. */
 internal object Kit {
@@ -236,8 +237,15 @@ internal object Kit {
      */
     val LOOPBACK: InetAddress = InetAddress.getByName("127.0.0.1")
 
-    /** A test server bound to [LOOPBACK]; `@StartStop` finds it started and only stops it. */
-    fun server(): MockWebServer = MockWebServer().apply { start(LOOPBACK, 0) }
+    /**
+     * A test server bound to [LOOPBACK], its sockets made by [sockets] when given; `@StartStop`
+     * finds it started and only stops it.
+     */
+    fun server(sockets: ServerSocketFactory? = null): MockWebServer =
+        MockWebServer().apply {
+            sockets?.let { serverSocketFactory = it }
+            start(LOOPBACK, 0)
+        }
 
     /** [path] on this server at the literal address it is bound to. */
     fun MockWebServer.literalUrl(path: String): HttpUrl =
