@@ -453,7 +453,7 @@ interface TaskRuntime {
   1. 未作答的提示写 `prompt/withdrawn`；
   2. 缺结果的调用补 `tool/result`。有 `tool/call` 的（可能执行过）：停止时记 `CANCELLED` 并附"可能已生效"，失败或恢复时记 `OUTCOME_UNKNOWN` 并附"这一步可能已经生效，先 `phone_observe` 核实再决定"。没有 `tool/call` 的，或确知还没开始的：停止时记 `CANCELLED`，否则记 `NOT_STARTED`；
   3. 写 `step/end` 和 `turn/end`：停止时是 `CANCELLED` / `STOPPED`，否则是 `FAILED`。
-- 停止时：取消在途请求，撤回待答提示，补完上面的修复。停止前已接受的输入，先记录、再记为移除。最后关闭日志。
+- 停止时：取消在途请求，撤回待答提示，补完上面的修复。停止前已接受的输入，先记录、再记为移除。最后关闭日志。外部 scope 被取消（`SHUTDOWN`）也一样：收尾在 `NonCancellable` 里进行，先停止接受输入，等录入协程写完手上那一条（每条命令先完整记录、再移除），然后由收尾者自己记录剩下已接受的命令。收尾者是唯一的，不会和录入协程同时写。
 - **不自动续跑**：恢复时修复日志，写 `session/resumed`，然后等新输入。
 - 插件或拦截器出故障，只结束当前 turn（`FAILED`），不会让 TaskRuntime 停掉。
 

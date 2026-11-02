@@ -171,13 +171,21 @@ internal class TurnEndings(
  * Records the input methods' entries and level changes in arrival order on its own coroutine, so
  * that [TaskRuntime.followup] and friends never suspend. A log failure stops the task
  * ([onLogFailure]).
+ *
+ * A command is accepted when it is queued before [close]. Each is recorded whole, even when the
+ * intake is cancelled meanwhile, and only then removed: so after the intake's coroutine ended,
+ * [drain] records exactly the accepted commands it had not recorded yet. The shutdown is that
+ * single finisher (see [AgentLoop]).
  */
 internal class Intake(
     private val inbox: Inbox,
     private val record: suspend (SessionEvent) -> Unit,
     private val onLogFailure: () -> Unit,
 ) {
-    private val commands = Channel<Command>(Channel.UNLIMITED)
+    private val lock = Any()
+    private val accepted = ArrayDeque<Command>()
+    private var closed = false
+    private val arrivals = Channel<Unit>(Channel.CONFLATED)
     private val wakes = Channel<Unit>(Channel.CONFLATED)
 
     /** Queues [entry] for [queue]; ignored once [close]d. */
@@ -186,25 +194,76 @@ internal class Intake(
         entry: InboxEntry,
         wake: Boolean,
     ) {
-        commands.trySend(Command.Add(queue, entry, wake))
+        accept(Command.Add(queue, entry, wake))
     }
 
     /** Queues a change of the task's security level; ignored once [close]d. */
     fun changeLevel(level: SecurityLevel) {
-        commands.trySend(Command.Level(level))
+        accept(Command.Level(level))
     }
 
-    /** Records submitted entries until [close]d, waking the driver for followups and steers. */
+    /** Records accepted commands until cancelled, waking the driver for followups and steers. */
     suspend fun run() {
-        for (command in commands) {
-            try {
-                handle(command)
-            } catch (ignored: SessionLogException) {
-                // The store refuses writes from now on, so the task cannot record anything: stop it.
-                return onLogFailure()
-            }
+        while (true) {
+            arrivals.receive()
+            if (!drain()) return onLogFailure()
         }
     }
+
+    /**
+     * Records the accepted commands not recorded yet, in order; `false` when the log refused one
+     * (it stays accepted, unrecorded). Only one caller at a time: the intake's coroutine, then,
+     * once it ended, the shutdown.
+     */
+    suspend fun drain(): Boolean {
+        var next = recordNext()
+        while (next == Next.RECORDED) next = recordNext()
+        return next == Next.EMPTY
+    }
+
+    /** Stops accepting commands; those accepted before stay to be recorded. */
+    fun close() {
+        synchronized(lock) { closed = true }
+    }
+
+    /** Suspends until a followup or steer was recorded since the last call. */
+    suspend fun awaitWake() {
+        wakes.receive()
+    }
+
+    private fun accept(command: Command) {
+        val open = synchronized(lock) { !closed && accepted.add(command) }
+        if (open) arrivals.trySend(Unit)
+    }
+
+    /** Records the oldest accepted command, then removes it; neither step is cut by a cancellation. */
+    private suspend fun recordNext(): Next =
+        withContext(NonCancellable) {
+            val command = synchronized(lock) { accepted.firstOrNull() }
+            when {
+                command == null -> {
+                    Next.EMPTY
+                }
+
+                !recorded(command) -> {
+                    Next.FAILED
+                }
+
+                else -> {
+                    synchronized(lock) { accepted.removeFirst() }
+                    Next.RECORDED
+                }
+            }
+        }
+
+    private suspend fun recorded(command: Command): Boolean =
+        try {
+            handle(command)
+            true
+        } catch (ignored: SessionLogException) {
+            // The store refuses writes from now on, so the task cannot record anything.
+            false
+        }
 
     private suspend fun handle(command: Command) {
         when (command) {
@@ -219,14 +278,7 @@ internal class Intake(
         }
     }
 
-    /** Suspends until a followup or steer was recorded since the last call. */
-    suspend fun awaitWake() {
-        wakes.receive()
-    }
-
-    fun close() {
-        commands.close()
-    }
+    private enum class Next { RECORDED, EMPTY, FAILED }
 
     private sealed interface Command {
         class Add(

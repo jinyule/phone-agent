@@ -50,8 +50,9 @@ public interface TaskRuntime {
     /**
      * Stops this task only, for [cause]; clears the inbox. An in-flight model request is cancelled
      * (its delivered prefix kept as interrupted), a pending prompt is withdrawn, and pending or
-     * running tool calls end CANCELLED; `task/stopped` is recorded last. Later calls to any method
-     * are ignored.
+     * running tool calls end CANCELLED. Input accepted before the stop is recorded, then recorded
+     * as removed, never lost; the same holds when the runtime's scope is cancelled
+     * ([StopCause.SHUTDOWN]). Later calls to any method are ignored.
      */
     public fun stop(cause: StopCause)
 

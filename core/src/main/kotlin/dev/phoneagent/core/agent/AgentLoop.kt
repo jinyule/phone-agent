@@ -27,6 +27,7 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -83,10 +84,11 @@ public data class AgentSetup(
  * in-flight model request. Everything else runs on the driver coroutine, launched in the scope
  * given to [start] or [resume]; cancelling that scope stops the task with [StopCause.SHUTDOWN].
  *
- * Failure and stop: see [Driver]. Stopping cancels the driver; the shutdown closes the turn,
- * lets the intake record the input accepted before the stop, clears the inbox (so that input is
- * recorded as withdrawn, not lost) and closes the log in `NonCancellable` code, then shows
- * [Phase.Stopped]. Input after the stop is ignored.
+ * Failure and stop: see [Driver]. Stopping (or cancelling the scope) cancels the driver; the
+ * shutdown, in `NonCancellable` code, closes the turn, stops accepting input, waits for the intake
+ * to finish the record in progress, then records itself whatever input was accepted and not yet
+ * recorded, clears the inbox (so accepted input is recorded, then recorded as removed, never
+ * lost) and closes the log; then it shows [Phase.Stopped]. Input after the stop is ignored.
  */
 public class AgentLoop private constructor(
     setup: AgentSetup,
@@ -176,7 +178,9 @@ public class AgentLoop private constructor(
         try {
             driver.finish()
             intake.close()
-            intakeJob.join()
+            // The intake stops between two records; this shutdown is then the single finisher.
+            intakeJob.cancelAndJoin()
+            intake.drain()
             clearInbox()
             log.close()
         } finally {
