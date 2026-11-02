@@ -49,6 +49,7 @@ internal class Requests(
     private val interceptors = loop.setup.interceptors
     private val requestChain = interceptors.request.chain { it }
     private val errorChain = interceptors.requestError.chain { Recovery.Fail }
+    private val stepLog = LoopStepLog(loop)
 
     suspend fun request(state: TurnState): Requested {
         var retries = 0
@@ -68,7 +69,7 @@ internal class Requests(
                 }
 
                 is Attempted.Failed -> {
-                    val recovery = errorChain.proceed(RequestFailure(attempt.error, state.attempt, retries))
+                    val recovery = errorChain.proceed(RequestFailure(attempt.error, state.attempt, retries, stepLog))
                     when (recovery) {
                         Recovery.Fail -> {
                             return Requested.Failed(attempt.error.message)

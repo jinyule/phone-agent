@@ -471,7 +471,7 @@ fun interface Chain<I, O> { suspend fun proceed(input: I): O }   // 不调用 pr
 |---|---|---|---|---|
 | `preStep` | 每个 step 之前（本 step 的输入已写入日志） | `PreStepInput(turn, step, log)` → `Proceed` / `Refuse(detail)` | **拒绝本 step**；追加 runtime-context（前台 App、时间、知识提示）；压缩。`log` 只能写上下文事件（`compaction/*`、`context/reasoning-dropped`、runtime-context），其他事件在写入之前抛 `IllegalArgumentException` | RuntimeContext、Compaction |
 | `request` | 每次 attempt 之前 | `RequestPlan` → `RequestPlan` | 为主请求选模型、线路快照、推理档位、缓存断点；`RequestPlan` 只服务主对话，看图和轻量请求走旁路（`side/*`）；**不能改消息** | ModelRouter |
-| `requestError` | attempt 失败后（step 仍打开；回复没过边界校验也算，按 `BadResponse`） | `RequestFailure(error, attempt, retries)` → `Retry(delayMs)` / `Fail` | 决定是否重试；每次重试记 `request/retry` | `RetryInterceptor`（默认）、OverflowCompaction、ImageOffload |
+| `requestError` | attempt 失败后（step 仍打开；回复没过边界校验也算，按 `BadResponse`） | `RequestFailure(error, attempt, retries, log)` → `Retry(delayMs)` / `Fail` | 决定是否重试；每次重试记 `request/retry`。`log` 和 `preStep` 的是同一份允许清单，例如签名失效时先写 `context/reasoning-dropped` 再重试，下一次 attempt 按写入后的日志组装 | `RetryInterceptor`（默认）、OverflowCompaction、ImageOffload |
 | `toolPreExecute` | 每个通过校验的调用，已写 `tool/call` | `PreExecuteInput(call, tool)` → `Verdict` | allow / refuse / confirm / handoff | **PolicyEngine**（固定排在链后，不可重排、无法绕过） |
 | `toolExecute` | 包住执行体，在工具超时之内 | `ExecuteInput(call, tool, context)` → `ToolResult` | 包装、延后或短路这个调用，spill-back 检测；**不能替换调用**：`proceed` 只接受判定过的那一组 call、tool、context，而且只能调一次，否则什么都不执行，调用记 `ERROR` | MainScreenWatch |
 | `toolPostExecute` | 每个调用有结果之后（执行、拒绝、转交都算） | `PostExecuteInput(call, tool, result)` → `PostExecuteResult(result, context)` | 替换结果；附加上下文（进 nextStep） | LoopGuard（含重复调用提醒）、OutwardPacing、KnowledgeNotice、Spill |

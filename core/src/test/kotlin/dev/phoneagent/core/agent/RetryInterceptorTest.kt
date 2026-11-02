@@ -25,7 +25,23 @@ class RetryInterceptorTest {
     private suspend fun RetryInterceptor.decide(
         error: ModelError,
         retries: Int = 0,
-    ): Recovery = intercept(RequestFailure(error, attempt = retries + 1, retries = retries), end)
+    ): Recovery = intercept(RequestFailure(error, attempt = retries + 1, retries = retries, unused), end)
+
+    /** The retry policy never reads or writes the log. */
+    private val unused =
+        object : StepLog {
+            override val taskId get() = error("unused")
+
+            override suspend fun records() = error("unused")
+
+            override suspend fun appendRuntimeContext(parts: List<dev.phoneagent.core.model.Part>) = error("unused")
+
+            override suspend fun append(
+                event: dev.phoneagent.core.session.SessionEvent,
+                surfaceOp: dev.phoneagent.core.session.SurfaceOp,
+                sources: List<Long>,
+            ) = error("unused")
+        }
 
     private val network = ModelError.Network("reset")
 

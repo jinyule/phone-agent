@@ -3,7 +3,11 @@
 package dev.phoneagent.core.agent
 
 import dev.phoneagent.core.ids.ToolCallId
+import dev.phoneagent.core.model.ChatResponse
+import dev.phoneagent.core.model.ModelError
 import dev.phoneagent.core.model.Part
+import dev.phoneagent.core.model.ReasoningKind
+import dev.phoneagent.core.model.Role
 import dev.phoneagent.core.model.StopReason
 import dev.phoneagent.core.session.AssistantMessage
 import dev.phoneagent.core.session.CompactionEnded
@@ -23,11 +27,14 @@ import dev.phoneagent.core.session.TurnEnded
 import dev.phoneagent.core.session.UserMessage
 import dev.phoneagent.core.session.UserMessageKind
 import dev.phoneagent.core.testing.FakeChatModel
+import dev.phoneagent.core.testing.FakeChatModel.Companion.call
+import dev.phoneagent.core.testing.FakeTool
 import dev.phoneagent.core.tool.ToolResult
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.JsonNull
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 
@@ -167,4 +174,55 @@ class AgentLoopStepLogTest {
             "every type is sampled",
         )
     }
+
+    @Test
+    fun `requestError may drop reasoning and the retry is built without it`() =
+        runTest {
+            val look = FakeTool("look")
+            val thinking =
+                Part.Reasoning(
+                    FakeChatModel.INFO.provider,
+                    FakeChatModel.INFO.model,
+                    ReasoningKind.ANTHROPIC_THINKING,
+                    JsonNull,
+                )
+            val refused = mutableListOf<String?>()
+            val dropping =
+                Interceptor<RequestFailure, Recovery> { input, chain ->
+                    if (input.error !is ModelError.PrefixBindingMismatch) return@Interceptor chain.proceed(input)
+                    try {
+                        input.log.append(forged)
+                    } catch (expected: IllegalArgumentException) {
+                        refused += expected.message
+                    }
+                    val reply = input.log.records().last { it.event is AssistantMessage }
+                    input.log.append(ReasoningDropped(reply.seq))
+                    Recovery.Retry(0)
+                }
+            val model =
+                FakeChatModel()
+                    .replies(ChatResponse(listOf(thinking, Part.Text("看一下"), call("c1", "look")), StopReason.TOOL_USE))
+                    .fails(ModelError.PrefixBindingMismatch("signature no longer valid"))
+                    .answers("好了")
+            val harness =
+                LoopHarness(
+                    this,
+                    model,
+                    tools = listOf(look),
+                    interceptors = Interceptors(requestError = listOf(dropping)),
+                )
+            harness.start().followup(text("go"))
+            advanceUntilIdle()
+
+            assertEquals(listOf("assistant/message is not a context event; only the loop writes it"), refused)
+
+            fun replyParts(request: Int): List<Part> =
+                model.requests[request]
+                    .messages
+                    .single { it.role == Role.ASSISTANT }
+                    .parts
+            assertEquals(listOf(thinking, Part.Text("看一下"), call("c1", "look")), replyParts(1))
+            assertEquals(listOf(Part.Text("看一下"), call("c1", "look")), replyParts(2), "only the reasoning is gone")
+            assertEquals(TurnEnded(1, TurnEndReason.COMPLETED), harness.events().last())
+        }
 }

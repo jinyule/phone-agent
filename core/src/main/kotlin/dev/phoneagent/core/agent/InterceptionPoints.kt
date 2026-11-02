@@ -139,11 +139,15 @@ public data class RequestPlan(
  * @property error the failure.
  * @property attempt the attempt that failed, from 1 within the step.
  * @property retries retries already made in this step.
+ * @property log what the recovery may read and add before a retry, with the same allowlist as
+ *   `preStep` (e.g. `context/reasoning-dropped` before retrying a [ModelError.PrefixBindingMismatch]);
+ *   the next attempt is built from the log as it is then.
  */
-public data class RequestFailure(
-    val error: ModelError,
-    val attempt: Int,
-    val retries: Int,
+public class RequestFailure(
+    public val error: ModelError,
+    public val attempt: Int,
+    public val retries: Int,
+    public val log: StepLog,
 )
 
 /** `requestError` outcome. */
