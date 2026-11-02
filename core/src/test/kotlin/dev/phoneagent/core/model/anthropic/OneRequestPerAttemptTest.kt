@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * Every `complete()` is exactly one HTTP request, so the caller's retry budget and log
@@ -50,17 +51,26 @@ class OneRequestPerAttemptTest {
             assertEquals(1, server.requestCount)
         }
 
+    /** A second call whose connection drops after the request fails once, with [timeouts]. */
+    private suspend fun dropAfterRequest(timeouts: AnthropicTimeouts) {
+        val model =
+            Kit
+                .adapters(client = timeouts.client())
+                .model(Kit.profile(server.base()), Kit.MODEL, Kit.CAPABILITIES, Kit.blobs())
+        server.enqueueSse(Kit.TEXT_REPLY)
+        model.complete(Kit.request())
+        server.enqueue(MockResponse.Builder().onResponseStart(SocketEffect.CloseSocket()).build())
+        server.enqueueSse(Kit.TEXT_REPLY)
+        assertThrows<ModelError.Network> { model.complete(Kit.request()) }
+        assertEquals(2, server.requestCount, "one request per call")
+    }
+
+    @Test
+    fun `a connection that drops after the request is not resent`() = runTest { dropAfterRequest(AnthropicTimeouts()) }
+
     @Test
     fun `a reused connection that drops after the request is not resent`() =
-        runTest {
-            val model = Kit.model(server)
-            server.enqueueSse(Kit.TEXT_REPLY)
-            model.complete(Kit.request())
-            server.enqueue(MockResponse.Builder().onResponseStart(SocketEffect.CloseSocket()).build())
-            server.enqueueSse(Kit.TEXT_REPLY)
-            assertThrows<ModelError.Network> { model.complete(Kit.request()) }
-            assertEquals(2, server.requestCount, "one request per call")
-        }
+        runTest { dropAfterRequest(AnthropicTimeouts(idleConnectionKeepAlive = 1.minutes)) }
 
     @Test
     fun `307 is not followed`() =

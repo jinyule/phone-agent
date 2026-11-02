@@ -14,12 +14,15 @@ import dev.phoneagent.core.ports.Clock
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.serialization.json.JsonObject
+import okhttp3.ConnectionPool
 import okhttp3.HttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * Entry point of the Anthropic Messages adapter (model-layer §3.3). One instance per app: it owns
@@ -71,21 +74,30 @@ public class AnthropicAdapters internal constructor(
  * @property connectMs TCP and TLS connect, > 0.
  * @property readMs idle time between received bytes, > 0.
  * @property writeMs idle time while sending the request (large screenshots), > 0.
+ * @property idleConnectionKeepAlive how long a connection stays in the pool between requests for
+ *   reuse, from zero (the default: no connection is reused) to five minutes. A server can close an
+ *   idle connection without saying so, and the next request on it then fails (OkHttp's resend is
+ *   off, model-layer §3.1); raise it only for a server whose own idle timeout is known to be
+ *   longer.
  */
 public data class AnthropicTimeouts(
     val connectMs: Long = 15_000,
     val readMs: Long = 300_000,
     val writeMs: Long = 60_000,
+    val idleConnectionKeepAlive: Duration = Duration.ZERO,
 ) {
     init {
         require(connectMs > 0 && readMs > 0 && writeMs > 0) { "HTTP timeouts must be > 0 ms: $this" }
+        require(idleConnectionKeepAlive >= Duration.ZERO && idleConnectionKeepAlive <= MAX_KEEP_ALIVE) {
+            "idleConnectionKeepAlive must be between 0 and $MAX_KEEP_ALIVE: $idleConnectionKeepAlive"
+        }
     }
 
     /**
      * The adapter's client. Every `complete()` is one HTTP request: the caller retries
      * (`requestError`) and logs each attempt, so OkHttp's own resends are off — connection-failure
      * retries, redirects (a 307/308 would resend the POST) and the 503 `Retry-After: 0` follow-up
-     * ([RetryAfterStash]).
+     * ([RetryAfterStash]). Its pool keeps idle connections for [idleConnectionKeepAlive].
      */
     internal fun client(): OkHttpClient =
         OkHttpClient
@@ -93,11 +105,27 @@ public data class AnthropicTimeouts(
             .connectTimeout(connectMs, TimeUnit.MILLISECONDS)
             .readTimeout(readMs, TimeUnit.MILLISECONDS)
             .writeTimeout(writeMs, TimeUnit.MILLISECONDS)
+            .connectionPool(pool())
             .retryOnConnectionFailure(false)
             .followRedirects(false)
             .followSslRedirects(false)
             .addNetworkInterceptor(RetryAfterStash)
             .build()
+
+    /** OkHttp needs a positive keep-alive, so "none" is a pool that keeps no idle connection. */
+    private fun pool(): ConnectionPool =
+        if (idleConnectionKeepAlive == Duration.ZERO) {
+            ConnectionPool(0, 1, TimeUnit.NANOSECONDS)
+        } else {
+            ConnectionPool(MAX_IDLE_CONNECTIONS, idleConnectionKeepAlive.inWholeNanoseconds, TimeUnit.NANOSECONDS)
+        }
+
+    private companion object {
+        val MAX_KEEP_ALIVE = 5.minutes
+
+        /** OkHttp's default. */
+        const val MAX_IDLE_CONNECTIONS = 5
+    }
 }
 
 /** What every model of one [AnthropicAdapters] shares. */

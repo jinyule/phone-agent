@@ -175,7 +175,7 @@ data class WireProfile(
 
 - **工具调用**：`tools[].function` + `tool_choice:"auto"`。主循环每轮只执行一个调用，所以服务商支持时适配器在 `prepare` 里设 `wire.disableParallelToolCalls = true`，线路上发 `parallel_tool_calls:false`。如果模型仍然返回多个调用，第一个之外的每个都要配一条结果"已跳过：每步只执行一个动作"，否则下一次请求会被拒。调用的 `arguments` 不是字符串时不静默改写（Chat 和 Responses 相同）：缺省或 `null` 记成 `{}`；对象原样序列化（有的网关发对象）；数字、布尔、数组按原始 JSON 文本保留为 argsJson，交给工具层的边界校验给模型反馈"参数无效"。这些参数和字符串参数一样经过回显检查。
 - **流式**：`stream:true` + `stream_options.include_usage`；要兼容某些网关返回 `usage:null` 的情况。
-- **连接复用**（OpenAI 适配器的 HTTP 客户端，Responses 也用它）：默认不复用空闲连接，每个 attempt 新建连接（`HttpTimeouts.idleConnectionKeepAlive`，默认 `Duration.ZERO`，加载时校验，范围 0 到 5 分钟）。原因：服务端可以不打招呼（不带 `Connection: close`）关掉空闲的 keep-alive 连接，而 OkHttp 只对空闲满 10 秒的连接做健康检查；连接失败重试又是关着的（保住"一个 attempt 只发一个请求"），所以复用一条已经被关掉的连接，这次请求一定失败，白白占掉 `requestError` 的一次重试和一段退避。常见的本地服务（uvicorn、Node http、cpp-httplib）空闲超时在 5 秒左右，正好落在两步之间的间隔里。多一次 TCP/TLS 握手，和模型的延迟比可以忽略。**什么时候可以调大**：已经知道服务端的空闲超时比这个值长时（比如自己部署、配置可查的服务）。**调大以后仍然会碰到**：服务端的超时比这个值短，或者服务端在超时之前因为别的原因（重启、负载均衡切换）关掉连接时，下一次请求照样失败一次；这个剩下的竞争窗口交给 `requestError` 重试，不打开 OkHttp 的连接失败重试。
+- **连接复用**（两个适配器的 HTTP 客户端，规则相同：OpenAI 适配器的 `HttpTimeouts.idleConnectionKeepAlive`，Responses 也用它；Anthropic 适配器的 `AnthropicTimeouts.idleConnectionKeepAlive`）：默认不复用空闲连接，每个 attempt 新建连接（默认 `Duration.ZERO`，加载时校验，范围 0 到 5 分钟）。原因：服务端可以不打招呼（不带 `Connection: close`）关掉空闲的 keep-alive 连接，而 OkHttp 只对空闲满 10 秒的连接做健康检查；连接失败重试又是关着的（保住"一个 attempt 只发一个请求"），所以复用一条已经被关掉的连接，这次请求一定失败（`Network`），白白占掉 `requestError` 的一次重试和一段退避。常见的本地服务（uvicorn、Node http、cpp-httplib）空闲超时在 5 秒左右，正好落在两步之间的间隔里。多一次 TCP/TLS 握手，和模型的延迟比可以忽略。**什么时候可以调大**：已经知道服务端的空闲超时比这个值长时（比如自己部署、配置可查的服务）。**调大以后仍然会碰到**：服务端的超时比这个值短，或者服务端在超时之前因为别的原因（重启、负载均衡切换）关掉连接时，下一次请求照样失败一次；这个剩下的竞争窗口交给 `requestError` 重试，不打开 OkHttp 的连接失败重试。
 - **结束原因**（`finish_reason` → `stopReason`）：`length` / `max_tokens` → `MAX_TOKENS`；`content_filter`、`sensitive` 和 `refusal` 报 `Refusal`，带不带调用都一样。正常结束（`stop`、`end_turn`、`eos`、`tool_calls`、`function_call` 或没有原因）时，带调用就是 `TOOL_USE`（Ollama 带调用时也报 `stop`），不带调用就是 `END_TURN`（`tool_calls` / `function_call` 不带调用是 `OTHER`）。不认识的值一律 `OTHER`，带着的调用不执行。
 - **推理内容**：字段名和"要不要回传"各家不同（`reasoning_content` 等）。在 `ProviderProfile.reasoningField` 和 `ProviderProfile.echoReasoning` 里按服务商配置，由能力探测确认；**探测不了的标"未验证"**。写请求头时这两项冻结进 `wire`（§2"线路快照"）。
 - **工具调用漏成文字**：有的模型会把工具调用写成正文里的标记（DeepSeek DSML、`<tool_call>` 等），参考 Mika 的 `LeakedToolMarkup`。还原**默认关闭，所有预设（包括 DeepSeek、通义、Ollama）都不打开**：还原出来的调用没走服务商的工具通道，而 PolicyEngine 现在还不能对还原出来的调用要求用户确认。以后作为用户显式开启的兼容选项提供（UI 由 WP09 决定）。预设的 `leakedCallFormats` 记下这条线路有证据会漏出的格式（DeepSeek 是 DSML，通义和 Ollama 是 `<tool_call>`）。`ChatQuirks.recoverLeakedCalls` 只能开启这条线路允许的格式（`WireOptions.allowedLeakedCalls`）：预设线路的预设按 `WireOptions.defaultsFor` 的方式解析（指向官方 host 的自定义 profile 也算这个预设），允许的就是预设的 `leakedCallFormats`，线路自己不能再声明；自定义线路默认什么都不允许，必须在 `ChatQuirks.leakedCallFormats` 里显式声明实际会用到的格式，开启的格式必须是声明的子集。创建模型和开始"测试并保存"时校验，不满足就抛 `IllegalArgumentException`，不发请求。设置界面（WP09/WP10）的开关只能列出这条线路允许的格式。开启后，下面几条都满足才还原，否则正文原样保留：
@@ -240,7 +240,7 @@ data class WireProfile(
   - 一份档案服务多个模型时，保存的设置先经 `AnthropicSettings.effectiveFor(profile, model)` 按模型算出有效设置，再生成快照，记下的就是实际发出的设置。
   - 带工具时固定发 `disable_parallel_tool_use:true`。这是映射版本 1 的规则，不读 `parallelToolCalls`。
 - **传输**：和 OpenAI 适配器一致。
-  - 每次 attempt 只发一个请求：关掉连接失败重试和重定向跟随。
+  - 每次 attempt 只发一个请求：关掉连接失败重试和重定向跟随。默认也不复用空闲连接（§3.1"连接复用"）。
   - 3xx 报不可重试的 `InvalidRequest(param = null)`，`detail` 里带打码、截断后的目标地址。
   - SSE 认 LF、CRLF 和单独的 CR。
   - `Retry-After` 只接受有限、非负的值。
