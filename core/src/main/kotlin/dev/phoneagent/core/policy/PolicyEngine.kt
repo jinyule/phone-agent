@@ -124,7 +124,15 @@ public sealed interface Verdict {
  * @property taskId the task.
  * @property level user-selected security level.
  * @property unattended no user is watching (scheduled tasks): spending is always refused.
- * @property screen the snapshot the call was planned on, or `null` for non-screen tools.
+ * @property screen the screen the call is judged on, derived from the log: the latest screen
+ *   recorded under a call that already has its `tool/result` (a `screen/snapshot`, the re-check
+ *   screen S' included, or the `after` screen of a `screen/action` or `screen/launch`), provided
+ *   no boundary came after it. Boundaries: `handoff/start`, `handoff/end`, `session/resumed`, the
+ *   `tool/started` of a non-READ call (by the intent of the verdict it started on), and every
+ *   `screen/action` and `screen/launch`, whose own `after` screen counts as recorded after them.
+ *   It may be newer than what the model saw. During the re-check after approval it is S',
+ *   recorded under this call. `null` when there is no such screen (none read, a read failed, or
+ *   a boundary came after the last one), screen tools included: the policy decides.
  * @property operatedPackages the `intent.pkg` of every non-READ call that started in this task
  *   (`tool/started`), taking the intent of the verdict it started on (`verdictSeq`); this includes
  *   the target package of `phone_launch`. A refused or handed-off call, one waiting for or denied

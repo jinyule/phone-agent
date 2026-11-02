@@ -306,7 +306,8 @@ fun interface IntentResolver {          // 这次调用会干什么；纯函数�
     fun resolve(call: ToolCall, risk: RiskClass, screen: ScreenSnapshot?): ActionIntent   // risk 是下限
 }
 data class PolicyContext(
-    val taskId: TaskId, val level: SecurityLevel, val unattended: Boolean, val screen: ScreenSnapshot?,
+    val taskId: TaskId, val level: SecurityLevel, val unattended: Boolean,
+    val screen: ScreenSnapshot?,                             // 所属调用已有结果的、最新记录的那一屏（含复核的 S′），之后没有作废边界；交接开始起之前的屏全部作废，边界清单见 KDoc；复核时是 S′；没有时为 null
     val operatedPackages: Set<String> = emptySet(),          // 本任务写过 tool/started 的非 READ 调用的 intent.pkg（intent 取 verdictSeq 那条 verdict；含 phone_launch 的目标）
     val outwardConfirmedPackages: Set<String> = emptySet(),  // 只认执行实际依据的那次批准，见下文
     val approved: ConfirmCard? = null,                       // 批准后复核时传入刚批准的卡
