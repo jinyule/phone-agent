@@ -23,6 +23,8 @@ import kotlinx.serialization.json.put
  * `phone_observe(detail?, image?)` (phase1 §5): reads the screen as one page. A frame with
  * Set-of-Mark boxes is attached when `image=true`, or when `image` is absent and the tree is not
  * [TreeQuality.GOOD]; never when [vision] is off or the page is FLAG_SECURE (the text says why).
+ * The description is one text whatever [vision] is (tool definitions are part of the cached
+ * prompt prefix): it states the condition instead.
  */
 internal class PhoneObserveTool(
     private val presenter: ScreenPresenter,
@@ -31,12 +33,13 @@ internal class PhoneObserveTool(
 ) : PhaseOneTool(
         name = "phone_observe",
         description =
-            "读当前屏幕，返回这一屏的元素列表（格式见系统提示）。detail=full 列出全部元素和完整文字；image=true 附一张带编号框的截图。" +
-                "界面元素读不全时会自动附图。动作类工具的结果里已经带了动作后的画面，通常不用紧接着再读屏。",
+            "读当前屏幕，返回这一屏的元素列表（格式见系统提示）。detail=full 列出全部元素和完整文字。" +
+                "模型能看图时，image=true 附一张带编号框的截图；界面元素读不全且模型能看图时会自动附图。" +
+                "动作类工具的结果里已经带了动作后的画面，通常不用紧接着再读屏。",
         mask = presenter::mask,
         declare = {
             string("detail", "brief（默认）控制长度：长文字截断，太长的页面折叠；full 列出全部元素和完整文字。", enum = DETAILS.keys.toList())
-            boolean("image", "true 附截图，false 不附；不填时界面读不全才附。")
+            boolean("image", "true 附截图，false 不附；不填时界面读不全才附。模型不看图时不会附图。")
         },
     ) {
     override val group: ToolGroup = ToolGroup.PHONE

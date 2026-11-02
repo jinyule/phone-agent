@@ -29,6 +29,8 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -143,6 +145,21 @@ class ObserveAndWaitTest {
                 val gone = FakeScreen().apply { unavailable = ScreenUnavailableException("无障碍服务断开") }
                 assertTrue(observe(screen = gone).first.text().startsWith("屏幕暂时用不了（无障碍服务断开）"))
             }
+
+        @Test
+        fun `the description offers screenshots only to a model that can read images`() {
+            val def = tools().getValue("phone_observe").def
+            assertTrue(def.description.contains("模型能看图时，image=true 附一张带编号框的截图"), def.description)
+            assertTrue(def.description.contains("界面元素读不全且模型能看图时会自动附图"), def.description)
+            val image =
+                def.parameters["properties"]!!
+                    .jsonObject
+                    .getValue("image")
+                    .jsonObject
+                    .getValue("description")
+                    .jsonPrimitive.content
+            assertTrue(image.contains("模型不看图时不会附图"), image)
+        }
 
         @Test
         fun `is a concurrency-safe read`() {
