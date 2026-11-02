@@ -97,6 +97,8 @@ class PortTypesTest {
         val ocr = OcrLine("加载中", Bounds(0, 0, 10, 10))
         assertFalse(ScreenDiff(ocrAdded = listOf(ocr)).isEmpty)
         assertFalse(ScreenDiff(ocrRemoved = listOf(ocr)).isEmpty)
+        // OCR that was not compared is no change, only a note.
+        assertTrue(ScreenDiff(ocrUnverified = true).isEmpty)
     }
 
     @Test
@@ -108,6 +110,12 @@ class PortTypesTest {
         )
         val diff = ScreenDiff(ocrAdded = listOf(OcrLine("已完成", Bounds(0, 0, 10, 10))))
         assertEquals(diff, withDefaults.decodeFromString<ScreenDiff>(withDefaults.encodeToString(diff)))
+        val unverified = ScreenDiff(ocrUnverified = true)
+        assertEquals(
+            """{"added":[],"removed":[],"changed":[],"ocrUnverified":true}""",
+            withDefaults.encodeToString(unverified),
+        )
+        assertEquals(unverified, Json.decodeFromString<ScreenDiff>(Json.encodeToString(unverified)))
         assertEquals(ScreenDiff(), Json.decodeFromString<ScreenDiff>("""{"added":[],"removed":[],"changed":[]}"""))
     }
 

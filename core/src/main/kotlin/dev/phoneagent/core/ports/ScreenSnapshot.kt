@@ -301,8 +301,16 @@ public enum class ScreenFlag {
  * @property changed printed elements shown under the same ref in both snapshots that read
  *   differently (text, absorbed texts, value, hint, states, printed coordinates) or moved to
  *   another parent, as they are now (`~`).
- * @property ocrAdded OCR lines of the later snapshot whose text or place is new.
- * @property ocrRemoved OCR lines of the earlier snapshot that are gone; a line that moved is in both lists.
+ * OCR lines are compared only when the later snapshot was read with OCR (`ocr` not `null`): a
+ * later read without OCR says nothing about the earlier lines, so none of them is removed.
+ *
+ * @property ocrAdded OCR lines of the later snapshot whose text or place is new; with no OCR on
+ *   the earlier snapshot, all of its lines.
+ * @property ocrRemoved OCR lines of the earlier snapshot that are gone from the later one's OCR; a
+ *   line that moved is in both lists (removed at its old place, added at its new one).
+ * @property ocrUnverified the earlier snapshot had OCR lines and the later one was read without
+ *   OCR, so whether they are still there, and where, is not known. Not a change: [isEmpty] does
+ *   not look at it.
  */
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
@@ -310,11 +318,12 @@ public data class ScreenDiff(
     val added: List<UiElement> = emptyList(),
     val removed: List<ElementRef> = emptyList(),
     val changed: List<UiElement> = emptyList(),
-    // Left out when empty, so logs written before these fields existed read and write the same.
+    // Left out when empty or false, so logs written before these fields existed read and write the same.
     @EncodeDefault(EncodeDefault.Mode.NEVER) val ocrAdded: List<OcrLine> = emptyList(),
     @EncodeDefault(EncodeDefault.Mode.NEVER) val ocrRemoved: List<OcrLine> = emptyList(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val ocrUnverified: Boolean = false,
 ) {
-    /** Whether nothing changed. */
+    /** Whether nothing is known to have changed ([ocrUnverified] aside). */
     public val isEmpty: Boolean
         get() = added.isEmpty() && removed.isEmpty() && changed.isEmpty() && ocrAdded.isEmpty() && ocrRemoved.isEmpty()
 }

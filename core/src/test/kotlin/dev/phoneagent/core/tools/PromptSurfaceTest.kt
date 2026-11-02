@@ -153,19 +153,31 @@ class PromptSurfaceTest {
     @Test
     fun `results - a diff lists OCR changes and refs that went away`() =
         runTest {
-            // The picture's OCR text changed, and the send button e10 is gone: its ref now names a
-            // plain container that is not printed, so e10 must be dropped.
+            // The picture's OCR text changed, its caption moved down, and the send button e10 is
+            // gone: its ref now names a plain container that is not printed, so e10 must be dropped.
             val picture = OcrLine("二维码加载中", box(300, 400, 700, 440), 0.9)
-            val before = Screens.CHAT.copy(id = SnapshotId("s15"), ocr = listOf(picture))
+            val caption = OcrLine("长按识别二维码", box(300, 450, 700, 490), 0.9)
+            val before = Screens.CHAT.copy(id = SnapshotId("s15"), ocr = listOf(picture, caption))
             val overlay = el("e10", ElementRole.CONTAINER, null, box(880, 930, 980, 980))
             val after =
                 before.copy(
                     id = SnapshotId("s16"),
                     elements = Screens.CHAT_ELEMENTS.dropLast(1) + overlay,
-                    ocr = listOf(picture.copy(text = "二维码已过期，点击刷新")),
+                    ocr = listOf(picture.copy(text = "二维码已过期，点击刷新"), caption.copy(bounds = box(300, 500, 700, 540))),
                 )
             val result = act("phone_tap", """{"screen":"s15","x":500,"y":420}""", before, after)
             Golden.assertMatches("results/tap-diff-ocr-and-gone.expected.txt", result)
+        }
+
+    @Test
+    fun `results - a screen read without OCR leaves the earlier OCR lines unverified`() =
+        runTest {
+            val picture = OcrLine("二维码已过期，点击刷新", box(300, 400, 700, 440), 0.9)
+            val before = Screens.CHAT.copy(id = SnapshotId("s15"), ocr = listOf(picture))
+            val typed = Screens.CHAT_ELEMENTS.map { if (it.ref.value == "e9") it.copy(value = "好的") else it }
+            val after = before.copy(id = SnapshotId("s16"), elements = typed, ocr = null)
+            val result = act("phone_type", """{"screen":"s15","ref":"e9","text":"好的"}""", before, after)
+            Golden.assertMatches("results/type-diff-ocr-unverified.expected.txt", result)
         }
 
     @Test

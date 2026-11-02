@@ -134,11 +134,79 @@ class ScreenDiffViewTest {
         val level = OcrLine("游戏中 第 1 关", box(300, 100, 700, 160), 0.9)
         val text = shown(before, page("s2").copy(ocr = listOf(level, rank.copy(bounds = box(400, 820, 600, 880)))))
         assertEquals(
-            listOf("+ 屏上文字 \"游戏中 第 1 关\" (500,130)", "~ 屏上文字 \"排行榜\" (500,850)", "- 屏上文字 \"开始游戏\""),
+            listOf(
+                "+ 屏上文字 \"游戏中 第 1 关\" (500,130)",
+                "+ 屏上文字 \"排行榜\" (500,850)",
+                "- 屏上文字 \"开始游戏\" (500,530)",
+                "- 屏上文字 \"排行榜\" (500,650)",
+            ),
             body(text),
             text,
         )
         assertFalse(text.contains("没有可见变化"), text)
+    }
+
+    @Test
+    fun `an OCR line that goes away is named by its old place, so equal texts are told apart`() {
+        val top = OcrLine("购买", box(100, 200, 300, 260), 0.9)
+        val bottom = OcrLine("购买", box(100, 600, 300, 660), 0.9)
+        val before = page("s1").copy(ocr = listOf(top, bottom))
+        val topGone = shown(before, page("s2").copy(ocr = listOf(bottom)))
+        val bottomGone = shown(before, page("s2").copy(ocr = listOf(top)))
+        assertEquals(listOf("- 屏上文字 \"购买\" (200,230)"), body(topGone), topGone)
+        assertEquals(listOf("- 屏上文字 \"购买\" (200,630)"), body(bottomGone), bottomGone)
+    }
+
+    @Test
+    fun `OCR lines are not reported gone from a screen that was read without OCR`() {
+        val qr = listOf(OcrLine("二维码已过期", box(300, 400, 700, 440), 0.9), OcrLine("点击刷新", box(400, 460, 600, 500), 0.9))
+        val before = page("s1").copy(ocr = qr)
+        val note = "（这一屏没做文字识别，之前识别到的屏上文字和坐标没有重新核实）"
+        // Not run: nothing is known about the old lines, and that is said.
+        val unread = shown(before, page("s2").copy(ocr = null))
+        assertEquals(emptyList<String>(), body(unread), unread)
+        assertTrue(unread.lines().contains(note), unread)
+        // Ran and found nothing: the old lines are gone.
+        val empty = shown(before, page("s2").copy(ocr = emptyList()))
+        assertEquals(listOf("- 屏上文字 \"二维码已过期\" (500,420)", "- 屏上文字 \"点击刷新\" (500,480)"), body(empty), empty)
+        assertFalse(empty.contains(note), empty)
+        // Not run before: what is found now is new.
+        val found = shown(page("s1").copy(ocr = null), page("s2").copy(ocr = qr.take(1)))
+        assertEquals(listOf("+ 屏上文字 \"二维码已过期\" (500,420)"), body(found), found)
+        assertFalse(found.contains(note), found)
+        // Neither read has OCR: nothing to say.
+        val none = shown(page("s1").copy(ocr = null), page("s2").copy(ocr = null))
+        assertFalse(none.contains(note), none)
+    }
+
+    @Test
+    fun `the full page after a big change also says the earlier OCR lines were not checked again`() {
+        val game = el("e1", ElementRole.BUTTON, "关闭", box(900, 30, 980, 90), click)
+        val before = snapshot("s1", listOf(game)).copy(ocr = listOf(OcrLine("开始游戏", box(400, 500, 600, 560), 0.9)))
+        val menu =
+            (2..4).map {
+                el(
+                    "e$it",
+                    ElementRole.BUTTON,
+                    "选项 $it",
+                    box(100, it * 100, 900, it * 100 + 60),
+                    click,
+                )
+            }
+        val text = shown(before, before.copy(id = SnapshotId("s2"), elements = listOf(game) + menu, ocr = null))
+        assertEquals("（与 s1 相比变化较大，下面是完整一屏，+ 是新出现的元素）", text.lines()[1], text)
+        assertEquals("（这一屏没做文字识别，之前识别到的屏上文字和坐标没有重新核实）", text.lines()[2], text)
+        assertFalse(text.contains("开始游戏"), text)
+    }
+
+    @Test
+    fun `OCR lines that were not compared do not count toward the full-page share`() {
+        val lines = (1..12).map { OcrLine("第 $it 行", box(0, it * 60, 999, it * 60 + 40), 0.9) }
+        val game = el("e1", ElementRole.BUTTON, "关闭", box(900, 30, 980, 90), click)
+        val before = snapshot("s1", listOf(game)).copy(ocr = lines)
+        val text = shown(before, before.copy(id = SnapshotId("s2"), ocr = null))
+        assertEquals("screen s2 · 与 s1 相比没有可见变化", text.lines()[0], text)
+        assertEquals("（这一屏没做文字识别，之前识别到的屏上文字和坐标没有重新核实）", text.lines()[1], text)
     }
 
     @Test
@@ -155,7 +223,7 @@ class ScreenDiffViewTest {
             listOf(
                 "~ @e9 输入框 值:\"好的\" {可编辑,焦点} (480,955)",
                 "+ 屏上文字 \"已完成\" (500,530)",
-                "- 屏上文字 \"加载中\"",
+                "- 屏上文字 \"加载中\" (500,530)",
             ),
             body(shown(before, after)),
         )

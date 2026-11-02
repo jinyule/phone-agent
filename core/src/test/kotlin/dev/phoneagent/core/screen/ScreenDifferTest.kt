@@ -220,7 +220,28 @@ class ScreenDifferTest {
         val moved = loading.copy(bounds = box(400, 600, 600, 660))
         val movedDiff = differ.diff(old.copy(ocr = listOf(loading)), old.copy(ocr = listOf(moved)))
         assertEquals(ScreenDiff(ocrAdded = listOf(moved), ocrRemoved = listOf(loading)), movedDiff)
-        assertEquals(ScreenDiff(ocrRemoved = listOf(loading, loading)), differ.diff(old, old.copy(ocr = null)))
+    }
+
+    @Test
+    fun `OCR lines are compared only when the later screen was read with OCR`() {
+        val expired = OcrLine("二维码已过期", box(300, 400, 700, 440), 0.9)
+        val refresh = OcrLine("点击刷新", box(400, 460, 600, 500), 0.9)
+        val read = snapshot("s1", emptyList()).copy(ocr = listOf(expired, refresh))
+        // Not run on the later screen: the old lines are neither gone nor counted.
+        val unread = differ.diff(read, read.copy(ocr = null))
+        assertEquals(emptyList<OcrLine>(), unread.ocrRemoved)
+        assertTrue(unread.isEmpty)
+        assertEquals(ScreenDiff(ocrUnverified = true), unread)
+        // Ran and found nothing: the old lines are gone.
+        assertEquals(ScreenDiff(ocrRemoved = listOf(expired, refresh)), differ.diff(read, read.copy(ocr = emptyList())))
+        // Not run on the earlier screen: what is found now is new.
+        assertEquals(
+            ScreenDiff(ocrAdded = listOf(expired)),
+            differ.diff(read.copy(ocr = null), read.copy(ocr = listOf(expired))),
+        )
+        // Nothing was read before: nothing is left unverified.
+        assertEquals(ScreenDiff(), differ.diff(read.copy(ocr = null), read.copy(ocr = null)))
+        assertEquals(ScreenDiff(), differ.diff(read.copy(ocr = emptyList()), read.copy(ocr = null)))
     }
 
     @Test

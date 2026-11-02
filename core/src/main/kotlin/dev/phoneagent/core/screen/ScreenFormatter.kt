@@ -4,6 +4,7 @@ import dev.phoneagent.core.ids.SnapshotId
 import dev.phoneagent.core.policy.RiskLexicon
 import dev.phoneagent.core.ports.ActionOutcome
 import dev.phoneagent.core.ports.ElementRef
+import dev.phoneagent.core.ports.OcrLine
 import dev.phoneagent.core.ports.ScreenDiff
 import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.ports.SnapshotDetail
@@ -20,11 +21,13 @@ import dev.phoneagent.core.tool.ScreenPresenter
  * and a line says how many items are hidden and where to scroll; the header and the top and
  * bottom zones are always kept.
  *
- * After an action ([afterAction]) the model gets only the diff (`+` new, `~` changed, `-` gone,
- * for elements and then OCR lines; see [ScreenDiffer] for what counts) unless the app changed,
- * there is no diff, more than [ScreenFormatConfig.fullPageShare] of the lines changed, or the
- * diff cannot be shown faithfully or within the budget; then it gets the full page with new
- * elements marked `+`.
+ * After an action ([afterAction]) the model gets only the diff (`+` new, `~` changed, `-` gone
+ * for elements; `+` new and `-` gone for OCR lines, each with its center, so a moved line is one
+ * of each; see [ScreenDiffer] for what counts) unless the app changed, there is no diff, more than
+ * [ScreenFormatConfig.fullPageShare] of the lines changed, or the diff cannot be shown faithfully
+ * or within the budget; then it gets the full page with new elements marked `+`. When the later
+ * screen was read without OCR after one with OCR lines ([ScreenDiff.ocrUnverified]), either form
+ * says that those lines were not checked again.
  *
  * [vision] is whether the main model reads images (the same capability the tools are assembled
  * with, `ToolsConfig.vision`): without it no note suggests a screenshot.
@@ -41,7 +44,7 @@ public class ScreenFormatter(
     override fun page(
         snapshot: ScreenSnapshot,
         detail: SnapshotDetail,
-    ): String = render(snapshot, detail, added = emptySet(), note = null)
+    ): String = render(snapshot, detail, added = emptySet(), notes = emptyList())
 
     override fun afterAction(
         outcome: ActionOutcome,
@@ -68,14 +71,14 @@ public class ScreenFormatter(
             after,
             SnapshotDetail.BRIEF,
             added = diff.added.map { it.ref }.toSet(),
-            note = "（${since}变化较大，下面是完整一屏，+ 是新出现的元素）",
+            notes = listOf("（${since}变化较大，下面是完整一屏，+ 是新出现的元素）") + diff.ocrNote(),
         )
 
     private fun render(
         snapshot: ScreenSnapshot,
         detail: SnapshotDetail,
         added: Set<ElementRef>,
-        note: String?,
+        notes: List<String>,
     ): String {
         val layout = PageLayout(snapshot, config)
         val risky = riskyRefs(snapshot, layout)
@@ -95,7 +98,7 @@ public class ScreenFormatter(
                         INDENT.repeat(line.depth) + text
                     }
             }
-        val header = headers.lines(snapshot, note)
+        val header = headers.lines(snapshot, notes)
         val ocr =
             snapshot.ocr.orEmpty().map { line ->
                 val center = line.bounds.center()
@@ -141,7 +144,7 @@ public class ScreenFormatter(
             } else {
                 listOf("screen ${after.id} · ${since}的变化（其余不变）")
             }
-        val text = (head + headers.notes(after) + body).joinToString("\n")
+        val text = (head + headers.notes(after) + diff.ocrNote() + body).joinToString("\n")
         return text.takeIf { it.length <= config.briefBudget }
     }
 
@@ -157,19 +160,16 @@ public class ScreenFormatter(
         return if (gone.isEmpty()) null else gone.joinToString(" ", prefix = "- ") { "@$it" }
     }
 
-    /** OCR lines that appeared (`+`), moved (`~`, same text in both lists) or went away (`-`). */
-    private fun ocrChanges(diff: ScreenDiff): List<String> {
-        val gone = diff.ocrRemoved.toMutableList()
-        val appeared =
-            diff.ocrAdded.map { line ->
-                val moved = gone.firstOrNull { fullLines.clean(it.text) == fullLines.clean(line.text) }
-                moved?.let(gone::remove)
-                val center = line.bounds.center()
-                "${if (moved == null) "+" else "~"} $OCR_WORD \"${briefLines.clean(
-                    line.text,
-                )}\" (${center.x},${center.y})"
-            }
-        return appeared + gone.map { "- $OCR_WORD \"${briefLines.clean(it.text)}\"" }
+    /** OCR lines that appeared (`+`) or went away (`-`), each at its center; a moved line is one of each. */
+    private fun ocrChanges(diff: ScreenDiff): List<String> =
+        diff.ocrAdded.map { ocrChange("+", it) } + diff.ocrRemoved.map { ocrChange("-", it) }
+
+    private fun ocrChange(
+        mark: String,
+        line: OcrLine,
+    ): String {
+        val center = line.bounds.center()
+        return "$mark $OCR_WORD \"${briefLines.clean(line.text)}\" (${center.x},${center.y})"
     }
 
     private fun riskyRefs(
@@ -198,3 +198,7 @@ public class ScreenFormatter(
         const val OCR_WORD = "屏上文字"
     }
 }
+
+/** The note for OCR lines of the earlier screen that this one did not check again, if any. */
+private fun ScreenDiff.ocrNote(): List<String> =
+    if (ocrUnverified) listOf("（这一屏没做文字识别，之前识别到的屏上文字和坐标没有重新核实）") else emptyList()

@@ -15,11 +15,11 @@ import dev.phoneagent.core.ports.TreeQuality
 internal class PageHeader(
     private val vision: Boolean,
 ) {
-    /** The header line, the [notes], then [note] when given. */
+    /** The header line, the [notes], then [extra]. */
     fun lines(
         snapshot: ScreenSnapshot,
-        note: String?,
-    ): List<String> = listOf(title(snapshot)) + notes(snapshot) + listOfNotNull(note)
+        extra: List<String>,
+    ): List<String> = listOf(title(snapshot)) + notes(snapshot) + extra
 
     /** The page-state line (flags) and the tree-quality note, each only when there is something to say. */
     fun notes(snapshot: ScreenSnapshot): List<String> {

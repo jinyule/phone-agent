@@ -27,8 +27,10 @@ import kotlin.math.abs
  * - A ref printed only in [before] is *removed* (`-`), whatever happened to the element: gone,
  *   hidden, absorbed into a row, given a new ref, or its ref now names an element that is not
  *   printed. So a ref that changes is one element removed and one added.
- * - OCR lines are compared as printed (masked text and center): lines of [after] not in [before]
- *   are added, lines of [before] not in [after] removed; a moved line is in both.
+ * - OCR lines are compared as printed (masked text and center), only when [after] was read with
+ *   OCR: lines of [after] not in [before] are added, lines of [before] not in [after] removed; a
+ *   moved line is in both. When [after] has no OCR, the lines of [before] are left unverified
+ *   ([ScreenDiff.ocrUnverified]), not removed.
  *
  * So an element in no list still shows the same line under the same ref, and every ref the model
  * holds is either still as it saw it, listed with its new line, or listed as void.
@@ -57,8 +59,9 @@ public class ScreenDiffer(
             }
         }
         val removed = was.keys.filter { it !in now }
-        val ocrBefore = ocrLines(before)
-        val ocrAfter = ocrLines(after)
+        val ocr = after.ocr ?: return ScreenDiff(added, removed, changed, ocrUnverified = !before.ocr.isNullOrEmpty())
+        val ocrBefore = ocrLines(before.ocr.orEmpty())
+        val ocrAfter = ocrLines(ocr)
         return ScreenDiff(
             added = added,
             removed = removed,
@@ -102,9 +105,9 @@ public class ScreenDiffer(
         return abs(old.x - new.x) > config.moveTolerance || abs(old.y - new.y) > config.moveTolerance
     }
 
-    /** OCR lines of [snapshot] as printed (masked text and center), with the line itself. */
-    private fun ocrLines(snapshot: ScreenSnapshot): List<Pair<String, OcrLine>> =
-        snapshot.ocr.orEmpty().map { line ->
+    /** [ocr] lines as printed (masked text and center), with the line itself. */
+    private fun ocrLines(ocr: List<OcrLine>): List<Pair<String, OcrLine>> =
+        ocr.map { line ->
             val center = line.bounds.center()
             "${lines.clean(line.text)}|${center.x},${center.y}" to line
         }
