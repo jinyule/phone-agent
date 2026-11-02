@@ -11,9 +11,14 @@ import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.ModelRole
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.PromptBlock
+import dev.phoneagent.core.model.ReasoningKind
 import dev.phoneagent.core.model.Role
 import dev.phoneagent.core.model.StopReason
 import dev.phoneagent.core.model.ToolDef
+import dev.phoneagent.core.policy.ActionIntent
+import dev.phoneagent.core.policy.IntentKind
+import dev.phoneagent.core.policy.SecurityLevel
+import dev.phoneagent.core.policy.Verdict
 import dev.phoneagent.core.testing.TEST_WIRE
 import dev.phoneagent.core.tool.ToolCall
 import dev.phoneagent.core.tool.ToolResult
@@ -25,9 +30,10 @@ import kotlinx.serialization.json.put
  * Rule samples of the model view (`SessionEvent` KDoc, "Model view"): given these records, the
  * messages `deriveMessages` must return. WP02's `deriveMessages` tests run every [cases] entry:
  * for each [View], derive from the records with `seq <= afterSeq` and compare with [View.messages].
+ * The run-rule samples (stop, resume, calls that need a result) are [RunRuleSamples], included.
  * `DeriveRuleSamplesTest` keeps the samples themselves consistent with the rules.
  */
-object DeriveRuleSamples {
+object DeriveRuleSamples : RuleSampleKit() {
     /** The expected model view once the log ends at [afterSeq]. */
     data class View(
         val afterSeq: Long,
@@ -41,39 +47,6 @@ object DeriveRuleSamples {
         val records: List<SessionRecord>,
         val views: List<View>,
     )
-
-    private val p = SessionSamples
-
-    private val header =
-        RequestHeader(
-            provider = p.provider,
-            model = p.model,
-            protocol = ModelProtocol.ANTHROPIC_MESSAGES,
-            wire = TEST_WIRE,
-            system = listOf(PromptBlock("identity", "You operate a phone.")),
-            tools = listOf(ToolDef("phone_tap", "Tap an element.", p.schema)),
-            cache = CacheLayout.NONE,
-            contextEdits = ContextEditPolicy.ClientSide,
-        )
-
-    private val ask = UserMessage(UserMessageKind.USER, listOf(Part.Text("给张三发消息")))
-
-    private fun reply(
-        attempt: Int,
-        vararg parts: Part,
-        stop: StopReason? = StopReason.END_TURN,
-    ) = AssistantMessage(attempt, p.provider, p.model, parts.toList(), stop, interrupted = stop == null)
-
-    private fun records(vararg events: Pair<SessionEvent, List<Long>>): List<SessionRecord> =
-        events.mapIndexed { index, (event, sources) -> SessionRecord(index + 1L, 0, event, sources = sources) }
-
-    private infix fun SessionEvent.from(sources: List<Long>) = this to sources
-
-    private val SessionEvent.alone get() = this to emptyList<Long>()
-
-    private fun user(event: UserMessage) = Message(Role.USER, event.parts)
-
-    private fun assistant(event: AssistantMessage) = Message(Role.ASSISTANT, event.parts)
 
     private val errorPrefix = reply(1, Part.Text("我先"), stop = null)
     private val retried = reply(2, Part.Text("我先看看屏幕"))
@@ -135,42 +108,6 @@ object DeriveRuleSamples {
                     View(6, listOf(user(ask))),
                     View(9, listOf(user(ask), assistant(steerPrefix), user(steer))),
                     View(12, listOf(user(ask), assistant(steerPrefix), user(steer), assistant(afterSteer))),
-                ),
-        )
-
-    private val stopPrefix = reply(1, Part.Text("正在打开"), stop = null)
-    private val goOn = UserMessage(UserMessageKind.USER, listOf(Part.Text("继续")))
-    private val resumed = reply(1, Part.Text("继续发消息"))
-
-    private val keptAfterStop =
-        Case(
-            name = "stop-prefix-visible-with-next-input",
-            rule =
-                "A prefix cut by stop (or by a final failure) is not superseded: it joins the model view with the " +
-                    "next user/message, in the next turn.",
-            records =
-                records(
-                    p.start.alone,
-                    TurnStarted(1).alone,
-                    ask.alone,
-                    StepStarted(1, 1).alone,
-                    header.alone,
-                    stopPrefix.alone,
-                    StepEnded(1, 1, StepOutcome.CANCELLED).alone,
-                    TurnEnded(1, TurnEndReason.STOPPED).alone,
-                    TaskStopped(StopCause.USER).alone,
-                    TurnStarted(2).alone,
-                    goOn.alone,
-                    StepStarted(2, 1).alone,
-                    resumed.alone,
-                    StepEnded(2, 1, StepOutcome.COMPLETED).alone,
-                    TurnEnded(2, TurnEndReason.COMPLETED).alone,
-                ),
-            views =
-                listOf(
-                    View(9, listOf(user(ask))),
-                    View(11, listOf(user(ask), assistant(stopPrefix), user(goOn))),
-                    View(15, listOf(user(ask), assistant(stopPrefix), user(goOn), assistant(resumed))),
                 ),
         )
 
@@ -265,32 +202,6 @@ object DeriveRuleSamples {
                     View(10, listOf(user(ask), assistant(mainReply))),
                 ),
         )
-
-    private fun thinking(signature: String) =
-        p.reasoning.copy(
-            opaque =
-                buildJsonObject {
-                    put("type", "thinking")
-                    put("signature", signature)
-                },
-            summary = "thought $signature",
-        )
-
-    private fun tap(id: String) =
-        Part.ToolCall(ToolCallId(id), "phone_tap", """{"screen":"s1","ref":"e2","reason":"r"}""")
-
-    private fun dispatch(id: String) =
-        ToolCallRecorded(
-            ToolCall(ToolCallId(id), p.task, p.session, "phone_tap", buildJsonObject { put("ref", "e2") }, "r"),
-        )
-
-    private fun done(id: String) =
-        ToolResultRecorded(ToolCallId(id), "phone_tap", ToolResult(ToolStatus.OK, listOf(Part.Text("done $id"))))
-
-    private fun tool(result: ToolResultRecorded) = Message(Role.TOOL, listOf(result.result.toPart(result.callId)))
-
-    private fun withoutReasoning(event: AssistantMessage) =
-        Message(Role.ASSISTANT, event.parts.filterNot { it is Part.Reasoning })
 
     private val mismatch =
         AssistantAttempt(1, ModelErrorKind.PREFIX_BINDING_MISMATCH, "invalid thinking signature", 400)
@@ -490,49 +401,6 @@ object DeriveRuleSamples {
             listOf(withoutReasoning(cutAfterThinking)),
         )
 
-    private val stoppedAfterThinking = reply(1, thinking("J"), Part.Text("正在打开"), stop = null)
-    private val resumeAfterStop = UserMessage(UserMessageKind.USER, listOf(Part.Text("接着做")))
-    private val resumedReply = reply(1, Part.Text("继续打开"))
-
-    private val stoppedThinkingAndText =
-        Case(
-            name = "stopped-after-complete-reasoning",
-            rule =
-                "A prefix cut by stop after a complete thinking block joins the next turn's view with its text " +
-                    "only.",
-            records =
-                records(
-                    p.start.alone,
-                    TurnStarted(1).alone,
-                    ask.alone,
-                    StepStarted(1, 1).alone,
-                    header.alone,
-                    stoppedAfterThinking.alone,
-                    StepEnded(1, 1, StepOutcome.CANCELLED).alone,
-                    TurnEnded(1, TurnEndReason.STOPPED).alone,
-                    TaskStopped(StopCause.USER).alone,
-                    TurnStarted(2).alone,
-                    resumeAfterStop.alone,
-                    StepStarted(2, 1).alone,
-                    resumedReply.alone,
-                    StepEnded(2, 1, StepOutcome.COMPLETED).alone,
-                    TurnEnded(2, TurnEndReason.COMPLETED).alone,
-                ),
-            views =
-                listOf(
-                    View(9, listOf(user(ask))),
-                    View(
-                        15,
-                        listOf(
-                            user(ask),
-                            withoutReasoning(stoppedAfterThinking),
-                            user(resumeAfterStop),
-                            assistant(resumedReply),
-                        ),
-                    ),
-                ),
-        )
-
     private val erroredAfterThinking = reply(1, thinking("K"), Part.Text("我先"), stop = null)
     private val retriedAfterThinking = reply(2, thinking("L"), Part.Text("我先看看屏幕"))
 
@@ -556,19 +424,79 @@ object DeriveRuleSamples {
             views = listOf(View(10, listOf(user(ask), assistant(retriedAfterThinking)))),
         )
 
+    private val compaction =
+        Part.Reasoning(
+            p.provider,
+            p.model,
+            ReasoningKind.ANTHROPIC_COMPACTION,
+            buildJsonObject {
+                put("type", "compaction")
+                put("content", "earlier steps, compacted")
+            },
+        )
+    private val compacted = reply(1, compaction, thinking("M"), Part.Text("点发送"), tap("k1"), stop = StopReason.TOOL_USE)
+    private val afterCompactedDrop = reply(2, Part.Text("已发送"))
+
+    private val compactionKept =
+        Case(
+            name = "compaction-kept-when-reasoning-dropped",
+            rule =
+                "context/reasoning-dropped removes reasoning blocks only: an ANTHROPIC_COMPACTION block holds the " +
+                    "compacted history and stays where it was.",
+            records =
+                records(
+                    p.start.alone,
+                    TurnStarted(1).alone,
+                    ask.alone,
+                    StepStarted(1, 1).alone,
+                    header.alone,
+                    compacted.alone,
+                    dispatch("k1") from listOf(6),
+                    done("k1") from listOf(7),
+                    StepEnded(1, 1, StepOutcome.COMPLETED).alone,
+                    StepStarted(1, 2).alone,
+                    mismatch.alone,
+                    ReasoningDropped(upToSeq = 6).alone,
+                    RequestRetry(2, 0, ModelErrorKind.PREFIX_BINDING_MISMATCH).alone,
+                    afterCompactedDrop.alone,
+                    StepEnded(1, 2, StepOutcome.COMPLETED).alone,
+                    TurnEnded(1, TurnEndReason.COMPLETED).alone,
+                ),
+            views =
+                listOf(
+                    View(11, listOf(user(ask), assistant(compacted), tool(done("k1")))),
+                    View(
+                        12,
+                        listOf(
+                            user(ask),
+                            Message(Role.ASSISTANT, listOf(compaction, Part.Text("点发送"), tap("k1"))),
+                            tool(done("k1")),
+                        ),
+                    ),
+                    View(
+                        16,
+                        listOf(
+                            user(ask),
+                            Message(Role.ASSISTANT, listOf(compaction, Part.Text("点发送"), tap("k1"))),
+                            tool(done("k1")),
+                            assistant(afterCompactedDrop),
+                        ),
+                    ),
+                ),
+        )
+
     /** Every case. */
     val cases: List<Case> =
         listOf(
             supersededByRetry,
             keptBySteer,
-            keptAfterStop,
             reasoningDropped,
             sideRequests,
             dropBySeq,
             dropsAccumulate,
             interruptedThinkingOnly,
             interruptedThinkingAndText,
-            stoppedThinkingAndText,
             supersededWithThinking,
-        )
+            compactionKept,
+        ) + RunRuleSamples.cases
 }

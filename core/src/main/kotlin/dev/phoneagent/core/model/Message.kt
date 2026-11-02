@@ -116,15 +116,21 @@ public sealed interface Part {
 
     /**
      * Provider-private content (thinking with signature, encrypted reasoning, server compaction
-     * blocks). Stored verbatim and sent back only to the same [provider] and [model]; other
-     * adapters drop it.
+     * blocks). Stored verbatim and sent back only to the same [provider]; adapters of other
+     * providers drop it. Whether a block goes back after a switch to another model of the same
+     * provider is that provider's adapter's rule, written in its model-layer section: the
+     * Anthropic adapter always sends every block back verbatim and leaves it to the API to leave
+     * out what the current model cannot read (never stripped on the client: a later switch back
+     * needs the blocks, a gap breaks the blocks after it, and a compaction block holds history);
+     * the Responses rule for encrypted reasoning is model-layer §3.2. `context/reasoning-dropped`
+     * removes only blocks whose [kind] is [ReasoningKind.isReasoning].
      */
     @Serializable
     @SerialName("reasoning")
     public data class Reasoning(
         /** Provider that produced it. */
         val provider: ProviderId,
-        /** Model that produced it. */
+        /** Model that produced it: for the adapter's rule, the UI and diagnostics. */
         val model: ModelId,
         /** Wire shape of [opaque]. */
         val kind: ReasoningKind,
@@ -141,21 +147,29 @@ public sealed interface Part {
     }
 }
 
-/** Wire shape of a [Part.Reasoning] block. */
+/**
+ * Wire shape of a [Part.Reasoning] block.
+ *
+ * @property isReasoning the block is the model's reasoning, which `context/reasoning-dropped`
+ *   removes; `false` for a block that holds conversation history instead (a compaction block),
+ *   which a drop keeps: removing it would make the server process the whole history it replaced.
+ */
 @Serializable
-public enum class ReasoningKind {
+public enum class ReasoningKind(
+    public val isReasoning: Boolean,
+) {
     /** Anthropic `thinking` block with `signature`. */
-    ANTHROPIC_THINKING,
+    ANTHROPIC_THINKING(isReasoning = true),
 
     /** Anthropic `redacted_thinking` block. */
-    ANTHROPIC_REDACTED_THINKING,
+    ANTHROPIC_REDACTED_THINKING(isReasoning = true),
 
-    /** Anthropic server-side `compaction` block (must be appended back to history, model-layer §5). */
-    ANTHROPIC_COMPACTION,
+    /** Anthropic server-side `compaction` block: compacted history, appended back as it came (model-layer §5). */
+    ANTHROPIC_COMPACTION(isReasoning = false),
 
     /** OpenAI Responses `reasoning` item with `encrypted_content`. */
-    RESPONSES_ENCRYPTED,
+    RESPONSES_ENCRYPTED(isReasoning = true),
 
     /** Chat Completions reasoning field (`reasoning_content` and similar, per `ProviderProfile`). */
-    CHAT_REASONING_FIELD,
+    CHAT_REASONING_FIELD(isReasoning = true),
 }

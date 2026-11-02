@@ -2,7 +2,10 @@ package dev.phoneagent.core.session
 
 import dev.phoneagent.core.model.Message
 import dev.phoneagent.core.model.Part
+import dev.phoneagent.core.model.ReasoningKind
 import dev.phoneagent.core.model.Role
+import dev.phoneagent.core.model.StopReason.TOOL_USE
+import dev.phoneagent.core.tool.ToolStatus
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.serializer
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -162,10 +165,22 @@ class DeriveRuleSamplesTest {
 
         /** Strips reasoning from the retry that supersedes a prefix too. */
         STRIP_RETRY_AFTER_INTERRUPTION,
+
+        /** Removes compaction blocks with the reasoning a drop removes. */
+        DROP_COMPACTION_TOO,
+
+        /** Leaves out the tool calls of a reply that did not end with TOOL_USE (r2's "discarded"). */
+        DROP_CALLS_OF_INCOMPLETE_REPLY,
+
+        /** Leaves out SKIPPED results, as if a call that never ran had nothing to answer. */
+        DROP_SKIPPED_RESULTS,
+
+        /** Leaves out CANCELLED results of a stop. */
+        DROP_CANCELLED_RESULTS,
     }
 
     /**
-     * The model-view rules of the `SessionEvent` KDoc, written out for the samples (no compaction);
+     * The model-view rules of the `SessionEvent` KDoc, written out for the samples (no compaction records);
      * with a [mistake], one plausible error in them.
      */
     private class Projector(
@@ -179,16 +194,44 @@ class DeriveRuleSamplesTest {
             val drops = log.filter { it.event is ReasoningDropped }
             return log.mapIndexedNotNull { index, record ->
                 when (val event = record.event) {
-                    is UserMessage -> Message(Role.USER, event.parts)
-                    is AssistantMessage -> assistant(log.take(index), log.drop(index + 1), record.seq, event, drops)
-                    is ToolResultRecorded -> Message(Role.TOOL, listOf(event.result.toPart(event.callId)))
-                    is CompactionSummary, is CompactionPrune -> error("compaction is not covered by this projector")
-                    else -> null
+                    is UserMessage -> {
+                        Message(Role.USER, event.parts)
+                    }
+
+                    is AssistantMessage -> {
+                        assistant(log.take(index), log.drop(index + 1), record.seq, event, drops)
+                    }
+
+                    is ToolResultRecorded -> {
+                        if (leavesOut(
+                                event,
+                            )
+                        ) {
+                            null
+                        } else {
+                            Message(Role.TOOL, listOf(event.result.toPart(event.callId)))
+                        }
+                    }
+
+                    is CompactionSummary, is CompactionPrune -> {
+                        error("compaction is not covered by this projector")
+                    }
+
+                    else -> {
+                        null
+                    }
                 }
             }
         }
 
         private fun makes(candidate: Mistake) = mistake == candidate
+
+        private fun leavesOut(result: ToolResultRecorded): Boolean =
+            when {
+                result.result.status == ToolStatus.SKIPPED -> makes(Mistake.DROP_SKIPPED_RESULTS)
+                result.result.status == ToolStatus.CANCELLED -> makes(Mistake.DROP_CANCELLED_RESULTS)
+                else -> false
+            }
 
         private fun assistant(
             earlier: List<SessionRecord>,
@@ -202,12 +245,28 @@ class DeriveRuleSamplesTest {
             // Steered: the input that follows comes in the same turn; otherwise a stop ended the turn first.
             val steered = next != null && later.takeWhile { it !== next }.none { it.event is TurnEnded }
             if (!visible || droppedWhole(event, steered)) return null
-            val strip = dropped(seq, drops) || stripsPrefix(event, steered) || stripsRetry(earlier)
-            val stripped = event.parts.filterNot { it is Part.Reasoning && strip }
+            val byDrop = dropped(seq, drops)
+            val whole = stripsPrefix(event, steered) || stripsRetry(earlier)
+            val stripped = event.parts.filterNot { part -> strips(event, part, whole, byDrop) }
             val keepAll = stripped.isEmpty() && event.interrupted && makes(Mistake.KEEP_REASONING_ONLY_PREFIX)
             val parts = if (keepAll) event.parts else stripped
             return if (parts.isNotEmpty() || makes(Mistake.KEEP_EMPTY)) Message(Role.ASSISTANT, parts) else null
         }
+
+        /** Whether [part] of [event] is left out: all reasoning when [whole], reasoning blocks when [byDrop]. */
+        private fun strips(
+            event: AssistantMessage,
+            part: Part,
+            whole: Boolean,
+            byDrop: Boolean,
+        ): Boolean =
+            when {
+                part is Part.Reasoning -> whole || (byDrop && dropsKind(part.kind))
+                part is Part.ToolCall -> makes(Mistake.DROP_CALLS_OF_INCOMPLETE_REPLY) && event.stopReason != TOOL_USE
+                else -> false
+            }
+
+        private fun dropsKind(kind: ReasoningKind): Boolean = kind.isReasoning || makes(Mistake.DROP_COMPACTION_TOO)
 
         private fun droppedWhole(
             event: AssistantMessage,
