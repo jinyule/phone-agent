@@ -45,10 +45,11 @@ internal object ToolResults {
      * "已点击 @e10"), then the screen after it from [presenter]. [plannedOn] is the snapshot the
      * action named, or `null`.
      *
-     * The status line follows the port's [ActionOutcome.effect], except that a `NO_CHANGE` with a
-     * diff that is not empty reads as a change: the diff then lists what changed, and saying "no
-     * change" next to it would contradict it (the port's fingerprint ignores some of what the
-     * diff shows, e.g. a new parent).
+     * The status line follows the port's [ActionOutcome.effect], which compares the screen right
+     * before and right after the action; the diff below it compares with the screen the model last
+     * read. A `NO_CHANGE` with a diff that is not empty therefore says both: the action changed
+     * nothing, and here is what differs from the last read, not necessarily caused by the action
+     * (see `okLine`).
      *
      * Whenever the outcome has a screen after it, the text shows that screen (diff or page, for
      * every status, refusals included) and `details.screen` names it; without one the text tells

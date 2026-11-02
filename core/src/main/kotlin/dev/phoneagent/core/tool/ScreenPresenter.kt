@@ -30,10 +30,11 @@ public interface ScreenPresenter {
      * action names no snapshot, e.g. a swipe or a key). The tool adds its status line before it.
      *
      * - [ActionOutcome.after] is `null`: a one-line note telling the model to observe.
-     * - The full page of `after` (as [page] at `BRIEF`, elements new since the earlier snapshot
-     *   marked `+`) when [ActionOutcome.diff] is `null`, the effect is `NEW_APP`, more than a
-     *   configured share (by default half) of the page's lines were added, removed or changed, the
-     *   diff names an element `after` does not have, or the diff text would not fit the page budget.
+     * - The full page of `after` (as [page] at `BRIEF`; with a diff and the same app, elements new
+     *   since the earlier snapshot marked `+`) when [ActionOutcome.diff] is `null`, the effect is
+     *   `NEW_APP`, more than a configured share (by default half) of the page's lines were added,
+     *   removed or changed, the diff names an element `after` does not have, or the diff text
+     *   would not fit the page budget.
      * - Otherwise only the diff ([dev.phoneagent.core.ports.ScreenDiff]): `+` added and `~`
      *   changed elements as they are now, then the refs the earlier page showed that are no longer
      *   valid (a removed ref is left out only when the diff prints its new binding), then OCR lines

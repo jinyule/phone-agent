@@ -8,7 +8,9 @@ import dev.phoneagent.core.ports.ElementRef
 import dev.phoneagent.core.ports.ElementRole
 import dev.phoneagent.core.ports.ElementState
 import dev.phoneagent.core.ports.OcrLine
+import dev.phoneagent.core.ports.ScreenDiff
 import dev.phoneagent.core.ports.ScreenSnapshot
+import dev.phoneagent.core.ports.SnapshotDetail
 import dev.phoneagent.core.ports.UiElement
 import dev.phoneagent.core.testing.Screens
 import dev.phoneagent.core.testing.Screens.box
@@ -177,6 +179,11 @@ class ScreenDiffViewTest {
         // Neither read has OCR: nothing to say.
         val none = shown(page("s1").copy(ocr = null), page("s2").copy(ocr = null))
         assertFalse(none.contains(note), none)
+        // Another app: its page is shown as it is, and the earlier app's lines are not mentioned.
+        val after = page("s2").copy(ocr = null)
+        val otherApp = ActionOutcome(Status.Ok, Effect.NEW_APP, after, differ.diff(before, after))
+        assertEquals(ScreenDiff(ocrUnverified = true), otherApp.diff)
+        assertEquals(formatter.page(after, SnapshotDetail.BRIEF), formatter.afterAction(otherApp, before.id))
     }
 
     @Test

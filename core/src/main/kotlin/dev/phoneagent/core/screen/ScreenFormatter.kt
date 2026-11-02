@@ -25,9 +25,11 @@ import dev.phoneagent.core.tool.ScreenPresenter
  * for elements; `+` new and `-` gone for OCR lines, each with its center, so a moved line is one
  * of each; see [ScreenDiffer] for what counts) unless the app changed, there is no diff, more than
  * [ScreenFormatConfig.fullPageShare] of the lines changed, or the diff cannot be shown faithfully
- * or within the budget; then it gets the full page with new elements marked `+`. When the later
- * screen was read without OCR after one with OCR lines ([ScreenDiff.ocrUnverified]), either form
- * says that those lines were not checked again.
+ * or within the budget; then it gets the full page, with new elements marked `+` when there is a
+ * diff and the app is the same. When the later screen was read without OCR after one with OCR
+ * lines ([ScreenDiff.ocrUnverified]), the diff and the full page after a big change say that those
+ * lines were not checked again. After a switch to another app (`NEW_APP`) the page is shown as it
+ * is, without that note: the earlier lines were the other app's.
  *
  * [vision] is whether the main model reads images: without it no note suggests a screenshot, and
  * the tools read it here to decide on frames. Built only by [ScreenComponents], with the [config]
