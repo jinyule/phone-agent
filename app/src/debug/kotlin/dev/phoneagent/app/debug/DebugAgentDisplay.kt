@@ -35,13 +35,25 @@ internal class DebugAgentDisplay(
     @Volatile
     private var lastFrameAt = 0L
 
-    /** Display id, or a negative `DisplayResult` value when the helper refused. */
+    /**
+     * Display id, or a negative `DisplayResult` value when the helper refused. When the helper
+     * throws instead, the constructor closes the thread and the reader and rethrows.
+     */
     val displayId: Int
 
     init {
         reader.setOnImageAvailableListener({ take() }, handler)
-        displayId = core.createDisplay(reader.surface, width, height, dpi)
+        displayId = createOrClose(dpi)
         if (displayId < 0) close()
+    }
+
+    private fun createOrClose(dpi: Int): Int {
+        var created = false
+        try {
+            return core.createDisplay(reader.surface, width, height, dpi).also { created = true }
+        } finally {
+            if (!created) close()
+        }
     }
 
     // androidx.core's createBitmap would be nicer, but debug-only scaffolding is not worth a

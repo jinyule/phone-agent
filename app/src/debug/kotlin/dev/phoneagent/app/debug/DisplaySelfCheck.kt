@@ -30,24 +30,33 @@ internal class DisplaySelfCheck(
 ) {
     private val steps = SelfCheckSteps()
 
+    /**
+     * A helper call that throws fails its step by name; the later sections and `releaseAll` still
+     * run. Only a helper that refuses to probe is left alone, since it built nothing.
+     */
     fun run(): List<String> {
-        if (!probe()) return steps.lines()
-        val display = DebugAgentDisplay(core, WIDTH, HEIGHT, DPI)
+        val probed = steps.attempt("probe") { probe() }
+        if (probed == false) return steps.lines()
         try {
+            if (probed == true) withDisplay()
+        } finally {
+            steps.attempt("releaseAll") { releaseAll() }
+        }
+        return steps.lines()
+    }
+
+    private fun withDisplay() {
+        steps.attempt("createDisplay") { DebugAgentDisplay(core, WIDTH, HEIGHT, DPI) }?.use { display ->
             if (steps.check("createDisplay", display.displayId >= 0, "id ${display.displayId}")) {
                 onDisplay(display)
             }
-        } finally {
-            display.close()
-            releaseAll()
         }
-        return steps.lines()
     }
 
     /**
      * Records every probe step. False when the helper refuses to probe at all (a helper whose
      * capabilities are unavailable answers NOT_IMPLEMENTED with the reason): nothing else can
-     * work, so the check stops there.
+     * work, so the check stops there. Any other exception propagates to [run], which names it.
      */
     private fun probe(): Boolean {
         val result =
@@ -68,11 +77,11 @@ internal class DisplaySelfCheck(
 
     private fun onDisplay(display: DebugAgentDisplay) {
         val id = display.displayId
-        val task = startSettings(id)
-        frame(display)
-        input(id)
-        if (task != null) handover(task, id)
-        audioAndGrants()
+        val task = steps.attempt("startSettings") { startSettings(id) }
+        steps.attempt("frame") { frame(display) }
+        steps.attempt("input") { input(id) }
+        if (task != null) steps.attempt("handover") { handover(task, id) }
+        steps.attempt("audioAndGrants") { audioAndGrants() }
     }
 
     /** Starts the settings app on [displayId] and returns its task id. */

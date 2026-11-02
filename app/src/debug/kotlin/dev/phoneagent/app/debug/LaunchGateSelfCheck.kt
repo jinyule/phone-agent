@@ -25,15 +25,16 @@ internal class LaunchGateSelfCheck(
 ) {
     private val steps = SelfCheckSteps()
 
+    /** A helper call that throws fails its step by name; `releaseAll` runs either way. */
     fun run(): List<String> {
-        val display = DebugAgentDisplay(core, WIDTH, HEIGHT, DPI)
         try {
-            if (steps.check("createDisplay", display.displayId >= 0, "id ${display.displayId}")) {
-                start(display.displayId)
+            steps.attempt("createDisplay") { DebugAgentDisplay(core, WIDTH, HEIGHT, DPI) }?.use { display ->
+                if (steps.check("createDisplay", display.displayId >= 0, "id ${display.displayId}")) {
+                    steps.attempt("startActivity") { start(display.displayId) }
+                }
             }
         } finally {
-            display.close()
-            core.releaseAll()
+            steps.attempt("releaseAll") { core.releaseAll() }
         }
         return steps.lines()
     }

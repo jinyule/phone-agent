@@ -1,5 +1,6 @@
 package dev.phoneagent.app.debug
 
+import android.os.RemoteException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -7,6 +8,7 @@ import org.junit.Test
 
 class SelfCheckStepsTest {
     private val attemptsBeforeReady = 3
+    private val answer = 7
 
     @Test
     fun allPassingStepsEndInPass() {
@@ -30,6 +32,20 @@ class SelfCheckStepsTest {
         assertTrue(lines.contains("probe: ok"))
         assertTrue(lines.contains("injectKey: FAILED refused"))
         assertTrue(lines.contains("frame: FAILED no frame within 8000 ms"))
+    }
+
+    @Test
+    fun aThrowingCallFailsItsStepByNameAndTheNextStepStillRuns() {
+        val steps = SelfCheckSteps()
+        assertEquals(null, steps.attempt<Int>("topTask") { throw IllegalStateException("broken") })
+        assertEquals(null, steps.attempt<Int>("moveTask") { throw RemoteException("gone") })
+        assertEquals(answer, steps.attempt("injectKey") { answer })
+        val lines = steps.lines()
+        assertEquals("topTask: FAILED java.lang.IllegalStateException: broken", lines[0])
+        // The android.jar stub of RemoteException drops its message on the JVM.
+        assertTrue(lines[1], lines[1].startsWith("moveTask: FAILED android.os.RemoteException"))
+        assertEquals("FAIL: topTask, moveTask", lines.last())
+        assertEquals(listOf("topTask", "moveTask", "FAIL"), lines.map { it.substringBefore(":") })
     }
 
     @Test

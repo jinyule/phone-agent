@@ -1,5 +1,7 @@
 package dev.phoneagent.app.debug
 
+import android.os.RemoteException
+
 /**
  * Collects the lines a self-check prints. Every step is `name: ok …` or `name: FAILED …`, and the
  * last line is `PASS` or `FAIL: <the steps that failed>`, which the receiver returns as the
@@ -31,6 +33,25 @@ internal class SelfCheckSteps {
         name: String,
         detail: String,
     ): Boolean = check(name, passed = false, detail = detail)
+
+    /**
+     * Runs [block], which calls across the helper boundary. When it throws, records [name] as failed
+     * with the exception and returns null, so the later steps and the cleanup still run.
+     */
+    @Suppress("TooGenericExceptionCaught") // Parcel.readException rethrows any RuntimeException of the helper.
+    fun <T> attempt(
+        name: String,
+        block: () -> T,
+    ): T? =
+        try {
+            block()
+        } catch (e: RemoteException) {
+            fail(name, "$e")
+            null
+        } catch (e: RuntimeException) {
+            fail(name, "$e")
+            null
+        }
 
     /** The collected lines plus the verdict. */
     fun lines(): List<String> = lines + if (failures.isEmpty()) "PASS" else "FAIL: ${failures.joinToString(", ")}"

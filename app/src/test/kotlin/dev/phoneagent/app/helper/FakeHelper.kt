@@ -28,6 +28,9 @@ class FakeHelper(
 
     /** What [probe] does; by default it refuses as the A-stage helper does. */
     var onProbe: () -> Bundle = { throw PrivilegedError.notImplemented("probe") }
+
+    /** What [createDisplay] does; by default it refuses as the A-stage helper does. */
+    var onCreateDisplay: () -> Int = { throw PrivilegedError.notImplemented("createDisplay") }
     val calls = mutableListOf<String>()
     private val recipients = mutableListOf<IBinder.DeathRecipient>()
 
@@ -85,7 +88,10 @@ class FakeHelper(
         w: Int,
         h: Int,
         dpi: Int,
-    ): Int = throw PrivilegedError.notImplemented("createDisplay")
+    ): Int {
+        calls += "createDisplay"
+        return onCreateDisplay()
+    }
 
     override fun releaseDisplay(displayId: Int): Unit = throw PrivilegedError.notImplemented("releaseDisplay")
 
