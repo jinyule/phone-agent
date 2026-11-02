@@ -1,6 +1,7 @@
 package dev.phoneagent.core.agent
 
 import dev.phoneagent.core.ids.PromptId
+import dev.phoneagent.core.ids.ToolCallId
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.session.ApprovalAsked
 import dev.phoneagent.core.session.ApprovalDecided
@@ -111,6 +112,29 @@ private fun missingResult(
                 ToolResult.failure(ToolStatus.NOT_STARTED, texts.notStarted)
             }
         }
+    }
+
+/**
+ * The prompts [callId] asked (card, question, handoff) that nothing closed yet, oldest first: the
+ * waits it cut off while it went on to its result (its budget, a cancellation inside the tool).
+ */
+internal fun openPromptsOf(
+    records: List<SessionRecord>,
+    callId: ToolCallId,
+): List<PromptId> {
+    val closed = records.mapNotNullTo(HashSet()) { closedPrompt(it.event) }
+    return records.mapNotNull { askedBy(it.event, callId) }.filter { it !in closed }
+}
+
+private fun askedBy(
+    event: SessionEvent,
+    callId: ToolCallId,
+): PromptId? =
+    when {
+        event is ApprovalAsked && event.card.callId == callId -> event.promptId
+        event is QuestionAsked && event.callId == callId -> event.promptId
+        event is HandoffStarted && event.callId == callId -> event.promptId
+        else -> null
     }
 
 private fun openedPrompt(event: SessionEvent): PromptId? =

@@ -154,4 +154,37 @@ class SessionRepairTest {
             openStep(log(StepStarted(1, 1), StepEnded(1, 1, StepOutcome.COMPLETED), StepStarted(1, 2))),
         )
     }
+
+    @Test
+    fun `a call's open prompts are those it asked that nothing closed`() {
+        val c1 = ToolCallId("c1")
+        val c2 = ToolCallId("c2")
+        val card =
+            SessionSamples.events
+                .filterIsInstance<ApprovalAsked>()
+                .single()
+                .card
+        val records =
+            log(
+                ApprovalAsked(prompt(1), card.copy(callId = c1), expiresAt = 1),
+                ApprovalAsked(prompt(2), card.copy(callId = c2), expiresAt = 1),
+                ApprovalAsked(prompt(3), card.copy(callId = c1), expiresAt = 1),
+                ApprovalDecided(prompt(3), ConfirmResult.APPROVED),
+                QuestionAsked(prompt(4), c1, Question("?")),
+                QuestionAsked(prompt(5), c2, Question("?")),
+                QuestionAsked(prompt(6), c1, Question("?")),
+                QuestionAnswered(prompt(6), AskResult.Declined),
+                HandoffStarted(prompt(7), HandoffKind.LOGIN, "log in", c1),
+                HandoffStarted(prompt(8), HandoffKind.LOGIN, "log in", c2),
+                HandoffStarted(prompt(9), HandoffKind.LOGIN, "log in"),
+                HandoffStarted(prompt(10), HandoffKind.LOGIN, "log in", c1),
+                HandoffEnded(prompt(10), HandoffResult.DONE),
+                HandoffStarted(prompt(11), HandoffKind.LOGIN, "log in", c1),
+                PromptWithdrawn(prompt(11)),
+                answered("c1"),
+            )
+        assertEquals(listOf(prompt(1), prompt(4), prompt(7)), openPromptsOf(records, c1))
+        assertEquals(listOf(prompt(2), prompt(5), prompt(8)), openPromptsOf(records, c2))
+        assertEquals(emptyList<PromptId>(), openPromptsOf(log(answered("c1")), c1))
+    }
 }

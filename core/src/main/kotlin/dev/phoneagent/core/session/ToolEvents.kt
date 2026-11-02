@@ -210,8 +210,10 @@ public data class HandoffEnded(
 }
 
 /**
- * `prompt/withdrawn`: the prompt at [promptId] (card, question or handoff) was withdrawn because
- * the task stopped while it waited. The waiting call was cancelled and got no result.
+ * `prompt/withdrawn`: the prompt at [promptId] (card, question or handoff) was withdrawn without an
+ * answer. Either the task stopped (or died) while it waited, and the waiting call was cancelled
+ * and got no result; or the call cut its own wait off (its budget, a cancellation inside the tool)
+ * and went on to its result, which follows this record.
  */
 @Serializable
 @SerialName("prompt/withdrawn")

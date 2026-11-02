@@ -213,6 +213,7 @@ fun UserInteraction.forTools(): ToolInteraction   // 运行时给 ToolContext �
   - 超时返回 `EXPIRED`；
   - 没人能回答（无人值守）时立即返回 `UNAVAILABLE`，不显示任何东西；
   - 任务在等待时被停止，调用被取消（抛 `CancellationException`，不返回结果），日志记 `prompt/withdrawn`。
+  - 等待被调用自己截断、turn 照常继续时（超出工具预算，或者工具内部的取消，比如它自己套了超时），这个调用问过、还没关闭的提示也记 `prompt/withdrawn`，和修复路径写的是同一种记录，写在这个调用的 `tool/result` 之前（`NonCancellable`）。`HandoffResult` 不增加新值，接管没有 `handoff/end`。
   - 提问和结果在方法返回前已写进日志；等待时间不计入 `timeoutMs`；每个任务同时最多一个待答提示。
 
 ### 3.3 屏幕端口（主屏和虚拟屏共用一套实现，按 displayId 参数化）
@@ -738,7 +739,7 @@ TaskRuntime 循环（每个 step，对应 §3.8 的拦截点）：
 
 1. 遇到 `hand_to_user`、PolicyEngine 判为转交、或检测到防截屏页时触发；
 2. 用 `moveTask` 把任务挪到主屏，同时发通知和悬浮胶囊，提示"请处理：登录 / 验证码 / 付款"；
-3. 用户点"处理好了"后，把任务挪回后台屏，并告诉模型"用户已处理，请核实结果"。每次接管结束（不论结局，也不论是 PolicyEngine 判的转交还是工具自己发起的）、下一次模型请求之前，runtime 都重新读屏（等待上限同复核，`LoopConfig.recheckScreenTimeoutMs`），记成这个调用名下的 `screen/snapshot`，之后的调用就在这一屏上判定。读不到时不报错：接管开始之前的屏一律不再算数，之后的调用以 `screen = null` 判定（§3.8），这个调用的结果末尾加上"读不到屏，先 phone_observe"（`LoopTexts.screenUnknown`）。接管没有正常结束时同样如此：停止、超出工具预算、意外异常都没有 `handoff/end`，也来不及读屏，旧屏从 `handoff/started` 起就已作废；补结果的两条路径（正常派发和 `repairOf`）都给这个调用加上同一句提示；
+3. 用户点"处理好了"后，把任务挪回后台屏，并告诉模型"用户已处理，请核实结果"。每次接管结束（不论结局，也不论是 PolicyEngine 判的转交还是工具自己发起的）、下一次模型请求之前，runtime 都重新读屏（等待上限同复核，`LoopConfig.recheckScreenTimeoutMs`），记成这个调用名下的 `screen/snapshot`，之后的调用就在这一屏上判定。读不到时不报错：接管开始之前的屏一律不再算数，之后的调用以 `screen = null` 判定（§3.8），这个调用的结果末尾加上"读不到屏，先 phone_observe"（`LoopTexts.screenUnknown`）。接管没有正常结束时同样如此：停止、超出工具预算、意外异常都没有 `handoff/end`，也来不及读屏，旧屏从 `handoff/started` 起就已作废；补结果的两条路径（正常派发和 `repairOf`）都给这个调用加上同一句提示；接管被截断而 turn 照常继续时，提示本身由正常派发补一条 `prompt/withdrawn` 关掉（§3.2），停止、turn 失败和崩溃恢复时由修复路径关掉；
 4. 同一时间只交一个 App 给用户，多个任务排队。
 
 ---

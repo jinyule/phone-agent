@@ -12,6 +12,7 @@ import dev.phoneagent.core.ports.forTools
 import dev.phoneagent.core.session.InboxEntry
 import dev.phoneagent.core.session.InboxEntryKind
 import dev.phoneagent.core.session.InboxQueue
+import dev.phoneagent.core.session.PromptWithdrawn
 import dev.phoneagent.core.session.ToolCallRecorded
 import dev.phoneagent.core.session.ToolExecuted
 import dev.phoneagent.core.session.ToolResultRecorded
@@ -25,8 +26,10 @@ import dev.phoneagent.core.tool.ToolControl
 import dev.phoneagent.core.tool.ToolResult
 import dev.phoneagent.core.tool.ToolStatus
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -45,9 +48,11 @@ import kotlinx.serialization.json.jsonPrimitive
  *    the execution facts around it ([ExecutionEnd]): `tool/started` is flushed before the tool
  *    runs, READ tools included. A failed flush stops the task before the tool runs; the log
  *    already says it started, so repair gives it OUTCOME_UNKNOWN;
- * 4. a call that handed off and whose screen could not be read afterwards gets
- *    [LoopTexts.screenUnknown] after its result's text; then `toolPostExecute`, `tool/result`,
- *    and the attached context queued for the next step.
+ * 4. a prompt the call asked and left open (its wait was cut off by the budget or a cancellation
+ *    inside the tool) gets `prompt/withdrawn`, as a repair would write it; a call that handed off
+ *    and whose screen could not be read afterwards gets [LoopTexts.screenUnknown] after its
+ *    result's text; then `toolPostExecute`, `tool/result`, and the attached context queued for
+ *    the next step.
  */
 internal class Calls(
     private val loop: LoopContext,
@@ -136,6 +141,10 @@ internal class Calls(
                 is Ruling.Run -> execute(tool, call, ruling.verdictSeq)
                 is Ruling.Answered -> ruling.result
             }
+        // A wait the call cut off left its prompt open; the turn goes on, so close it as a repair would.
+        withContext(NonCancellable) {
+            for (prompt in openPromptsOf(loop.log.records(), call.id)) loop.log.append(PromptWithdrawn(prompt))
+        }
         val result =
             if (screenLostAfterHandoff(
                     loop.log.records(),
