@@ -26,6 +26,14 @@ public sealed class ModelError(
      */
     public open val retryAfterMs: Long? get() = null
 
+    /**
+     * Whether what this attempt streamed must not be kept. When `true` the runtime records no
+     * interrupted `assistant/message` for the attempt, only its `assistant/attempt` with the
+     * error's fixed message, and the UI clears the fragments it has shown. Only a [BadResponse]
+     * for a reply that carries the request's secret sets it (`CredentialResolver`, redaction).
+     */
+    public open val discardsStreamed: Boolean get() = false
+
     /** The API key is invalid or lacks permission. */
     public class Auth(
         detail: String,
@@ -131,10 +139,16 @@ public sealed class ModelError(
         override val kind: ModelErrorKind get() = ModelErrorKind.SERVER
     }
 
-    /** The reply violated the protocol (unparseable JSON, missing fields). */
+    /**
+     * The reply violated the protocol (unparseable JSON, missing fields), or carries the request's
+     * secret in content the model produced: then the detail is a fixed text that quotes nothing
+     * of the reply, and [discardsStreamed] is `true`.
+     */
     public class BadResponse(
         detail: String,
         cause: Throwable? = null,
+        /** What the attempt streamed is not kept ([ModelError.discardsStreamed]). */
+        override val discardsStreamed: Boolean = false,
     ) : ModelError("bad response: $detail", cause) {
         override val kind: ModelErrorKind get() = ModelErrorKind.BAD_RESPONSE
     }

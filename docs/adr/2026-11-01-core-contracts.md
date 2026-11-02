@@ -197,6 +197,7 @@ v1 仍未发布（冻结点是第一个 M1 PR）。`session/resumed` 和 `policy
 - **截断的调用**（A8）：`MAX_TOKENS` 带调用时 `assistant/message` 原样记录，每个调用补一条 `tool/result(SKIPPED)`，不写 `tool/call`：截断的参数可能解析不出合法的 `ToolCall`，而 `tool/call` 装的是校验过的调用。`OTHER` 带调用是 BadResponse。
 - **compaction 块不随推理去掉**（A9）：`ReasoningKind.isReasoning` 标出推理类；`context/reasoning-dropped` 只去掉推理类，`ANTHROPIC_COMPACTION` 保留。没有把 compaction 从 `Part.Reasoning` 拆出去：它和推理块一样是服务商私有、只回传给同一 provider 的不透明块，拆出去要多一种 Part、改所有适配器和 v1 格式，换来的只是去掉一个布尔属性。
 - **跨模型回传**（A7）：`Part.Reasoning` 只回传给同一 provider；同一 provider 换了 model 以后回不回传由该 provider 的适配器决定。Anthropic 一律原样回传，由 API 略过当前模型读不了的块。
+- **回复里出现密钥**（A11）：适配器不改写模型产生的任何内容，整条回复按 `BadResponse` 拒绝，返回固定文字。`ModelError` 加 `discardsStreamed`（只有这种 `BadResponse` 为 true）：runtime 不把已流出的前缀记成 interrupted 的 `assistant/message`，只记 `assistant/attempt`，UI 清掉已显示的片段。没有选"加一种 ModelError"：它仍是一次违反约定的回复，分类还是 BAD_RESPONSE，只是已流出的内容不能留；也没有选"改写成 `***`"：会破坏 Anthropic 的推理绑定，改写调用参数还会改掉要执行的操作。
 - **外发免确认资格**（A2）：只认 `tool/started.verdictSeq` 那条 Allow 之前这个调用最后一张 APPROVED 的卡，并且要求它是 OUTWARD、pkg 等于那条 Allow 的 intent.pkg。
 
 ## Alternatives considered

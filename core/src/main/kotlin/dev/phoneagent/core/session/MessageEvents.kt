@@ -156,7 +156,9 @@ public data class ReasoningDropped(
  * @property stopReason why generation stopped; `null` exactly when [interrupted].
  * @property usage token counts, or `null` when not reported (always `null` when interrupted).
  * @property interrupted the stream was cut (steer, stop, error) after [parts] were delivered; such a
- *   message never holds tool calls (half-streamed calls are dropped).
+ *   message never holds tool calls (half-streamed calls are dropped). Not written for an error
+ *   that discards what was streamed (`ModelError.discardsStreamed`): that attempt is only an
+ *   `assistant/attempt`.
  * @property providerMetadata provider facts that are not model-visible, or `null`.
  */
 @Serializable
@@ -187,7 +189,8 @@ public data class AssistantMessage(
 }
 
 /**
- * `assistant/attempt`: an attempt that failed before anything reached the user. Not model-visible.
+ * `assistant/attempt`: an attempt that failed before anything reached the user, or with an error
+ * that discards what was streamed (`ModelError.discardsStreamed`). Not model-visible.
  *
  * @property attempt attempt number within the step, >= 1.
  * @property error failure class.

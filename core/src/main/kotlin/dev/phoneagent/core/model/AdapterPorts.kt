@@ -7,12 +7,17 @@ import dev.phoneagent.core.ids.BlobRef
  * built; implemented by the key store and the ChatGPT token source and wired by the app.
  * Secrets never appear in logs, exception messages or `toString`.
  *
- * Redaction (adapters, model-layer §2): a request's secret is removed from everything an adapter
- * returns, streams or reports. A signed or encrypted reasoning block (an Anthropic `thinking`
- * block with its `signature`, the `data` of `redacted_thinking`, the Responses
- * `encrypted_content`, and the like) breaks when changed and cannot be redacted: when the secret
- * appears in one, the whole reply fails as [ModelError.BadResponse] with a fixed text, and no
- * delta of it has shown the secret first.
+ * Redaction (adapters, model-layer §2), for the secret a request used:
+ * - Content the model produced is never rewritten. When the secret appears in any of it (text,
+ *   tool call arguments, reasoning previews, opaque and signed blocks: Anthropic `thinking`,
+ *   `redacted_thinking` and `tool_use`, Responses `reasoning` and `encrypted_content`, and the
+ *   like), the whole reply fails as [ModelError.BadResponse] with a fixed text and
+ *   [ModelError.discardsStreamed] set.
+ * - Matching there is exact, on the secret and on its JSON-escaped form, with no fallback by
+ *   shape. A secret shorter than 8 characters is taken for a placeholder and not matched (a
+ *   provisional bound).
+ * - Diagnostic fields the server wrote (error bodies, refusal categories, metadata) are still
+ *   rewritten to `***`, with a fallback by shape.
  */
 public fun interface CredentialResolver {
     /**

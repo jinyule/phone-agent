@@ -160,6 +160,30 @@ class ModelContractsTest {
     }
 
     @Test
+    fun `only a bad response may discard what its attempt streamed`() {
+        val errors =
+            listOf(
+                ModelError.Auth("bad key"),
+                ModelError.SignInExpired(),
+                ModelError.PlanNotEligible("scope"),
+                ModelError.QuotaExceeded("weekly"),
+                ModelError.RateLimited(1500),
+                ModelError.Overloaded(null),
+                ModelError.ContextOverflow("too long"),
+                ModelError.InvalidRequest("temperature", "not allowed"),
+                ModelError.Refusal("cyber"),
+                ModelError.PrefixBindingMismatch("thinking"),
+                ModelError.Network("reset"),
+                ModelError.Server(503, "unavailable"),
+                ModelError.BadResponse("no choices"),
+            )
+        assertEquals(emptyList<ModelError>(), errors.filter { it.discardsStreamed }, "kept by default")
+        val secret = ModelError.BadResponse("the reply carries the request's secret", discardsStreamed = true)
+        assertTrue(secret.discardsStreamed)
+        assertEquals("bad response: the reply carries the request's secret", secret.message)
+    }
+
+    @Test
     fun `a server delay is never negative`() {
         val negative =
             mapOf(
