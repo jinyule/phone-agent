@@ -88,11 +88,13 @@ public enum class NonceSlot {
  * Resume nonces overlap by one generation: the nonce a running helper may still hold stays live
  * until the next admission. That rescues only part of what an app death after the save, before
  * the reply goes out, leaves behind (the app cannot see whether a reply arrived). A resuming helper
- * comes back with the nonce it presented, unless another admission was saved before it does; a
- * helper on its first handoff cannot, its one-time nonce is used up. Then only the helper the app
- * was connected to, holding the current resume nonce and not told to stop, can hand off; otherwise
- * every helper is refused ([HandoffReject.BAD_NONCE]) and a new launch is needed. This is a known
- * gap (ADR 2026-11-01-privileged-handoff, decision 3); closing it needs nonces kept per pid.
+ * comes back with the nonce it presented; a helper on its first handoff cannot, its one-time nonce
+ * is used up. Then the helper that held the resume nonce current before that admission was saved,
+ * and was not told to stop, can hand off, whether or not it is connected to the app process. Both
+ * hold only until another admission is saved. A helper that meets neither is refused
+ * ([HandoffReject.BAD_NONCE]) and exits; unless another helper connects, a new launch is needed.
+ * This is a known gap (ADR 2026-11-01-privileged-handoff, decision 3); closing it needs nonces
+ * kept per pid.
  *
  * The cost of the overlap: a replaced helper's resume nonce stays valid until the next admission.
  * The same app process refuses a replaced helper that hands off again; after an app restart, one

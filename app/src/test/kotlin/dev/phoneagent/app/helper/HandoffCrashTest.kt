@@ -24,11 +24,12 @@ import kotlin.concurrent.thread
 /**
  * The app process dies in the middle of admitting a helper: what was saved stays, nothing after it
  * runs, and the helper never gets its reply. A new app process then starts on the same storage.
- * A resuming helper comes back with the nonce it presented unless another admission was saved
- * first, and the helper the app was connected to, holding the current resume nonce and not told to
- * stop, comes back. The other cases are the known gap of ADR 2026-11-01-privileged-handoff
- * (decision 3): the `knownGap…` tests pin that every helper is then refused, and are meant to flip
- * once nonces are kept per pid (plan (a) in that ADR's Alternatives).
+ * A resuming helper comes back with the nonce it presented; after a first handoff, the helper that
+ * held the resume nonce current before that save, and was not told to stop, comes back, whether or
+ * not an app process was connected to it. Both hold only until another admission is saved. The
+ * other cases are the known gap of ADR 2026-11-01-privileged-handoff (decision 3): the `knownGap…`
+ * tests pin that the helpers left are then refused, and are meant to flip once nonces are kept per
+ * pid (plan (a) in that ADR's Alternatives).
  */
 @RunWith(RobolectricTestRunner::class)
 class HandoffCrashTest {

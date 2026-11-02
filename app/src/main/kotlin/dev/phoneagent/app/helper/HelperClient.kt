@@ -38,10 +38,11 @@ import java.util.concurrent.atomic.AtomicBoolean
  * This client cannot know whether a reply arrived: the Binder framework writes it after [offer]
  * returns. If this process dies after saving an admission and before the reply goes out, the
  * admitted helper never gets its next nonce. A resuming helper can still come back with the nonce
- * it presented, unless another admission was saved before it does; a helper on its first handoff
- * cannot, its one-time nonce is used up. Then only the helper this process was connected to,
- * holding the current resume nonce and not told to stop, can hand off. Otherwise every helper is
- * refused ([HandoffReject.BAD_NONCE]), releases and exits, and a new launch is needed: a known gap
+ * it presented; a helper on its first handoff cannot, its one-time nonce is used up. Then the
+ * helper that held the resume nonce current before that admission was saved, and was not told to
+ * stop, can hand off, whether or not it is connected to this process. Both hold only until another
+ * admission is saved. A helper that meets neither is refused ([HandoffReject.BAD_NONCE]), releases
+ * and exits; unless another helper connects, a new launch is needed: a known gap
  * (ADR 2026-11-01-privileged-handoff, decision 3), pinned by HandoffCrashTest.
  *
  * Helpers are admitted one at a time: [offer] holds a lock from the decision until the replaced
