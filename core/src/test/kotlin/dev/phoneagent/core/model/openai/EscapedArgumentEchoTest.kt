@@ -296,6 +296,23 @@ class EscapedArgumentEchoTest {
             assertRejected(model(ModelProtocol.OPENAI_RESPONSES, style.key), style.key)
         }
 
+    @ParameterizedTest(name = "one id for two Chat calls: {0}")
+    @EnumSource(Style::class)
+    fun `shown arguments that only hold the key across two calls of one id are rejected`(style: Style) =
+        runTest {
+            // Two calls, index 0 and 1, with the same id: their deltas add up under that id, the parts do not.
+            val args = """{"city":"${style.wire}"}"""
+            val cut = args.indexOf(style.wire) + style.inEscape + 2
+
+            fun call(
+                index: Int,
+                fragment: String,
+            ) = """{"choices":[{"index":0,"delta":{"tool_calls":[{"index":$index,"id":"call_1",""" +
+                """"function":{"name":"get_weather","arguments":${JsonPrimitive(fragment)}}}]}}]}"""
+            server.enqueueSse(Kit.sse(call(0, args.take(cut)), call(1, args.drop(cut)), chatEnd("tool_calls")))
+            assertRejected(model(ModelProtocol.OPENAI_CHAT_COMPLETIONS, style.key), style.key)
+        }
+
     @ParameterizedTest(name = "spelling: {0}")
     @EnumSource(Style::class)
     fun `each spelling is its key once decoded`(style: Style) {
