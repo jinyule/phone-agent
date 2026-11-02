@@ -25,7 +25,8 @@ class ProbeCredentialGuidanceTest {
     private val server = Kit.server()
 
     @ParameterizedTest(name = "key {0}")
-    @ValueSource(strings = ["token", "pa", "a", "confirm", "\"token\":"])
+    // `":"pa-` only in the arguments a correct reply sends: `{"token":"pa-…"}`.
+    @ValueSource(strings = ["token", "pa", "a", "confirm", "\"token\":", "\":\"pa-"])
     fun `a key the trial request contains fails before any request`(key: String) =
         runTest {
             // Answers a regression that sends the requests anyway, so it fails at once.
