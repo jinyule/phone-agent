@@ -11,6 +11,9 @@ import dev.phoneagent.core.ports.ScreenUnavailableException
 import dev.phoneagent.core.ports.SystemKey
 import dev.phoneagent.core.ports.Target
 import dev.phoneagent.core.ports.UiAction
+import dev.phoneagent.core.ports.UiElement
+import dev.phoneagent.core.screen.ScreenDiffer
+import dev.phoneagent.core.screen.ScreenFingerprint
 import dev.phoneagent.core.screen.ScreenFormatter
 import dev.phoneagent.core.testing.FakeContext
 import dev.phoneagent.core.testing.FakeScreen
@@ -221,6 +224,42 @@ class ScreenActionToolsTest {
             assertTrue(lines.getValue(Effect.SECURE_PAGE).contains("hand_to_user(kind=secure_page)"))
             assertTrue(lines.getValue(Effect.UNKNOWN).contains("不确定"))
             assertEquals(Effect.entries.size, lines.values.toSet().size)
+        }
+
+    @Test
+    fun `a diff that is not empty is shown as a change, even when the port saw no change`() =
+        runTest {
+            // Only the messages' parent changed: the fingerprint, and so the port's effect, stays the same.
+            val moved = Screens.CHAT_ELEMENTS.map { if (it.parent?.value == "e5") it.copy(parent = null) else it }
+            val after = after.copy(elements = moved)
+            val print = { e: List<UiElement> -> ScreenFingerprint.of(after.pkg, after.activity, e, null) }
+            assertEquals(print(Screens.CHAT_ELEMENTS), print(moved))
+            val diff = ScreenDiffer().diff(Screens.CHAT, after)
+            assertFalse(diff.isEmpty)
+            val outcome = ActionOutcome(Status.Ok, Effect.NO_CHANGE, after, diff)
+            val text =
+                run(
+                    "phone_tap",
+                    """{"screen":"s12","ref":"e10"}""",
+                    FakeScreen().apply {
+                        onAct =
+                            { _, _ -> outcome }
+                    },
+                ).text()
+            assertTrue(text.startsWith("已点击 @e10。\nscreen s13 · 与 s12 相比的变化（其余不变）"), text)
+            assertFalse(text.contains("没有变化") || text.contains("没有可见变化"), text)
+            // With an empty diff the port's "no change" stands.
+            val same = ActionOutcome(Status.Ok, Effect.NO_CHANGE, after, ScreenDiff())
+            val unchanged =
+                run(
+                    "phone_tap",
+                    """{"screen":"s12","ref":"e10"}""",
+                    FakeScreen().apply {
+                        onAct =
+                            { _, _ -> same }
+                    },
+                ).text()
+            assertTrue(unchanged.contains("画面没有变化"), unchanged)
         }
 
     @Test

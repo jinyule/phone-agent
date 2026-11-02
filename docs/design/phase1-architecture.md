@@ -549,6 +549,7 @@ screen s12 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · 坐标 0–
   - ScreenPort 实现给同一元素换编号，差分里就是一删一增；换得多了会退化成完整一屏。
   换了 App、没有差分、增删改的行（元素和 OCR 合计）超过一半、差分里有这一屏没有的元素，或者差分本身超过预算时，给完整一屏，并用 `+` 标出新元素。
 - 只要动作后读到了一屏（`ActionOutcome.after` 不为空），结果就给出这一屏（差分或完整一屏，开头是新的 screen 编号），成功、失败、被拒绝都一样，`details.screen` 也只在这时写；没读到时提示先 phone_observe，`details` 里不写 screen。所以 `details.screen` 总是模型看过的一屏。
+- 差分不为空时，状态行不说"画面没有变化"，即使端口给的 effect 是 `NO_CHANGE`（指纹不看父节点等差分会报的内容），直接给差分；`details.effect` 仍是端口给的值。
 
 ---
 
@@ -576,7 +577,7 @@ screen s12 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · 坐标 0–
 
 `phone_wait` 的等法（不依赖 `ScreenPort.awaitChange` 报告调用之前的变化）：appear / disappear 每隔 `ToolsConfig.waitReadIntervalMs`（默认 250ms）读一屏判断一次，变化最迟一个间隔内被发现，画面一直在动也只按间隔读；截止时用最后一屏再判断一次，条件那时已经成立就算等到了。两次读屏之间只等固定间隔，**不和 `awaitChange` 取先到的那个**：最小读屏间隔同时就是最长等待，变化事件没法让读屏提前，取先到只会每轮多一次端口调用，结果一样。stable 用 `awaitChange` 等一段 `stableQuietMs` 的安静期，每次看到变化后至少隔一个读屏间隔再看，端口不挂起也不会空转。全部用协程时间，可取消。
 
-元素编号参数（`ref`）写 `@e5` 或 `e5`，裸数字不算编号。`phone_launch` 的 `link` 只接受 `LaunchTarget.Link.SCHEMES`（https、http、geo、mailto、market；`core.ports` 里唯一的一份，工具和适配器都用它），适配器只把它当作可浏览的 `ACTION_VIEW` + Uri 打开，不解析成任意 Intent；App 深链（如 `weixin://`）不在里面，打开 App 用 `app`。`request_confirmation` 的风险等级是 WRITE（保守下限）：只有 PolicyEngine 给出 Confirm、用户批准、复核为 Allow 之后才执行，所以它的结果是"用户已确认"。
+元素编号参数（`ref`）写 `@e5` 或 `e5`，裸数字不算编号。`phone_launch` 的 `app` 只收包名，App 名字返回 `INVALID_ARGS`，提示先用 `phone_apps` 查包名；有 App 列表时包名还必须是列表里能打开的 App。`cold=true` 在 M1 只是清掉这个 App 的任务栈、从首页重新打开，进程不重启；force-stop 要等 M2 的特权助手（`LaunchTarget.App.cold`）。`phone_intent` 的每个 kind 都只打开预填好的系统界面、不直接提交（拨号不拨出，分享只打开分享面板），policy 一律按 NAVIGATE 判；之后在那个界面上真正发出或修改的动作另外判定。`phone_launch` 的 `link` 只接受 `LaunchTarget.Link.SCHEMES`（https、http、geo、mailto、market；`core.ports` 里唯一的一份，工具和适配器都用它），适配器只把它当作可浏览的 `ACTION_VIEW` + Uri 打开，不解析成任意 Intent；App 深链（如 `weixin://`）不在里面，打开 App 用 `app`。`request_confirmation` 的风险等级是 WRITE（保守下限）：只有 PolicyEngine 给出 Confirm、用户批准、复核为 Allow 之后才执行，所以它的结果是"用户已确认"。
 
 `phone_intent` 各 kind 的字段键名以下表为准（`LaunchTarget.SystemIntent.fields` 用这些键；工具在边界校验，WP05 解析、WP07 实现都用同一套键）：
 

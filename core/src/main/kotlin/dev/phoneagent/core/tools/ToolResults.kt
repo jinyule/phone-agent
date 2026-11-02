@@ -45,6 +45,11 @@ internal object ToolResults {
      * "已点击 @e10"), then the screen after it from [presenter]. [plannedOn] is the snapshot the
      * action named, or `null`.
      *
+     * The status line follows the port's [ActionOutcome.effect], except that a `NO_CHANGE` with a
+     * diff that is not empty reads as a change: the diff then lists what changed, and saying "no
+     * change" next to it would contradict it (the port's fingerprint ignores some of what the
+     * diff shows, e.g. a new parent).
+     *
      * Whenever the outcome has a screen after it, the text shows that screen (diff or page, for
      * every status, refusals included) and `details.screen` names it; without one the text tells
      * the model to observe and `details` has no `screen`. So `details.screen` is always a screen
@@ -61,7 +66,7 @@ internal object ToolResults {
         val (status, text) =
             when (val result = outcome.status) {
                 ActionOutcome.Status.Ok -> {
-                    ToolStatus.OK to "${effectLine(done, outcome.effect)}\n$screen"
+                    ToolStatus.OK to "${effectLine(done, shownEffect(outcome))}\n$screen"
                 }
 
                 is ActionOutcome.Status.Failed -> {
@@ -83,6 +88,17 @@ internal object ToolResults {
                 }
             }
         return ToolResult(status, listOf(Part.Text(text)), details(outcome))
+    }
+
+    private fun shownEffect(outcome: ActionOutcome): ActionOutcome.Effect {
+        val changes = outcome.diff?.isEmpty == false
+        return if (outcome.effect == ActionOutcome.Effect.NO_CHANGE &&
+            changes
+        ) {
+            ActionOutcome.Effect.CHANGED
+        } else {
+            outcome.effect
+        }
     }
 
     private fun effectLine(

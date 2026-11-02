@@ -168,6 +168,37 @@ class PromptSurfaceTest {
         }
 
     @Test
+    fun `results - a diff is shown as a change even when the port saw no change`() =
+        runTest {
+            // Only the messages' parent changed, which the fingerprint (and so the effect) ignores.
+            val after =
+                Screens.CHAT.copy(
+                    id = SnapshotId("s13"),
+                    elements =
+                        Screens.CHAT_ELEMENTS.map {
+                            if (it.parent?.value ==
+                                "e5"
+                            ) {
+                                it.copy(parent = null)
+                            } else {
+                                it
+                            }
+                        },
+                )
+            val outcome =
+                ActionOutcome(
+                    ActionOutcome.Status.Ok,
+                    ActionOutcome.Effect.NO_CHANGE,
+                    after,
+                    ScreenDiffer().diff(Screens.CHAT, after),
+                )
+            Golden.assertMatches(
+                "results/tap-diff-without-port-change.expected.txt",
+                run("phone_tap", """{"screen":"s12","ref":"e7"}""", outcome),
+            )
+        }
+
+    @Test
     fun `results - tap opens a new page in full`() =
         runTest {
             val result = act("phone_tap", """{"screen":"s12","ref":"e3"}""", Screens.CHAT, Samples.chatInfo)
