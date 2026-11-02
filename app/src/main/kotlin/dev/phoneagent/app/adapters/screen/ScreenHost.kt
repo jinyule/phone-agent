@@ -149,7 +149,11 @@ internal interface ImeConnection {
         replace: Boolean,
     ): Boolean
 
-    /** Sends the editor's IME action (search, send, done…). Returns whether it was sent. */
+    /**
+     * Sends the editor's IME action (search, send, done…). Returns whether it was sent, not whether
+     * the editor acted on it: the input connection does not tell, so a "done" ENTER is judged only
+     * by its effect on the screen.
+     */
     fun performEditorAction(): Boolean
 
     /** Asks the editor to select [start]..[end] (a cursor when equal). Returns whether it was sent. */

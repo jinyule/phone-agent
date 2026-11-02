@@ -184,6 +184,7 @@ internal class ServiceImeConnection(
         return true
     }
 
+    /** `true` whenever a connection is bound: `InputConnection.performEditorAction` reports nothing more. */
     override fun performEditorAction(): Boolean {
         val connection = ime.currentInputConnection ?: return false
         val declared = (ime.currentInputEditorInfo?.imeOptions ?: 0) and EditorInfo.IME_MASK_ACTION

@@ -14,8 +14,9 @@ import android.view.accessibility.AccessibilityNodeInfo
  * The read-back decides the result: the field shows the request ([Result.Entered], ignoring the
  * spaces, dashes and parentheses formatting fields insert; other rewrites such as "1,000" for
  * "1000" are a mismatch), shows something else ([Result.Mismatch]), or was replaced before it could
- * be read ([Result.Unconfirmed]). Password fields cannot be read back: the first level that
- * delivered, or that changed the mask, is trusted.
+ * be read ([Result.Unconfirmed]). Only a match is submitted; after a mismatch the model sees what
+ * the field shows and decides whether to press ENTER. Password fields cannot be read back: the
+ * first level that delivered, or that changed the mask, is trusted.
  */
 internal object TextEntry {
     /** A fallback level. */
