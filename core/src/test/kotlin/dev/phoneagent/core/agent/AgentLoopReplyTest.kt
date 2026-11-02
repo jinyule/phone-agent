@@ -2,8 +2,13 @@
 
 package dev.phoneagent.core.agent
 
+import dev.phoneagent.core.ids.ModelId
+import dev.phoneagent.core.ids.ProviderId
+import dev.phoneagent.core.model.ChatResponse
 import dev.phoneagent.core.model.ModelErrorKind
 import dev.phoneagent.core.model.Part
+import dev.phoneagent.core.model.ReasoningKind
+import dev.phoneagent.core.model.StopReason
 import dev.phoneagent.core.session.AssistantAttempt
 import dev.phoneagent.core.session.AssistantMessage
 import dev.phoneagent.core.session.RequestRetry
@@ -17,6 +22,7 @@ import dev.phoneagent.core.tool.RiskClass
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.JsonNull
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import kotlin.random.Random
@@ -91,6 +97,72 @@ class AgentLoopReplyTest {
                 TurnEnded(1, TurnEndReason.FAILED, "bad response: tool call id c1 appears more than once in the reply"),
                 harness.events().last(),
             )
+            assertEquals(Phase.Idle, loop.phase.value)
+        }
+
+    private val thinking =
+        Part.Reasoning(
+            ProviderId("fake"),
+            ModelId("fake-model"),
+            ReasoningKind.ANTHROPIC_THINKING,
+            JsonNull,
+        )
+
+    @Test
+    fun `an empty reply is a bad response, retried, and does not end the turn`() =
+        runTest {
+            val model = FakeChatModel().replies(ChatResponse(emptyList(), StopReason.END_TURN)).answers("好了")
+            val harness = LoopHarness(this, model, interceptors = retrying)
+            val loop = harness.start()
+            loop.followup(text("go"))
+            advanceUntilIdle()
+
+            val events = harness.events()
+            assertEquals(Phase.Done, loop.phase.value)
+            assertEquals(
+                AssistantAttempt(
+                    1,
+                    ModelErrorKind.BAD_RESPONSE,
+                    "bad response: the reply has no text and no tool call",
+                ),
+                events.only<AssistantAttempt>().single(),
+            )
+            assertEquals(listOf(listOf(Part.Text("好了"))), events.only<AssistantMessage>().map { it.parts })
+        }
+
+    @Test
+    fun `a reply of reasoning or blank text only is no final answer`() =
+        runTest {
+            val model =
+                FakeChatModel()
+                    .replies(ChatResponse(listOf(thinking), StopReason.END_TURN))
+                    .replies(ChatResponse(listOf(thinking, Part.Text(" \n")), StopReason.END_TURN))
+            val harness = LoopHarness(this, model)
+            val loop = harness.start()
+            loop.followup(text("go"))
+            advanceUntilIdle()
+            loop.followup(text("again"))
+            advanceUntilIdle()
+
+            val events = harness.events()
+            assertEquals(Phase.Idle, loop.phase.value)
+            assertEquals(listOf(TurnEndReason.FAILED, TurnEndReason.FAILED), events.only<TurnEnded>().map { it.reason })
+            assertEquals(listOf(Part.Text(" \n")), events.only<AssistantMessage>().single().parts, "only the prefix")
+            assertEquals(2, events.only<AssistantAttempt>().count { it.error == ModelErrorKind.BAD_RESPONSE })
+        }
+
+    @Test
+    fun `a reply cut at the output cap with reasoning only ends the turn at the cap, not as a bad response`() =
+        runTest {
+            val model = FakeChatModel().replies(ChatResponse(listOf(thinking), StopReason.MAX_TOKENS))
+            val harness = LoopHarness(this, model)
+            val loop = harness.start()
+            loop.followup(text("go"))
+            advanceUntilIdle()
+
+            val events = harness.events()
+            assertEquals(TurnEnded(1, TurnEndReason.MAX_TOKENS), events.last())
+            assertEquals(emptyList<AssistantAttempt>(), events.only<AssistantAttempt>())
             assertEquals(Phase.Idle, loop.phase.value)
         }
 }
