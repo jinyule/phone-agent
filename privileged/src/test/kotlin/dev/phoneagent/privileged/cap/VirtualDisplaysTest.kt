@@ -19,7 +19,7 @@ class VirtualDisplaysTest {
     private val failing = mutableSetOf<Int>()
     private val readers = mutableListOf<ImageReader>()
     private val displays =
-        VirtualDisplays(SystemBridge(ApplicationProvider.getApplicationContext()), SDK) { display: VirtualDisplay ->
+        VirtualDisplays(FakeBridge(ApplicationProvider.getApplicationContext()), SDK) { display: VirtualDisplay ->
             val id = display.display.displayId
             check(id !in failing) { "releasing display $id failed" }
             display.release()

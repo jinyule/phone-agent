@@ -38,21 +38,35 @@ internal class Prober(
         return bundle(steps)
     }
 
+    /** The probe display's id, or -1; below API 34 the reason is reported without creating one. */
     private fun createDisplay(
         reader: ImageReader,
         steps: MutableMap<String, String>,
-    ): Int {
-        val id = displays.create(reader.surface, WIDTH, HEIGHT, DPI)
-        steps[ProbeKeys.Step.DISPLAY] =
-            if (id >= 0) ProbeKeys.RESULT_OK else "createDisplay returned $id; see logcat"
-        return id
-    }
+    ): Int =
+        when (val opened = displays.open(reader.surface, WIDTH, HEIGHT, DPI)) {
+            is VirtualDisplays.Opened.Display -> {
+                steps[ProbeKeys.Step.DISPLAY] = ProbeKeys.RESULT_OK
+                // open() only keeps a display whose IME policy reads back as LOCAL.
+                steps[ProbeKeys.Step.IME] = ProbeKeys.RESULT_OK
+                opened.id
+            }
+
+            is VirtualDisplays.Opened.Refused -> {
+                steps[ProbeKeys.Step.DISPLAY] = opened.reason
+                -1
+            }
+
+            is VirtualDisplays.Opened.Failed -> {
+                steps[ProbeKeys.Step.DISPLAY] = opened.reason
+                opened.ime?.let { steps[ProbeKeys.Step.IME] = it }
+                -1
+            }
+        }
 
     private fun exercise(
         displayId: Int,
         steps: MutableMap<String, String>,
     ) {
-        steps[ProbeKeys.Step.IME] = step { displays.setImePolicy(displayId) }
         steps[ProbeKeys.Step.TASKS] = step { require(tasks.rows().isNotEmpty()) { "the task list is empty" } }
         steps[ProbeKeys.Step.INPUT] = step { require(tap(displayId)) { "injectStroke was refused; see logcat" } }
     }

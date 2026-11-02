@@ -51,23 +51,73 @@ internal class VirtualDisplays(
     fun sizeOf(displayId: Int): Pair<Int, Int>? =
         synchronized(lock) { displays[displayId]?.let { it.width to it.height } }
 
+    /** What [open] did. */
+    sealed interface Opened {
+        /** A display the helper now owns. */
+        data class Display(
+            val id: Int,
+        ) : Opened
+
+        /** Nothing was created: the request (or this API level) is not acceptable. */
+        data class Refused(
+            val reason: String,
+        ) : Opened
+
+        /**
+         * No display is left: the platform refused, or the one it made was released again because
+         * its keyboard would open on the user's screen ([ime] says why the IME policy failed).
+         */
+        data class Failed(
+            val reason: String,
+            val ime: String? = null,
+        ) : Opened
+    }
+
     /**
-     * Creates a display rendering into [surface]; returns its id, or a negative
-     * [DisplayResult] value. The IME policy is set right after creation: a keyboard must never
-     * appear on the user's screen because the agent focused a text field.
+     * Creates a display rendering into [surface]; returns its id, or a negative [DisplayResult]
+     * value. See [open].
      */
     fun create(
         surface: Surface?,
         width: Int,
         height: Int,
         dpi: Int,
-    ): Int {
-        val refusal = if (surface == null) "no surface" else DisplaySpec.problem(width, height, dpi)
-        if (refusal != null) {
-            Log.w(TAG, "createDisplay refused: $refusal")
-            return DisplayResult.REFUSED
+    ): Int =
+        when (val opened = open(surface, width, height, dpi)) {
+            is Opened.Display -> {
+                opened.id
+            }
+
+            is Opened.Refused -> {
+                Log.w(TAG, "createDisplay refused: ${opened.reason}")
+                DisplayResult.REFUSED
+            }
+
+            is Opened.Failed -> {
+                Log.e(TAG, "createDisplay failed: ${opened.reason} ${opened.ime.orEmpty()}")
+                DisplayResult.FAILED
+            }
         }
-        return add(checkNotNull(surface), width, height, dpi)
+
+    /**
+     * Creates a display rendering into [surface]. Below API 34 nothing is created: without
+     * OWN_FOCUS the display would take the user's focus (phase1-architecture D2). Right after
+     * creation the IME policy is set to LOCAL and read back; a display whose keyboard would open on
+     * the user's screen is released again and reported as [Opened.Failed].
+     */
+    fun open(
+        surface: Surface?,
+        width: Int,
+        height: Int,
+        dpi: Int,
+    ): Opened {
+        val refusal =
+            when {
+                !DisplaySpec.keepsUserFocus(sdkInt) -> "background displays need API 34+, this is API $sdkInt"
+                surface == null -> "no surface"
+                else -> DisplaySpec.problem(width, height, dpi)
+            }
+        return if (refusal != null) Opened.Refused(refusal) else add(checkNotNull(surface), width, height, dpi)
     }
 
     private fun add(
@@ -75,18 +125,33 @@ internal class VirtualDisplays(
         width: Int,
         height: Int,
         dpi: Int,
-    ): Int =
+    ): Opened =
         try {
-            val display = newDisplay(surface, width, height, dpi)
-            val id = display.display.displayId
-            synchronized(lock) { displays[id] = Held(display, width, height) }
-            keepKeyboardLocal(id)
-            Log.i(TAG, "display $id: ${width}x$height @ ${dpi}dpi, flags 0x${flags.toString(HEX)}")
-            id
+            keep(newDisplay(surface, width, height, dpi), width, height, dpi)
         } catch (e: CapabilityUnavailable) {
             Log.e(TAG, "createDisplay failed", e)
-            DisplayResult.FAILED
+            Opened.Failed(e.message.orEmpty())
         }
+
+    /** Keeps [display] when its keyboard stays on it; otherwise releases it again. */
+    private fun keep(
+        display: VirtualDisplay,
+        width: Int,
+        height: Int,
+        dpi: Int,
+    ): Opened {
+        val id = display.display.displayId
+        val held = Held(display, width, height)
+        val imeProblem = ime.problem(id)
+        if (imeProblem != null) {
+            // One whose release throws is kept as ours, so releaseAll tries again.
+            releaseHeld(listOf(id to held))
+            return Opened.Failed("display $id was released: its keyboard would open on the user's screen", imeProblem)
+        }
+        synchronized(lock) { displays[id] = held }
+        Log.i(TAG, "display $id: ${width}x$height @ ${dpi}dpi, flags 0x${flags.toString(HEX)}")
+        return Opened.Display(id)
+    }
 
     private fun newDisplay(
         surface: Surface,
@@ -126,21 +191,6 @@ internal class VirtualDisplays(
 
     private val flags: Int get() = DisplaySpec.flagsFor(sdkInt)
 
-    /** Keeps the keyboard on [displayId]; throws [CapabilityUnavailable] so `probe()` can report it. */
-    fun setImePolicy(displayId: Int): Unit = ime.setLocal(displayId)
-
-    /**
-     * The same, during creation: a display whose keyboard would open on the user's screen is still
-     * usable for everything that does not type, so this only logs.
-     */
-    private fun keepKeyboardLocal(displayId: Int) {
-        try {
-            ime.setLocal(displayId)
-        } catch (e: CapabilityUnavailable) {
-            Log.w(TAG, "display $displayId keeps the system IME policy", e)
-        }
-    }
-
     private companion object {
         const val TAG = "PhoneAgentHelper"
         const val HEX = 16
@@ -155,7 +205,18 @@ internal class VirtualDisplays(
 private class DisplayImePolicy(
     private val bridge: SystemBridge,
 ) {
-    fun setLocal(displayId: Int) {
+    /** Why the keyboard of [displayId] cannot be kept on it, or null when it is. */
+    fun problem(displayId: Int): String? {
+        try {
+            setLocal(displayId)
+        } catch (e: CapabilityUnavailable) {
+            Log.w(TAG, "display $displayId cannot keep its keyboard", e)
+            return e.message.orEmpty()
+        }
+        return null
+    }
+
+    private fun setLocal(displayId: Int) {
         val wm = bridge.windowManager
         reflecting("IWindowManager.setDisplayImePolicy") {
             bridge.method(wm, "setDisplayImePolicy", 2).invoke(wm, displayId, DisplaySpec.IME_POLICY_LOCAL)
