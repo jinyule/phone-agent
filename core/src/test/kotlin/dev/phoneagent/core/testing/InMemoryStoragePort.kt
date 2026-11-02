@@ -10,7 +10,8 @@ import java.io.IOException
  *
  * Set [failSync] / [failAppend] / [failWrite] to make the next calls throw, or [syncFailures] /
  * [appendFailures] to make only the next n calls throw; [beforeAppend] runs inside every append
- * (e.g. to suspend on a barrier). [writes] counts atomic writes per path.
+ * (e.g. to suspend on a barrier). [writes] counts atomic writes per path, [openAppenders] the
+ * appenders not closed yet.
  */
 class InMemoryStoragePort : StoragePort {
     val files = linkedMapOf<String, ByteArray>()
@@ -22,6 +23,10 @@ class InMemoryStoragePort : StoragePort {
     var appendFailures = 0
     var beforeAppend: suspend () -> Unit = {}
     var syncCount = 0
+        private set
+
+    /** Appenders opened and not closed yet. */
+    var openAppenders = 0
         private set
 
     fun text(path: String): String = files.getValue(path).decodeToString()
@@ -47,6 +52,7 @@ class InMemoryStoragePort : StoragePort {
 
     override suspend fun openAppender(path: StoragePath): StorageAppender {
         files.putIfAbsent(path.value, ByteArray(0))
+        openAppenders++
         return object : StorageAppender {
             override suspend fun append(bytes: ByteArray) {
                 beforeAppend()
@@ -63,7 +69,9 @@ class InMemoryStoragePort : StoragePort {
                 syncCount++
             }
 
-            override suspend fun close() = Unit
+            override suspend fun close() {
+                openAppenders--
+            }
         }
     }
 

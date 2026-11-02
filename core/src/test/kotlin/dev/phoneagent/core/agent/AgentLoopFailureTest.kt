@@ -22,6 +22,7 @@ import dev.phoneagent.core.session.InboxSpliced
 import dev.phoneagent.core.session.PromptWithdrawn
 import dev.phoneagent.core.session.QuestionAsked
 import dev.phoneagent.core.session.RequestRetry
+import dev.phoneagent.core.session.SessionFlushException
 import dev.phoneagent.core.session.SessionResumed
 import dev.phoneagent.core.session.SessionStore
 import dev.phoneagent.core.session.StepEnded
@@ -42,7 +43,11 @@ import dev.phoneagent.core.tool.ToolCall
 import dev.phoneagent.core.tool.ToolResult
 import dev.phoneagent.core.tool.ToolStatus
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runTest
@@ -531,6 +536,46 @@ class AgentLoopFailureTest {
             resumed.followup(text("b"))
             advanceUntilIdle()
             assertEquals(TurnEnded(2, TurnEndReason.COMPLETED), harness.events().last())
+        }
+
+    /** A session that was stopped cleanly, with its log closed. */
+    private suspend fun TestScope.stoppedSession(harness: LoopHarness) {
+        val loop = harness.start()
+        loop.stop(StopCause.SHUTDOWN)
+        loop.awaitStopped()
+        assertEquals(0, harness.storage.openAppenders)
+    }
+
+    @Test
+    fun `a resume that fails after opening the log closes it`() =
+        runTest {
+            val harness = LoopHarness(this)
+            stoppedSession(harness)
+            harness.storage.failSync = true
+            val failure =
+                try {
+                    harness.resume()
+                    null
+                } catch (expected: SessionFlushException) {
+                    expected
+                }
+            assertTrue(failure != null)
+            assertEquals(0, harness.storage.openAppenders, "the store is not leaked")
+        }
+
+    @Test
+    fun `a resume cancelled after opening the log closes it`() =
+        runTest {
+            val harness = LoopHarness(this)
+            stoppedSession(harness)
+            val attempt =
+                launch(start = CoroutineStart.UNDISPATCHED) {
+                    coroutineContext.job.cancel() // e.g. the service stops while the task is being resumed
+                    harness.resume()
+                }
+            advanceUntilIdle()
+            assertTrue(attempt.isCancelled)
+            assertEquals(0, harness.storage.openAppenders, "the store is not leaked")
         }
 
     @Test

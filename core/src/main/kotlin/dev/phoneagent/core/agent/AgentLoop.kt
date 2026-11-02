@@ -225,16 +225,30 @@ public class AgentLoop private constructor(
          * an open prompt is withdrawn, an open step and turn end `FAILED`, then `session/resumed`.
          * Nothing continues on its own: queued input stays queued until the next followup or steer.
          * Throws what `SessionStore.open` throws, and [IllegalArgumentException] when the log
-         * belongs to another task.
+         * belongs to another task. When it throws or is cancelled after opening the log, it closes
+         * the log again.
          */
         public suspend fun resume(
             setup: AgentSetup,
             scope: CoroutineScope,
         ): AgentLoop {
             val opened = SessionStore.open(setup.files, setup.clock)
+            val handover = StoreHandover(opened.store)
+            try {
+                return handover.to(adopt(setup, opened, scope))
+            } finally {
+                handover.release()
+            }
+        }
+
+        /** Repairs the reopened log of [opened] and hands its store to a new loop. */
+        private suspend fun adopt(
+            setup: AgentSetup,
+            opened: SessionStore.Opened,
+            scope: CoroutineScope,
+        ): AgentLoop {
             val store = opened.store
             val owner = store.header.taskId
-            if (owner != setup.taskId) store.close()
             require(
                 owner == setup.taskId,
             ) { "session ${store.header.sessionId} belongs to task $owner, not ${setup.taskId}" }
@@ -244,5 +258,19 @@ public class AgentLoop private constructor(
             store.flush()
             return AgentLoop(setup, store, store.records(), scope)
         }
+    }
+}
+
+/** Owns a store until it is handed [to] a loop; [release] closes it if it never was. */
+private class StoreHandover(
+    private val store: SessionStore,
+) {
+    private var handedOver = false
+
+    fun to(loop: AgentLoop): AgentLoop = loop.also { handedOver = true }
+
+    /** Closes the store, even when cancelled, unless a loop owns it now. */
+    suspend fun release() {
+        if (!handedOver) withContext(NonCancellable) { store.close() }
     }
 }
