@@ -18,6 +18,8 @@ import android.view.Surface;
 //   transactions skip this guard and expose no capability; DUMP and SHELL_COMMAND are guarded too.
 // - A method the helper does not implement throws UnsupportedOperationException whose message
 //   starts with PrivilegedError.NOT_IMPLEMENTED.
+// - No call answers with a made-up zero: a failure Parcel cannot carry arrives as
+//   IllegalStateException naming it (protocol 3).
 // - Any change to this file must bump PrivilegedProtocol.VERSION and append the new fingerprint
 //   to privileged/protocol-history.txt (checked by :privileged:verifyPrivilegedProtocol).
 interface IPrivilegedCore {

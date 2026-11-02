@@ -36,8 +36,8 @@ internal open class SystemBridge(
     private val context: Context,
 ) {
     /**
-     * `IActivityTaskManager`: tasks, cross-display starts, the task-stack listener. Open, like
-     * [windowManager], so a test can stand in an object with the same method names.
+     * `IActivityTaskManager`: tasks, cross-display starts, the task-stack listener. Open, like the
+     * other entry points, so a test can stand in an object with the same method and field names.
      */
     open val activityTaskManager: Any by lazy {
         reflect("IActivityTaskManager") {
@@ -63,7 +63,7 @@ internal open class SystemBridge(
     }
 
     /** `InputManagerGlobal` (API 34+) or `InputManager`, whichever carries `injectInputEvent`. */
-    val inputManager: Any by lazy {
+    open val inputManager: Any by lazy {
         val global =
             try {
                 Class.forName("android.hardware.input.InputManagerGlobal").getMethod("getInstance").invoke(null)
@@ -77,7 +77,7 @@ internal open class SystemBridge(
     }
 
     /** `TaskInfo`, whose public fields describe a task. */
-    val taskInfo: Class<*> by lazy { reflect("TaskInfo") { Class.forName("android.app.TaskInfo") } }
+    open val taskInfo: Class<*> by lazy { reflect("TaskInfo") { Class.forName("android.app.TaskInfo") } }
 
     /**
      * The method named [name] on [owner] whose parameter count is [parameters], preferring the
@@ -106,7 +106,13 @@ internal open class SystemBridge(
     }
 }
 
-/** Runs [block], turning reflection failures into [CapabilityUnavailable] that names [what]. */
+/**
+ * Runs [block], turning reflection failures into [CapabilityUnavailable] that names [what]: a
+ * member that is missing or refused, a call or field read on an object of another shape
+ * (`IllegalArgumentException`), and a cast inside [block] (`ClassCastException`). [block] holds
+ * reflective calls only; an answer is converted with a safe cast after it, so a call that did run
+ * is never taken for one that is missing.
+ */
 internal inline fun <T> reflecting(
     what: String,
     block: () -> T,
@@ -115,4 +121,8 @@ internal inline fun <T> reflecting(
         block()
     } catch (e: ReflectiveOperationException) {
         throw CapabilityUnavailable("$what failed through reflection", e)
+    } catch (e: IllegalArgumentException) {
+        throw CapabilityUnavailable("$what does not fit this build", e)
+    } catch (e: ClassCastException) {
+        throw CapabilityUnavailable("$what does not fit this build", e)
     }

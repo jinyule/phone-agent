@@ -227,18 +227,22 @@ private class DisplayImePolicy(
         }
     }
 
+    /** The policy as read back, null when it cannot be read; an answer that is no policy throws. */
     private fun readBack(
         wm: Any,
         displayId: Int,
-    ): Int? =
-        try {
-            reflecting("IWindowManager.getDisplayImePolicy") {
-                bridge.method(wm, "getDisplayImePolicy", 1).invoke(wm, displayId) as Int
+    ): Int? {
+        val answer =
+            try {
+                reflecting("IWindowManager.getDisplayImePolicy") {
+                    bridge.method(wm, "getDisplayImePolicy", 1).invoke(wm, displayId)
+                }
+            } catch (e: CapabilityUnavailable) {
+                Log.i(TAG, "cannot read back the IME policy of display $displayId", e)
+                return null
             }
-        } catch (e: CapabilityUnavailable) {
-            Log.i(TAG, "cannot read back the IME policy of display $displayId", e)
-            null
-        }
+        return answer as? Int ?: throw CapabilityUnavailable("display $displayId reports IME policy $answer")
+    }
 
     private companion object {
         const val TAG = "PhoneAgentHelper"

@@ -137,9 +137,19 @@ internal class MainScreenWatch(
             emptyList()
         }
 
+    /**
+     * One read of the main screen on the watch thread, the work behind every signal and poll. A
+     * failure is logged and skipped, and the next signal or poll reads again: an exception that
+     * reached the looper would end the helper.
+     */
+    @Suppress("TooGenericExceptionCaught") // The watch thread's error boundary, see above.
     private fun scan() {
         val now = clock()
-        synchronized(log) { if (log.watching(now)) log.scan(snapshot(), now) }
+        try {
+            synchronized(log) { if (log.watching(now)) log.scan(snapshot(), now) }
+        } catch (e: RuntimeException) {
+            Log.e(TAG, "a main-screen scan failed, the next one reads again", e)
+        }
     }
 
     /** A burst of task changes is read once. */

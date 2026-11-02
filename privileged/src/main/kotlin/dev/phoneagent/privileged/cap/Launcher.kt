@@ -192,7 +192,7 @@ private class ActivityStarter(
     ): Boolean {
         val options = ActivityOptions.makeBasic().setLaunchDisplayId(displayId).toBundle()
         val atm = bridge.activityTaskManager
-        val started =
+        val answer =
             try {
                 reflecting("IActivityTaskManager.startActivityAsUser") {
                     bridge.method(atm, "startActivityAsUser", START_PARAMETERS).invoke(
@@ -209,14 +209,16 @@ private class ActivityStarter(
                         null,
                         options,
                         USER_CURRENT,
-                    ) as Int
+                    )
                 }
             } catch (e: CapabilityUnavailable) {
                 Log.w(TAG, "startActivityAsUser unavailable, falling back to am start", e)
                 return amStart(displayId, intent)
             }
-        if (started < 0) Log.w(TAG, "startActivityAsUser($intent) -> $started")
-        return started >= 0
+        // It ran: an answer that is not a start result is a failure, never a reason to start again.
+        val started = answer as? Int
+        if (started == null || started < 0) Log.w(TAG, "startActivityAsUser($intent) -> $answer")
+        return started != null && started >= 0
     }
 
     private fun amStart(

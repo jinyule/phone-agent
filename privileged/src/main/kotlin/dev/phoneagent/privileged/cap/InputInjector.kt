@@ -185,9 +185,11 @@ internal class InputInjector(
                 event.javaClass.getMethod("setDisplayId", Int::class.javaPrimitiveType).invoke(event, displayId)
             }
             val manager = bridge.inputManager
-            reflecting("injectInputEvent") {
-                bridge.method(manager, "injectInputEvent", 2).invoke(manager, event, INJECT_MODE_ASYNC) as Boolean
-            }
+            val answer =
+                reflecting("injectInputEvent") {
+                    bridge.method(manager, "injectInputEvent", 2).invoke(manager, event, INJECT_MODE_ASYNC)
+                }
+            answer as? Boolean ?: throw CapabilityUnavailable("injectInputEvent answered $answer")
         } catch (e: CapabilityUnavailable) {
             Log.w(TAG, "cannot inject into display $displayId", e)
             false

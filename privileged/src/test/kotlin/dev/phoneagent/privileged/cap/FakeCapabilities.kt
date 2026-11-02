@@ -22,6 +22,14 @@ internal class FakeCapabilities : Capabilities {
     /** Thrown by [releaseAll] when set. */
     var failRelease: RuntimeException? = null
 
+    /** Thrown by every capability call when set, after the call is recorded. */
+    var unexpected: Exception? = null
+
+    private fun record(call: String) {
+        calls += call
+        unexpected?.let { throw it }
+    }
+
     override val displays: DisplayCaps =
         object : DisplayCaps {
             override fun createDisplay(
@@ -30,12 +38,12 @@ internal class FakeCapabilities : Capabilities {
                 height: Int,
                 dpi: Int,
             ): Int {
-                calls += "createDisplay(${surface == null}, $width, $height, $dpi)"
+                record("createDisplay(${surface == null}, $width, $height, $dpi)")
                 return displayIdResult
             }
 
             override fun releaseDisplay(displayId: Int) {
-                calls += "releaseDisplay($displayId)"
+                record("releaseDisplay($displayId)")
             }
         }
 
@@ -47,12 +55,12 @@ internal class FakeCapabilities : Capabilities {
                 userId: Int,
                 cold: Boolean,
             ): Int {
-                calls += "startActivity($displayId, ${intent?.action}, $userId, $cold)"
+                record("startActivity($displayId, ${intent?.action}, $userId, $cold)")
                 return startResult
             }
 
             override fun topTask(displayId: Int): Int {
-                calls += "topTask($displayId)"
+                record("topTask($displayId)")
                 return topTaskResult
             }
 
@@ -60,17 +68,17 @@ internal class FakeCapabilities : Capabilities {
                 taskId: Int,
                 displayId: Int,
             ): Boolean {
-                calls += "moveTask($taskId, $displayId)"
+                record("moveTask($taskId, $displayId)")
                 return moveResult
             }
 
             override fun watchMainScreen(windowMs: Int): Int {
-                calls += "watchMainScreen($windowMs)"
+                record("watchMainScreen($windowMs)")
                 return topTaskResult
             }
 
             override fun mainArrivals(sinceUptimeMs: Long): Bundle {
-                calls += "mainArrivals($sinceUptimeMs)"
+                record("mainArrivals($sinceUptimeMs)")
                 return arrivalsResult
             }
         }
@@ -83,7 +91,7 @@ internal class FakeCapabilities : Capabilities {
                 ys: IntArray?,
                 times: LongArray?,
             ): Boolean {
-                calls += "injectStroke($displayId, ${xs?.toList()}, ${ys?.toList()}, ${times?.toList()})"
+                record("injectStroke($displayId, ${xs?.toList()}, ${ys?.toList()}, ${times?.toList()})")
                 return strokeResult
             }
 
@@ -91,7 +99,7 @@ internal class FakeCapabilities : Capabilities {
                 displayId: Int,
                 keyCode: Int,
             ): Boolean {
-                calls += "injectKey($displayId, $keyCode)"
+                record("injectKey($displayId, $keyCode)")
                 return keyResult
             }
         }
@@ -102,18 +110,18 @@ internal class FakeCapabilities : Capabilities {
                 pkg: String?,
                 muted: Boolean,
             ): Boolean {
-                calls += "setAudioMuted($pkg, $muted)"
+                record("setAudioMuted($pkg, $muted)")
                 return muteResult
             }
 
             override fun grantSelf(permission: String?): Int {
-                calls += "grantSelf($permission)"
+                record("grantSelf($permission)")
                 return grantResult
             }
         }
 
     override fun probe(): Bundle {
-        calls += "probe()"
+        record("probe()")
         return probeResult
     }
 

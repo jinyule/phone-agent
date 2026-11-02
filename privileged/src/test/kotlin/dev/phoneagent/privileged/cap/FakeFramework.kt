@@ -12,10 +12,10 @@ import android.content.pm.PackageInfo
 import android.graphics.PixelFormat
 import android.media.ImageReader
 import android.os.Bundle
-import android.os.IBinder
-import android.os.IInterface
+import android.view.InputEvent
 import androidx.test.core.app.ApplicationProvider
 import dev.phoneagent.privileged.IPrivilegedCore
+import dev.phoneagent.privileged.OverTheWire
 import dev.phoneagent.privileged.helper.PrivilegedCore
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.shadows.ShadowBinder
@@ -31,7 +31,18 @@ internal class FakeActivityTaskManager {
 
     /** Every intent `startActivityAsUser` was asked to start, with the user it was asked for. */
     val started = mutableListOf<Pair<Intent, Int>>()
-    var startResult = 0
+
+    /** What `startActivityAsUser` answers; anything but an Int is a framework that changed. */
+    var startResult: Any? = 0
+
+    /** How many more `getTasks` answers fail while they are read, as a list torn mid-read would. */
+    var tornReads = 0
+
+    /** Whether `registerTaskStackListener` accepts a listener; it throws otherwise, so the watch polls. */
+    var acceptsListener = false
+
+    /** The `ITaskStackListener` registered last. */
+    var listener: Any? = null
 
     @Suppress("UNUSED_PARAMETER", "unused") // Signature of IActivityTaskManager.getTasks.
     fun getTasks(
@@ -39,7 +50,27 @@ internal class FakeActivityTaskManager {
         filterOnlyVisibleRecents: Boolean,
         keepIntentExtra: Boolean,
         displayId: Int,
-    ): List<ActivityManager.RunningTaskInfo> = tasks.toList()
+    ): List<ActivityManager.RunningTaskInfo> {
+        if (tornReads == 0) return tasks.toList()
+        tornReads--
+        return object : AbstractList<ActivityManager.RunningTaskInfo>() {
+            override val size = 1
+
+            override fun get(index: Int): ActivityManager.RunningTaskInfo =
+                error("the task list changed while it was read")
+        }
+    }
+
+    @Suppress("unused") // Signature of IActivityTaskManager.registerTaskStackListener.
+    fun registerTaskStackListener(listener: Any?) {
+        check(acceptsListener) { "no task stack listeners on this fake" }
+        this.listener = listener
+    }
+
+    @Suppress("UNUSED_PARAMETER", "unused") // Signature of IActivityTaskManager.unregisterTaskStackListener.
+    fun unregisterTaskStackListener(listener: Any?) {
+        this.listener = null
+    }
 
     // LongParameterList: the twelve parameters of IActivityTaskManager.startActivityAsUser.
     @Suppress("UNUSED_PARAMETER", "unused", "LongParameterList")
@@ -56,7 +87,7 @@ internal class FakeActivityTaskManager {
         profilerInfo: Any?,
         options: Bundle?,
         userId: Int,
-    ): Int {
+    ): Any? {
         started += intent to userId
         return startResult
     }
@@ -71,6 +102,9 @@ internal class FakeWindowManager {
     var imeAccepted = true
     private val imePolicies = mutableMapOf<Int, Int>()
 
+    /** When set, what `getDisplayImePolicy` answers instead of the policy that was set. */
+    var imeReadBack: Any? = null
+
     fun isKeyguardLocked(): Boolean = keyguardLocked ?: error("IWindowManager went away")
 
     fun setDisplayImePolicy(
@@ -80,7 +114,7 @@ internal class FakeWindowManager {
         if (imeAccepted) imePolicies[displayId] = imePolicy
     }
 
-    fun getDisplayImePolicy(displayId: Int): Int = imePolicies[displayId] ?: IME_POLICY_FALLBACK
+    fun getDisplayImePolicy(displayId: Int): Any = imeReadBack ?: imePolicies[displayId] ?: IME_POLICY_FALLBACK
 
     private companion object {
         /** `WindowManager.DISPLAY_IME_POLICY_FALLBACK_DISPLAY`: the keyboard opens on the main screen. */
@@ -88,13 +122,36 @@ internal class FakeWindowManager {
     }
 }
 
+/** Stands in for `InputManagerGlobal`. */
+internal class FakeInputManager {
+    var injected = 0
+
+    /** What `injectInputEvent` answers; anything but a Boolean is a framework that changed. */
+    var answer: Any? = true
+
+    @Suppress("UNUSED_PARAMETER", "unused") // Signature of InputManagerGlobal.injectInputEvent.
+    fun injectInputEvent(
+        event: InputEvent,
+        mode: Int,
+    ): Any? {
+        injected++
+        return answer
+    }
+}
+
 internal class FakeBridge(
     context: Context,
     val atm: FakeActivityTaskManager = FakeActivityTaskManager(),
     val wm: FakeWindowManager = FakeWindowManager(),
+    val input: FakeInputManager = FakeInputManager(),
 ) : SystemBridge(context) {
+    /** The class whose fields describe a task; another one is a framework that changed. */
+    var taskInfoClass: Class<*> = TaskInfo::class.java
+
     override val activityTaskManager: Any get() = atm
     override val windowManager: Any get() = wm
+    override val inputManager: Any get() = input
+    override val taskInfo: Class<*> get() = taskInfoClass
 }
 
 /** Records every command instead of running it; [answer] decides the result. */
@@ -128,9 +185,10 @@ internal class CapabilityHarness(
         AndroidCapabilities.create(context, ServedApp(APP, APP_UID), Platform(bridge, sdkInt, commands, stateDir))
     private val readers = mutableListOf<ImageReader>()
 
+    val wire = OverTheWire(PrivilegedCore(APP_UID, capabilities) {})
+
     /** The helper as the app sees it. */
-    val core: IPrivilegedCore =
-        IPrivilegedCore.Stub.asInterface(RemoteOnly(PrivilegedCore(APP_UID, capabilities) {}))
+    val core: IPrivilegedCore = IPrivilegedCore.Stub.asInterface(wire)
 
     init {
         ShadowBinder.setCallingUid(APP_UID)
@@ -230,11 +288,4 @@ internal class CapabilityHarness(
             TaskInfo::class.java.getField(field).set(this, value)
         }
     }
-}
-
-/** A binder whose local interface is hidden, so `asInterface` builds the generated Proxy around it. */
-private class RemoteOnly(
-    private val binder: IBinder,
-) : IBinder by binder {
-    override fun queryLocalInterface(descriptor: String): IInterface? = null
 }

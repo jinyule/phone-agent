@@ -38,7 +38,7 @@ internal class TaskTable(
                     bridge.method(atm, "getTasks", 3).invoke(atm, MAX_TASKS, false, false)
                 }
             } as? List<*> ?: throw CapabilityUnavailable("getTasks returned no list")
-        return tasks.filterNotNull().mapIndexed(fields::read)
+        return reflecting("TaskInfo fields") { tasks.filterNotNull().mapIndexed(fields::read) }
     }
 
     /** The task on top of [displayId], or -1. */

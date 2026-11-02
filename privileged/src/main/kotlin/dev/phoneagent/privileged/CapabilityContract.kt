@@ -44,11 +44,11 @@ public object StartResult {
  * The reason is always in logcat, and `probe()` reports whether displays work at all.
  */
 public object DisplayResult {
-    /** The surface, size or density was not acceptable, or (protocol 2) the API level is below 34. */
+    /** The surface, size or density was not acceptable, or (protocol 3) the API level is below 34. */
     public const val REFUSED: Int = -2
 
     /**
-     * The platform refused to create the display, or (protocol 2) its keyboard would have opened
+     * The platform refused to create the display, or (protocol 3) its keyboard would have opened
      * on the user's screen and it was released again.
      */
     public const val FAILED: Int = -1

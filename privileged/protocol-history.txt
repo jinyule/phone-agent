@@ -2,3 +2,4 @@
 # (engineering-baseline §6). Never edit or remove a line; bump VERSION and append instead.
 1 ded94e5c145d576835459dcf2ff2dcf3874e4e60e829172c6d2b5541972cd701
 2 ded94e5c145d576835459dcf2ff2dcf3874e4e60e829172c6d2b5541972cd701  # same AIDL; startActivity returns LOCKED (7)
+3 ded94e5c145d576835459dcf2ff2dcf3874e4e60e829172c6d2b5541972cd701  # same AIDL; createDisplay REFUSED below API 34, FAILED without a LOCAL IME; unexpected failures arrive as IllegalStateException

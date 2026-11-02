@@ -1,8 +1,10 @@
 package dev.phoneagent.privileged.helper
 
 import android.content.Intent
+import android.os.BadParcelableException
 import android.os.Binder
 import android.os.Bundle
+import android.os.NetworkOnMainThreadException
 import android.os.Parcel
 import android.os.Process
 import android.util.Log
@@ -20,6 +22,11 @@ import dev.phoneagent.privileged.cap.Capabilities
  * the guard and expose no capability. Everything beyond the frozen handoff methods is delegated to
  * [capabilities], which also decides what `releaseAll` has to undo.
  *
+ * An exception the wire cannot carry (see [carried]) would end the transaction without a reply,
+ * which the Proxy reads as success and a zero result (display 0, StartResult.OK,
+ * GrantResult.GRANTED). Past the uid guard, such an exception is logged and replaced by an
+ * IllegalStateException that names it.
+ *
  * [onShutdown] runs on the Binder thread and must only schedule the exit.
  */
 @Suppress("TooManyFunctions") // One override per IPrivilegedCore method; each is a one-line delegation.
@@ -28,6 +35,7 @@ internal class PrivilegedCore(
     private val capabilities: Capabilities,
     private val onShutdown: () -> Unit,
 ) : IPrivilegedCore.Stub() {
+    @Suppress("TooGenericExceptionCaught") // The last line before the native boundary, see the class comment.
     override fun onTransact(
         code: Int,
         data: Parcel,
@@ -38,7 +46,22 @@ internal class PrivilegedCore(
             val caller = Binder.getCallingUid()
             if (caller != allowedUid) throw SecurityException("uid $caller may not call the PhoneAgent helper")
         }
-        return super.onTransact(code, data, reply, flags)
+        if (code !in FIRST_CALL_TRANSACTION..LAST_CALL_TRANSACTION) return super.onTransact(code, data, reply, flags)
+        return try {
+            super.onTransact(code, data, reply, flags)
+        } catch (e: Exception) {
+            throw carried(code, e)
+        }
+    }
+
+    /** [e] itself when `Parcel.writeException` carries it, else an IllegalStateException naming it. */
+    private fun carried(
+        code: Int,
+        e: Exception,
+    ): RuntimeException {
+        if (e is RuntimeException && CARRIED.any { it.isInstance(e) }) return e
+        Log.e(TAG, "transaction $code failed with an exception the wire cannot carry", e)
+        return IllegalStateException("the helper failed: $e")
     }
 
     override fun protocolVersion(): Int = PrivilegedProtocol.VERSION
@@ -119,5 +142,21 @@ internal class PrivilegedCore(
 
         /** System transactions that could reach helper code if `dump` or `onShellCommand` were overridden. */
         val GUARDED_SYSTEM_TRANSACTIONS = setOf(DUMP_TRANSACTION, SHELL_COMMAND_TRANSACTION)
+
+        /**
+         * What `Parcel.writeException` writes and the Proxy throws again (`Parcel.getExceptionCode`;
+         * the hidden ServiceSpecificException and framework Parcelable exceptions are left out, the
+         * helper throws neither, and they would arrive as IllegalStateException).
+         */
+        val CARRIED: List<Class<out RuntimeException>> =
+            listOf(
+                SecurityException::class.java,
+                BadParcelableException::class.java,
+                IllegalArgumentException::class.java,
+                NullPointerException::class.java,
+                IllegalStateException::class.java,
+                NetworkOnMainThreadException::class.java,
+                UnsupportedOperationException::class.java,
+            )
     }
 }
