@@ -16,6 +16,10 @@ import dev.phoneagent.core.session.SessionRecord
  * not repeat an id, nor reuse one of an earlier reply in [earlier]. Ids are never renumbered,
  * since stateful protocols (Responses) refer to the provider's own ids.
  *
+ * Only a reply that ended normally may have its calls run: tool calls in a reply that stopped for
+ * [StopReason.OTHER] (incomplete, filtered, unknown) are a violation. A reply cut at the output cap
+ * ([StopReason.MAX_TOKENS]) is not; the loop records it and skips its calls (a truncation).
+ *
  * A reply must show something: with neither a tool call nor non-blank text (empty, or reasoning
  * only) it is no final answer. A reply cut at the output cap is exempt; it ends the turn
  * `MAX_TOKENS` instead.
@@ -32,10 +36,13 @@ internal fun replyProblem(
     return when {
         repeated != null -> "tool call id $repeated appears more than once in the reply"
         reused != null -> "tool call id $reused was already used in this session"
+        response.stopReason == StopReason.OTHER && ids.isNotEmpty() -> ABNORMAL
         response.stopReason != StopReason.MAX_TOKENS && !response.showsSomething() -> EMPTY
         else -> null
     }
 }
+
+private const val ABNORMAL = "tool calls in a reply that did not end normally (OTHER)"
 
 private const val EMPTY = "the reply has no text and no tool call"
 

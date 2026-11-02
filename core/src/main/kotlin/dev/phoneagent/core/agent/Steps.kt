@@ -22,7 +22,9 @@ import dev.phoneagent.core.tool.ToolControl
  * → `step/start` → the model request → the reply's first tool call (the others are SKIPPED) →
  * `step/end`. The turn ends when a reply has no tool call and no steer is queued (after
  * `turnStopping`), when a result carries [ToolControl.EndTurn], when a reply hit the output cap
- * (its calls are not run), when `preStep` refuses, at a limit, or when the request fails.
+ * (its calls are not run), when `preStep` refuses, at a limit, or when the request fails. Only
+ * calls of a reply that ended normally run: a reply that stopped for another reason with calls
+ * never gets here ([replyProblem]).
  */
 internal class Steps(
     private val loop: LoopContext,

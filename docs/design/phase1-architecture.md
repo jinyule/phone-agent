@@ -429,11 +429,11 @@ interface TaskRuntime {
 - **turn**：从 inbox 取出输入后的一次完整消化。
 - **step**：一次模型回复，加上它请求的工具调用。**每个回复只执行第一个调用**，其余的记 `SKIPPED`，模型看到结果后重新决定。
 - **attempt**：同一 step 内的一次请求（重试，或 steer 之后重发）。每个 attempt 都重新走 `request` 链，再从日志推导消息；`request/header` 只在变化时写。重试的请求和上一次相同（失败 attempt 的中断前缀不进请求），steer 之后的请求带上新输入。
-- **回复的边界校验**：回复记成 `assistant/message` 之前先校验。callId 在同一 session 内唯一，由主循环在这里保证：同一回复里不能重复，也不能和日志里已有的 callId 重复；不重新编号，因为 Responses 这类有服务端状态的协议依赖原始 id。回复还必须有可见内容：既没有工具调用、也没有非空白文字（空回复，或者只有 reasoning）就不算最终回答；撞到输出上限的回复例外，按 max-tokens 结束。不过校验就当 `ModelError.BadResponse` 交给 `requestError`：回复本身不记录，只留已显示的中断前缀和带诊断的 `assistant/attempt`，什么都不执行。
+- **回复的边界校验**：回复记成 `assistant/message` 之前先校验。callId 在同一 session 内唯一，由主循环在这里保证：同一回复里不能重复，也不能和日志里已有的 callId 重复；不重新编号，因为 Responses 这类有服务端状态的协议依赖原始 id。以 `OTHER` 结束的回复不能带工具调用（max-tokens 的回复不算违反，按截断处理）。回复还必须有可见内容：既没有工具调用、也没有非空白文字（空回复，或者只有 reasoning）就不算最终回答；撞到输出上限的回复例外，按 max-tokens 结束。不过校验就当 `ModelError.BadResponse` 交给 `requestError`：回复本身不记录，只留已显示的中断前缀和带诊断的 `assistant/attempt`，什么都不执行。
 
 **停止条件**（turn 的结束原因）：
 - 最终回答（没有工具调用、有非空白文字）→ `turnStopping` → `COMPLETED`；`end_not_done` → `END_NOT_DONE`；
-- max-tokens：这次回复的工具调用全部记 `SKIPPED`、不执行 → `MAX_TOKENS`；
+- 只执行正常结束的回复里的调用。max-tokens：回复照记，工具调用全部记 `SKIPPED`、不执行 → `MAX_TOKENS`。以其他原因结束（`StopReason.OTHER`：incomplete、被过滤、原因不明）又带着调用的回复过不了边界校验，当 `BadResponse`，同样不执行；
 - `preStep` 拒绝 → `PRE_STEP_REFUSED`；
 - **步数上限**：每个 turn 默认 80（`LoopConfig.maxStepsPerTurn`）→ `LIMIT`；
 - **turn-stopping 续跑上限**：每个 turn 默认 3 次（`maxContinuationsPerTurn`）→ `LIMIT`。
@@ -704,7 +704,7 @@ TaskRuntime 循环（每个 step，对应 §3.8 的拦截点）：
   3. request 链选模型 → 写 request/header（有变化才写）→ deriveMessages → 刷盘 → ChatModel.complete
        steer 到来、模型请求还在进行：取消这次 attempt（已输出的部分记成 interrupted），取走 steer 后重发
        工具执行中不被插话打断
-       回复先过边界校验（§3.7：callId 在 session 内唯一；不能是空回复或只有 reasoning）→ 不过就当 BadResponse 走下面的失败路径，回复不记录、不执行
+       回复先过边界校验（§3.7：callId 在 session 内唯一；以 OTHER 结束的回复不能带调用；不能是空回复或只有 reasoning）→ 不过就当 BadResponse 走下面的失败路径，回复不记录、不执行
        失败 → requestError 链（重试 / 溢出压缩 / 卸载图片 / 思考块前缀不匹配时去掉 thinking 块重试一次）
        撞到 max-tokens → 本次回复的工具调用全部 SKIPPED，turn 结束
   4. 没有工具调用 → 校验（工具调用漏成文字 / 语言是否对）→ 作为最终回答 → turnStopping（空回复在第 3 步就当 BadResponse 了）

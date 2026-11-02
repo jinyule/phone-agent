@@ -165,4 +165,52 @@ class AgentLoopReplyTest {
             assertEquals(emptyList<AssistantAttempt>(), events.only<AssistantAttempt>())
             assertEquals(Phase.Idle, loop.phase.value)
         }
+
+    @Test
+    fun `tool calls in a reply that ended for another reason are a bad response and do not run`() =
+        runTest {
+            val tap = FakeTool("tap", RiskClass.WRITE)
+            val model =
+                FakeChatModel()
+                    .calls(call("c1", "tap"), stopReason = StopReason.OTHER)
+                    .answers("好了")
+            val harness = LoopHarness(this, model, tools = listOf(tap), interceptors = retrying)
+            val loop = harness.start()
+            loop.followup(text("go"))
+            advanceUntilIdle()
+
+            val events = harness.events()
+            assertEquals(Phase.Done, loop.phase.value)
+            assertEquals(emptyList<Any>(), tap.calls)
+            assertEquals(emptyList<ToolCallRecorded>(), events.only<ToolCallRecorded>())
+            assertEquals(
+                "bad response: tool calls in a reply that did not end normally (OTHER)",
+                events.only<AssistantAttempt>().single().message,
+            )
+        }
+
+    @Test
+    fun `without a retry calls of an abnormal reply fail the turn, and a plain answer ending so still counts`() =
+        runTest {
+            val tap = FakeTool("tap", RiskClass.WRITE)
+            val model =
+                FakeChatModel()
+                    .calls(call("c1", "tap"), stopReason = StopReason.OTHER)
+                    .answers("好了", StopReason.OTHER)
+            val harness = LoopHarness(this, model, tools = listOf(tap))
+            val loop = harness.start()
+            loop.followup(text("go"))
+            advanceUntilIdle()
+            assertEquals(Phase.Idle, loop.phase.value)
+            loop.followup(text("again"))
+            advanceUntilIdle()
+
+            val events = harness.events()
+            assertEquals(emptyList<Any>(), tap.calls)
+            assertEquals(
+                listOf(TurnEndReason.FAILED, TurnEndReason.COMPLETED),
+                events.only<TurnEnded>().map { it.reason },
+            )
+            assertEquals(Phase.Done, loop.phase.value)
+        }
 }
