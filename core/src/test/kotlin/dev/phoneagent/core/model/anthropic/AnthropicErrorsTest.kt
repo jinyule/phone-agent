@@ -145,6 +145,19 @@ class AnthropicErrorsTest {
     }
 
     @Test
+    fun `a redirect target is masked before it is cut, so a key across the cut leaves no piece`() {
+        val key = "plain-placeholder-location-0001"
+        val prefix = "https://proxy.example.com/"
+        val location = prefix + "a".repeat(KEY_AT - prefix.length) + key
+        val error =
+            AnthropicErrors.fromHttp(307, headersOf("Location", location), "", Kit.NOW_MS, Redactor(listOf(key)))
+        val detail = (error as ModelError.InvalidRequest).detail
+        val pieces = key.windowed(PIECE).filter { it in detail }
+        assertTrue(pieces.isEmpty(), "pieces of the key in the target: ${pieces.size} (not shown)")
+        assertTrue(detail.contains(prefix + "a".repeat(KEY_AT - prefix.length)), "the target up to the key is kept")
+    }
+
+    @Test
     fun `stream error events map by type, unknown types are server errors`() {
         fun stream(type: String?) = AnthropicErrors.fromStream(AnthropicError(type, "boom"))
         assertEquals(ModelErrorKind.OVERLOADED, stream("overloaded_error").kind)
@@ -165,6 +178,12 @@ class AnthropicErrorsTest {
         DateTimeFormatter.RFC_1123_DATE_TIME.format(Instant.ofEpochMilli(ms).atZone(ZoneOffset.UTC))
 
     companion object {
+        /** Where the key starts in the redirect target: before the 300-character cut, ending past it. */
+        private const val KEY_AT = 290
+
+        /** The shortest piece of a key that counts as part of it. */
+        private const val PIECE = 6
+
         @JvmStatic
         fun cases(): List<Array<Any>> =
             listOf(
