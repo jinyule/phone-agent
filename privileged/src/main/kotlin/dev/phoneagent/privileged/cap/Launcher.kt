@@ -222,40 +222,38 @@ private class ActivityStarter(
     }
 
     /**
-     * `am start` with the whole intent: component, action (unless MAIN), data, type, categories
-     * and flags, so it starts what `startActivityAsUser` would have. Extras have no faithful
-     * spelling here yet, so an intent with extras is not started this way (false).
+     * `am start` with the whole intent: component, action (MAIN too: MAIN with LAUNCHER and without
+     * it are different intents), data, type, categories and flags, so it starts what
+     * `startActivityAsUser` would have. Extras have no faithful spelling here yet, so an intent
+     * with extras is not started this way (false).
      */
     private fun amStart(
         displayId: Int,
         intent: Intent,
     ): Boolean {
-        val component = intent.component
-        val action = intent.action?.takeUnless { it == Intent.ACTION_MAIN && component != null }
         val problem =
             when {
                 intent.extras?.isEmpty == false -> "am start cannot carry its extras"
-                component == null && action == null -> "it names neither a component nor an action"
+                intent.component == null && intent.action == null -> "it names neither a component nor an action"
                 else -> null
             }
         if (problem != null) {
             Log.w(TAG, "not falling back to am start for $intent: $problem")
             return false
         }
-        return commands.run(amArguments(displayId, intent, action)).ok
+        return commands.run(amArguments(displayId, intent)).ok
     }
 
-    /** `am start` arguments for [intent], whose [action] (null for MAIN with a component) is given. */
+    /** `am start` arguments for [intent]. */
     private fun amArguments(
         displayId: Int,
         intent: Intent,
-        action: String?,
     ): List<String> =
         buildList {
             val component = intent.component
             addAll(listOf("am", "start", "--display", "$displayId"))
             component?.let { addAll(listOf("-n", it.flattenToShortString())) }
-            action?.let { addAll(listOf("-a", it)) }
+            intent.action?.let { addAll(listOf("-a", it)) }
             intent.dataString?.let { addAll(listOf("-d", it)) }
             intent.type?.let { addAll(listOf("-t", it)) }
             intent.categories?.forEach { addAll(listOf("-c", it)) }

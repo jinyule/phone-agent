@@ -1,5 +1,6 @@
 package dev.phoneagent.privileged.cap
 
+import android.content.ComponentName
 import android.content.Intent
 import android.content.IntentFilter
 import android.net.Uri
@@ -43,6 +44,12 @@ class AmFallbackTest {
                 addDataType("image/*")
             }
         shadowOf(helper.context.packageManager).addIntentFilterForActivity(component, image)
+        val launcher =
+            IntentFilter(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_DEFAULT)
+                addCategory(Intent.CATEGORY_LAUNCHER)
+            }
+        shadowOf(helper.context.packageManager).addIntentFilterForActivity(component, launcher)
         display = helper.display()
         helper.bridge.atm.startUnavailable = true
     }
@@ -83,6 +90,17 @@ class AmFallbackTest {
                 "-f",
                 "$NEW_TASK",
             )
+        assertEquals(listOf(expected), helper.commands.of("am"))
+    }
+
+    @Test
+    fun aLauncherStartWithAComponentKeepsActionMain() {
+        val intent =
+            Intent(Intent.ACTION_MAIN)
+                .addCategory(Intent.CATEGORY_LAUNCHER)
+                .setComponent(ComponentName(HANDLER, "$HANDLER.Main"))
+        assertEquals(StartResult.OK, start(intent))
+        val expected = am("-a", Intent.ACTION_MAIN, "-c", Intent.CATEGORY_LAUNCHER, "-f", "$NEW_TASK")
         assertEquals(listOf(expected), helper.commands.of("am"))
     }
 
