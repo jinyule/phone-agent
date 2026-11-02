@@ -69,4 +69,26 @@ class DeltaLedgerTest {
             "one more is fine",
         )
     }
+
+    @Test
+    fun `announced calls in another order than the reply's are a contradiction`() {
+        val second = ToolCallId("call_2")
+        val calls = listOf(Part.ToolCall(id, "tap", "{}"), Part.ToolCall(second, "swipe", "{}"))
+        val late = DeltaLedger(Deltas(), EchoGuard.NONE)
+        late.started(second, "swipe")
+        assertEquals(listOf("calls"), late.catchUp(calls), "a call the reply puts first was announced after")
+        val swapped = DeltaLedger(Deltas(), EchoGuard.NONE)
+        swapped.started(second, "swipe")
+        swapped.started(id, "tap")
+        assertEquals(listOf("calls"), swapped.catchUp(calls), "both announced, the other way round")
+        val between = DeltaLedger(Deltas(), EchoGuard.NONE)
+        between.started(id, "tap")
+        between.started(second, "swipe")
+        val third = Part.ToolCall(ToolCallId("call_3"), "type", "{}")
+        assertEquals(listOf("calls"), between.catchUp(listOf(calls[0], third, calls[1])), "one inserted between")
+        val prefix = DeltaLedger(Deltas(), EchoGuard.NONE)
+        prefix.started(id, "tap")
+        prefix.started(second, "swipe")
+        assertEquals(emptyList<String>(), prefix.catchUp(calls + third), "calls added at the end only")
+    }
 }

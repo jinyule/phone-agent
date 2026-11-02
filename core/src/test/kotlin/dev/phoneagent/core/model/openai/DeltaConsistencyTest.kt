@@ -155,4 +155,32 @@ class DeltaConsistencyTest {
             assertEquals(listOf("call_1"), deltas.started.map { it.id.value }, "the preview showed it")
             assertEquals(JsonArray(listOf(JsonPrimitive("calls"))), response.providerMetadata?.get(PREVIEW_DIVERGED))
         }
+
+    @Test
+    fun `a final output with a call before the ones the stream showed is flagged`() =
+        runTest {
+            fun call(n: Int) =
+                """{"type":"function_call","id":"fc_$n","call_id":"call_$n","name":"tap","arguments":"{}"}"""
+            server.enqueueSse(
+                listOf(
+                    """{"type":"response.output_item.added","output_index":1,"item":${call(2)}}""",
+                    """{"type":"response.completed","response":{"status":"completed","output":[${call(
+                        1,
+                    )},${call(2)}]}}""",
+                ).joinToString("") { "data: $it\n\n" },
+            )
+            val deltas = Deltas()
+            val response = responses().complete(Kit.request(), deltas)
+            assertEquals(
+                listOf("call_1", "call_2"),
+                response.toolCalls.map { it.id.value },
+                "the final output is the reply",
+            )
+            assertEquals(
+                listOf("call_2", "call_1"),
+                deltas.started.map { it.id.value },
+                "the preview showed them reversed",
+            )
+            assertEquals(JsonArray(listOf(JsonPrimitive("calls"))), response.providerMetadata?.get(PREVIEW_DIVERGED))
+        }
 }

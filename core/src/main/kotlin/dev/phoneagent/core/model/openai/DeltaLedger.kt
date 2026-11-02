@@ -24,7 +24,9 @@ internal class DeltaLedger(
     private val text = StringBuilder()
     private val reasoning = StringBuilder()
     private val args = LinkedHashMap<ToolCallId, StringBuilder>()
-    private val names = HashMap<ToolCallId, String>()
+
+    // In the order the calls were announced.
+    private val names = LinkedHashMap<ToolCallId, String>()
     private val textWindow = guard.Window()
     private val reasoningWindow = guard.Window()
     private val argsWindows = HashMap<ToolCallId, EchoGuard.Window>()
@@ -75,17 +77,18 @@ internal class DeltaLedger(
     /**
      * Shows whatever of [parts] the deltas have not shown yet (see the class contract). Returns the
      * channels where [parts] do not extend what was shown, in this order: `text`, `reasoning`,
-     * `calls` (an announced call is missing from [parts] or has another name there), `args`;
-     * empty when the deltas add up.
+     * `calls` (the announced calls, in announcement order, are not the first calls of [parts] with
+     * the same names: one is missing, renamed, or in another order, which counts as well; calls
+     * that only follow them are not a contradiction), `args`; empty when the deltas add up.
      */
     fun catchUp(parts: List<Part>): List<String> {
         val diverged = mutableListOf<String>()
-        val calls = parts.filterIsInstance<Part.ToolCall>().associate { it.id to it.name }
+        val calls = parts.filterIsInstance<Part.ToolCall>()
         if (!extend(text, parts.filterIsInstance<Part.Text>().joinToString("") { it.text }, ::text)) diverged += "text"
         val summaries = parts.filterIsInstance<Part.Reasoning>().mapNotNull { it.summary }
         if (!extend(reasoning, summaries.joinToString(TEXT_SEPARATOR), ::reasoning)) diverged += "reasoning"
-        if (names.any { (id, name) -> calls[id] != name }) diverged += "calls"
-        for (call in parts.filterIsInstance<Part.ToolCall>()) {
+        if (calls.take(names.size).map { it.id to it.name } != names.toList()) diverged += "calls"
+        for (call in calls) {
             started(call.id, call.name)
             if (!extend(checkNotNull(args[call.id]), call.argsJson) { args(call.id, it) }) diverged += "args"
         }
