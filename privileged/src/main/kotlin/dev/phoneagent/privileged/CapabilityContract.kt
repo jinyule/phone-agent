@@ -13,7 +13,7 @@ public object StartResult {
     /** The user has this app visible on the main screen; nothing was started. */
     public const val IN_USE_ON_MAIN: Int = 1
 
-    /** Nothing can handle the intent (no launcher entry, no matching activity). */
+    /** Nothing can handle the intent (no launcher entry, no matching activity, no such component). */
     public const val NOT_FOUND: Int = 2
 
     /** The helper could not inspect or start it; the reason is in logcat. */
@@ -27,7 +27,8 @@ public object StartResult {
 
     /**
      * Refused by the helper: not its own display, another user, a malformed intent, or (protocol
-     * 2) an intent that carries another intent.
+     * 2) an intent that carries another intent, has several handlers, or names an activity the
+     * app itself could not start (not exported, or guarded by a permission the app lacks).
      */
     public const val REFUSED: Int = 6
 

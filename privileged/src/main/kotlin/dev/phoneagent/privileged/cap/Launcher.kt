@@ -10,11 +10,9 @@
  */
 package dev.phoneagent.privileged.cap
 
-import android.annotation.SuppressLint
 import android.app.ActivityOptions
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.util.Log
 import dev.phoneagent.privileged.StartResult
 
@@ -23,13 +21,15 @@ import dev.phoneagent.privileged.StartResult
  *
  * What the helper guarantees, whatever the app asks for: the target display is one of its own, the
  * app is the copy installed for the helper's user, an app the user has visible on the main screen
- * is never started, a cold start never kills a process whose tasks live elsewhere, and the intent
- * cannot hand out URI permissions or carry another intent ([NestedIntents]). Which intents the agent may send at all is decided by the app's
- * PolicyEngine (phase1-architecture §6); the helper is not a second policy.
+ * is never started, a cold start never kills a process whose tasks live elsewhere, the intent can
+ * neither hand out URI permissions nor carry another intent ([NestedIntents]), and only an
+ * activity the app's own uid could start is started ([LaunchTargets]). Which intents the agent
+ * may send at all is decided by the app's PolicyEngine (phase1-architecture §6); the helper is not
+ * a second policy.
  */
 internal class Launcher(
     platform: Platform,
-    private val context: Context,
+    context: Context,
     app: ServedApp,
     private val displays: VirtualDisplays,
     private val tasks: TaskTable,
@@ -39,6 +39,7 @@ internal class Launcher(
     private val commands = platform.commands
     private val starter = ActivityStarter(platform.bridge, commands)
     private val keyguard = Keyguard(platform.bridge)
+    private val targets = LaunchTargets(context, app)
 
     /** Starts [intent] on [displayId]; see [StartResult]. */
     fun start(
@@ -108,21 +109,32 @@ internal class Launcher(
         displayId: Int,
         intent: Intent,
         cold: Boolean,
-    ): Int {
-        val candidates = candidates(intent)
-        val snapshot = if (candidates.isEmpty()) emptyList() else tasks.rows()
-        val gate =
-            if (candidates.isEmpty()) {
-                Log.w(TAG, "nothing can handle $intent")
-                StartResult.NOT_FOUND
-            } else {
-                LaunchGate.refuse(snapshot, candidates, displayId, displays.ids(), myUser)
+    ): Int =
+        when (val target = targets.check(intent)) {
+            is LaunchTargets.Target.Refused -> {
+                Log.w(TAG, "not starting on display $displayId: ${target.reason}")
+                target.result
             }
+
+            is LaunchTargets.Target.Allowed -> {
+                // Start exactly the activity that was checked, not whatever resolves later.
+                gated(displayId, Intent(intent).setComponent(target.activity), cold)
+            }
+        }
+
+    private fun gated(
+        displayId: Int,
+        intent: Intent,
+        cold: Boolean,
+    ): Int {
+        val target = checkNotNull(intent.component).packageName
+        val snapshot = tasks.rows()
+        val gate = LaunchGate.refuse(snapshot, listOf(target), displayId, displays.ids(), myUser)
         if (gate != null) {
-            Log.i(TAG, "not starting $candidates on display $displayId: StartResult $gate")
+            Log.i(TAG, "not starting $target on display $displayId: StartResult $gate")
             return gate
         }
-        return started(displayId, intent, cold, snapshot, candidates.singleOrNull())
+        return started(displayId, intent, cold, snapshot, target)
     }
 
     private fun started(
@@ -130,42 +142,13 @@ internal class Launcher(
         intent: Intent,
         cold: Boolean,
         snapshot: List<TaskRow>,
-        target: String?,
+        target: String,
     ): Int {
-        val coldDone = cold && target != null && restart(snapshot, target, displayId)
+        val coldDone = cold && restart(snapshot, target, displayId)
         if (!starter.start(displayId, intent)) return StartResult.ERROR
         ownership.remember(tasks.topTask(displayId))
         return if (cold && !coldDone) StartResult.COLD_IGNORED else StartResult.OK
     }
-
-    /** Packages that can handle [intent]: the named component, or whatever resolves. */
-    private fun candidates(intent: Intent): List<String> {
-        val component = intent.component
-        val pkg = intent.`package`
-        return when {
-            component != null -> listOf(component.packageName)
-
-            // A package with no matching activity may still have a launcher entry.
-            pkg != null -> resolve(intent).ifEmpty { launchable(pkg) }
-
-            else -> resolve(intent)
-        }
-    }
-
-    // The helper runs as the shell user, which sees every package; manifest <queries> would not
-    // apply to it anyway (app_process is not this app's process).
-    @SuppressLint("QueryPermissionsNeeded")
-    private fun resolve(intent: Intent): List<String> =
-        reflecting("PackageManager.queryIntentActivities") {
-            context.packageManager
-                .queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
-                .map { it.activityInfo.packageName }
-                .distinct()
-        }
-
-    /** The launcher entry of [pkg], when it has one. */
-    private fun launchable(pkg: String): List<String> =
-        if (context.packageManager.getLaunchIntentForPackage(pkg) != null) listOf(pkg) else emptyList()
 
     /**
      * Force-stops [target] so it starts from its first screen. Only when every task of the app is

@@ -22,6 +22,7 @@ phase1-architecture §3.5 列出了 `IPrivilegedCore` 的能力面，调研报�
    - 锁屏时什么都不启动（`LOCKED`，协议 2 新增）：用户不在场时，agent 不该打开任何 App。锁屏状态读不到也按锁屏处理。
    - 冷启动只在"这个 App 的任务全在这块屏上"时才 `am force-stop`，否则降级为普通启动并返回 `COLD_IGNORED`。
    - intent 里的 `FLAG_GRANT_*`（URI 授权）在启动前被清掉：助手是 shell 身份，不替任何人授予 URI 权限。
+   - 只启动 App 自己的 uid 也能启动的 Activity（`LaunchTargets`）：intent 先解析成唯一的 Activity，它必须已导出（或属于本 App），它要求的权限 App 的 uid 必须已获得（`checkPermission(perm, appUid)`）；启动时把 component 设成检查过的那个。解析不出来是 `NOT_FOUND`；能处理它的 Activity 不止一个、未导出、缺权限都是 `REFUSED`。例如 PhoneAgent 没有 `CALL_PHONE`，`ACTION_CALL tel:` 就被拒绝。助手以 shell 身份运行，权限远多于 App，这一条只管"调用身份的权限上限"，付款、发送这类内容判定仍归 PolicyEngine。
    - 带嵌套 intent 的请求一律拒绝（`REFUSED`，`NestedIntents`）：extras 里任何一层的 Intent、Intent 数组或列表，`ACTION_CHOOSER`，selector，带 intent 的 ClipData 条目；extras 读不出来也拒绝。嵌套的 intent 会被接收方再启动一次，助手没检查过它启动什么、用谁的权限。ClipData 里的普通 URI 照旧允许。
    - 只支持主用户（`userId` 必须是助手自己的用户或 `USER_CURRENT`）。分身和工作资料留到以后。
    - `injectKey` 只放行导航和编辑键（`PressKeys`）。音量、电源、Home、最近任务、助手、相机、媒体键作用于整机而不是 agent 的屏，一律拒绝。
@@ -68,6 +69,7 @@ phase1-architecture §3.5 列出了 `IPrivilegedCore` 的能力面，调研报�
 - 跳出回收依赖 App 先调 `watchMainScreen`：没开窗口时冒到主屏的任务不算 `spilled`，`moveTask` 会拒绝。§7.2 的主循环本来就在每个动作前调它，WP14 实现 ScreenPort 时要保证这一点。
 - 窗口内冒到主屏的任务都可以被挪回，包括用户在这 3 秒内自己切换到的 App。窗口短、且只有 App 显式调用才会挪，但这是一个真实的权衡；要更严格的话，需要把"是不是 agent 引起的"判定（Mika 的 `MainScreenSpill`）也做进来，那属于 WP14 的 ScreenPort。
 - 只支持主用户：分身、工作资料里的 App 现在启动不了（`StartResult.REFUSED`）。
+- 有多个 App 能处理的链接（比如装了两个浏览器）会被拒绝：助手问不了用户选哪个。WP14 要先在 App 侧解析出用户的默认处理者，再把明确的 component 传进来。
 - WP14 的 ScreenPort 要在后台屏上把 `phone_key home` 直接变成 Failed（原因见决定 1），不能交给 `injectKey`：助手的拒绝只是一个 false，模型看不到原因。
 - 只在 API 36 模拟器上验证过。API 30–33 没有 `OWN_FOCUS`，虚拟屏会抢主屏焦点，这正是 D2 "后台屏要求 API 34+"的原因；API 34/35 的行为未实测。
 - `releaseAll` 会解除静音、释放所有屏、清掉任务归属，屏上的任务随之销毁（`DESTROY_CONTENT_ON_REMOVAL`）。三类资源分开释放，每类里的每个资源（每块屏、每个被静音的包）也单独释放：某一个抛异常只记日志，其余照常释放，失败的那个留到下一次 `releaseAll` 再试；`releaseAll` 本身不抛（与 A 段 `HeldResource` 的语义一致，代码在 `cap/Release.kt`）。单独的 `releaseDisplay` 失败时，屏也留在助手手里，由下一次 `releaseAll` 重试。App 死后的宽限期语义不变（A 段 ADR），所以 App 重启后虚拟屏上的任务不会保留。要让任务跨 App 重启存活，需要新的协议方法，见 A 段 ADR 的"后果"。

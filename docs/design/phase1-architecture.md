@@ -318,6 +318,7 @@ interface IPrivilegedCore {
 **助手自己保证的几条**（无论 App 传什么，WP12 B 段）：
 - 只往自己建的屏启动、注入；主屏和别人的屏一律拒绝。
 - 用户在主屏**可见**地用着的 App 不启动（`StartResult.IN_USE_ON_MAIN`）；看不清任务列表时也不启动。
+- 只启动 App 自己的 uid 也能启动的 Activity：解析成唯一的 Activity，要求它已导出（或属于本 App）、它要求的权限 App 已获得，并且只启动检查过的这一个；解析不出是 `NOT_FOUND`，多个候选、未导出、缺权限是 `REFUSED`。
 - 带嵌套 intent 的请求一律拒绝（`StartResult.REFUSED`）：extras 里任何一层的 Intent / Intent[] / Intent 列表、`ACTION_CHOOSER`、selector、带 intent 的 ClipData 条目，以及读不出来的 extras。
 - 锁屏时什么都不启动（`StartResult.LOCKED`）。锁屏状态读自 `IWindowManager.isKeyguardLocked()`，读不到就当作锁屏；不用 `KeyguardManager`，它在调用失败时会回答"没锁"。
 - 冷启动只在"这个 App 的任务全在这块屏上"时才 force-stop，否则降级为普通启动并返回 `COLD_IGNORED`。
