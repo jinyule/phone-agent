@@ -246,12 +246,14 @@ public class AgentLoop private constructor(
 
         /**
          * Reopens the session in [AgentSetup.files] after the process ended, possibly mid-turn, and
-         * repairs it (D14): calls without a result get NOT_STARTED or OUTCOME_UNKNOWN (observe first),
-         * an open prompt is withdrawn, an open step and turn end `FAILED`, then `session/resumed`.
-         * Nothing continues on its own: queued input stays queued until the next followup or steer.
-         * Throws what `SessionStore.open` throws, and [IllegalArgumentException] when the log
-         * belongs to another task. When it throws or is cancelled after opening the log, it closes
-         * the log again.
+         * repairs it (D14): calls without a result get NOT_STARTED without a `tool/started`, else
+         * OUTCOME_UNKNOWN (observe first when it may have changed the phone), an open prompt is
+         * withdrawn, an open step and turn end `FAILED`, then `session/resumed`. Nothing continues
+         * on its own: queued input stays queued until the next followup or steer. Throws what
+         * `SessionStore.open` throws, and [IllegalArgumentException] when the log belongs to
+         * another task or ends with a final stop (`task/stopped` with USER or LIMIT: nothing may
+         * follow it, so such a task is never revived). When it throws or is cancelled after
+         * opening the log, it closes the log again.
          */
         public suspend fun resume(
             setup: AgentSetup,

@@ -123,12 +123,15 @@ public data class LoopTexts(
     val toolError: String = "工具执行出错，异常类型：",
     /** A `toolExecute` extension replaced the judged call or ran it twice. */
     val interceptorFault: String = "未按判定执行：有扩展篡改了这次调用。",
-    /** The task stopped before the call ran. */
+    /** Repair: the task stopped and the call has no `tool/started`, so it never ran. */
     val stoppedBeforeRun: String = "未执行：任务已经停止。",
-    /** The task stopped while the call ran. */
+    /** Repair: the task stopped and the call has a `tool/started` but no result. */
     val stoppedWhileRunning: String = "这次调用运行期间，任务被停止了。",
-    /** Repair: the step failed before the call was dispatched. */
+    /**
+     * Repair: the step failed (or the process died) and the call has no `tool/started`, so it
+     * never ran; a call still waiting for its approval counts too.
+     */
     val notStarted: String = "未执行：这一步在调用开始之前就失败了。",
-    /** Repair: the call was dispatched but no result was recorded. */
+    /** Repair: the step failed (or the process died) and the call has a `tool/started` but no result. */
     val outcomeUnknown: String = "这一步在调用运行期间失败了，结果未知。",
 )

@@ -23,8 +23,9 @@ import dev.phoneagent.core.tool.ToolResult
  * The interceptors of one task, per fixed point (phase1 §3.8), each list in chain order (add to
  * the defaults with `copy`). The loop adds its own fixed parts around them: the step limit before
  * `preStep`, the request flush after `request`, the PolicyEngine guard after `toolPreExecute`, the
- * write-action flush before `toolExecute` and the tool timeout around the whole `toolExecute`
- * chain. A throwing interceptor ends the current turn only.
+ * tool timeout around the whole `toolExecute` chain, and the chain's end, where every call (READ
+ * included) records and flushes `tool/started`, then runs. A throwing interceptor ends the current
+ * turn only.
  *
  * @property preStep before every step: refuse it, append runtime context, compact.
  * @property request before every attempt: choose the model and reasoning; cannot touch messages.
