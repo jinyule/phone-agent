@@ -1,0 +1,115 @@
+package dev.phoneagent.core.model.anthropic
+
+import dev.phoneagent.core.model.Usage
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.longOrNull
+import kotlinx.serialization.json.put
+
+/**
+ * The message-level facts of one reply, from `message_start` and `message_delta`: the stop
+ * reason and its details, usage, and what goes into `providerMetadata`. Several `message_delta`
+ * events may come; the last value of each field wins.
+ */
+internal class MessageFacts(
+    private val protocol: Protocol,
+) {
+    private val usage = LinkedHashMap<String, JsonElement>()
+    private var messageId: String? = null
+    private var servedModel: String? = null
+    private var stopSequence: JsonElement? = null
+    private var stopDetails: JsonObject? = null
+    private var inputTransformations: JsonElement? = null
+    private var contextManagement: JsonElement? = null
+
+    /** The last `stop_reason`, or `null` when none came. */
+    var stopReason: String? = null
+        private set
+
+    /** `stop_details.category` of a refusal. */
+    val refusalCategory: String? get() = stopDetails?.str("category")
+
+    /** The `message` of `message_start`; it must carry no content yet. */
+    fun start(message: JsonObject) {
+        messageId = message.str("id")
+        servedModel = message.str("model")
+        (message["content"] as? JsonArray)?.let { if (it.isNotEmpty()) protocol.bad("message_start with content") }
+        message.obj("usage")?.let(::merge)
+        extras(message)
+    }
+
+    /** A `message_delta` event. */
+    fun delta(event: JsonObject) {
+        val delta = event.obj("delta") ?: protocol.bad("message_delta without a delta")
+        if ("stop_reason" in delta) stopReason = delta.str("stop_reason")
+        if ("stop_sequence" in delta) stopSequence = delta["stop_sequence"]?.orNull()
+        if ("stop_details" in delta) stopDetails = delta.obj("stop_details")
+        event.obj("usage")?.let(::merge)
+        extras(event)
+    }
+
+    /**
+     * Usage in neutral terms; `null` when the reply carried none. Input counts the uncached,
+     * cache-read and cache-written tokens together.
+     */
+    fun usage(): Usage? {
+        if (usage.isEmpty()) return null
+        val input = count("input_tokens")
+        val read = count("cache_read_input_tokens")
+        val written = count("cache_creation_input_tokens")
+        val thinking = (usage["output_tokens_details"] as? JsonObject)?.let { count(it["thinking_tokens"]) }
+        val total = input.toLong() + read + written
+        if (total > Int.MAX_VALUE) protocol.bad("input token total $total is out of range")
+        return Usage(
+            inputTokens = total.toInt(),
+            outputTokens = count("output_tokens"),
+            cacheReadTokens = read,
+            cacheWriteTokens = written,
+            reasoningTokens = thinking,
+        )
+    }
+
+    /** `providerMetadata`: identity, stop details, server-side edits and any fallback. */
+    fun metadata(
+        reason: String,
+        content: ContentBlocks.Assembled,
+    ): JsonObject =
+        buildJsonObject {
+            messageId?.let { put("id", it) }
+            servedModel?.let { put("model", it) }
+            put("stop_reason", reason)
+            stopSequence?.let { put("stop_sequence", it) }
+            stopDetails?.let { put("stop_details", it) }
+            inputTransformations?.let { put("input_transformations", it) }
+            contextManagement?.let { put("context_management", it) }
+            usage["iterations"]?.let { put("usage_iterations", it) }
+            if (content.fallbacks.isNotEmpty()) put("fallbacks", JsonArray(content.fallbacks))
+            if (content.discarded > 0) put("fallback_discarded", content.discarded)
+            if (content.diverged.isNotEmpty()) put(PREVIEW_DIVERGED, JsonArray(content.diverged.map(::JsonPrimitive)))
+        }
+
+    private fun extras(source: JsonObject) {
+        source["input_transformations"]?.orNull()?.let { inputTransformations = it }
+        source["context_management"]?.orNull()?.let { contextManagement = it }
+    }
+
+    /** Usage values are running totals: a later value replaces an earlier one. */
+    private fun merge(update: JsonObject) {
+        update.forEach { (key, value) -> if (value !is JsonNull) usage[key] = value }
+    }
+
+    private fun count(key: String): Int = count(usage[key]) ?: 0
+
+    private fun count(value: JsonElement?): Int? {
+        if (value == null || value is JsonNull) return null
+        val long =
+            (value as? JsonPrimitive)?.takeUnless { it.isString }?.longOrNull
+                ?: protocol.bad("usage value $value is not a count")
+        if (long !in 0..Int.MAX_VALUE) protocol.bad("usage value $long is out of range")
+        return long.toInt()
+    }
+}

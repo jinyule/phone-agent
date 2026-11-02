@@ -1,0 +1,12 @@
+{
+  "source": "constructed: message_stop without any stop_reason",
+  "expect": {
+    "error": {
+      "kind": "BAD_RESPONSE",
+      "message": "bad response: message_stop without a stop_reason"
+    },
+    "deltas": [
+      "text: x"
+    ]
+  }
+}

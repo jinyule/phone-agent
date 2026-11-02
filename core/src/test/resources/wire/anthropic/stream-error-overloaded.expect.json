@@ -1,0 +1,12 @@
+{
+  "source": "constructed from the Messages streaming reference and the Java SDK 3.3.0 event types; not verified against real Claude; error event after output started",
+  "expect": {
+    "error": {
+      "kind": "OVERLOADED",
+      "message": "provider overloaded"
+    },
+    "deltas": [
+      "text: 正在"
+    ]
+  }
+}

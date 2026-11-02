@@ -1,0 +1,27 @@
+{
+  "source": "recorded 2026-11-02 from the local Messages gateway serving gpt-6-luna (wire format only, not Claude)",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "text",
+          "text": "pong"
+        }
+      ],
+      "stopReason": "END_TURN",
+      "usage": {
+        "inputTokens": 3489,
+        "outputTokens": 5,
+        "cacheReadTokens": 3328
+      },
+      "providerMetadata": {
+        "id": "msg_resp_03671491cbee6394016ae7e38b2c908197b0222d96947588a9",
+        "model": "gpt-6-luna",
+        "stop_reason": "end_turn"
+      }
+    },
+    "deltas": [
+      "text: pong"
+    ]
+  }
+}

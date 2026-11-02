@@ -1,0 +1,47 @@
+{
+  "source": "constructed: a whole Message object, as a server that ignores stream:true sends it",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "reasoning",
+          "provider": "claude",
+          "model": "claude-opus-5-5",
+          "kind": "ANTHROPIC_THINKING",
+          "opaque": {
+            "type": "thinking",
+            "thinking": "查天气。",
+            "signature": "SnNvbi1ub3QtcmVhbA=="
+          },
+          "summary": "查天气。"
+        },
+        {
+          "type": "text",
+          "text": "我来查。"
+        },
+        {
+          "type": "tool_call",
+          "id": "toolu_01Json",
+          "name": "get_weather",
+          "argsJson": "{\"city\":\"巴黎\",\"reason\":\"查天气\"}"
+        }
+      ],
+      "stopReason": "TOOL_USE",
+      "usage": {
+        "inputTokens": 20,
+        "outputTokens": 30
+      },
+      "providerMetadata": {
+        "id": "msg_01Json",
+        "model": "claude-opus-5-5",
+        "stop_reason": "tool_use"
+      }
+    },
+    "deltas": [
+      "reasoning: 查天气。",
+      "text: 我来查。",
+      "started: toolu_01Json get_weather",
+      "args: toolu_01Json {\"city\":\"巴黎\",\"reason\":\"查天气\"}"
+    ]
+  }
+}

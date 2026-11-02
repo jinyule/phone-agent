@@ -1,0 +1,27 @@
+{
+  "source": "constructed from the Messages streaming reference and the Java SDK 3.3.0 event types; not verified against real Claude",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "text",
+          "text": "巴黎今天晴。"
+        }
+      ],
+      "stopReason": "END_TURN",
+      "usage": {
+        "inputTokens": 25,
+        "outputTokens": 15
+      },
+      "providerMetadata": {
+        "id": "msg_01Test",
+        "model": "claude-opus-5-5",
+        "stop_reason": "end_turn"
+      }
+    },
+    "deltas": [
+      "text: 巴黎今天",
+      "text: 晴。"
+    ]
+  }
+}

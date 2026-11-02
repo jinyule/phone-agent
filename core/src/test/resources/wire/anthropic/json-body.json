@@ -1,0 +1,34 @@
+{
+  "id": "msg_01Json",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-opus-5-5",
+  "content": [
+    {
+      "type": "thinking",
+      "thinking": "查天气。",
+      "signature": "SnNvbi1ub3QtcmVhbA=="
+    },
+    {
+      "type": "text",
+      "text": "我来查。"
+    },
+    {
+      "type": "tool_use",
+      "id": "toolu_01Json",
+      "name": "get_weather",
+      "input": {
+        "city": "巴黎",
+        "reason": "查天气"
+      }
+    }
+  ],
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 20,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "output_tokens": 30
+  }
+}

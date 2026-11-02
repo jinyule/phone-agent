@@ -1,0 +1,22 @@
+: source: recorded 2026-11-02 from the local Messages gateway serving gpt-6-luna (wire format only, not Claude)
+
+: keepalive
+: keepalive
+event: message_start
+data: {"message":{"content":[],"id":"msg_resp_03671491cbee6394016ae7e38b2c908197b0222d96947588a9","model":"gpt-6-luna","role":"assistant","stop_reason":null,"stop_sequence":null,"type":"message","usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}},"type":"message_start"}
+
+event: content_block_start
+data: {"content_block":{"text":"","type":"text"},"index":0,"type":"content_block_start"}
+
+event: content_block_delta
+data: {"delta":{"text":"pong","type":"text_delta"},"index":0,"type":"content_block_delta"}
+
+event: content_block_stop
+data: {"index":0,"type":"content_block_stop"}
+
+event: message_delta
+data: {"delta":{"stop_reason":"end_turn","stop_sequence":null},"type":"message_delta","usage":{"input_tokens":161,"output_tokens":5,"cache_read_input_tokens":3328,"cache_creation_input_tokens":0}}
+
+event: message_stop
+data: {"type":"message_stop"}
+

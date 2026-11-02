@@ -1,0 +1,12 @@
+{
+  "source": "constructed from the Messages streaming reference and the Java SDK 3.3.0 event types; not verified against real Claude; decline after partial output, null category",
+  "expect": {
+    "error": {
+      "kind": "REFUSAL",
+      "message": "model refused"
+    },
+    "deltas": [
+      "text: 第一步，"
+    ]
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "source": "constructed from the Messages streaming reference and the Java SDK 3.3.0 event types; not verified against real Claude; Opus 5.5 shape: summarized thinking, progress thinking between text and the call, eager tool input split mid-token",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "reasoning",
+          "provider": "claude",
+          "model": "claude-opus-5-5",
+          "kind": "ANTHROPIC_THINKING",
+          "opaque": {
+            "type": "thinking",
+            "thinking": "用户想知道巴黎的天气，需要调用工具。",
+            "signature": "RXFzaWduYXR1cmUtbm90LXJlYWwtMQ=="
+          },
+          "summary": "用户想知道巴黎的天气，需要调用工具。"
+        },
+        {
+          "type": "text",
+          "text": "我来查一下。"
+        },
+        {
+          "type": "reasoning",
+          "provider": "claude",
+          "model": "claude-opus-5-5",
+          "kind": "ANTHROPIC_THINKING",
+          "opaque": {
+            "type": "thinking",
+            "thinking": "调用 get_weather。",
+            "signature": "RXFzaWduYXR1cmUtbm90LXJlYWwtMg=="
+          },
+          "summary": "调用 get_weather。"
+        },
+        {
+          "type": "tool_call",
+          "id": "toolu_01Weather",
+          "name": "get_weather",
+          "argsJson": "{\"city\": \"巴黎\", \"reason\": \"查天气\"}"
+        }
+      ],
+      "stopReason": "TOOL_USE",
+      "usage": {
+        "inputTokens": 40,
+        "outputTokens": 88,
+        "reasoningTokens": 40
+      },
+      "providerMetadata": {
+        "id": "msg_01Test",
+        "model": "claude-opus-5-5",
+        "stop_reason": "tool_use"
+      }
+    },
+    "deltas": [
+      "reasoning: 用户想知道巴黎",
+      "reasoning: 的天气，需要调用工具。",
+      "text: 我来查一下。",
+      "reasoning: \n\n调用 get_weather。",
+      "started: toolu_01Weather get_weather",
+      "args: toolu_01Weather {\"city\": \"巴",
+      "args: toolu_01Weather 黎\", \"rea",
+      "args: toolu_01Weather son\": \"查天气\"}"
+    ]
+  }
+}

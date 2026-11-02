@@ -1,0 +1,29 @@
+{
+  "source": "constructed from the Messages streaming reference and the Java SDK 3.3.0 event types; not verified against real Claude; output cap hit inside eager tool input",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "tool_call",
+          "id": "toolu_01Cut",
+          "name": "get_weather",
+          "argsJson": "{\"city\": \"巴"
+        }
+      ],
+      "stopReason": "MAX_TOKENS",
+      "usage": {
+        "inputTokens": 25,
+        "outputTokens": 64000
+      },
+      "providerMetadata": {
+        "id": "msg_01Test",
+        "model": "claude-opus-5-5",
+        "stop_reason": "max_tokens"
+      }
+    },
+    "deltas": [
+      "started: toolu_01Cut get_weather",
+      "args: toolu_01Cut {\"city\": \"巴"
+    ]
+  }
+}

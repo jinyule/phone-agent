@@ -1,0 +1,10 @@
+{
+  "source": "constructed from the Messages streaming reference and the Java SDK 3.3.0 event types; not verified against real Claude; classifier decline before any output (HTTP 200)",
+  "expect": {
+    "error": {
+      "kind": "REFUSAL",
+      "message": "model refused (cyber)"
+    },
+    "deltas": []
+  }
+}

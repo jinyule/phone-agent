@@ -1,0 +1,38 @@
+{
+  "source": "recorded 2026-11-02 from the local Messages gateway serving gpt-6-luna (wire format only, not Claude)",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "tool_call",
+          "id": "call_3662d16d1cae40d396bc1a7acdcd7bf8",
+          "name": "get_weather",
+          "argsJson": "{\"city\":\"巴黎\",\"reason\":\"查天气\"}"
+        }
+      ],
+      "stopReason": "TOOL_USE",
+      "usage": {
+        "inputTokens": 3617,
+        "outputTokens": 23
+      },
+      "providerMetadata": {
+        "id": "msg_resp_0139489602049734016ae7e38f76708193ad7109cf72da64fe",
+        "model": "gpt-6-luna",
+        "stop_reason": "tool_use"
+      }
+    },
+    "deltas": [
+      "started: call_3662d16d1cae40d396bc1a7acdcd7bf8 get_weather",
+      "args: call_3662d16d1cae40d396bc1a7acdcd7bf8 {\"",
+      "args: call_3662d16d1cae40d396bc1a7acdcd7bf8 city",
+      "args: call_3662d16d1cae40d396bc1a7acdcd7bf8 \":\"",
+      "args: call_3662d16d1cae40d396bc1a7acdcd7bf8 巴黎",
+      "args: call_3662d16d1cae40d396bc1a7acdcd7bf8 \",\"",
+      "args: call_3662d16d1cae40d396bc1a7acdcd7bf8 reason",
+      "args: call_3662d16d1cae40d396bc1a7acdcd7bf8 \":\"",
+      "args: call_3662d16d1cae40d396bc1a7acdcd7bf8 查",
+      "args: call_3662d16d1cae40d396bc1a7acdcd7bf8 天气",
+      "args: call_3662d16d1cae40d396bc1a7acdcd7bf8 \"}"
+    ]
+  }
+}
