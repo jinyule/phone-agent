@@ -114,7 +114,7 @@ M1/M2 的主循环、OpenAI 系适配器、Anthropic 适配器、PolicyEngine、
 
 ### 9. 等待用户、工具控制信号、共用的风险词表（协调者补充要求）
 
-- **`UserInteraction`**（`core.ports`）：`ask(Question): AskResult`、`confirm(ConfirmCard): ConfirmResult`、`handOff(kind, reason): HandoffResult`。三个方法都是 suspend，由运行时实现，通过 `ToolContext.interaction` 交给工具，每次调用一个实例。`ask` 和 `handOff` 由工具和运行时（处理 `Verdict.HandOff` 时）调用；`confirm` 只由运行时在处理 `Verdict.Confirm` 时调用，工具不调。`request_confirmation` 也走 PolicyEngine 得到 Confirm（addendum §5），确认 UI 和 `approval/*` 事件只有一条路径。
+- **`UserInteraction`**（`core.ports`）：`ask(Question): AskResult`、`confirm(ConfirmCard): ConfirmResult`、`handOff(kind, reason): HandoffResult`。三个方法都是 suspend，由运行时实现。`ask` 和 `handOff` 由工具和运行时（处理 `Verdict.HandOff` 时）调用；`confirm` 只由运行时在处理 `Verdict.Confirm` 时调用。工具经 `ToolContext.interaction` 拿到的是只有 `ask` 和 `handOff` 的 `ToolInteraction`（第 12 节），每次调用一个实例。`request_confirmation` 也走 PolicyEngine 得到 Confirm（addendum §5），确认 UI 和 `approval/*` 事件只有一条路径。
   - 每个方法有自己的结果类型，工具不会收到不可能的回复，`when` 可以穷举。
   - 用户回复：`Answered` / `Declined`、`APPROVED` / `REJECTED`、`DONE` / `DECLINED`。
   - 超过等待时限：`EXPIRED`；没人能回答（无人值守）：立即返回 `UNAVAILABLE`。
@@ -160,10 +160,25 @@ M1/M2 的主循环、OpenAI 系适配器、Anthropic 适配器、PolicyEngine、
 - **`ModelError.retryAfterMs`**（B7）：基类属性，默认 `null`；`RateLimited`、`Overloaded`、`Server` 可以带上服务端给的延迟。
 - **跨记录不变量**（S4）：写入和读取都检查 `SessionInvariants`（surfaceOp 和类型匹配、每个调用 id 最多一条 `tool/call` 和一条 `tool/result`、上面几条 B2/B3/B5 的规则）。
 - **追加与取消**（S2、S3）：等锁时可以取消，什么都不写；拿到锁以后先检查取消；开始写的记录一定写完并计入，即使调用方已被取消（方法返回记录，job 报取消，调用方以 `records()` 为准）。写入过程中的任何失败都让 store 进入失败状态。收尾代码在 `withContext(NonCancellable)` 里追加。
-- **存储的持久性**（B4、S8）：新建目录后，从最深的新目录往上逐个 fsync 父目录，直到第一个原本存在的祖先；写入失败删除临时文件。`StoragePort.openAppender` 的契约：调用方在拿到句柄前被取消时，由实现关闭句柄。
+- **存储的持久性**（B4、S8）：新建目录后，从最深的新目录往上逐个 fsync 父目录，直到第一个原本存在的祖先；写入失败删除临时文件。（第 12 节改成每次都同步整条链。）`StoragePort.openAppender` 的契约：调用方在拿到句柄前被取消时，由实现关闭句柄。
 - **工具参数的 schema 子集**（S5）：注册时只接受 `core.tool.ToolSchema` 的 KDoc 列出的子集（每个 schema 一个 `type`；object / array / string / integer / number / boolean 各自允许的关键字；计数非负、下限不高于上限、enum 非空且不重复），并递归检查每一层。WP02 的参数校验器照这个子集实现，模型看到的 schema 就都能被完整执行。`ToolRegistry` 的 `expanded` 改为 `List<ToolGroup>`，展开顺序由调用方给出。
 - **`ProviderProfile` 不泄漏密钥**（S6）：baseUrl 不能带 user info，出错信息不回显 URL；header 名里含 key、token、secret、auth、cookie 的一律拒绝（和 `WireProfile.headers` 同一条规则）；`toString` 只列 header 名。明文 http 只允许本机和局域网：loopback、私有、link-local、unique-local 地址字面量，`localhost` 和 `*.local`，只看文本、不查 DNS。没有另设"本地服务器"标记：地址本身就能判断，多一个开关就多一种配错的方式。
 - **值域校验**（S9）：turn、step、attempt ≥ 1，`request/retry.attempt` ≥ 2，延迟 ≥ 0，请求头按它产生的 `ChatRequest` 校验。坏值在解码时成为所在行的 `SessionCorruptedException`。
+
+### 12. 修复清单第 2 轮（fix-list-r2，协调者评审）
+
+v1 仍未发布，fixture 和 `format-names.txt` 按新事件重新生成（生成器拒绝覆盖，先删旧的 v1 目录）。
+
+- **目录链的持久性**（B1）：每次 `writeAtomically` 和 `openAppender` 都 fsync 整条链：文件所在目录、它上面直到根的每一层、根的父目录。目录是不是这次新建的不再参与判断：上一次同步失败后，目录已经存在，"只同步新目录"的重试会漏掉上级。代价是每次写多几次目录 fsync。根在构造时转成绝对路径（S1）。rename 之后的同步失败仍然抛错，此时新内容已经就位但不知道是否持久（S6，`StoragePort` 的 KDoc 写明调用方不能假设旧内容还在）。
+- **线路快照的生成入口**（B2）：`ChatModel.prepare(reasoning): RequestSettings(reasoning, wire)`，适配器实现，把档位钳制和线路映射放在同一步；主循环写 `request/header`、能力包写 `side/request` 之前调用，回放不调用。同一实例对同一档位结果稳定（`ModelRouter` 冻结 profile、能力和映射版本）。`ChatModelContract` 是测试源码里的抽象契约测试，适配器测试继承它；core 里用 fake 跑一遍。`WireProfile.parallelToolCalls` 改名 `disableParallelToolCalls`（S9），true 才发"禁止并行"的线路字段。
+- **执行事实和停止进日志**（B3）：
+  - `tool/started(callId, verdictSeq)`：真正调用 `Tool.execute` 之前追加并刷盘；`verdictSeq` 必须是这个调用最新的 verdict，而且是 Allow。拒绝、转交、审批未通过、拦截器短路都没有它。修复按它区分 NOT_STARTED 和 OUTCOME_UNKNOWN。
+  - `tool/executed(callId, status)`：execute 返回后、`toolPostExecute` 之前写原始状态；取消和超时不写。
+  - `task/stopped(cause)`：停止流程的最后一条。`USER`、`LIMIT` 是终态，之后的追加被拒绝，读到后面还有记录就是损坏；`SHUTDOWN`、`ERROR` 可以显式恢复。`StopCause` 从 `core.agent` 移到 `core.session`（session 在第 4 层，不能引用第 5 层的 agent）。
+  - 三者都不可忽略。`PolicyContext.operatedPackages` 和 `outwardConfirmedPackages` 改为按执行事实推导（KDoc），`PolicyContextSamples` 给出样例日志和期望值，`PolicyContextSourcesTest` 用参考推导核对样例并证明它们能区分常见的错误推导。
+  - 不变量补充：结果之后不能再声明同一个调用（S7）；`tool/started` 要求已声明、没有结果、没开始过；`tool/executed` 要求已开始、没有结果、没记过。
+- **工具拿不到 `confirm`**（B4）：`ToolContext.interaction` 的类型是 `ToolInteraction`（`ask`、`handOff`）；`UserInteraction` 继承它并加上 `confirm`。运行时用 `forTools()` 包一层视图交给工具，强转也拿不到 `confirm`。确认卡只来自 PolicyEngine 的 Confirm 判定。
+- **其他**：integer 的上下界按 64 位整数比较（S3）；`retryAfterMs` 在构造时要求 ≥ 0，解析不了或为负的由适配器转成 `null`（S8）；推理去掉记录按 seq 生效、多条累加，中断前缀进视图时去掉其中的 `Part.Reasoning`（S5、S10），样例在 `DeriveRuleSamples`，参考投影核对。
 
 ## Alternatives considered
 
@@ -195,13 +210,18 @@ M1/M2 的主循环、OpenAI 系适配器、Anthropic 适配器、PolicyEngine、
 - **`request/header` 保留 `role`，旁路请求也写请求头**：主视图推导就得按 role 过滤所有头和回复，旁路的回复还会混进 `assistant/message`。
 - **线路设置在回放时从当时的 `ProviderProfile` 取**：profile 会被用户修改，日志就不再能单独重建请求。
 - **fixture 用环境变量开关写回**：一次误设就会改写已发布的版本；改用拒绝覆盖的生成任务。
+- **执行事实从现有事件推导，不加 `tool/started`**（B3 的另一个选项）：WP02 实测了两个反例。工具进入 execute 后再 handOff，最后一条是 `handoff/start`，却已执行一次；真实执行返回 OK 和 `toolExecute` 拦截器短路返回 OK，日志完全相同，执行次数却是 1 和 0。
+- **停止只写进 `turn/end`**：停在 turn 之外时没有 `turn/end`，而且 stop 前后日志相同，恢复时分不清"被用户停了"和"进程被杀"。
+- **`ChatModel.wire(reasoning): WireProfile`，档位由调用方用 `clampTo` 自己算**（B2 的另一个选项）：钳制和映射分在两处，主循环和能力包可能各算出不同的档位；`RequestSettings` 把两者一次给出。
+- **只同步这次新建的目录，失败的记在内存里下次补**（B1 的另一个选项）：换一个 port 实例或进程重启就丢了；整条链每次都同步，不需要记状态。
+- **`ToolContext` 保留 `confirm`，运行时忽略工具造的卡**：工具造的卡仍然会显示给用户，而且"安全历史只认策略来源的卡"要在运行时另记来源；从类型上去掉更简单。
 
 ## 后果
 
 - 加一个字段就要升格式版本、写迁移函数、提交新版本的 fixture。这是换取"旧日志永远按原意读"的代价。
 - `SessionStore.open` 只接受当前版本的日志。旧版本日志只能经迁移用 `read` 读出，不能接着追加；需要原地升级时再加。
 - Konsist 只看源码，有两处看不到：
-  - 不调用的全限定顶层属性引用（`dev.phoneagent.core.x.value`）；全限定的函数调用（`dev.phoneagent.core.x.foo()`、`….build { }`）能看到；
+  - 不调用的全限定顶层属性引用（`dev.phoneagent.core.x.value`）；全限定的函数调用（`dev.phoneagent.core.x.foo()`、`….build { }`，带类型实参的 `….foo<A<B>>()` 也算，类型实参可以嵌套）能看到；
   - 不按目录放置的 package 声明（这类文件按 `package` 声明归类）。
 
   需要更严时，改用编译后检查或加 detekt 规则。

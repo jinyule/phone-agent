@@ -106,7 +106,8 @@ data class WireProfile(
     val reasoningField: String? = null, val echoReasoning: Boolean = false,   // Chat Completions 的推理字段与回传
     val reasoningEffort: WireSetting? = null,   // 推理档位映射后的字段和值（如 reasoning.effort = high）；null = 不发
     val maxTokensField: String? = null,         // max_tokens / max_completion_tokens / max_output_tokens；null = 不发上限
-    val parallelToolCalls: Boolean = false, val streamOptions: Boolean = false,
+    val disableParallelToolCalls: Boolean = false,      // true：Chat/Responses 发 parallel_tool_calls:false，Anthropic 发 disable_parallel_tool_use:true；false 两者都不发
+    val streamOptions: Boolean = false,
     val includeEncryptedReasoning: Boolean = false,       // Responses：include: ["reasoning.encrypted_content"]
     val recoverLeakedToolCalls: Boolean = false,          // 把漏成正文的工具调用还原（§3.1）
     val options: Map<String, String> = emptyMap(),        // 还没有专门字段的其他设置，小写名字，不放秘密
@@ -115,7 +116,19 @@ data class WireProfile(
 
 - **适配器只从 `request.wire` 读这些项**，不读实时的 `ProviderProfile` 或 `ModelCapabilities`：它们在任务中途可能被改。profile 只提供 endpoint 和凭据引用。
 - 适配器在发送前拒绝两种请求（`InvalidRequest`）：`credential` 的种类和 profile 不一致；`mappingVersion` 不是它实现的版本。
-- `ProviderProfile.wire(mappingVersion)` 填来自 profile 的部分（凭据种类、headers、推理字段与回传），其余由适配器的规则在写请求头时决定（WP03）。`ChatRequest.reasoning` 是钳制到模型档位之后的中性档位（`ReasoningLevel.clampTo`），线路上的值在 `reasoningEffort`。
+- **线路快照的唯一生成入口是 `ChatModel.prepare(reasoning): RequestSettings(reasoning, wire)`**（`core.model`）：
+  ```kotlin
+  interface ChatModel {
+      val info: ModelInfo
+      fun prepare(reasoning: ReasoningLevel?): RequestSettings   // 纯函数，不抛；同一实例对同一档位结果相等，集合是副本
+      suspend fun complete(request: ChatRequest, onDelta: (Delta) -> Unit = {}): ChatResponse
+  }
+  data class RequestSettings(val reasoning: ReasoningLevel?, val wire: WireProfile)
+  ```
+  - 适配器（WP03/WP04）实现它：按 `clampTo` 把档位钳制到 `info.capabilities.reasoningLevels`，再按自己 `mappingVersion` 的规则映射成 `reasoningEffort` 等线路项。钳制和映射在同一步完成，调用方不自己算。`ProviderProfile.wire(mappingVersion)` 是给适配器用的辅助函数，填来自 profile 的部分（凭据种类、headers 副本、推理字段与回传）。
+  - 调用方：主循环（WP02）写 `request/header` 前调用，能力包写 `side/request` 前调用；两者把 `reasoning` 放进 `ChatRequest.reasoning`，把 `wire` 放进 `ChatRequest.wire`，并原样记进日志。**回放不调用 `prepare`**，两项都从日志取。
+  - `ModelRouter` 把任务绑定到模型时，把 profile、能力和映射版本冻结进 ChatModel 实例，所以任务中途改设置不会改变 `prepare` 的结果。
+  - 适配器测试继承 core 测试源里的 `ChatModelContract`（稳定性、钳制、`prepare` 的结果能被 `complete` 接受、外来 `mappingVersion` 或凭据种类在发送前被拒）。
 - 回放时，同一个 `mappingVersion` 的规则加上日志里的请求，必须逐字节重建当时发出的请求。
 
 ---
@@ -124,7 +137,7 @@ data class WireProfile(
 
 ### 3.1 Chat Completions 兼容（DeepSeek、通义、Kimi、GLM、豆包、硅基流动、OpenRouter、Ollama、LM Studio …）
 
-- **工具调用**：`tools[].function` + `tool_choice:"auto"`。主循环每轮只执行一个调用，所以服务商支持时发 `parallel_tool_calls:false`。如果模型仍然返回多个调用，第一个之外的每个都要配一条结果"已跳过：每步只执行一个动作"，否则下一次请求会被拒。
+- **工具调用**：`tools[].function` + `tool_choice:"auto"`。主循环每轮只执行一个调用，所以服务商支持时适配器在 `prepare` 里设 `wire.disableParallelToolCalls = true`，线路上发 `parallel_tool_calls:false`。如果模型仍然返回多个调用，第一个之外的每个都要配一条结果"已跳过：每步只执行一个动作"，否则下一次请求会被拒。
 - **流式**：`stream:true` + `stream_options.include_usage`；要兼容某些网关返回 `usage:null` 的情况。
 - **推理内容**：字段名和"要不要回传"各家不同（`reasoning_content` 等）。在 `ProviderProfile.reasoningField` 和 `ProviderProfile.echoReasoning` 里按服务商配置，由能力探测确认；**探测不了的标"未验证"**。写请求头时这两项冻结进 `wire`（§2"线路快照"）。
 - **工具调用漏成文字**：有的模型会把工具调用写成正文里的标记（DeepSeek DSML、`<tool_call>` 等），参考 Mika 的 `LeakedToolMarkup`，识别出来按工具调用处理。
