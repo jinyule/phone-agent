@@ -16,11 +16,13 @@ import dev.phoneagent.core.session.HandoffStarted
 import dev.phoneagent.core.session.QuestionAnswered
 import dev.phoneagent.core.session.QuestionAsked
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.coroutines.resume
 
 /**
  * The task's prompts to the user (cards, questions, handoffs) and their answers
@@ -147,23 +149,58 @@ internal class Prompts(
         pending.set(prompt)
         loop.phase.value = Phase.Waiting(reason, id)
         try {
-            return withTimeoutOrNull(timeoutMs) { prompt.result.await() }
+            withTimeoutOrNull(timeoutMs) { prompt.await() }
         } finally {
             pending.compareAndSet(prompt, null)
             loop.phase.value = before
         }
+        // A reply taken before the expiry closed the prompt counts, even when the timer fired first.
+        return prompt.close()
     }
 
+    /**
+     * One prompt's answer slot, PENDING until the first fitting reply takes it (ANSWERED) or it is
+     * closed (CLOSED), whichever happens first: so [offer] is `true` exactly when its reply is the
+     * prompt's answer. A cancelled wait (stop, shutdown, expiry) closes the slot as it is cancelled,
+     * before the waiting coroutine runs again.
+     */
     private class Pending<T : Any>(
         val id: PromptId,
         private val fit: (UserReply) -> T?,
     ) {
-        val result = CompletableDeferred<T>()
+        private val slot = AtomicReference<Slot<T>>(Slot.Pending)
+        private val answered = CompletableDeferred<Unit>()
 
         fun offer(reply: UserReply): Boolean {
             val value = fit(reply) ?: return false
-            return result.complete(value)
+            val taken = slot.compareAndSet(Slot.Pending, Slot.Answered(value))
+            if (taken) answered.complete(Unit)
+            return taken
         }
+
+        /** Suspends until a reply was taken. */
+        suspend fun await() {
+            suspendCancellableCoroutine { waiter ->
+                waiter.invokeOnCancellation { close() }
+                answered.invokeOnCompletion { waiter.resume(Unit) }
+            }
+        }
+
+        /** Closes the slot unless answered; returns the answer, if any. */
+        fun close(): T? {
+            slot.compareAndSet(Slot.Pending, Slot.Closed)
+            return (slot.get() as? Slot.Answered)?.value
+        }
+    }
+
+    private sealed interface Slot<out T> {
+        data object Pending : Slot<Nothing>
+
+        data object Closed : Slot<Nothing>
+
+        class Answered<T>(
+            val value: T,
+        ) : Slot<T>
     }
 }
 

@@ -423,7 +423,8 @@ interface TaskRuntime {
 - 输入方法都不挂起、立即返回；先记成 `inbox/spliced`，再生效。
 - `Idle`：还没开始，或上一个 turn 没有最终回答就结束了（失败、上限、`preStep` 拒绝、max-tokens）。`Done`：上一个 turn 以最终回答或 `end_not_done` 结束。两者都接受 followup，都不会自己继续。
 - `Stopped(cause)` 是终态，之后的输入一律忽略。会话日志写不了或刷不了盘时，任务以 `StopCause.ERROR` 停止。
-- `events` 缓冲 256 条，收集者跟不上时丢最旧的；UI 不能错过的状态要从 `phase` 或日志恢复。
+- `events` 缓冲 256 条，收集者跟不上时丢最旧的；UI 不能错过的状态要从 `phase` 或日志恢复。待答提示也一样：`Phase.Waiting.promptId` 就是日志里 `approval/asked`、`question/asked` 或 `handoff/started` 的 id，完整的卡片、问题或接管说明都在那条记录里。
+- `answer` 返回 `true` 当且仅当这条回复成了提示的答案。每个提示是一个原子状态：待答 → 已答 / 已关闭，先到的一方生效。停止、关闭 scope 或到期时，提示在被取消的那一刻就关闭，之后的回复一律返回 `false`；到期前已被接受的回复照样算数，即使计时器先触发。
 
 **层级关系**：
 - **turn**：从 inbox 取出输入后的一次完整消化。

@@ -57,9 +57,16 @@ public interface TaskRuntime {
     public fun stop(cause: StopCause)
 
     /**
-     * Answers the pending prompt [promptId]. Returns `false`, changing nothing, when the prompt
-     * is not pending (answered, expired, withdrawn, unknown) or [reply] does not fit its kind
-     * (see [UserReply]); the UI then drops its card.
+     * Answers the pending prompt [promptId]. Returns `true` exactly when [reply] became the
+     * prompt's answer. Returns `false`, changing nothing, when the prompt is not pending (answered,
+     * expired, withdrawn, unknown) or [reply] does not fit its kind (see [UserReply]); the UI then
+     * drops its card. A prompt stops taking replies the moment it is closed: a stop, a shutdown or
+     * its expiry closes it before the task acts on that, and a reply taken just before the expiry
+     * counts.
+     *
+     * A UI that did not see a prompt being asked recovers it from the session log:
+     * [Phase.Waiting.promptId] is the id of its `approval/asked`, `question/asked` or
+     * `handoff/started` record, which holds the whole card, question or handoff.
      */
     public fun answer(
         promptId: PromptId,
