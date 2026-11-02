@@ -550,7 +550,7 @@ screen s12 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · 坐标 0–
   - 只有这一屏做了文字识别（`ocr` 不为 `null`）才比较 OCR 行。这一屏没做、上一屏有 OCR 行时，不报这些行没了，也不计入变化占比，差分（或退回的完整一屏）里写明"这一屏没做文字识别，之前识别到的屏上文字和坐标没有重新核实"（`ScreenDiff.ocrUnverified`）；这一屏做了但什么都没识别到（空列表），上一屏的行才报 `-`；上一屏没做、这一屏有识别结果时，全部报 `+`。
   - ScreenPort 实现给同一元素换编号，差分里就是一删一增；换得多了会退化成完整一屏。
   换了 App、没有差分、增删改的行（元素和 OCR 合计）超过一半、差分里有这一屏没有的元素，或者差分本身超过预算时，给完整一屏，并用 `+` 标出新元素。
-- 只要动作后读到了一屏（`ActionOutcome.after` 不为空），结果就给出这一屏（差分或完整一屏，开头是新的 screen 编号），成功、失败、被拒绝都一样，`details.screen` 也只在这时写；没读到时提示先 phone_observe，`details` 里不写 screen。所以 `details.screen` 总是模型看过的一屏。
+- 只要动作后读到了一屏（`ActionOutcome.after` 不为空），结果就给出这一屏（差分或完整一屏，跟在第一行的结果说明之后，以新的 screen 编号开头），成功、失败、被拒绝都一样，`details.screen` 也只在这时写；没读到时提示先 phone_observe，`details` 里不写 screen。系统提示照此说明：屏幕段以新的 `screen sN` 开头；屏幕动作之后没读到新屏、又要依据当前画面继续操作时，先 phone_observe（不承诺每个结果都带一屏，`ask_user`、`phone_apps` 这类结果本来就没有）。所以 `details.screen` 总是模型看过的一屏。
 - 差分不为空时，状态行不说"画面没有变化"，即使端口给的 effect 是 `NO_CHANGE`（指纹不看父节点等差分会报的内容），直接给差分；`details.effect` 仍是端口给的值。
 
 ---
