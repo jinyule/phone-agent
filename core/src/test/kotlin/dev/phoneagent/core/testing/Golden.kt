@@ -11,12 +11,15 @@ import java.nio.file.Path
  * itself is trimmed, so a text that ends in a newline is stored with two). Tests only compare: on a
  * mismatch, or when the golden is missing, the actual file content is written to
  * `build/prompt-surface-actual/<path>` and the test fails. Accepting it is a separate, explicit
- * step after a test run: review the diff, then copy it over, e.g.
- * `cp -R core/build/prompt-surface-actual/. core/src/test/resources/prompt-surface/`.
+ * step after a test run: review the diff, then copy it over with [ACCEPT] (the failure message
+ * prints it).
  */
 object Golden {
     private const val EXPECTED = "src/test/resources/prompt-surface"
     private val actualRoot: Path = Path.of("build/prompt-surface-actual")
+
+    /** The acceptance step, run from the repository root after reviewing the actual files. */
+    const val ACCEPT: String = "cp -R core/build/prompt-surface-actual/. core/src/test/resources/prompt-surface/"
 
     /** Compares [text] with the golden at [path]; a mismatch leaves the actual file under [actualDir]. */
     fun assertMatches(
@@ -35,6 +38,11 @@ object Golden {
         Files.createDirectories(kept.parent)
         Files.writeString(kept, actual)
         val what = if (expected == null) "is missing" else "differs"
-        assertEquals(expected, actual, "golden $EXPECTED/$path $what; the actual file is $kept (review, then copy)")
+        assertEquals(
+            expected,
+            actual,
+            "golden $EXPECTED/$path $what; the actual file is $kept. " +
+                "Review it, then accept from the repository root: $ACCEPT",
+        )
     }
 }

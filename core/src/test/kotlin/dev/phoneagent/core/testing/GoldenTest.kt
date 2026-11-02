@@ -52,6 +52,8 @@ class GoldenTest {
         val failure = runCatching { Golden.assertMatches(path, "not the page", actual) }.exceptionOrNull()
         assertTrue(failure is AssertionFailedError, "a mismatch fails: $failure")
         assertTrue(failure!!.message!!.contains(actual.resolve(path).toString()), failure.message)
+        val accept = "cp -R core/build/prompt-surface-actual/. core/src/test/resources/prompt-surface/"
+        assertTrue(failure.message!!.contains(accept), "the failure tells how to accept: ${failure.message}")
         assertEquals("not the page\n", actual.resolve(path).readText(), "kept with the file's final newline")
         assertEquals(before, source.readText(), "the golden is untouched")
     }
