@@ -195,5 +195,29 @@ class SettingsAndLoginTest {
         )
         // A profile page that only links to the login page is not one.
         assertEquals(Verdict.Allow, decide(tap("e1"), on(screen(el("e1", "立即登录")), SecurityLevel.AUTONOMOUS)))
+        assertEquals(Verdict.Allow, decide(tap("e1"), on(screen(el("e1", "登录/注册")), SecurityLevel.AUTONOMOUS)))
+    }
+
+    @ParameterizedTest
+    @EnumSource(SecurityLevel::class)
+    fun `a login flow named on a control counts at any length`(level: SecurityLevel) {
+        val long = "本机号码一键登录并同意用户服务协议和隐私政策"
+        val named = screen(el("e1", long, bounds = box(100, 600, 900, 680)))
+        assertEquals(
+            HandoffKind.LOGIN,
+            assertInstanceOf(Verdict.HandOff::class.java, decide(tap("e1"), on(named, level))).kind,
+        )
+        val inside =
+            screen(
+                el("e1", bounds = box(100, 600, 900, 680)),
+                text("t2", long, box(120, 610, 880, 670), parent = "e1"),
+            )
+        assertEquals(
+            HandoffKind.LOGIN,
+            assertInstanceOf(Verdict.HandOff::class.java, decide(tap("e1"), on(inside, level))).kind,
+        )
+        // Body text that mentions a login flow is not a login page.
+        val article = screen(text("t1", "教程：怎样在设置里关闭本机号码一键登录功能和相关的授权"), el("e1", "返回"))
+        assertEquals(Verdict.Allow, decide(tap("e1"), on(article, SecurityLevel.AUTONOMOUS)))
     }
 }

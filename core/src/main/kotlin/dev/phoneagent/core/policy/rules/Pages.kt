@@ -20,13 +20,25 @@ internal class Pages(
     private val amounts: Amounts,
 ) {
     /**
-     * A login page: flagged; or it names a login flow ("本机号码一键登录", "验证码登录"); or it says
-     * "登录" and asks for a password, a code, an account or a phone number.
+     * A login page: flagged; or it names a login flow ("本机号码一键登录", "验证码登录") in a short
+     * text or, at any length, on a control ("本机号码一键登录并同意用户协议"); or it says "登录"
+     * and asks for a password, a code, an account or a phone number.
      */
     fun isLogin(screen: ScreenSnapshot): Boolean =
         ScreenFlag.LOGIN in screen.flags ||
             mentions(screen, LOGIN_FLOWS) ||
+            screen.elements.any { onControl(it, screen, LOGIN_FLOWS) } ||
             (mentions(screen, LOGIN) && screen.elements.any { asks(it, SECRET_HINTS) || asks(it, ACCOUNT_HINTS) })
+
+    /** [element]'s name contains one of [words], and it is a control or part of one. */
+    private fun onControl(
+        element: UiElement,
+        screen: ScreenSnapshot,
+        words: List<String>,
+    ): Boolean {
+        val name = Text.compact(element.name.orEmpty())
+        return words.any { it in name } && (Elements.clickable(element) || Tree.inControl(element, screen))
+    }
 
     /** A password field, or a field whose hint or name contains one of [words]. */
     private fun asks(
