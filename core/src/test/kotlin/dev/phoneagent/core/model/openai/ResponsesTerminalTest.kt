@@ -4,6 +4,7 @@ import dev.phoneagent.core.model.ChatModel
 import dev.phoneagent.core.model.Credential
 import dev.phoneagent.core.model.ModelError
 import dev.phoneagent.core.model.ModelProtocol
+import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.StopReason
 import dev.phoneagent.core.model.openai.Kit.base
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
@@ -179,13 +180,16 @@ class ResponsesTerminalTest {
             assertThrows<ModelError.BadResponse> { model().complete(Kit.request()) }
         }
 
-    @Test
-    fun `a final output that is absent or null leaves the streamed items`() =
+    @ParameterizedTest(name = "final fields after status: [{0}]")
+    @ValueSource(strings = ["", ""","output":null"""])
+    fun `a final output that is absent or null leaves the streamed items`(output: String) =
         runTest {
             val done = "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":$text}\n\n"
-            server.enqueueSse(done + terminal("response.completed", """"status":"completed""""))
-            assertEquals(StopReason.END_TURN, model().complete(Kit.request()).stopReason)
-            server.enqueueSse(done + terminal("response.completed", """"status":"completed","output":null"""))
-            assertEquals(StopReason.END_TURN, model().complete(Kit.request()).stopReason)
+            server.enqueueSse(done + terminal("response.completed", """"status":"completed"$output"""))
+            val deltas = Deltas()
+            val reply = model().complete(Kit.request(), deltas)
+            assertEquals(StopReason.END_TURN, reply.stopReason)
+            assertEquals(listOf(Part.Text("Hi")), reply.parts, "the streamed item is the reply")
+            assertEquals("Hi", deltas.text, "and the preview shows it")
         }
 }
