@@ -13,9 +13,11 @@ internal object JsonEscapes {
      * by an escaped low one as their pair), `\/`, `\"`, `\\`, `\n`, `\t`, `\r`, `\b` and `\f`.
      * Anything else stays as written: an unknown escape, a `\u` without four hex digits, a lone
      * surrogate, a backslash at the end. The backslash `\\` decodes to starts nothing, so
-     * `\\u0070` decodes once, to a backslash and `u0070`.
+     * `\\u0070` decodes once, to a backslash and `u0070`. Text without a backslash is returned as
+     * it is.
      */
     fun lenientDecode(raw: String): String {
+        if (BACKSLASH !in raw) return raw
         val decoded = StringBuilder(raw.length)
         var at = 0
         while (at < raw.length) {
