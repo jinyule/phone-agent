@@ -84,6 +84,33 @@ class DisplayCreationTest {
         assertEquals("released, so not tried a third time", listOf(id, id), h.releaseAttempts)
     }
 
+    /**
+     * A display whose IME policy cannot be read back is not verified: it fails and is released, and
+     * the probe says why.
+     */
+    private fun assertUnverifiedImeFails(h: CapabilityHarness) {
+        assertEquals(DisplayResult.FAILED, h.display())
+        assertEquals("the display was released again", emptyList<String>(), agentDisplays(h))
+        val steps = probe(h)
+        val ime = steps[ProbeKeys.Step.IME].orEmpty()
+        assertTrue("$steps", ime != ProbeKeys.RESULT_OK && ime.contains("getDisplayImePolicy"))
+        assertEquals("the probe released its display too", emptyList<String>(), agentDisplays(h))
+    }
+
+    @Test
+    fun aDisplayWhoseImePolicyGetterThrowsFails() {
+        val h = helper(36)
+        h.bridge.wm.imeGetterFails = true
+        assertUnverifiedImeFails(h)
+    }
+
+    @Test
+    fun aDisplayOnARomWithoutTheImePolicyGetterFails() {
+        val h = helper(36)
+        h.bridge.windowManagerOverride = WindowManagerWithoutImeGetter(h.bridge.wm)
+        assertUnverifiedImeFails(h)
+    }
+
     @Test
     fun belowApi34NoDisplayIsCreated() {
         val h = helper(33)

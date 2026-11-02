@@ -105,6 +105,9 @@ internal class FakeWindowManager {
     /** When set, what `getDisplayImePolicy` answers instead of the policy that was set. */
     var imeReadBack: Any? = null
 
+    /** Makes `getDisplayImePolicy` throw, as a ROM that changed or guarded it would. */
+    var imeGetterFails = false
+
     fun isKeyguardLocked(): Boolean = keyguardLocked ?: error("IWindowManager went away")
 
     fun setDisplayImePolicy(
@@ -114,11 +117,28 @@ internal class FakeWindowManager {
         if (imeAccepted) imePolicies[displayId] = imePolicy
     }
 
-    fun getDisplayImePolicy(displayId: Int): Any = imeReadBack ?: imePolicies[displayId] ?: IME_POLICY_FALLBACK
+    fun getDisplayImePolicy(displayId: Int): Any {
+        check(!imeGetterFails) { "getDisplayImePolicy is guarded on this ROM" }
+        return imeReadBack ?: imePolicies[displayId] ?: IME_POLICY_FALLBACK
+    }
 
     private companion object {
         /** `WindowManager.DISPLAY_IME_POLICY_FALLBACK_DISPLAY`: the keyboard opens on the main screen. */
         const val IME_POLICY_FALLBACK = 1
+    }
+}
+
+/** An `IWindowManager` of a ROM that dropped `getDisplayImePolicy`; the rest is [wm]. */
+internal class WindowManagerWithoutImeGetter(
+    private val wm: FakeWindowManager,
+) {
+    fun isKeyguardLocked(): Boolean = wm.isKeyguardLocked()
+
+    fun setDisplayImePolicy(
+        displayId: Int,
+        imePolicy: Int,
+    ) {
+        wm.setDisplayImePolicy(displayId, imePolicy)
     }
 }
 
@@ -148,8 +168,11 @@ internal class FakeBridge(
     /** The class whose fields describe a task; another one is a framework that changed. */
     var taskInfoClass: Class<*> = TaskInfo::class.java
 
+    /** When set, the `IWindowManager` the helper sees instead of [wm]. */
+    var windowManagerOverride: Any? = null
+
     override val activityTaskManager: Any get() = atm
-    override val windowManager: Any get() = wm
+    override val windowManager: Any get() = windowManagerOverride ?: wm
     override val inputManager: Any get() = input
     override val taskInfo: Class<*> get() = taskInfoClass
 }

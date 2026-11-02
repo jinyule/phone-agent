@@ -311,7 +311,7 @@ interface IPrivilegedCore {
 - 意外失败不会被读成 0（协议 3 起）。`Parcel.writeException` 写不了的异常（`ClassCastException`、受检异常……）会让事务以 `UNKNOWN_TRANSACTION` 结束，回复是空的，Proxy 读到的是"没有异常、结果 0"，也就是 displayId 0、`StartResult.OK`、`GrantResult.GRANTED`。所以 `PrivilegedCore` 在 uid 守卫之后兜底：这类异常先记日志，再换成带原异常名的 `IllegalStateException`；Binder 能传的异常原样传。能力层里，隐藏 API 的查找、读字段、类型转换失败统一包成 `CapabilityUnavailable`，由各方法换成自己的失败值；调用已经执行、只是答复类型不对时按失败处理，不再走降级路径重试。主屏监视线程上的扫描失败只记日志，下一次信号或轮询照常读。
 - 返回值是常量，不是裸数字（`dev.phoneagent.privileged.CapabilityContract.kt`）：
   - `startActivity` → `StartResult`：0 已启动、1 用户正在主屏用它、2 没有页面能接、3 出错、4 冷启动被降级（它在别处还有任务）、5 被 agent 的另一块屏占用、6 助手拒绝（不是它的屏、别的用户、intent 不合规）、7 锁屏中（读不到锁屏状态也算，协议 2 起）；
-  - `createDisplay` → 非负是 displayId，`DisplayResult.REFUSED`(-2) 是参数不合规或 API 34 以下，`DisplayResult.FAILED`(-1) 是系统拒绝，或者 IME 策略设不成 LOCAL、回读不是 LOCAL（屏已被释放；后两条协议 3 起）；
+  - `createDisplay` → 非负是 displayId，`DisplayResult.REFUSED`(-2) 是参数不合规或 API 34 以下，`DisplayResult.FAILED`(-1) 是系统拒绝，或者 IME 策略设不成 LOCAL、回读不是 LOCAL、回读不了（屏已被释放，释放失败时进待清理集合；后几条协议 3 起，"回读不了"协议 4 起）；
   - `grantSelf` → `GrantResult`：0 已授予、1 不在白名单、2 失败；
   - `probe` → `ProbeKeys`：`steps`/`results` 两个平行数组，每项是 `ok` 或失败原因，外加 `ok` 总判定；
   - `mainArrivals` → `ArrivalKeys`：任务、包名、页面、用户、时间、来自哪块屏、是否同一任务、是否普通页面、此刻在哪块屏（Bundle 里没有对象列表，所以用平行数组）。

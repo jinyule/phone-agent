@@ -221,8 +221,10 @@ internal class VirtualDisplays(
 
 /**
  * `IWindowManager.setDisplayImePolicy(displayId, LOCAL)`: the keyboard opens on the agent's
- * display, never on the user's screen. Read back where the getter exists, because a policy that
- * silently stayed at the default would send the keyboard to the main screen.
+ * display, never on the user's screen. The policy is always read back, because one that silently
+ * stayed at the default would send the keyboard to the main screen: a getter that is missing,
+ * fails, or answers something other than LOCAL leaves the policy unverified, and the display is
+ * not kept.
  */
 private class DisplayImePolicy(
     private val bridge: SystemBridge,
@@ -243,25 +245,27 @@ private class DisplayImePolicy(
         reflecting("IWindowManager.setDisplayImePolicy") {
             bridge.method(wm, "setDisplayImePolicy", 2).invoke(wm, displayId, DisplaySpec.IME_POLICY_LOCAL)
         }
-        val policy = readBack(wm, displayId) ?: return
+        val policy = readBack(wm, displayId)
         if (policy != DisplaySpec.IME_POLICY_LOCAL) {
             throw CapabilityUnavailable("display $displayId reports IME policy $policy, wanted LOCAL")
         }
     }
 
-    /** The policy as read back, null when it cannot be read; an answer that is no policy throws. */
+    /** The policy as read back; a getter that is missing or fails, or an answer that is no policy, throws. */
     private fun readBack(
         wm: Any,
         displayId: Int,
-    ): Int? {
+    ): Int {
         val answer =
             try {
                 reflecting("IWindowManager.getDisplayImePolicy") {
                     bridge.method(wm, "getDisplayImePolicy", 1).invoke(wm, displayId)
                 }
             } catch (e: CapabilityUnavailable) {
-                Log.i(TAG, "cannot read back the IME policy of display $displayId", e)
-                return null
+                throw CapabilityUnavailable(
+                    "the IME policy of display $displayId cannot be read back, so it is unverified (${e.message})",
+                    e,
+                )
             }
         return answer as? Int ?: throw CapabilityUnavailable("display $displayId reports IME policy $answer")
     }

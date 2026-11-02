@@ -45,7 +45,7 @@ phase1-architecture §3.5 列出了 `IPrivilegedCore` 的能力面，调研报�
    - `moveRootTaskToDisplay` 失败回退 `am display move-stack`；
    - `startActivityAsUser`（12 参数）失败回退 `am start --display`（先按 component，再按 action）；
    - `getTasks` 读不出来时，启动和挪任务一律拒绝，而不是猜；
-   - `setDisplayImePolicy` 设完回读（有 getter 时）。设不上或回读不是 LOCAL，就把刚建的屏释放掉，`createDisplay` 返回 `FAILED`：键盘弹到用户屏上是不能接受的，不存在"不打字就照常用"的屏。释放本身失败时，这块屏进"待清理"集合：`owns`/`sizeOf`/`ids` 和所有能力（启动、注入、移任务）都不认它，`releaseAll` 再释放它，释放成功才移出集合；失败原因写"没能释放、等待清理"，不写"已释放"。`probe()` 的 IME 一项照常报告原因；
+   - `setDisplayImePolicy` 设完一定回读。设不上、回读不是 LOCAL，或者回读做不了（getter 不存在、调用失败、答复不是整数，都算"IME 未验证"），就把刚建的屏释放掉，`createDisplay` 返回 `FAILED`：键盘弹到用户屏上是不能接受的，不存在"不打字就照常用"的屏。释放本身失败时，这块屏进"待清理"集合：`owns`/`sizeOf`/`ids` 和所有能力（启动、注入、移任务）都不认它，`releaseAll` 再释放它，释放成功才移出集合；失败原因写"没能释放、等待清理"，不写"已释放"。`probe()` 的 IME 一项照常报告原因；
    - API 34 以下 `createDisplay` 返回 `REFUSED`，不建屏（没有 `OWN_FOCUS`，屏会抢用户的焦点，D2）；`probe()` 在建屏之前就报告"background displays need API 34+"；
    - 整个能力层构建失败时降级成 `NoCapabilities`：交接照常，每个能力返回失败值，`probe()` 和 `mainArrivals()` 抛带原因的 `NOT_IMPLEMENTED`。
 

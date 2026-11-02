@@ -46,7 +46,7 @@ internal class Prober(
         when (val opened = displays.open(reader.surface, WIDTH, HEIGHT, DPI)) {
             is VirtualDisplays.Opened.Display -> {
                 steps[ProbeKeys.Step.DISPLAY] = ProbeKeys.RESULT_OK
-                // open() only keeps a display whose IME policy reads back as LOCAL.
+                // open() keeps a display only when its IME policy was set and read back as LOCAL.
                 steps[ProbeKeys.Step.IME] = ProbeKeys.RESULT_OK
                 opened.id
             }
