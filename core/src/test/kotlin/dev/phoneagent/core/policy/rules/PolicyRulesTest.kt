@@ -121,12 +121,16 @@ class PolicyRulesTest {
         val names =
             list
                 .lines()
-                .filter { it.isNotBlank() && !it.startsWith("#") }
+                .map { it.substringBefore('#').trim() }
+                .filter(String::isNotEmpty)
                 .flatMap { line ->
-                    val (pkg, _, labels) = line.trim().split(Regex("\\s+"), limit = 3)
-                    listOf(pkg) + labels.split('|')
+                    val (pkg, _, labels) = line.split(Regex("\\s+"), limit = 3)
+                    listOf(pkg) + labels.split('|').map(String::trim)
                 }
         assertTrue(names.size > 100, "list read")
+        // The notes after '#' are not names: every name is checked as the list parser reads it.
+        assertTrue(names.none { '#' in it || it.isBlank() }, "names parsed like BlockedApps.parse")
+        assertTrue("京东金融" in names && "AlipayHK" in names && "Monzo" in names, "single and last names read")
         for (r in Refusal.entries) {
             val hint = r.verdict().hintForModel
             names.forEach { name ->
