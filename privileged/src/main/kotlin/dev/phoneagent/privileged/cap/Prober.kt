@@ -33,7 +33,7 @@ internal class Prober(
             steps[ProbeKeys.Step.MAIN_SCREEN] = step { require(mainScreen.start()) { "no task stack listener" } }
             steps[ProbeKeys.Step.LOCK] = lock()
         } finally {
-            if (displayId >= 0) steps[ProbeKeys.Step.RELEASE] = step { displays.release(displayId) }
+            if (displayId >= 0) steps[ProbeKeys.Step.RELEASE] = release(displayId)
             reader.close()
         }
         Log.i(TAG, "probe: ${steps.entries.joinToString { "${it.key}=${it.value}" }}")
@@ -83,6 +83,9 @@ internal class Prober(
             is LockState.Unknown -> state.reason
         }
 
+    /** Releases the probe display; one that cannot be released waits for `releaseAll` and fails the step. */
+    private fun release(displayId: Int): String = step { check(displays.release(displayId)) { NOT_RELEASED } }
+
     /** One tap in the middle of the probe display: there is nothing on it to activate. */
     private fun tap(displayId: Int): Boolean {
         val x = intArrayOf(WIDTH / 2, WIDTH / 2)
@@ -109,6 +112,7 @@ internal class Prober(
         const val HEIGHT = 720
         const val DPI = 160
         const val TAP_MS = 40L
+        const val NOT_RELEASED = "the probe display could not be released; it waits for releaseAll"
 
         fun bundle(steps: Map<String, String>): Bundle =
             Bundle().apply {

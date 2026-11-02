@@ -144,7 +144,9 @@ internal class AndroidCapabilities(
                 dpi: Int,
             ): Int = virtualDisplays.create(surface, width, height, dpi)
 
-            override fun releaseDisplay(displayId: Int) = virtualDisplays.release(displayId)
+            override fun releaseDisplay(displayId: Int) {
+                virtualDisplays.release(displayId)
+            }
         }
 
     override val tasks: TaskCaps =

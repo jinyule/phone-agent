@@ -50,6 +50,7 @@ phase1-architecture §3.5 列出了 `IPrivilegedCore` 的能力面，调研报�
    - 整个能力层构建失败时降级成 `NoCapabilities`：交接照常，每个能力返回失败值，`probe()` 和 `mainArrivals()` 抛带原因的 `NOT_IMPLEMENTED`。
 
 4. **`probe()` 在助手自己的 `ImageReader` 上跑**：建一块 360x720 的小屏 → 设 IME 策略 → 读任务列表 → 注入一次落在空屏中间的点击 → 注册主屏监听 → 读锁屏状态 → 释放。返回 `steps`/`results` 两个平行数组，每项是 `ok` 或原因，`ok` 是全部通过。不需要 App 传 Surface，帧也不出助手进程。
+   - 释放一步（`release`）：协议 5 起如实报告，释放失败时写原因、`ok` 为 false，这块屏进"待清理"集合等 `releaseAll`（见决定 3）；之前这一步永远是 `ok`。
    - 锁屏一步（`lock`，协议 4 起）：读到"锁着"或"没锁"都是 `ok`，值本身不影响结果；`isKeyguardLocked` 不存在、调用失败、答复不是 Boolean 时写原因，`ok` 为 false。读不到时每次启动都会返回 `LOCKED`，这正是 onboarding 要点名的 ROM 问题。probe 和 `startActivity` 共用同一份读取（`Keyguard.read()`）和同一个带原因的结果（`LockState`），两边不会各说各的。
 
 5. **静音和授权用平台命令，程序名有白名单**（`ShellCommands`：`am`/`pm`/`appops`/`input`，参数由助手拼）。`appops` 的 `PLAY_AUDIO` 反射需要 `AppOpsManager` 的隐藏重载和 `MANAGE_APP_OPS_MODES`，各版本差异大；命令形式 Mika 已在真机验证过。仍然没有"执行任意命令"的接口。

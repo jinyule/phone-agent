@@ -313,7 +313,7 @@ interface IPrivilegedCore {
   - `startActivity` → `StartResult`：0 已启动、1 用户正在主屏用它、2 没有页面能接、3 出错、4 冷启动被降级（它在别处还有任务）、5 被 agent 的另一块屏占用、6 助手拒绝（不是它的屏、别的用户、intent 不合规）、7 锁屏中（读不到锁屏状态也算，协议 2 起）；
   - `createDisplay` → 非负是 displayId，`DisplayResult.REFUSED`(-2) 是参数不合规或 API 34 以下，`DisplayResult.FAILED`(-1) 是系统拒绝，或者 IME 策略设不成 LOCAL、回读不是 LOCAL、回读不了（屏已被释放，释放失败时进待清理集合；后几条协议 3 起，"回读不了"协议 4 起）；
   - `grantSelf` → `GrantResult`：0 已授予、1 不在白名单、2 失败；
-  - `probe` → `ProbeKeys`：`steps`/`results` 两个平行数组，每项是 `ok` 或失败原因，外加 `ok` 总判定；协议 4 起多一步 `lock`，锁屏状态读得到就是 `ok`（锁没锁都算），读不到写原因、`ok` 为 false；
+  - `probe` → `ProbeKeys`：`steps`/`results` 两个平行数组，每项是 `ok` 或失败原因，外加 `ok` 总判定；协议 4 起多一步 `lock`，锁屏状态读得到就是 `ok`（锁没锁都算），读不到写原因、`ok` 为 false；协议 5 起 `release` 一步如实报告释放失败；
   - `mainArrivals` → `ArrivalKeys`：任务、包名、页面、用户、时间、来自哪块屏、是否同一任务、是否普通页面、此刻在哪块屏（Bundle 里没有对象列表，所以用平行数组）。
 
 **助手自己保证的几条**（无论 App 传什么，WP12 B 段）：

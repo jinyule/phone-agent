@@ -130,6 +130,23 @@ class DisplayCreationTest {
     }
 
     @Test
+    fun aProbeDisplayThatCannotBeReleasedFailsTheReleaseStepAndWaitsForReleaseAll() {
+        val h = helper(36)
+        h.releaseFails = true
+        val result = h.core.probe()
+        val steps = result.getStringArray(ProbeKeys.STEPS).orEmpty()
+        val outcomes = result.getStringArray(ProbeKeys.RESULTS).orEmpty()
+        val release = steps.zip(outcomes).toMap()[ProbeKeys.Step.RELEASE].orEmpty()
+        assertTrue(release, release != ProbeKeys.RESULT_OK && release.contains("releaseAll"))
+        assertFalse(result.getBoolean(ProbeKeys.OK))
+        assertEquals("the probe display waits for cleanup", 1, agentDisplays(h).size)
+
+        h.releaseFails = false
+        h.core.releaseAll()
+        assertEquals(emptyList<String>(), agentDisplays(h))
+    }
+
+    @Test
     fun belowApi34NoDisplayIsCreated() {
         val h = helper(33)
         assertEquals(DisplayResult.REFUSED, h.display())

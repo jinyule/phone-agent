@@ -111,7 +111,10 @@ public object ProbeKeys {
          */
         public const val LOCK: String = "lock"
 
-        /** Releasing the virtual display again. */
+        /**
+         * Releasing the virtual display again. From protocol 5 a release that fails is reported
+         * here (the display then waits for `releaseAll`); before, this step was always `ok`.
+         */
         public const val RELEASE: String = "release"
     }
 }

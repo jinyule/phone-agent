@@ -178,15 +178,18 @@ internal class VirtualDisplays(
 
     /**
      * Releases one display; tasks on it are destroyed with it. From this call on the display is
-     * not usable; one whose release throws is logged and waits for cleanup by [releaseAll].
+     * not usable; one whose release throws is logged and waits for cleanup by [releaseAll], and the
+     * result is false. A display that is not ours (any more) is true: nothing of it is left.
      */
-    fun release(displayId: Int) {
+    fun release(displayId: Int): Boolean {
         val display = synchronized(lock) { displays.remove(displayId)?.display ?: pending.remove(displayId) }
         if (display == null) {
             Log.w(TAG, "releaseDisplay($displayId): not ours")
-            return
+            return true
         }
-        if (releaseOrSetAside(listOf(displayId to display)).isEmpty()) Log.i(TAG, "display $displayId released")
+        val released = releaseOrSetAside(listOf(displayId to display)).isEmpty()
+        if (released) Log.i(TAG, "display $displayId released")
+        return released
     }
 
     /**
