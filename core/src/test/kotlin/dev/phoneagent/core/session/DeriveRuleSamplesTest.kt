@@ -123,35 +123,53 @@ class DeriveRuleSamplesTest {
 
     @Test
     fun `the samples tell each plausible wrong projector apart`() {
-        val wrongProjectors =
-            mapOf(
-                "drops every reasoning once any drop exists" to Projector(dropAllOnceAnyDrop = true),
-                "drops reasoning of replies before the drop record, not up to upToSeq" to
-                    Projector(dropByPosition = true),
-                "applies only the first drop" to Projector(firstDropOnly = true),
-                "keeps messages left without parts" to Projector(keepEmpty = true),
-                "keeps reasoning of a visible interrupted prefix" to Projector(keepPrefixReasoning = true),
-            )
         val undetected =
-            wrongProjectors
-                .filter { (_, projector) ->
+            Mistake.entries
+                .filter { mistake ->
+                    val projector = Projector(mistake)
                     DeriveRuleSamples.cases.all { case ->
                         case.views.all { projector.view(case.records, it.afterSeq) == it.messages }
                     }
-                }.keys
-        assertEquals(emptySet<String>(), undetected, "wrong projectors every sample agrees with")
+                }
+        assertEquals(emptyList<Mistake>(), undetected, "wrong projectors every sample agrees with")
+    }
+
+    /** One plausible mistake in implementing the model-view rules. */
+    private enum class Mistake {
+        /** Drops every reasoning once any drop exists. */
+        DROP_ALL_ONCE_ANY_DROP,
+
+        /** Drops reasoning of the replies before the drop record, not of those up to upToSeq. */
+        DROP_BY_POSITION,
+
+        /** Applies only the first drop. */
+        FIRST_DROP_ONLY,
+
+        /** Keeps messages left without parts. */
+        KEEP_EMPTY,
+
+        /** Keeps the reasoning of a visible interrupted prefix. */
+        KEEP_PREFIX_REASONING,
+
+        /** Keeps a prefix of nothing but reasoning instead of leaving it out. */
+        KEEP_REASONING_ONLY_PREFIX,
+
+        /** Drops a steered prefix that holds reasoning instead of stripping it. */
+        DROP_STEERED_PREFIX_WITH_REASONING,
+
+        /** Strips reasoning only from steered prefixes, not from one cut by a stop. */
+        STRIP_ONLY_STEERED_PREFIX,
+
+        /** Strips reasoning from the retry that supersedes a prefix too. */
+        STRIP_RETRY_AFTER_INTERRUPTION,
     }
 
     /**
-     * The model-view rules of the `SessionEvent` KDoc, written out for the samples (no compaction).
-     * The flags turn on one plausible mistake each.
+     * The model-view rules of the `SessionEvent` KDoc, written out for the samples (no compaction);
+     * with a [mistake], one plausible error in them.
      */
     private class Projector(
-        val dropAllOnceAnyDrop: Boolean = false,
-        val dropByPosition: Boolean = false,
-        val firstDropOnly: Boolean = false,
-        val keepEmpty: Boolean = false,
-        val keepPrefixReasoning: Boolean = false,
+        private val mistake: Mistake? = null,
     ) {
         fun view(
             records: List<SessionRecord>,
@@ -162,7 +180,7 @@ class DeriveRuleSamplesTest {
             return log.mapIndexedNotNull { index, record ->
                 when (val event = record.event) {
                     is UserMessage -> Message(Role.USER, event.parts)
-                    is AssistantMessage -> assistant(log.drop(index + 1), record.seq, event, drops)
+                    is AssistantMessage -> assistant(log.take(index), log.drop(index + 1), record.seq, event, drops)
                     is ToolResultRecorded -> Message(Role.TOOL, listOf(event.result.toPart(event.callId)))
                     is CompactionSummary, is CompactionPrune -> error("compaction is not covered by this projector")
                     else -> null
@@ -170,7 +188,10 @@ class DeriveRuleSamplesTest {
             }
         }
 
+        private fun makes(candidate: Mistake) = mistake == candidate
+
         private fun assistant(
+            earlier: List<SessionRecord>,
             later: List<SessionRecord>,
             seq: Long,
             event: AssistantMessage,
@@ -178,20 +199,46 @@ class DeriveRuleSamplesTest {
         ): Message? {
             val next = later.firstOrNull { it.event is UserMessage || it.event is AssistantMessage }
             val visible = !event.interrupted || next?.event is UserMessage
-            val dropped = dropped(seq, drops)
-            val stripPrefix = event.interrupted && !keepPrefixReasoning
-            val parts = event.parts.filterNot { it is Part.Reasoning && (dropped || stripPrefix) }
-            return if (visible && (parts.isNotEmpty() || keepEmpty)) Message(Role.ASSISTANT, parts) else null
+            // Steered: the input that follows comes in the same turn; otherwise a stop ended the turn first.
+            val steered = next != null && later.takeWhile { it !== next }.none { it.event is TurnEnded }
+            if (!visible || droppedWhole(event, steered)) return null
+            val strip = dropped(seq, drops) || stripsPrefix(event, steered) || stripsRetry(earlier)
+            val stripped = event.parts.filterNot { it is Part.Reasoning && strip }
+            val keepAll = stripped.isEmpty() && event.interrupted && makes(Mistake.KEEP_REASONING_ONLY_PREFIX)
+            val parts = if (keepAll) event.parts else stripped
+            return if (parts.isNotEmpty() || makes(Mistake.KEEP_EMPTY)) Message(Role.ASSISTANT, parts) else null
+        }
+
+        private fun droppedWhole(
+            event: AssistantMessage,
+            steered: Boolean,
+        ): Boolean =
+            makes(Mistake.DROP_STEERED_PREFIX_WITH_REASONING) &&
+                event.interrupted &&
+                steered &&
+                event.parts.any { it is Part.Reasoning }
+
+        private fun stripsPrefix(
+            event: AssistantMessage,
+            steered: Boolean,
+        ): Boolean =
+            event.interrupted &&
+                !makes(Mistake.KEEP_PREFIX_REASONING) &&
+                (steered || !makes(Mistake.STRIP_ONLY_STEERED_PREFIX))
+
+        private fun stripsRetry(earlier: List<SessionRecord>): Boolean {
+            val previous = earlier.lastOrNull { it.event is UserMessage || it.event is AssistantMessage }?.event
+            return makes(Mistake.STRIP_RETRY_AFTER_INTERRUPTION) && (previous as? AssistantMessage)?.interrupted == true
         }
 
         private fun dropped(
             seq: Long,
             drops: List<SessionRecord>,
         ): Boolean {
-            val applied = if (firstDropOnly) drops.take(1) else drops
+            val applied = if (makes(Mistake.FIRST_DROP_ONLY)) drops.take(1) else drops
             return when {
-                dropAllOnceAnyDrop -> drops.isNotEmpty()
-                dropByPosition -> applied.any { it.seq > seq }
+                makes(Mistake.DROP_ALL_ONCE_ANY_DROP) -> drops.isNotEmpty()
+                makes(Mistake.DROP_BY_POSITION) -> applied.any { it.seq > seq }
                 else -> applied.any { seq <= (it.event as ReasoningDropped).upToSeq }
             }
         }
