@@ -10,6 +10,7 @@ import dev.phoneagent.core.ports.ElementState
 import dev.phoneagent.core.ports.OcrLine
 import dev.phoneagent.core.ports.ScreenFlag
 import dev.phoneagent.core.ports.ScreenSnapshot
+import dev.phoneagent.core.ports.ScreenUnavailableException
 import dev.phoneagent.core.ports.SnapshotDetail
 import dev.phoneagent.core.ports.TreeQuality
 import dev.phoneagent.core.screen.ScreenDiffer
@@ -245,6 +246,35 @@ class PromptSurfaceTest {
                         run("phone_tap", tap, outcome)
                     }.joinToString("\n\n=====\n\n")
             Golden.assertMatches("results/tap-stale-refused-failed.expected.txt", text)
+        }
+
+    @Test
+    fun `results - device text with spread-out numbers is masked`() =
+        runTest {
+            // Reasons and messages come from the device as they are: line breaks, U+0085, space runs.
+            val failed =
+                ActionOutcome(
+                    ActionOutcome.Status.Failed("卡号 6222\r\n    0212\r\n    3456\r\n    7894 不可用"),
+                    ActionOutcome.Effect.UNKNOWN,
+                )
+            val refused =
+                ActionOutcome(
+                    ActionOutcome.Status.Refused("身份证 110105\u008519491231\u0085002X 不能填"),
+                    ActionOutcome.Effect.UNKNOWN,
+                )
+            val lost =
+                FakeScreen().apply {
+                    unavailable =
+                        ScreenUnavailableException("lost card 6222   0212   3456   7894", null)
+                }
+            val tap = """{"screen":"s12","ref":"e7"}"""
+            val text =
+                listOf(
+                    run("phone_tap", tap, failed),
+                    run("phone_tap", tap, refused),
+                    tools.getValue("phone_tap").execute(call("phone_tap", tap), FakeContext(lost)).text(),
+                ).joinToString("\n\n=====\n\n")
+            Golden.assertMatches("results/masked-device-text.expected.txt", text)
         }
 
     @Test
@@ -510,7 +540,10 @@ internal object Samples {
             flags = setOf(ScreenFlag.PAYMENT, ScreenFlag.KEYBOARD),
         ).assessed()
 
-    /** Card and id numbers in the forms apps print them; only the two order numbers stay readable. */
+    /**
+     * Card and id numbers in the forms apps print them (Unicode spaces, U+0085, zero-width marks,
+     * minus signs); only the two order numbers stay readable.
+     */
     val numberForms: ScreenSnapshot =
         snapshot(
             "s31",
@@ -526,6 +559,10 @@ internal object Samples {
                 el("e9", ElementRole.TEXT, "订单号：6222021234567894", box(40, 600, 960, 640)),
                 el("e10", ElementRole.TEXT, "运单号 6222 0212 3456 7894 已签收", box(40, 650, 960, 690)),
                 el("e11", ElementRole.TEXT, "电话 138 0013 8000 · 金额 ¥6,222.02", box(40, 700, 960, 740)),
+                el("e12", ElementRole.TEXT, "卡号 6222\u00850212\u00853456\u00857894", box(40, 750, 960, 790)),
+                el("e13", ElementRole.TEXT, "卡号 6222\u200B0212\u200B3456\u200B7894", box(40, 800, 960, 840)),
+                el("e14", ElementRole.TEXT, "身份证 110105\u221219491231\u2212002X", box(40, 850, 960, 890)),
+                el("e15", ElementRole.TEXT, "信用卡 4111\uFE631111\uFE631111\uFE631111", box(40, 900, 960, 940)),
             ),
         ).copy(pkg = "com.example.wallet", activity = "com.example.wallet.CardsActivity").assessed()
 

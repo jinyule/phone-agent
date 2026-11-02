@@ -209,6 +209,15 @@ class ScreenFormatterTest {
         }
 
         @Test
+        fun `every Unicode White_Space character, U+0085 included, folds into one space`() {
+            val spaces = (0..0xFFFF).map(Int::toChar).filter { WHITE_SPACE.matches("$it") }
+            assertEquals(25, spaces.size)
+            val text = spaces.joinToString("") { "字$it" } + "尾"
+            val line = body(el("e1", ElementRole.TEXT, "\u0085 $text \u2029"))[0]
+            assertEquals("@e1 \"" + "字 ".repeat(25) + "尾\"", line)
+        }
+
+        @Test
         fun `marks risky actionable elements with a warning, plain text never`() {
             val lines =
                 body(
@@ -666,3 +675,6 @@ class ScreenFormatterTest {
         ScreenFormatConfig(absorbMaxAreaShare = 1.0, absorbMaxPieces = 1, absorbMaxChars = 8)
     }
 }
+
+/** The Unicode White_Space property as the JDK knows it. */
+private val WHITE_SPACE = Regex("\\p{IsWhite_Space}")

@@ -5,7 +5,9 @@ import dev.phoneagent.core.ports.ActionOutcome
 import dev.phoneagent.core.ports.ActionOutcome.Effect
 import dev.phoneagent.core.ports.ActionOutcome.Status
 import dev.phoneagent.core.ports.AskResult
+import dev.phoneagent.core.ports.ElementRole
 import dev.phoneagent.core.ports.ScreenUnavailableException
+import dev.phoneagent.core.ports.SnapshotDetail
 import dev.phoneagent.core.screen.ScreenFormatter
 import dev.phoneagent.core.testing.FakeContext
 import dev.phoneagent.core.testing.FakeInteraction
@@ -19,6 +21,8 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertAll
+import java.util.Locale
 
 /**
  * Where tool output is masked (phase1 §4): text that comes from the device (failure and refusal
@@ -100,7 +104,61 @@ class MaskingBoundaryTest {
             assertTrue(confirmed.text().contains("绑定卡 $CARD"), confirmed.text())
         }
 
+    @Test
+    fun `numbers grouped by space runs, U+0085, zero-width marks or minus signs are masked at every exit`() =
+        runTest {
+            val exits = mutableListOf<Pair<String, String>>()
+            for (raw in GROUPED) {
+                val shown =
+                    raw
+                        .map {
+                            if (it.isDigit()) {
+                                "$it"
+                            } else {
+                                "\\u%04X".format(
+                                    Locale.ROOT,
+                                    it.code,
+                                )
+                            }
+                        }.joinToString("")
+                val failed =
+                    FakeScreen().apply {
+                        onAct =
+                            { _, _ -> ActionOutcome(Status.Failed("卡号 $raw"), Effect.UNKNOWN, after) }
+                    }
+                exits += "failure $shown" to tap(failed).text()
+                val refused =
+                    FakeScreen().apply { onAct = { _, _ -> ActionOutcome(Status.Refused("卡号 $raw"), Effect.UNKNOWN) } }
+                exits += "refusal $shown" to tap(refused).text()
+                val lost = FakeScreen().apply { unavailable = ScreenUnavailableException("lost 卡号 $raw", null) }
+                exits += "exception $shown" to tap(lost).text()
+                val typed = call("phone_type", """{"screen":"s12","ref":"e9","text":"x"}""", reason = "输入卡号 $raw")
+                exits += "summary $shown" to tools.getValue("phone_type").presentCall(typed).summary
+                val card = Screens.snapshot("s1", listOf(Screens.el("e1", ElementRole.TEXT, "卡号 $raw")))
+                exits += "screen $shown" to formatter.page(card, SnapshotDetail.FULL)
+            }
+            assertAll(
+                exits.map { (exit, text) ->
+                    {
+                        assertFalse(text.contains("6222") || text.contains("3456"), "$exit: $text")
+                        assertTrue(text.contains("「银行卡 尾号7894」"), "$exit: $text")
+                    }
+                },
+            )
+        }
+
     private companion object {
         const val CARD = "6222021234567894"
+
+        /** Groupings the device may send verbatim (no line folding happens before masking). */
+        val GROUPED =
+            listOf(
+                "6222   0212   3456   7894",
+                "6222\u00850212\u00853456\u00857894",
+                "6222\r\n  0212\r\n  3456\r\n  7894",
+                "6222\u200B0212\u200B3456\u200B7894",
+                "6222\u22120212\u22123456\u22127894",
+                "6222\uFE630212\uFE633456\uFE637894",
+            )
     }
 }

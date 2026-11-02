@@ -38,10 +38,20 @@ internal fun UiElement.isScrollContainer(): Boolean = ElementState.SCROLLABLE in
 internal fun UiElement.isEditable(): Boolean = role == ElementRole.INPUT || ElementState.EDITABLE in states
 
 /**
- * [text] on one line: whitespace runs (newlines and Unicode spaces such as U+00A0 or U+3000
- * included) collapsed to one space, trimmed.
+ * The Unicode White_Space characters, all 25: U+0009–U+000D, U+0020, U+0085, U+00A0, U+1680,
+ * U+2000–U+200A, U+2028, U+2029, U+202F, U+205F and U+3000. Listed because [Char.isWhitespace]
+ * misses U+0085 (NEXT LINE) and counts U+001C–U+001F, which are not spaces.
  */
-internal fun oneLine(text: String): String = WHITESPACE.replace(text, " ").trim { it.isWhitespace() }
+internal const val UNICODE_SPACES: String =
+    "\t\n\u000B\u000C\r \u0085\u00A0\u1680" +
+        "\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A" +
+        "\u2028\u2029\u202F\u205F\u3000"
+
+/** Whether this is one of [UNICODE_SPACES]. */
+internal fun Char.isUnicodeSpace(): Boolean = this in UNICODE_SPACES
+
+/** [text] on one line: runs of [UNICODE_SPACES] (line breaks included) collapsed to one space, trimmed. */
+internal fun oneLine(text: String): String = SPACE_RUN.replace(text, " ").trim(Char::isUnicodeSpace)
 
 /** [text] cut to at most [max] characters, ending in `…` when cut. */
 internal fun clip(
@@ -55,4 +65,4 @@ internal fun Bounds.areaShare(): Double {
     return (right - left + 1.0) * (bottom - top + 1.0) / (side * side)
 }
 
-private val WHITESPACE = Regex("[\\s\\p{Z}]+")
+private val SPACE_RUN = Regex("[$UNICODE_SPACES]+")

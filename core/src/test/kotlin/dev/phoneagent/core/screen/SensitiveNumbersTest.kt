@@ -5,6 +5,8 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import org.junit.jupiter.api.assertTimeoutPreemptively
+import java.time.Duration
 
 class SensitiveNumbersTest {
     private fun mask(text: String) = SensitiveNumbers.mask(text)
@@ -133,7 +135,76 @@ class SensitiveNumbersTest {
         assertThrows<IllegalArgumentException> { SensitiveNumbers.isLuhnValid("4111-1111") }
     }
 
+    @Test
+    fun `every Unicode space, U+0085 included, separates digit groups`() {
+        for (space in UNICODE_SPACES) {
+            val text = "卡号 6222${space}0212${space}3456${space}7894"
+            assertEquals("卡号 「银行卡 尾号7894」", mask(text), "U+" + space.code.toString(HEX))
+        }
+    }
+
+    @Test
+    fun `a gap of any length made of spaces and at most two dashes separates digit groups`() {
+        val card = "卡号 「银行卡 尾号7894」"
+        val gaps =
+            listOf(
+                "   ",
+                "    ",
+                "\r\n  ",
+                " \u3000 ",
+                "\u0085\u0085",
+                " - ",
+                "\n-\n",
+                " -- ",
+                "\t",
+                " ".repeat(9),
+                " ".repeat(40),
+            )
+        for (gap in gaps) {
+            val text = "卡号 6222${gap}0212${gap}3456${gap}7894"
+            assertEquals(card, mask(text), gap.map { "U+" + it.code.toString(HEX) }.toString())
+        }
+        // A number wrapped onto indented lines, and a column layout of one number.
+        assertEquals("尾 「银行卡 尾号7894」 尾", mask("尾 6222\r\n            0212\r\n            3456\r\n            7894 尾"))
+        assertEquals("「银行卡 尾号7894」", mask("6222 0212         3456 7894"))
+        assertEquals("身份证 「身份证 尾号002X」", mask("身份证 110105\n\n    19491231\n\n    002X"))
+    }
+
+    @Test
+    fun `minus signs and zero-width marks between groups count as separators`() {
+        for (mark in listOf("\u2212", "\uFE63", "\u200B", "\u200C", "\u200D", "\u2060", "\uFEFF")) {
+            val text = "卡号 6222${mark}0212${mark}3456${mark}7894"
+            assertEquals("卡号 「银行卡 尾号7894」", mask(text), "U+" + mark[0].code.toString(HEX))
+        }
+        assertEquals("身份证 「身份证 尾号002X」", mask("身份证 110105\u221219491231\u2212002X"))
+    }
+
+    @Test
+    fun `anything but spaces and up to two dashes between digit groups still separates fields`() {
+        for (gap in listOf(" / ", " 号 ", " --- ", " . ", "·", " _ ", "\u00B7", " * ")) {
+            val text = "6222 0212${gap}3456 7894"
+            assertEquals(text, mask(text), gap)
+        }
+        // Each group still has to be long enough, and the whole has to pass its check.
+        assertEquals("62 22 02 12 34 56 78 94", mask("62 22 02 12 34 56 78 94"))
+        assertEquals("6222   0212   3456   7895", mask("6222   0212   3456   7895"))
+    }
+
+    @Test
+    fun `a long run of short digit groups neither overflows the stack nor costs quadratic checks`() {
+        // Gaps of any length make long runs; each start is tried only as far as a card can reach.
+        val text = "1 ".repeat(SHORT_GROUPS) + "6222 0212 3456 7894"
+        val masked = assertTimeoutPreemptively(Duration.ofSeconds(SCAN_SECONDS)) { mask(text) }
+        assertEquals("1 ".repeat(SHORT_GROUPS) + "「银行卡 尾号7894」", masked)
+    }
+
     private companion object {
+        /** The 25 characters of Unicode White_Space. */
+        val UNICODE_SPACES =
+            ('\u0009'..'\u000D') + ' ' + '\u0085' + '\u00A0' + '\u1680' + ('\u2000'..'\u200A') +
+                '\u2028' + '\u2029' + '\u202F' + '\u205F' + '\u3000'
         const val HEX = 16
+        const val SHORT_GROUPS = 20_000
+        const val SCAN_SECONDS = 10L
     }
 }

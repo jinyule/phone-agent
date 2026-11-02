@@ -7,9 +7,21 @@ import java.time.YearMonth
  * text for the model, device-side reasons in tool results, step-card summaries and typed text on
  * trajectory cards.
  *
- * - **What is a number**: digit groups joined by one or two separators (any Unicode space, or a
- *   hyphen or dash), not glued to letters or digits; fullwidth digits count as digits. Each group
- *   sequence is tested where it stands, so numbers of separate fields are never joined.
+ * - **What is a number**: digit groups (ASCII or fullwidth digits) joined by gaps, not glued to
+ *   letters or digits. A gap is a run of any length of separators with at most two dashes in it:
+ *   - spaces: the 25 Unicode White_Space characters ([UNICODE_SPACES]: line breaks, U+0085,
+ *     U+00A0, U+2009, U+202F, U+3000 …);
+ *   - invisible format characters (Unicode category Cf): U+200B zero-width space, U+200C and
+ *     U+200D zero-width (non-)joiner, U+2060 word joiner, U+FEFF, U+00AD soft hyphen, bidi marks;
+ *   - dashes: `-`, U+2010–U+2014, U+2212 minus sign, U+FE63 small hyphen-minus, U+FF0D.
+ *
+ *   So a number wrapped onto indented lines or spread over columns is still one number; whether
+ *   it is a card or an id is then decided by its group sizes and its check character.
+ * - **Field boundaries**: anything else between two groups ends the number: letters, CJK text,
+ *   other punctuation (`/`, `.`, `_`, `·`, `*` …) or a third dash. Each group sequence is tested
+ *   where it stands, so numbers of separate fields are never joined. Not supported, so they also
+ *   end a number: other digit forms (Arabic-Indic, circled …), and combining marks, emoji or other
+ *   characters outside the Basic Multilingual Plane between digits.
  * - **What is masked**: a card is 15–19 digits passing Luhn, in one group or in groups of at least
  *   three digits; an id is 17 digits plus a check character (`0`–`9` or `X`) with a valid region,
  *   birth date and ISO 7064 MOD 11-2 check, in one group or in groups of at least two characters
@@ -28,11 +40,11 @@ public object SensitiveNumbers {
     public fun mask(text: String): String {
         if (text.count(Char::isDigit) < MIN_CARD_DIGITS) return text
         // Same length as text, so every range found in it is a range of text.
-        val plain = text.map(::plainChar).joinToString("")
+        val plain = NumberRuns.plain(text)
         val out = StringBuilder()
         var copied = 0
-        for (run in RUN.findAll(plain)) {
-            for ((range, masked) in numbersIn(plain, run.range)) {
+        for (run in NumberRuns.of(plain)) {
+            for ((range, masked) in numbersIn(plain, run)) {
                 out.append(text, copied, range.first).append(masked)
                 copied = range.last + 1
             }
@@ -61,25 +73,19 @@ public object SensitiveNumbers {
     }
 
     /**
-     * The numbers to mask inside [run] of [plain], in order, as (range, masked form). From each
-     * group the longest group sequence that is an id or a card wins, so a number next to another
-     * one ("第 3 6222 …") is still found.
+     * The numbers to mask in [groups] (one run of [plain]), in order, as (range, masked form). From
+     * each group the longest group sequence that is an id or a card wins, so a number next to
+     * another one ("第 3 6222 …") is still found.
      */
     private fun numbersIn(
         plain: String,
-        run: IntRange,
+        groups: List<IntRange>,
     ): List<Pair<IntRange, String>> {
-        val groups =
-            GROUP
-                .findAll(plain, run.first)
-                .map { it.range }
-                .takeWhile { it.last <= run.last }
-                .toList()
         val found = mutableListOf<Pair<IntRange, String>>()
         var first = 0
         while (first < groups.size) {
             val hit =
-                (groups.lastIndex downTo first).firstNotNullOfOrNull { last ->
+                (longestFrom(groups, first) downTo first).firstNotNullOfOrNull { last ->
                     masked(plain, groups.subList(first, last + 1))?.let { last to it }
                 }
             if (hit == null) {
@@ -90,6 +96,23 @@ public object SensitiveNumbers {
             }
         }
         return found
+    }
+
+    /**
+     * The last index of the longest group sequence from [first] that is not longer than any card or
+     * id, so a long run of short groups costs a bounded number of checks per group.
+     */
+    private fun longestFrom(
+        groups: List<IntRange>,
+        first: Int,
+    ): Int {
+        var last = first
+        var chars = groups[first].count()
+        while (last < groups.lastIndex && chars + groups[last + 1].count() <= MAX_CARD_DIGITS) {
+            last++
+            chars += groups[last].count()
+        }
+        return last
     }
 
     /** The masked form of [groups] when they make an id or a card that is not exempt, else `null`. */
@@ -141,20 +164,6 @@ public object SensitiveNumbers {
         return if (check == RADIX) 'X' else '0' + check
     }
 
-    /**
-     * [c] as the number scanner sees it: fullwidth digits, `X` and `#` as ASCII, `x` as `X`, any
-     * whitespace (Unicode spaces included) as a space, hyphens and dashes as `-`; one char for one.
-     */
-    private fun plainChar(c: Char): Char =
-        when {
-            c in '０'..'９' -> '0' + (c - '０')
-            c == 'x' || c == 'ｘ' || c == 'Ｘ' -> 'X'
-            c == '＃' -> '#'
-            c.isWhitespace() -> ' '
-            c in DASHES -> '-'
-            else -> c
-        }
-
     private const val ID_LENGTH = 18
     private const val BIRTH_START = 6
     private const val MIN_BIRTH_YEAR = 1900
@@ -169,12 +178,6 @@ public object SensitiveNumbers {
     private const val KEPT = 4
     private const val CARD_WORD_BEFORE = 32
     private const val CARD_WORD_AFTER = 12
-    private const val DASHES = "‐‑‒–—－"
-
-    /** Digit groups joined by one or two separators, maybe ending in an id check `X`, not glued to alphanumerics. */
-    private val RUN = Regex("(?<![0-9A-Za-z])[0-9]+(?:[ -]{1,2}[0-9]+)*X?(?![0-9A-Za-z])")
-
-    private val GROUP = Regex("[0-9]+X?")
 
     /** An order, tracking, serial or invoice label right before the number (end of the text before it). */
     private val ORDER_LABEL =
