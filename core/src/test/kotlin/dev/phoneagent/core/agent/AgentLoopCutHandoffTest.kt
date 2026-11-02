@@ -19,6 +19,7 @@ import dev.phoneagent.core.session.HandoffStarted
 import dev.phoneagent.core.session.PromptWithdrawn
 import dev.phoneagent.core.session.QuestionAsked
 import dev.phoneagent.core.session.StopCause
+import dev.phoneagent.core.session.ToolExecuted
 import dev.phoneagent.core.session.ToolResultRecorded
 import dev.phoneagent.core.testing.FakeChatModel
 import dev.phoneagent.core.testing.FakeChatModel.Companion.call
@@ -48,21 +49,23 @@ import java.io.IOException
  * A call that cuts its own prompt off (a timeout inside the tool) closes it at once, before the
  * next prompt may open: `prompt/withdrawn`, and for a handoff the task is taken back (once, within
  * [LoopConfig.takeBackTimeoutMs]); then the cancellation goes on to the tool. A failed take-back
- * ends the call with an error naming the exception's class only. Only a stop leaves the app with
- * the user, and the withdrawal to the repair.
+ * ends the call with an error naming the exception's class only (TIMEOUT when the budget cut it
+ * off). Only a stop leaves the app with the user, and the withdrawal to the repair.
  */
 class AgentLoopCutHandoffTest {
     private val c1 = ToolCallId("c1")
     private val texts = LoopTexts()
 
     /**
-     * Counts the moves; taking back takes [takeBackMs] (to its end despite a cancellation when
-     * [finishesBack]), then throws [backFailure].
+     * Counts the moves; handing over takes [handMs], to its end despite a cancellation; taking back
+     * takes [takeBackMs] (to its end despite a cancellation when [finishesBack]), then throws
+     * [backFailure].
      */
     private class CountingSurfaces(
         private val takeBackMs: Long = 0,
         private val backFailure: IOException? = null,
         private val finishesBack: Boolean = false,
+        private val handMs: Long = 0,
     ) : SurfaceManager {
         var handed = 0
         var takenBack = 0
@@ -79,6 +82,7 @@ class AgentLoopCutHandoffTest {
             kind: HandoffKind,
         ): HandoffTicket {
             handed++
+            withContext(NonCancellable) { delay(handMs) }
             return HandoffTicket(task, kind, SurfaceRef(7, SurfaceKind.AGENT), "t1")
         }
 
@@ -256,6 +260,30 @@ class AgentLoopCutHandoffTest {
             assertEquals(ToolStatus.ERROR, harness.resultOf(c1).status)
             val failedAt = harness.records().single { it.event is ToolResultRecorded && it.event.callId == c1 }.time
             assertEquals(1_000 + LoopConfig.DEFAULT_TAKE_BACK_TIMEOUT_MS, failedAt)
+        }
+
+    @Test
+    fun `a take-back that fails after the budget cut ends the call as TIMEOUT`() =
+        runTest {
+            // The budget runs out while the app is being handed over; taking it back then fails.
+            val surfaces = CountingSurfaces(handMs = 3_000, backFailure = IOException("display 7 gone"))
+            val hand =
+                FakeTool("hand", RiskClass.WRITE, timeoutMs = 1_000) { _, ctx ->
+                    ctx.interaction.handOff(HandoffKind.LOGIN, "请登录")
+                    ToolResult.ok("用户处理完了")
+                }
+            val model = FakeChatModel().calls(call("c1", "hand")).answers("好了")
+            val harness = LoopHarness(this, model, tools = listOf(hand), surfaces = surfaces)
+            val loop = harness.start()
+            loop.followup(text("登录"))
+            loop.awaitPhase(Phase.Done)
+
+            val result = harness.resultOf(c1)
+            assertEquals(ToolStatus.TIMEOUT, result.status, "the budget decides, whatever the take-back threw")
+            assertEquals("${texts.timeout}${texts.mayHaveTakenEffect}\n${texts.screenUnknown}", result.text())
+            assertTrue(harness.events().none { it is ToolExecuted }, "the cut-off call records no execution end")
+            assertEquals(1 to 1, surfaces.handed to surfaces.takenBack)
+            assertEquals(1, harness.events().only<PromptWithdrawn>().size)
         }
 
     @Test

@@ -39,8 +39,12 @@ import kotlin.coroutines.resume
  * 1. The lock is released only once the log closed the prompt, judged by the log ([openPrompts]):
  *    its answer or end, else `prompt/withdrawn`, whatever ended it (an answer, a cut by the call's
  *    budget or inside the tool, a failure).
- * 2. A handoff that ended so is taken back first, or the call ends with a failed take-back; a
- *    take-back that began and was cut off counts as failed.
+ * 2. A handoff that ended without its end (a cut, a failure) is taken back first, or the call
+ *    ends with a failed take-back: a take-back that fails, takes too long or began and was cut
+ *    off makes handOff throw [ScreenUnavailableException] (the move and the exception's class
+ *    only) in place of the cancellation or failure. Tools must let it propagate, not go on acting.
+ *    It is thrown whatever cut the call off: the call's own cut then ends as ERROR, its budget's
+ *    as TIMEOUT (still with [LoopTexts.mayHaveTakenEffect] and [LoopTexts.screenUnknown]).
  * 3. The only exceptions: a stopping task leaves the prompt to the repair and a handed-over app
  *    with the user; a failed log stops the task with ERROR.
  */
