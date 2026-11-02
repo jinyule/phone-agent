@@ -21,7 +21,6 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
 import okhttp3.Interceptor
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.asResponseBody
@@ -56,7 +55,8 @@ import kotlin.time.Duration.Companion.minutes
  *
  * Four model calls. One run sends at most `PA_E2E_MAX_REQUESTS` (default 6) requests; a rate limit
  * or quota error stops every remaining check, and nothing is retried. Each call prints one `e2e:`
- * line; raw streams (key masked) go to `build/e2e-anthropic/` for review.
+ * line; raw streams (key masked) go to `build/e2e-anthropic/` for review. Assertion messages never
+ * quote what the server sent.
  */
 @EnabledIfEnvironmentVariable(named = "PA_E2E_ANTHROPIC_BASE_URL", matches = ".+")
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
@@ -124,12 +124,13 @@ class AnthropicEndToEndTest {
                 "e2e: $label model=${model.info.model} stop=${reply.stopReason} usage=${reply.usage} " +
                     "parts=${reply.parts.map { it::class.simpleName }} meta=${reply.providerMetadata}",
             )
-            assertEquals(
-                reply.parts.filterIsInstance<Part.Text>().joinToString("") { it.text },
-                deltas.text,
-                "deltas add up",
+            assertTrue(
+                reply.parts.filterIsInstance<Part.Text>().joinToString("") { it.text } == deltas.text,
+                "deltas add up (values not shown)",
             )
-            reply.toolCalls.forEach { assertEquals(it.argsJson, deltas.args(it.id), "argument deltas add up") }
+            reply.toolCalls.forEach {
+                assertTrue(it.argsJson == deltas.args(it.id), "argument deltas add up (values not shown)")
+            }
             return reply to deltas
         } catch (e: ModelError) {
             report("e2e: $label model=${model.info.model} error=${e.kind} ${e.message}")
@@ -146,7 +147,7 @@ class AnthropicEndToEndTest {
         runTest(timeout = TIMEOUT) {
             val (reply, deltas) = call("text", model(), request(Kit.user("只回复一个英文单词：pong"), tools = false))
             assertEquals(StopReason.END_TURN, reply.stopReason)
-            assertTrue(deltas.text.lowercase(Locale.ROOT).contains("pong"), deltas.text)
+            assertTrue(deltas.text.lowercase(Locale.ROOT).contains("pong"), "the answer says pong (value not shown)")
         }
 
     @Test
@@ -159,10 +160,10 @@ class AnthropicEndToEndTest {
             val (reply, deltas) = call("tool call", model, first)
             assertEquals(StopReason.TOOL_USE, reply.stopReason)
             val call = reply.toolCalls.single()
-            assertEquals(Kit.WEATHER.name, call.name)
-            assertEquals(listOf(call.id), deltas.started.map { it.id })
-            val args = Json.parseToJsonElement(call.argsJson).jsonObject
-            assertTrue("city" in args, call.argsJson)
+            assertTrue(call.name == Kit.WEATHER.name, "the weather tool is called (name not shown)")
+            assertTrue(listOf(call.id) == deltas.started.map { it.id }, "the call is announced once (ids not shown)")
+            val args = runCatching { Json.parseToJsonElement(call.argsJson) }.getOrNull() as? JsonObject
+            assertTrue(args?.containsKey("city") == true, "the arguments name a city (arguments not shown)")
             val second =
                 request(
                     ask,
@@ -176,7 +177,7 @@ class AnthropicEndToEndTest {
                     .filterIsInstance<Part.Text>()
                     .joinToString("")
                     .contains("22"),
-                answer.parts.toString(),
+                "the answer uses the tool result (value not shown)",
             )
             assertAppendOnly(first, second)
         }
@@ -195,7 +196,7 @@ class AnthropicEndToEndTest {
                     .filterIsInstance<Part.Text>()
                     .joinToString("") { it.text }
                     .lowercase(Locale.ROOT)
-            assertTrue(text.contains("红") || text.contains("red"), text)
+            assertTrue(text.contains("红") || text.contains("red"), "the answer names the colour (value not shown)")
         }
 
     /**
@@ -214,7 +215,7 @@ class AnthropicEndToEndTest {
         }
         val before = messages(first)
         val after = messages(second)
-        assertEquals(before, after.take(before.size), "history is append-only")
+        assertTrue(before == after.take(before.size), "history is append-only (bodies not shown)")
     }
 
     private fun withoutCache(element: JsonElement): JsonElement =

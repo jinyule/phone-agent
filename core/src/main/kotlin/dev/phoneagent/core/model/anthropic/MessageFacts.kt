@@ -73,24 +73,35 @@ internal class MessageFacts(
         )
     }
 
-    /** `providerMetadata`: identity, stop details, server-side edits and any fallback. */
+    /**
+     * `providerMetadata`: identity, stop details, server-side edits and any fallback. Every string
+     * in it came from the server, so all of them are masked like an error body.
+     */
     fun metadata(
         reason: String,
         content: ContentBlocks.Assembled,
-    ): JsonObject =
-        buildJsonObject {
-            messageId?.let { put("id", it) }
-            servedModel?.let { put("model", it) }
-            put("stop_reason", reason)
-            stopSequence?.let { put("stop_sequence", it) }
-            stopDetails?.let { put("stop_details", it) }
-            inputTransformations?.let { put("input_transformations", it) }
-            contextManagement?.let { put("context_management", it) }
-            usage["iterations"]?.let { put("usage_iterations", it) }
-            if (content.fallbacks.isNotEmpty()) put("fallbacks", JsonArray(content.fallbacks))
-            if (content.discarded > 0) put("fallback_discarded", content.discarded)
-            if (content.diverged.isNotEmpty()) put(PREVIEW_DIVERGED, JsonArray(content.diverged.map(::JsonPrimitive)))
-        }
+    ): JsonObject {
+        val metadata =
+            buildJsonObject {
+                messageId?.let { put("id", it) }
+                servedModel?.let { put("model", it) }
+                put("stop_reason", reason)
+                stopSequence?.let { put("stop_sequence", it) }
+                stopDetails?.let { put("stop_details", it) }
+                inputTransformations?.let { put("input_transformations", it) }
+                contextManagement?.let { put("context_management", it) }
+                usage["iterations"]?.let { put("usage_iterations", it) }
+                if (content.fallbacks.isNotEmpty()) put("fallbacks", JsonArray(content.fallbacks))
+                if (content.discarded > 0) put("fallback_discarded", content.discarded)
+                if (content.diverged.isNotEmpty()) {
+                    put(
+                        PREVIEW_DIVERGED,
+                        JsonArray(content.diverged.map(::JsonPrimitive)),
+                    )
+                }
+            }
+        return protocol.mask(metadata)
+    }
 
     private fun extras(source: JsonObject) {
         source["input_transformations"]?.orNull()?.let { inputTransformations = it }

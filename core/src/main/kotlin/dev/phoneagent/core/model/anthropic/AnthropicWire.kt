@@ -26,6 +26,8 @@ import java.util.Locale
  * `reasoningEffort` (`output_config.effort`), `maxTokensField` (always `max_tokens`) and the
  * `anthropic.*` [WireProfile.options] below. The Chat Completions and Responses fields must keep
  * their defaults; anything else is refused with [ModelError.InvalidRequest] before sending.
+ * `tool_choice.disable_parallel_tool_use: true` is a rule of mapping version 1 (one action per
+ * step), not a snapshot field: `parallelToolCalls` belongs to Chat Completions and stays `false`.
  */
 public object AnthropicWire {
     /** Version of the mapping rules this adapter implements. */

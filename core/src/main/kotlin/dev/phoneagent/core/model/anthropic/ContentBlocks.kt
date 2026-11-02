@@ -7,17 +7,31 @@ import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.ReasoningKind
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import java.util.TreeMap
 
-/** Reports protocol violations as [ModelError.BadResponse], masked with the request's [redactor]. */
+/**
+ * Reports protocol violations as [ModelError.BadResponse] and masks what the server echoed, both
+ * with the request's [redactor].
+ */
 internal class Protocol(
     private val redactor: Redactor,
 ) {
     fun bad(detail: String): Nothing = throw ModelError.BadResponse(redactor.text(detail))
+
+    /** [value] with every string in it masked; structure, keys and other values are kept. */
+    fun mask(value: JsonObject): JsonObject = JsonObject(value.mapValues { (_, member) -> masked(member) })
+
+    private fun masked(value: JsonElement): JsonElement =
+        when (value) {
+            is JsonObject -> mask(value)
+            is JsonArray -> JsonArray(value.map(::masked))
+            is JsonPrimitive -> if (value.isString) JsonPrimitive(redactor.text(value.content)) else value
+        }
 
     /** [text] as JSON; [what] names it in the error. */
     fun parse(

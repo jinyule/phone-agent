@@ -9,6 +9,7 @@ import mockwebserver3.MockWebServer
 import mockwebserver3.SocketEffect
 import mockwebserver3.junit5.StartStop
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -70,8 +71,9 @@ class OneRequestPerAttemptTest {
                     .build(),
             )
             server.enqueueSse(Kit.TEXT_REPLY)
-            val error = assertThrows<ModelError.BadResponse> { Kit.model(server).complete(Kit.request()) }
+            val error = assertThrows<ModelError.InvalidRequest> { Kit.model(server).complete(Kit.request()) }
             assertTrue(error.message!!.contains("/v2/messages"), "the target is named: ${error.message}")
+            assertFalse(error.retryable, "a redirect is not retried either")
             assertEquals(1, server.requestCount)
         }
 

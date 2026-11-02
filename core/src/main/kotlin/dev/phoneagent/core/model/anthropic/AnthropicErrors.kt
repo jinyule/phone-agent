@@ -82,9 +82,13 @@ internal object AnthropicErrors {
         redactor: Redactor,
     ): ModelError {
         if (status in Status.REDIRECTS) {
-            // Redirects are not followed (one request per attempt); the address needs fixing.
-            val target = headers["Location"]?.let(redactor::text) ?: "an unnamed address"
-            return ModelError.BadResponse("HTTP $status redirect to $target: use the final address as the base URL")
+            // Redirects are not followed (one request per attempt): the same address fails again,
+            // so this is a configuration error the user fixes, not something to retry.
+            val target = headers["Location"]?.let(redactor::text)?.take(LOCATION_LIMIT) ?: "an unnamed address"
+            return ModelError.InvalidRequest(
+                param = null,
+                detail = "HTTP $status redirect to $target: check the base URL and use the final address",
+            )
         }
         val error = AnthropicError.parse(body, redactor)
         val wait = retryAfterMs(headers, nowMs)
@@ -175,6 +179,9 @@ internal object AnthropicErrors {
     private fun paramOf(message: String): String? = PARAM_PREFIX.find(message)?.groupValues?.get(1)
 
     private const val MS_PER_SECOND = 1000.0
+
+    /** Characters of a redirect target kept in the message, after masking. */
+    private const val LOCATION_LIMIT = 300
 
     /** `messages.1.content.0.tool_use.input: Field required`, `tool_choice: …`. */
     private val PARAM_PREFIX = Regex("""^([a-z_][a-z0-9_]*(?:\.[a-z0-9_]+)*): """)

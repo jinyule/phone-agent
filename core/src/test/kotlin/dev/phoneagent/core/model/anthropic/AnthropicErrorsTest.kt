@@ -131,12 +131,17 @@ class AnthropicErrorsTest {
     }
 
     @Test
-    fun `redirects are not followed and name their target, redacted`() {
+    fun `redirects are configuration errors that name their target, masked and cut`() {
         val error = map(307, "", headersOf("Location", "https://proxy.example.com/v1/messages?key=sk-abcdefghijklmnop"))
-        assertTrue(error is ModelError.BadResponse)
-        assertTrue(error.message!!.contains("https://proxy.example.com/v1/messages"), error.message)
-        assertFalse(error.message!!.contains("sk-abcdefghijklmnop"), error.message)
+        assertTrue(error is ModelError.InvalidRequest, error.toString())
+        assertNull((error as ModelError.InvalidRequest).param)
+        assertFalse(error.retryable, "the same address redirects again")
+        assertTrue(error.detail.contains("https://proxy.example.com/v1/messages"), error.detail)
+        assertTrue(error.detail.contains("check the base URL"), error.detail)
+        assertFalse(error.detail.contains("sk-abcdefghijklmnop"), error.detail)
         assertTrue(map(308, "").message!!.contains("an unnamed address"))
+        val long = map(301, "", headersOf("Location", "https://proxy.example.com/" + "a".repeat(1000)))
+        assertTrue(long.message!!.length < 500, "the target is cut: ${long.message!!.length}")
     }
 
     @Test
