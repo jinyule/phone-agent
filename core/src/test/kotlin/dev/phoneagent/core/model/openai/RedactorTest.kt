@@ -19,17 +19,17 @@ class RedactorTest {
 
     @Test
     fun `short secrets are matched exactly too`() {
-        val redactor = Redactor(listOf("test", "tinkey"))
-        assertEquals("key ***, *** run", redactor.text("key tinkey, test run"))
-        assertEquals("tinkey".length - 1, redactor.reach)
+        val redactor = Redactor(listOf("test", "local"))
+        assertEquals("key ***, *** run", redactor.text("key local, test run"))
+        assertEquals("local".length - 1, redactor.reach)
         assertEquals("(***)", Redactor(listOf("1")).text("(1)"))
     }
 
     @Test
     fun `an identifier is kept whole or not at all`() {
-        val redactor = Redactor(listOf("tinkey"))
-        assertEquals("qwen3:8b", redactor.verbatim("qwen3:8b"))
-        assertEquals(null, redactor.verbatim("tinkey-7b"))
+        val redactor = Redactor(listOf("qwen"))
+        assertEquals("llama3.2", redactor.verbatim("llama3.2"))
+        assertEquals(null, redactor.verbatim("qwen3:8b"))
         assertEquals(null, redactor.verbatim("Bearer " + "abcdefghijkl"), "a shape is masked too")
     }
 

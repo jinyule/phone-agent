@@ -65,8 +65,8 @@ class EchoGuardTest {
         assertSame(EchoGuard.NONE, Redactor(emptyList()).guard())
         assertThrows<ModelError.BadResponse> { Redactor(listOf("test")).guard().check("a test run") }
         val window = EchoGuard.NONE.Window()
-        assertDoesNotThrow { window.next("tinkey") }
-        assertDoesNotThrow { EchoGuard.NONE.parts(listOf(Part.Text("tinkey"))) }
+        assertDoesNotThrow { window.next("qwen") }
+        assertDoesNotThrow { EchoGuard.NONE.parts(listOf(Part.Text("qwen"))) }
     }
 
     @Test

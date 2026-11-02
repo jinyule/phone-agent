@@ -9,6 +9,7 @@ import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import mockwebserver3.junit5.StartStop
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 /**
@@ -61,22 +62,26 @@ class ListingIdTest {
     fun `a placeholder key inside model names leaves those entries out, never rewritten`() =
         runTest {
             // A local service given a placeholder key that its model names happen to contain.
+            // Assertions show no listed value: under a regression they would hold the key.
             val probe = Kit.adapters(Keys(PLACEHOLDER)).probe()
-            val listing = listing("$PLACEHOLDER-7b", "other", "$PLACEHOLDER:latest")
+            val listing = listing("$PLACEHOLDER:8b", "llama3.2", "${PLACEHOLDER}2.5-coder")
+            val shown = listOf(ListedModel(ModelId("llama3.2")))
             server.enqueue(listing)
-            assertEquals(listOf(ListedModel(ModelId("other"))), probe.listModels(profile))
-            for ((candidate, listed) in listOf("$PLACEHOLDER-7b" to true, "other" to true, "***-7b" to false)) {
+            assertTrue(probe.listModels(profile) == shown, "only the id without the key is listed")
+            val candidates = listOf("$PLACEHOLDER:8b" to true, "llama3.2" to true, "***:8b" to false)
+            for ((n, pair) in candidates.withIndex()) {
+                val (candidate, listed) = pair
                 server.enqueue(listing)
                 server.enqueueSse(trialCall("pa-1"))
                 val result = probe.testAndSave(profile, ModelId(candidate), Kit.capabilities(), token = "pa-1")
                 result as ProbeResult.Passed
-                assertEquals(listOf(ModelId("other")), result.models?.map { it.id })
-                assertEquals(listed, result.candidateListed, candidate)
+                assertTrue(result.models == shown, "candidate #$n: only the id without the key is listed")
+                assertEquals(listed, result.candidateListed, "candidate #$n is compared with the ids as listed")
             }
         }
 
     private companion object {
         const val BELL = 7
-        const val PLACEHOLDER = "tinkey"
+        const val PLACEHOLDER = "qwen"
     }
 }

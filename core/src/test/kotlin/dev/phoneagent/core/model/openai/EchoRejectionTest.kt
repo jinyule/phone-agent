@@ -246,7 +246,7 @@ class EchoRejectionTest {
         const val SLASHED = "placeholder/with-slash-00001"
 
         /** A short key, such as a placeholder a local service was given. */
-        const val SHORT = "tinkey"
+        const val SHORT = "qwen"
         const val PREFIX = 8
     }
 }
