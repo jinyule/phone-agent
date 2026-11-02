@@ -2,6 +2,7 @@ package dev.phoneagent.core.tools
 
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.ToolDef
+import dev.phoneagent.core.tool.RiskClass
 import dev.phoneagent.core.tool.StepCard
 import dev.phoneagent.core.tool.StepDetail
 import dev.phoneagent.core.tool.StepState
@@ -78,9 +79,11 @@ internal abstract class PhaseOneTool(
         }
 
     /**
-     * The card state of a result. A call stopped ([ToolStatus.CANCELLED]) or timed out while it may
-     * already have acted shows as [StepState.UNKNOWN], like [ToolStatus.OUTCOME_UNKNOWN], so the
-     * user is not told it failed and does it again; [ToolStatus.NOT_STARTED] never ran and fails.
+     * The card state of a result. A call that can change the phone and was stopped
+     * ([ToolStatus.CANCELLED]) or timed out while it may already have acted shows as
+     * [StepState.UNKNOWN], like [ToolStatus.OUTCOME_UNKNOWN], so the user is not told it failed and
+     * does it again. A read-only tool ([risk] is [RiskClass.READ], whatever the arguments) cannot
+     * have changed the phone, so for it these three fail. [ToolStatus.NOT_STARTED] never ran and fails.
      */
     private fun stateOf(status: ToolStatus): StepState =
         when (status) {
@@ -91,7 +94,7 @@ internal abstract class PhaseOneTool(
             ToolStatus.OUTCOME_UNKNOWN,
             ToolStatus.TIMEOUT,
             ToolStatus.CANCELLED,
-            -> StepState.UNKNOWN
+            -> if (risk == RiskClass.READ) StepState.FAILED else StepState.UNKNOWN
 
             ToolStatus.ERROR,
             ToolStatus.INVALID_ARGS,

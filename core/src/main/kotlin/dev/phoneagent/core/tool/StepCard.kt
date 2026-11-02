@@ -43,7 +43,8 @@ public enum class StepState {
 
     /**
      * Finished with a failure status that leaves no doubt it did not take effect as asked:
-     * ERROR, INVALID_ARGS, SKIPPED, NOT_STARTED (it never ran).
+     * ERROR, INVALID_ARGS, SKIPPED, NOT_STARTED (it never ran). For a read-only tool
+     * ([RiskClass.READ]) also OUTCOME_UNKNOWN, CANCELLED and TIMEOUT: it cannot have changed the phone.
      */
     FAILED,
 
@@ -51,9 +52,10 @@ public enum class StepState {
     REFUSED,
 
     /**
-     * The outcome is uncertain and the call may have taken effect: OUTCOME_UNKNOWN, and a call
-     * that was stopped (CANCELLED) or timed out (TIMEOUT). A call cancelled before it ran is shown
-     * so too, the safe side for a user who might otherwise do it again.
+     * The outcome is uncertain and a call that can change the phone (not [RiskClass.READ]) may have
+     * taken effect: OUTCOME_UNKNOWN, and such a call stopped (CANCELLED) or timed out (TIMEOUT).
+     * A call cancelled before it ran is shown so too, the safe side for a user who might otherwise
+     * do it again.
      */
     UNKNOWN,
 }

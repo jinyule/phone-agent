@@ -7,9 +7,12 @@ import dev.phoneagent.core.testing.FakeContext
 import dev.phoneagent.core.testing.FakeScreen
 import dev.phoneagent.core.testing.Screens
 import dev.phoneagent.core.testing.call
+import dev.phoneagent.core.tool.RiskClass
 import dev.phoneagent.core.tool.StepCard
 import dev.phoneagent.core.tool.StepDetail
 import dev.phoneagent.core.tool.StepState
+import dev.phoneagent.core.tool.Tool
+import dev.phoneagent.core.tool.ToolCall
 import dev.phoneagent.core.tool.ToolGroup
 import dev.phoneagent.core.tool.ToolRegistry
 import dev.phoneagent.core.tool.ToolResult
@@ -177,30 +180,59 @@ class PhaseOneToolsTest {
                 card.image,
             )
             assertEquals(StepState.SUCCEEDED, card.state)
-            val states =
-                ToolStatus.entries.associateWith { status ->
-                    observe
-                        .presentResult(
-                            call,
-                            ToolResult(status, listOf(Part.Text("x")), JsonObject(emptyMap())),
-                        ).state
-                }
-            // Stopped or timed out while running: it may have taken effect, so the card must not
-            // say "failed" (the user might do it again). Not started at all is a plain failure.
-            assertEquals(
-                mapOf(
-                    ToolStatus.OK to StepState.SUCCEEDED,
-                    ToolStatus.ERROR to StepState.FAILED,
-                    ToolStatus.REFUSED to StepState.REFUSED,
-                    ToolStatus.INVALID_ARGS to StepState.FAILED,
-                    ToolStatus.TIMEOUT to StepState.UNKNOWN,
-                    ToolStatus.CANCELLED to StepState.UNKNOWN,
-                    ToolStatus.SKIPPED to StepState.FAILED,
-                    ToolStatus.NOT_STARTED to StepState.FAILED,
-                    ToolStatus.OUTCOME_UNKNOWN to StepState.UNKNOWN,
-                ),
-                states,
-            )
+            // A read-only call cannot have changed the phone: stopped, timed out or unknown is a
+            // plain failure, not "may have taken effect".
+            assertEquals(READ_STATES, statesOf(observe, call))
             assertNull(observe.presentResult(call, ToolResult.ok("x")).image)
         }
+
+    @Test
+    fun `a call that can change the phone shows stopped, timed out and unknown as unknown`() {
+        val tap = tools.single { it.def.name == "phone_tap" }
+        assertEquals(RiskClass.WRITE, tap.risk)
+        // It may have taken effect, so the card must not say "failed" (the user might do it
+        // again). Not started at all is a plain failure.
+        assertEquals(
+            READ_STATES +
+                mapOf(
+                    ToolStatus.TIMEOUT to StepState.UNKNOWN,
+                    ToolStatus.CANCELLED to StepState.UNKNOWN,
+                    ToolStatus.OUTCOME_UNKNOWN to StepState.UNKNOWN,
+                ),
+            statesOf(tap, call("phone_tap", """{"target":"@e1"}""")),
+        )
+    }
+
+    @Test
+    fun `every tool's card states follow whether it is read-only`() {
+        for (tool in tools) {
+            val states = statesOf(tool, call(tool.def.name, "{}"))
+            val unsure = setOf(ToolStatus.TIMEOUT, ToolStatus.CANCELLED, ToolStatus.OUTCOME_UNKNOWN)
+            val expected = if (tool.risk == RiskClass.READ) StepState.FAILED else StepState.UNKNOWN
+            assertEquals(unsure.associateWith { expected }, states.filterKeys { it in unsure }, tool.def.name)
+        }
+    }
+
+    private fun statesOf(
+        tool: Tool,
+        call: ToolCall,
+    ): Map<ToolStatus, StepState> =
+        ToolStatus.entries.associateWith { status ->
+            tool.presentResult(call, ToolResult(status, listOf(Part.Text("x")), JsonObject(emptyMap()))).state
+        }
+
+    private companion object {
+        val READ_STATES =
+            mapOf(
+                ToolStatus.OK to StepState.SUCCEEDED,
+                ToolStatus.ERROR to StepState.FAILED,
+                ToolStatus.REFUSED to StepState.REFUSED,
+                ToolStatus.INVALID_ARGS to StepState.FAILED,
+                ToolStatus.TIMEOUT to StepState.FAILED,
+                ToolStatus.CANCELLED to StepState.FAILED,
+                ToolStatus.SKIPPED to StepState.FAILED,
+                ToolStatus.NOT_STARTED to StepState.FAILED,
+                ToolStatus.OUTCOME_UNKNOWN to StepState.FAILED,
+            )
+    }
 }
