@@ -8,6 +8,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import mockwebserver3.MockResponse
 import mockwebserver3.junit5.StartStop
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -79,8 +80,27 @@ class ListingIdTest {
             }
         }
 
+    @Test
+    fun `an entry holding a key handed out after the listing is left out of the passed result`() =
+        runTest {
+            // The listing request sends the first key; the trial sends the second, which a listed id holds.
+            val probe = Kit.adapters(Keys(FIRST, SECOND)).probe()
+            server.enqueue(listing("model-$SECOND", Kit.MODEL.value))
+            server.enqueueSse(trialCall("pa-1"))
+            val result = probe.testAndSave(profile, ModelId("model-$SECOND"), Kit.capabilities(), token = "pa-1")
+            assertFalse(result.toString().contains(SECOND), "the result holds the second key (value not shown)")
+            assertTrue(result is ProbeResult.Passed, "the trial passed")
+            result as ProbeResult.Passed
+            assertEquals(listOf(Kit.MODEL), result.models?.map { it.id }, "the entry is left out whole, not rewritten")
+            assertEquals(true, result.candidateListed, "the candidate is compared with the ids as listed")
+        }
+
     private companion object {
         const val BELL = 7
         const val PLACEHOLDER = "qwen"
+
+        /** Placeholders without a credential shape, the second one usable inside a model id. */
+        const val FIRST = "plain-placeholder-first-0001"
+        const val SECOND = "plain-placeholder-second-0002"
     }
 }

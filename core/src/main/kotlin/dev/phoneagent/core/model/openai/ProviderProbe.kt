@@ -156,16 +156,22 @@ public class ProviderProbe internal constructor(
         private fun failed(error: ModelError): ProbeResult =
             ProbeResult.Failed(ProbeStep.TOOL_CALL, error.kind, Redactor(env.known()).text(error.message.orEmpty()))
 
+        /**
+         * The outcome of a trial that got [reply]. Every secret the run sent masks it, including
+         * ones handed out after the listing: an entry holding one is left out of the models.
+         */
         private fun result(
             reply: ChatResponse,
             listing: Listing?,
             wire: WireOptions,
         ): ProbeResult {
-            val problem = checkTrialCall(reply, token, Redactor(env.known()))
+            val redactor = Redactor(env.known())
+            val problem = checkTrialCall(reply, token, redactor)
             val verified =
                 capabilities.copy(tools = true, verified = capabilities.verified + VerifiedCapability.TOOL_CALL)
+            val models = listing?.models?.filter { redactor.verbatim(it.id.value) != null }
             return problem?.let { ProbeResult.Failed(ProbeStep.TOOL_CALL, null, it) }
-                ?: ProbeResult.Passed(listing?.models, verified, listing?.let { candidate in it.ids }, wire)
+                ?: ProbeResult.Passed(models, verified, listing?.let { candidate in it.ids }, wire)
         }
     }
 
@@ -370,8 +376,9 @@ internal val NO_IMAGES: BlobSource = BlobSource { ref -> throw IOException("prob
 
 /**
  * A parsed listing. [models] is what may be shown: an entry whose id holds a secret the request
- * sent ([Redactor.verbatim]) is left out rather than shown rewritten. [ids] is every usable id as
- * listed, for deciding whether the candidate is listed; it never goes into a result.
+ * sent ([Redactor.verbatim]) is left out rather than shown rewritten ("test and save" filters it
+ * again with every secret its run sent). [ids] is every usable id as listed, for deciding whether
+ * the candidate is listed; it never goes into a result.
  */
 private class Listing(
     val models: List<ListedModel>,
