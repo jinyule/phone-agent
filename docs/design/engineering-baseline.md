@@ -23,7 +23,7 @@ phone-agent/
 ├─ build-logic/              Gradle 约定插件（included build）：kotlin-jvm、android-app、quality、coverage
 ├─ gradle/libs.versions.toml 版本目录；verification-metadata.xml（SHA-256）+ 禁止动态版本，不用 lockfile
 ├─ gradle/gradle-daemon-jvm.properties  构建 JDK（Temurin 25）
-├─ config/detekt/            detekt.yml + canary/（已知坏代码与必须报出的规则清单）
+├─ config/detekt/            detekt.yml + canary/（已知坏代码与必须报出的规则清单）+ canary-aidl/（同上，证明 privileged 的 detekt 能解析 AIDL 生成的类型）
 ├─ core/  privileged/  app/  模块划分见 phase1-architecture §2（eval/ 在 M1 加）
 ├─ core/src/test/resources/
 │   ├─ sessions/<scenario>/  会话回放 fixture（§3.2）
@@ -246,7 +246,7 @@ core/src/test/resources/sessions/<scenario>/
 | Gradle 约定插件 | ✅ `phoneagent.root / kotlin.jvm / android.application / android.library / quality / coverage` | `build-logic/convention` |
 | 版本号公式与单测 | ✅ | `AppVersion.kt`、`AppVersionTest` |
 | 静态检查 | ✅ Spotless + ktlint 1.8；detekt 2.0.0-alpha.6（带类型解析）；Android lint（警告即错误）；explicitApi + allWarningsAsErrors | `config/detekt/` |
-| "至少一个会被拒绝的反例" | ✅ `verifyDetektCanary`；手动验证过 explicitApi、Kover 两条规则、detekt 在真实模块里都会拦截 | `config/detekt/canary/` |
+| "至少一个会被拒绝的反例" | ✅ `verifyDetektCanary`；手动验证过 explicitApi、Kover 两条规则、detekt 在真实模块里都会拦截。Android 模块的 detekt 类型解析要带上本模块 javac 的输出（AIDL 生成的 Java 只作为 Kotlin 的源码出现，不在编译任务的 libraries 里）；`:privileged:verifyDetektCanary` 在这一点失效时报错 | `config/detekt/canary/`、`config/detekt/canary-aidl/`、`AndroidConventions.kt` |
 | Kover | ✅ 每类行覆盖 ≥ 90%；`critical` 变体校验 policy/agent 分支覆盖 100%；`@ExcludeFromCoverage` 的 reason 由测试检查 | `CoverageConventionPlugin.kt` |
 | 依赖可复现 | ✅ 校验文件 + 禁止动态版本 | `gradle/verification-metadata.xml` |
 | lefthook、gitleaks、.editorconfig、.gitattributes | ✅ | 仓库根目录 |

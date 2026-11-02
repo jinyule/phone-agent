@@ -9,6 +9,8 @@ import org.gradle.kotlin.dsl.register
  * `privileged-build` job) fails when the AIDL changed without bumping `PrivilegedProtocol.VERSION`
  * or transactions 1-4 changed at all. CI also passes `-PprivilegedProtocolBaseRef=<full base sha>`
  * so the history can only grow; local runs skip that part.
+ *
+ * With detekt applied, also [registerAidlDetektCanary].
  */
 class PrivilegedProtocolConventionPlugin : Plugin<Project> {
     override fun apply(target: Project): Unit =
@@ -26,6 +28,7 @@ class PrivilegedProtocolConventionPlugin : Plugin<Project> {
                     marker.set(layout.buildDirectory.file("privileged-protocol/verified"))
                 }
             tasks.matching { it.name == "check" }.configureEach { dependsOn(verify) }
+            pluginManager.withPlugin("dev.detekt") { registerAidlDetektCanary() }
         }
 
     private companion object {

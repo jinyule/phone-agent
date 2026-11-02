@@ -13,7 +13,8 @@ import javax.xml.parsers.DocumentBuilderFactory
 
 /**
  * Reads detekt's checkstyle report for the canary sources and fails if any expected rule
- * produced no finding, i.e. the configuration silently stopped enforcing it.
+ * produced no finding, i.e. the configuration (or the classpath it resolves types against)
+ * silently stopped enforcing it.
  */
 @CacheableTask
 abstract class VerifyDetektCanaryTask : DefaultTask() {
@@ -60,9 +61,14 @@ abstract class VerifyDetektCanaryTask : DefaultTask() {
 
         val missing = expected - fired
         if (missing.isNotEmpty()) {
+            val canary =
+                expectedRules
+                    .get()
+                    .asFile.parentFile.name
             throw GradleException(
-                "detekt canary: these rules no longer fire on config/detekt/canary: $missing. " +
-                    "Fix config/detekt/detekt.yml (or the canary source) so every listed rule is enforced.",
+                "detekt canary: these rules no longer fire on config/detekt/$canary: $missing. " +
+                    "Fix config/detekt/detekt.yml, the detekt classpath, or the canary source " +
+                    "so every listed rule is enforced.",
             )
         }
         marker.get().asFile.writeText(expected.joinToString("\n", postfix = "\n"))
