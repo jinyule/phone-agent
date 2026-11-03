@@ -1,6 +1,7 @@
 package dev.phoneagent.app.adapters.screen
 
 import android.graphics.Rect
+import android.text.InputType
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -100,8 +101,13 @@ class TypingOutcomeTest {
     fun aFieldThatAlreadyShowsTheRequestIsSubmittedWithoutTouchingItOrTheClipboard() =
         runTest {
             // Fix list r2 B2 (Claude r2 B2 / Codex R2-B3): already right, as shown, as formatted, or empty.
+            // The formatted one is a phone field (fix list r3 S1): only there does formatting count.
             for ((shows, typed) in listOf("hello" to "hello", "555-1234" to "5551234", "" to "")) {
-                val field = field { text = shows }
+                val field =
+                    field {
+                        text = shows
+                        if (shows.contains('-')) inputType = InputType.TYPE_CLASS_PHONE
+                    }
                 val clipboard = WatchedClipboard()
                 val system = TestSystem().apply { this.clipboard = clipboard }
 
@@ -110,6 +116,39 @@ class TypingOutcomeTest {
                 assertEquals("'$shows' for '$typed'", ActionOutcome.Status.Ok, outcome.status)
                 assertEquals("submitted, nothing else", listOf(AccessibilityAction.ACTION_IME_ENTER.id), field.log.ids)
                 assertEquals("the clipboard is not touched", emptyList<String>(), clipboard.calls)
+            }
+        }
+
+    @Test
+    fun aFieldOtherThanANumberThatDiffersOnlyInSpacesOrDashesIsTypedInto() =
+        runTest {
+            // Fix list r3 S1 (Claude r3 S1): before typing, the app has formatted nothing yet; a
+            // text field that does not show exactly the request needs it typed.
+            val table =
+                listOf(
+                    Triple("NewYork", "New York", false),
+                    Triple("helloworld", "hello world", false),
+                    Triple("co-op", "coop", false),
+                    Triple("hello", " ", true),
+                    Triple("", " ", false),
+                )
+            for ((shows, typed, append) in table) {
+                val field = field { text = shows }
+                field.log.answer = { action, args ->
+                    if (action == AccessibilityNodeInfo.ACTION_SET_TEXT) {
+                        field.text = args!!.getCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE)
+                    }
+                    true
+                }
+                val expected = if (append) shows + typed else typed
+
+                typeInto(field, UiAction.Type(Target.Point(500, 125), typed, append = append, submit = true))
+
+                val submitted = AccessibilityAction.ACTION_IME_ENTER.id in field.log.ids
+                assertTrue(
+                    "'$shows' for '$typed': shows '${field.text}', submitted $submitted",
+                    field.text?.toString() == expected || !submitted,
+                )
             }
         }
 

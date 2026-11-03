@@ -2,6 +2,7 @@ package dev.phoneagent.app.adapters.screen
 
 import android.os.Build
 import android.os.Bundle
+import android.text.InputType
 import android.view.accessibility.AccessibilityNodeInfo
 
 /**
@@ -15,10 +16,11 @@ import android.view.accessibility.AccessibilityNodeInfo
  * spaces, dashes and parentheses formatting fields insert; other rewrites such as "1,000" for
  * "1000" are a mismatch), shows something else ([Result.Mismatch]), or was replaced before it could
  * be read ([Result.Unconfirmed]). A field that already shows the request is left alone
- * ([Result.AlreadyShown]). Only a match is submitted; after a mismatch the model sees what the
- * field shows and decides whether to press ENTER. Password fields cannot be read back: the first
- * level that delivered, or that changed the mask, is trusted, and text is added to a password only
- * where the editor confirms its end.
+ * ([Result.AlreadyShown]): exactly, or up to that formatting in a phone number, number or date
+ * field ([formats]), where the app formats what it is given. Only a match is submitted; after a
+ * mismatch the model sees what the field shows and decides whether to press ENTER. Password fields
+ * cannot be read back: the first level that delivered, or that changed the mask, is trusted, and
+ * text is added to a password only where the editor confirms its end.
  */
 internal object TextEntry {
     /** A fallback level. */
@@ -55,11 +57,14 @@ internal object TextEntry {
      * @property text what the model asked to enter.
      * @property append keep the field's content and add [text] at the end.
      * @property before what the field showed before.
+     * @property formatted the field formats its text ([formats]), so [before] may show the
+     *   request formatted.
      */
     class Request(
         val text: String,
         val append: Boolean,
         val before: String?,
+        val formatted: Boolean = false,
     ) {
         /** What the field should show afterwards. */
         val expected: String get() = if (append) before.orEmpty() + text else text
@@ -133,10 +138,16 @@ internal object TextEntry {
     // Formatting fields insert while typing (phone numbers, card groups) does not count as a mismatch.
     private val FORMATTING = Regex("[\\s\\-()]")
 
+    // Input classes whose fields format what is typed: phone numbers, numbers, dates and times.
+    private val FORMATTING_CLASSES =
+        setOf(InputType.TYPE_CLASS_PHONE, InputType.TYPE_CLASS_NUMBER, InputType.TYPE_CLASS_DATETIME)
+
     /**
      * Runs [levels] in order until the field changes. [read] reads the field back; with
      * `settle = true` it first waits for the app to update the field. A field that is not a
-     * password and already shows the request runs no level.
+     * password and already shows the request runs no level: exactly the request, or for a field
+     * that formats its text ([Request.formatted]), the request up to formatting. Before typing, an
+     * app has formatted nothing, so in any other field a space or dash more or less is a change.
      */
     suspend fun enter(
         request: Request,
@@ -144,7 +155,7 @@ internal object TextEntry {
         levels: List<Pair<Level, Attempt>>,
         read: suspend (settle: Boolean) -> Shown,
     ): Result =
-        if (!secret && matches(request.before, request.expected)) {
+        if (!secret && shows(request)) {
             Result.AlreadyShown
         } else {
             fallBack(request, secret, levels, read)
@@ -203,6 +214,13 @@ internal object TextEntry {
         val now = judge(level, read(false), request, secret = false)
         return if (now is Result.Entered) now else judge(level, read(true), request, secret = false) ?: now
     }
+
+    private fun shows(request: Request): Boolean =
+        request.before == request.expected || (request.formatted && matches(request.before, request.expected))
+
+    /** Whether [field] formats its text: a phone number, number or date and time field, by its input type. */
+    fun formats(field: AccessibilityNodeInfo): Boolean =
+        (field.inputType and InputType.TYPE_MASK_CLASS) in FORMATTING_CLASSES
 
     /** Whether [shown] matches [expected], ignoring formatting characters. */
     fun matches(

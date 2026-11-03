@@ -41,7 +41,8 @@ class TextEntryTest {
         text: String,
         before: String? = "",
         append: Boolean = false,
-    ) = TextEntry.Request(text, append, before)
+        formatted: Boolean = false,
+    ) = TextEntry.Request(text, append, before, formatted)
 
     @Test
     fun stopsAtTheFirstLevelThatChangesTheField() =
@@ -66,7 +67,7 @@ class TextEntryTest {
             // Fix list r2 B2: typing it again would only fall through every level and fail.
             for ((before, request) in listOf(
                 "hello" to request("hello", before = "hello"),
-                "555-1234" to request("5551234", before = "555-1234"),
+                "555-1234" to request("5551234", before = "555-1234", formatted = true),
                 "" to request("", before = ""),
                 "Hi" to request("", before = "Hi", append = true),
             )) {
@@ -76,6 +77,19 @@ class TextEntryTest {
 
                 assertEquals(before, Result.AlreadyShown, TextEntry.enter(request, secret = false, levels, field.read))
                 assertEquals(before, emptyList<String>(), field.log)
+            }
+
+            // Fix list r3 S1: only a field that formats its text is taken as showing it formatted.
+            for ((before, request) in listOf(
+                "555-1234" to request("5551234", before = "555-1234"),
+                "New York" to request("NewYork", before = "New York"),
+                "co-op" to request("coop", before = "co-op"),
+            )) {
+                val field = Field(before)
+                val levels = listOf(field.level(Level.SET_TEXT, Sent.Delivered))
+
+                TextEntry.enter(request, secret = false, levels, field.read)
+                assertEquals(before, "SET_TEXT", field.log.first())
             }
 
             // A password field's read-back is a mask: it is never taken as already right.
