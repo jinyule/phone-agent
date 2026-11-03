@@ -238,9 +238,14 @@ class EscapedArgumentEchoTest {
         "OPENAI_CHAT_COMPLETIONS, cut, UNICODE",
         "OPENAI_CHAT_COMPLETIONS, cut, SLASH",
         "OPENAI_CHAT_COMPLETIONS, broken, UNICODE",
+        "OPENAI_CHAT_COMPLETIONS, error, SLASH",
+        "OPENAI_CHAT_COMPLETIONS, invariant, UNICODE",
         "OPENAI_RESPONSES, cut, UNICODE",
         "OPENAI_RESPONSES, cut, SLASH",
         "OPENAI_RESPONSES, broken, SLASH",
+        "OPENAI_RESPONSES, error, UNICODE",
+        "OPENAI_RESPONSES, failed, SLASH",
+        "OPENAI_RESPONSES, invariant, SLASH",
     )
     fun `a stream that fails after showing such arguments fails as the echo, not as its own error`(
         protocol: ModelProtocol,
@@ -250,7 +255,7 @@ class EscapedArgumentEchoTest {
         val args = """{"city":"${style.wire}"}"""
         val chat = protocol == ModelProtocol.OPENAI_CHAT_COMPLETIONS
         val body = if (chat) chatStream(listOf(args), reason = null) else responsesStream(listOf(args), ending = null)
-        server.enqueueSse(if (failure == "broken") body + "data: {not json\n\n" else body)
+        server.enqueueSse(body + failureEvent(failure, chat))
         val deltas = Deltas()
         assertRejected(model(protocol, style.key), style.key, deltas)
         assertEquals(
@@ -261,6 +266,28 @@ class EscapedArgumentEchoTest {
                 it.fragment
             },
         )
+    }
+
+    /**
+     * What ends a stream after its argument deltas: nothing (`cut`), a line that is not JSON, the
+     * provider's error event (a `Server` or `RateLimited` error, not a `BadResponse`), Responses'
+     * `response.failed`, or a second call whose id no `ToolCallId` can hold, which fails a model
+     * invariant (an `IllegalArgumentException`) while the stream is read.
+     */
+    private fun failureEvent(
+        failure: String,
+        chat: Boolean,
+    ): String {
+        val unusable = JsonPrimitive("c" + Char(1))
+        val event =
+            when (failure) {
+                "broken" -> "{not json"
+                "error" -> if (chat) CHAT_ERROR else RESPONSES_ERROR
+                "failed" -> RESPONSES_FAILED
+                "invariant" -> if (chat) chatCall(1, unusable) else responsesCall(1, unusable)
+                else -> null
+            }
+        return event?.let { "data: $it\n\n" }.orEmpty()
     }
 
     @ParameterizedTest(name = "trial: {0}")
@@ -332,8 +359,24 @@ class EscapedArgumentEchoTest {
             }
         }
 
+    private fun chatCall(
+        index: Int,
+        id: JsonPrimitive,
+    ) = """{"choices":[{"index":0,"delta":{"tool_calls":[{"index":$index,"id":$id,""" +
+        """"function":{"name":"tap","arguments":"{}"}}]}}]}"""
+
+    private fun responsesCall(
+        index: Int,
+        callId: JsonPrimitive,
+    ) = """{"type":"response.output_item.added","output_index":$index,""" +
+        """"item":{"type":"function_call","id":"fc_$index","call_id":$callId,"name":"tap","arguments":""}}"""
+
     private companion object {
         val BACKSLASH = Char(92)
+        const val CHAT_ERROR = """{"error":{"code":"server_error","message":"boom"}}"""
+        const val RESPONSES_ERROR = """{"type":"error","error":{"code":"rate_limit_exceeded","message":"slow down"}}"""
+        const val RESPONSES_FAILED =
+            """{"type":"response.failed","response":{"error":{"code":"server_error","message":"boom"}}}"""
         const val MIN_PIECE = 6
         const val TRIAL_TOOL = "confirm_connection"
 
