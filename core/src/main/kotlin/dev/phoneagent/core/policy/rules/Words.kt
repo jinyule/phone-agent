@@ -127,13 +127,17 @@ internal object Words {
 
     /**
      * What joins two actions in an English label ([Text.phrase] form): "Send and delete", "Delete
-     * & send", "Save + post", "Delete, then send". Each part is read as a label of its own where
-     * strong words count: in a control's own label at any length ([Lexicon.ofControl]), elsewhere
-     * within the length limit ([PolicyTuning.labelMax], [PolicyTuning.contextMax] in dialogs).
+     * & send", "Save + post", "Delete, then send". Each part is read by the [ENGLISH_PREFIX] phrase
+     * it starts with, never as an [ENGLISH_EXACT] one, where strong words count: in a control's own
+     * label at any length ([Lexicon.ofControl]), elsewhere within the length limit
+     * ([PolicyTuning.labelMax], [PolicyTuning.contextMax] in dialogs).
      */
     val ENGLISH_JOINERS: Regex = Regex(" and | & | \\+ |, then | then ")
 
-    /** English (spaced form): only the whole label ("Apply" alone is often a filter button: not listed). */
+    /**
+     * English (spaced form): only the whole label, as [EXACT] words ("Apply" alone is often a filter
+     * button: not listed); one part of a label joining others ([ENGLISH_JOINERS]) is none.
+     */
     val ENGLISH_EXACT: List<Pair<String, IntentKind>> =
         listOf(
             "submit" to IntentKind.OUTWARD,

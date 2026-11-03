@@ -360,6 +360,16 @@ class TargetsTest {
         for (label in listOf("Terms and conditions", "Photos and videos", "Payments & transfers", "Help & feedback")) {
             assertEquals(Verdict.Allow, decide(tap("e1"), sent(screen(el("e1", label)))), label)
         }
+        // Each part is read by the phrase it starts with, as Chinese strong words are ("扫码支付" pays);
+        // an exact phrase is only ever the whole label, as Chinese exact words are.
+        assertEquals(ConfirmReason.SPEND, reason(decide(tap("e1"), sent(screen(el("e1", "Scan & pay"))))))
+        val first = { s: ScreenSnapshot -> Fx.ctx(SecurityLevel.STANDARD, s, operated = setOfNotNull(s.pkg)) }
+        for (label in listOf("Invite", "Save and post")) {
+            assertEquals(ConfirmReason.OUTWARD, reason(decide(tap("e1"), first(screen(el("e1", label))))), label)
+        }
+        for (label in listOf("Invite and earn", "Like and comment")) {
+            assertEquals(Verdict.Allow, decide(tap("e1"), first(screen(el("e1", label)))), label)
+        }
     }
 
     @Test

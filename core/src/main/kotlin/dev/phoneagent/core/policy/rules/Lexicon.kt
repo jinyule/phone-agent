@@ -100,12 +100,15 @@ internal class Lexicon(
 }
 
 /**
- * The [Words.ENGLISH_PREFIX] phrase [text] starts with at a word boundary, else the
- * [Words.ENGLISH_EXACT] phrase it is ([Phrases.english]).
+ * The [Words.ENGLISH_PREFIX] phrase [text] starts with at a word boundary, else, when [text] is
+ * the [whole] label and not one part of it, the [Words.ENGLISH_EXACT] phrase it is ([Phrases.english]).
  */
-private fun englishPhrase(text: String): Pair<String, IntentKind>? =
+private fun englishPhrase(
+    text: String,
+    whole: Boolean,
+): Pair<String, IntentKind>? =
     Words.ENGLISH_PREFIX.firstOrNull { (phrase, _) -> text.startsWith(phrase) && !latinAt(text, phrase.length) }
-        ?: Words.ENGLISH_EXACT.firstOrNull { (phrase, _) -> text == phrase }
+        ?: if (whole) Words.ENGLISH_EXACT.firstOrNull { (phrase, _) -> text == phrase } else null
 
 /** [part] without the punctuation and spaces around it. */
 private fun trimmed(part: String): String = part.trim { !it.isLetterOrDigit() }
@@ -222,9 +225,10 @@ internal object Phrases {
      * English ([Text.phrase] form): the label starts with an [Words.ENGLISH_PREFIX] phrase at a
      * word boundary (any non-Latin letter ends a word: "Send消息"), or is an [Words.ENGLISH_EXACT]
      * phrase. Letters written apart ("s e n d") are read together. With [parts], each part the
-     * label joins with [Words.ENGLISH_JOINERS] ("Delete and send") is read so, the most severe
-     * deciding, and it sends when any part does. A [label] that is not [complete] is never vetoed;
-     * a vetoed one is vetoed whole.
+     * label joins with [Words.ENGLISH_JOINERS] ("Delete and send") is read by the phrase it starts
+     * with, the most severe deciding, and it sends when any part does; an exact phrase is only ever
+     * the whole label ("Invite and earn" invites no one). A [label] that is not [complete] is never
+     * vetoed; a vetoed one is vetoed whole.
      */
     fun english(
         label: String,
@@ -234,10 +238,11 @@ internal object Phrases {
         val spaced = Text.phrase(label).trimEnd { !it.isLetterOrDigit() }
         val letters = spaced.split(' ')
         val text = if (letters.size > 1 && letters.all { it.length == 1 }) letters.joinToString("") else spaced
-        val read = if (parts) text.split(Words.ENGLISH_JOINERS).map(::trimmed) else listOf(text)
+        val pieces = if (parts) text.split(Words.ENGLISH_JOINERS) else listOf(text)
+        val read = if (pieces.size > 1) pieces.map(::trimmed) else listOf(text)
         return read
             .map { part ->
-                englishPhrase(part)
+                englishPhrase(part, whole = read.size == 1)
                     ?.takeUnless { complete && vetoed(label, it.second) }
                     ?.let { (phrase, kind) -> Hit(kind, phrase, sends(phrase, kind)) }
             }.fold(null, ::firstMax)

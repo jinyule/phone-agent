@@ -124,6 +124,11 @@ class LexiconTest {
         listOf("Terms and conditions", "Photos and videos", "Payments & transfers", "Send code").forEach {
             assertNull(lexicon.ofControl(it), it)
         }
+        // Each part is read by the phrase it starts with; an exact phrase is only ever the whole label.
+        assertEquals(Hit(IntentKind.OUTWARD, "invite"), lexicon.ofControl("Invite"))
+        assertEquals(Hit(IntentKind.SPEND, "pay"), lexicon.ofControl("Scan & pay"))
+        listOf("Invite and earn", "Like and comment").forEach { assertNull(lexicon.ofControl(it), it) }
+        assertNull(lexicon.classify("Invite & earn"))
         // A code to oneself is told from the whole label only, also where the text is split only once.
         assertEquals(sendDelete, lexicon.ofControl("Send code and delete"))
         assertEquals(sendDelete, lexicon.inContext("Send code and delete"))
