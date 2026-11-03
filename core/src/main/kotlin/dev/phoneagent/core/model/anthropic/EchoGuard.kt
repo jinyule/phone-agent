@@ -1,6 +1,8 @@
 package dev.phoneagent.core.model.anthropic
 
 import dev.phoneagent.core.model.ModelError
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -17,11 +19,13 @@ import kotlinx.serialization.json.JsonPrimitive
  * Matching is exact, on the [Redactor]'s forms of each secret (as sent and JSON-escaped), with no
  * minimum length and no credential shapes, which ordinary output may contain. Content is checked
  * as it streams, not held back: [json] checks a block's start whole (every key and value, numbers
- * too); each string a delta carries goes through a [Window] of its own, one character shorter
- * than the longest form, so a secret split over fragments is caught by the fragment that
- * completes it, before that one is shown; and [arguments] checks the whole argument text of a
- * block once more when it ends, as written and with its escapes decoded ([JsonEscapes]), valid
- * JSON or not, so escapes such as `\/` or `\u0073` hide nothing there.
+ * too, as written and as written back: [exitForms]); each string a delta carries goes through a
+ * [Window] of its own, one character shorter than the longest form, so a secret split over
+ * fragments is caught by the fragment that completes it, before that one is shown; and
+ * [arguments] checks the whole argument text of a block once more when it ends, as written and
+ * with its escapes decoded ([JsonEscapes]), valid JSON or not, so escapes such as `\/` or `\u0073`
+ * hide nothing there. Argument text is logged as text and requests send its numbers as written,
+ * so it has no written-back form to check.
  *
  * Content of a declined attempt is checked as well, though its unknown blocks reach no exit
  * (deltas, reply, log, diagnostics, next request): stricter than the exit rule of model-layer §2,
@@ -53,7 +57,7 @@ internal class EchoGuard(
         if (forms.any { it in text }) throw CredentialEcho.error()
     }
 
-    /** Checks every key and every non-null value in [value], as parsed. */
+    /** Checks every key and every non-null value in [value], each in every form it reaches an exit in ([exitForms]). */
     fun json(value: JsonElement) {
         when (value) {
             is JsonObject -> {
@@ -68,7 +72,7 @@ internal class EchoGuard(
             }
 
             is JsonPrimitive -> {
-                if (value !is JsonNull) check(value.content)
+                if (value !is JsonNull) value.exitForms().forEach(::check)
             }
         }
     }
@@ -96,3 +100,25 @@ internal object CredentialEcho {
 
     fun error(): ModelError.BadResponse = ModelError.BadResponse(DETAIL, discardsStreamed = true)
 }
+
+/**
+ * The texts in which this non-null value reaches the exits (model-layer §2): as written (the
+ * reply's `toString`, the next request of this process) and, for a number, as kotlinx.serialization
+ * writes it back (the reply's JSON, the session log and the requests rebuilt from it), where
+ * `1.23456e5` becomes `123456.0`. A number it cannot write back (`1e400`, beyond the double range)
+ * fails the reply with [UNWRITABLE_NUMBER]: no log could record it.
+ */
+internal fun JsonPrimitive.exitForms(): List<String> {
+    if (isString) return listOf(content)
+    val written =
+        try {
+            Json.encodeToString(JsonElement.serializer(), this)
+        } catch (unwritable: SerializationException) {
+            // The session log's encoder refuses it too; the exception's message quotes the value.
+            throw ModelError.BadResponse(UNWRITABLE_NUMBER, Unquoted.bare(unwritable))
+        }
+    return listOf(content, written)
+}
+
+/** What a reply fails with when it holds a number no JSON encoder can write back. */
+internal const val UNWRITABLE_NUMBER = "the reply holds a number no JSON encoder can write back"

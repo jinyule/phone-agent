@@ -21,7 +21,8 @@ import org.junit.jupiter.params.provider.MethodSource
  * `stop_details`, `input_transformations`, `usage.iterations`) leaves that field out whole when
  * masking would change it, as a string does: a request secret such as `123456` or `true` reaches
  * neither the reply (its `toString` and its JSON) nor the session event recording it, streamed or
- * in a whole JSON reply.
+ * in a whole JSON reply. A number is compared as written and as it is written back: `1.23456e5`
+ * becomes `123456.0` in the reply's JSON and the session event.
  */
 class MetadataValueEchoTest {
     private val server = Kit.loopbackServer()
@@ -29,10 +30,11 @@ class MetadataValueEchoTest {
     @AfterEach
     fun closeServer() = server.close()
 
-    @ParameterizedTest(name = "{0}, {1}")
+    @ParameterizedTest(name = "{0} written as {1}, {2}")
     @MethodSource("cases")
     fun `a metadata number or boolean that is the key leaves its field out whole`(
         secret: String,
+        written: String,
         transport: String,
     ) = runTest {
         if (transport == WHOLE) {
@@ -40,11 +42,11 @@ class MetadataValueEchoTest {
                 MockResponse
                     .Builder()
                     .addHeader("Content-Type", "application/json")
-                    .body(whole(secret))
+                    .body(whole(written))
                     .build(),
             )
         } else {
-            server.enqueueSse(stream(secret))
+            server.enqueueSse(stream(written))
         }
         val reply = Kit.model(server, credentials = Keys(secret)).complete(Kit.request())
         val event =
@@ -74,12 +76,17 @@ class MetadataValueEchoTest {
         /** What stays of the metadata: the fields no value of the server's changes under masking. */
         val KEPT = setOf("id", "requested_model", "served_model", "stop_reason")
 
-        /** Placeholder secrets that are JSON literals, written as such into the metadata fields. */
-        val SECRETS = listOf("123456", "true")
+        /**
+         * Placeholder secrets that are JSON literals, each with how the metadata fields write it: as
+         * such, or as a number that is the key only once written back.
+         */
+        val SECRETS = listOf("123456" to "123456", "true" to "true", "123456" to "1.23456e5")
 
         @JvmStatic
         fun cases(): List<Arguments> =
-            SECRETS.flatMap { secret -> listOf(Arguments.of(secret, "SSE"), Arguments.of(secret, WHOLE)) }
+            SECRETS.flatMap { (secret, written) ->
+                listOf(Arguments.of(secret, written, "SSE"), Arguments.of(secret, written, WHOLE))
+            }
 
         /** The message-level members holding [value]; `stop_details` comes with the stop reason. */
         fun extras(value: String): String =

@@ -25,13 +25,14 @@ internal class Protocol(
 
     /**
      * Whether masking would change a member name or a value anywhere in [value]: strings, numbers
-     * and booleans alike, as written (a secret such as `123456` or `true` is a JSON literal there).
+     * and booleans alike (a secret such as `123456` or `true` is a JSON literal there), each in
+     * every form it reaches an exit in ([exitForms]: a number as written and as written back).
      */
     fun masks(value: JsonElement): Boolean =
         when (value) {
             is JsonObject -> value.any { (key, member) -> redactor.text(key) != key || masks(member) }
             is JsonArray -> value.any(::masks)
-            is JsonPrimitive -> value !is JsonNull && redactor.text(value.content) != value.content
+            is JsonPrimitive -> value !is JsonNull && value.exitForms().any { redactor.text(it) != it }
         }
 
     /**
