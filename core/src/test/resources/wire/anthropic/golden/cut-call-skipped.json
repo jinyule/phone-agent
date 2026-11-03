@@ -1,0 +1,108 @@
+{
+  "anthropic-version": "2026-10-21",
+  "anthropic-beta": [
+    "server-side-fallback-2026-07-01",
+    "thinking-binding-controls-2026-08-01"
+  ],
+  "body": {
+    "model": "claude-opus-5-5",
+    "max_tokens": 64000,
+    "stream": true,
+    "system": [
+      {
+        "type": "text",
+        "text": "你是手机助手。"
+      },
+      {
+        "type": "text",
+        "text": "每步只做一个动作。"
+      }
+    ],
+    "tools": [
+      {
+        "name": "get_weather",
+        "description": "查询城市当前天气。",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "city": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "city",
+            "reason"
+          ]
+        },
+        "eager_input_streaming": true
+      }
+    ],
+    "tool_choice": {
+      "type": "auto",
+      "disable_parallel_tool_use": true
+    },
+    "thinking": {
+      "type": "adaptive",
+      "display": "summarized",
+      "block_binding": {
+        "prefix_mismatch_behavior": "drop_block"
+      }
+    },
+    "output_config": {
+      "effort": "high"
+    },
+    "fallbacks": "default",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "巴黎天气怎么样？"
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "我来查一下。"
+          },
+          {
+            "type": "tool_use",
+            "id": "toolu_01",
+            "name": "get_weather",
+            "input": {}
+          }
+        ]
+      },
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "toolu_01",
+            "content": [
+              {
+                "type": "text",
+                "text": "未执行：回复在输出上限处被截断，你看到的参数（可能是 {}）不完整，不是你想发的。请重新发起这个调用。"
+              }
+            ],
+            "is_error": true
+          },
+          {
+            "type": "text",
+            "text": "继续",
+            "cache_control": {
+              "type": "ephemeral"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

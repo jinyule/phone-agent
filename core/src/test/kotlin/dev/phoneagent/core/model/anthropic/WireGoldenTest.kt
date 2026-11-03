@@ -2,6 +2,7 @@ package dev.phoneagent.core.model.anthropic
 
 import dev.phoneagent.core.ids.ModelId
 import dev.phoneagent.core.ids.ProviderId
+import dev.phoneagent.core.ids.ToolCallId
 import dev.phoneagent.core.model.CacheLayout
 import dev.phoneagent.core.model.ChatRequest
 import dev.phoneagent.core.model.ContextEditPolicy
@@ -12,6 +13,8 @@ import dev.phoneagent.core.model.ReasoningKind
 import dev.phoneagent.core.model.ReasoningLevel
 import dev.phoneagent.core.model.Role
 import dev.phoneagent.core.model.ToolDef
+import dev.phoneagent.core.tool.ToolResult
+import dev.phoneagent.core.tool.ToolStatus
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
@@ -151,6 +154,20 @@ class WireGoldenTest {
     }
 
     @Test
+    fun `a call cut at the output cap goes back with its SKIPPED result and the next user input`() =
+        golden(
+            "cut-call-skipped",
+            Kit.request(
+                Kit.user("巴黎天气怎么样？"),
+                Kit.assistant(Part.Text("我来查一下。"), Kit.call("toolu_01", """{"city":"巴""")),
+                Kit.tool(ToolResult.failure(ToolStatus.SKIPPED, SKIPPED_TEXT).toPart(ToolCallId("toolu_01"))),
+                Kit.user("继续"),
+                wire = Kit.wire(),
+                cache = CacheLayout(tools = false, system = false, recentMessages = 1),
+            ),
+        )
+
+    @Test
     fun `tool results open the merged user message, images inline`() =
         golden(
             "tool-results",
@@ -262,4 +279,10 @@ class WireGoldenTest {
                 put("additionalProperties", false)
             },
         )
+
+    private companion object {
+        /** A stand-in for the loop's fixed SKIPPED text (WP02 writes the real one; phase1 §3.7). */
+        const val SKIPPED_TEXT =
+            "未执行：回复在输出上限处被截断，你看到的参数（可能是 {}）不完整，不是你想发的。请重新发起这个调用。"
+    }
 }
