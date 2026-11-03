@@ -38,7 +38,7 @@ class EscapedArgumentsTest {
                 Kit.model(server, credentials = Keys(secret)).complete(Kit.request(), deltas)
             }
         assertEquals("bad response: $DETAIL", error.message)
-        assertTrue(CredentialEcho.discardsStreamed(error), "the streamed output is not kept")
+        assertTrue(error.discardsStreamed, "the streamed output is not kept")
         assertTrue(secret !in error.stackTraceToString(), "the error shows the key")
         assertEquals(shown, deltas.all, "shown before the rejection")
     }

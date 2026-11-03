@@ -36,7 +36,7 @@ class MemberNameEchoTest {
                 Kit.model(server, credentials = Keys(SECRET)).complete(Kit.request(), deltas)
             }
         assertEquals("bad response: ${CredentialEcho.DETAIL}", error.message, what)
-        assertTrue(CredentialEcho.discardsStreamed(error), "$what: the streamed output is not kept")
+        assertTrue(error.discardsStreamed, "$what: the streamed output is not kept")
         assertTrue(SECRET !in error.stackTraceToString(), "$what: the error shows the key")
         assertEquals(shown, deltas.all, "$what: shown before the rejection")
     }

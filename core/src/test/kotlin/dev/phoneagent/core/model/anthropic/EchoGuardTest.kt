@@ -16,7 +16,7 @@ class EchoGuardTest {
 
     private fun rejected(block: () -> Unit) {
         val error = assertThrows<ModelError.BadResponse> { block() }
-        assertTrue(CredentialEcho.discardsStreamed(error), "the streamed output is not kept")
+        assertTrue(error.discardsStreamed, "the streamed output is not kept")
     }
 
     @Test
@@ -78,8 +78,8 @@ class EchoGuardTest {
     @Test
     fun `only the fixed echo failure says its streamed output is not kept`() {
         assertEquals("bad response: ${CredentialEcho.DETAIL}", CredentialEcho.error().message)
-        assertTrue(CredentialEcho.discardsStreamed(CredentialEcho.error()))
-        assertFalse(CredentialEcho.discardsStreamed(ModelError.BadResponse("other")))
-        assertFalse(CredentialEcho.discardsStreamed(ModelError.Network(CredentialEcho.DETAIL)))
+        assertTrue(CredentialEcho.error().discardsStreamed)
+        assertFalse(ModelError.BadResponse("other").discardsStreamed)
+        assertFalse(ModelError.Network(CredentialEcho.DETAIL).discardsStreamed)
     }
 }
