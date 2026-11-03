@@ -82,6 +82,9 @@ class RulesLexiconTest {
         val pay = text("t2", "将从零钱支付 ¥5", window = 1)
         assertEquals(ElementRisk(IntentKind.SPEND, "确定:支付"), risk(ok, send, delete, pay))
         assertEquals(ElementRisk(IntentKind.DELETE, "确定:删除"), risk(ok, send, delete))
+        // An English dialog that joins two actions: both count.
+        val both = text("t5", "Send this and delete the chat?", window = 1)
+        assertEquals(ElementRisk(IntentKind.DELETE, "确定:delete"), risk(ok, both))
         // Text in another window is not part of the dialog; OCR lines are.
         val behind = text("t3", "删除", window = 0)
         assertNull(risk(ok, behind))

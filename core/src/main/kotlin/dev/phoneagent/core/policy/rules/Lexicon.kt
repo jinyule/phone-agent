@@ -40,9 +40,11 @@ internal class Lexicon(
 
     /**
      * The risk a control's own label names: as [classify], and a strong word anywhere in it counts
-     * at any length ("我已阅读并同意服务协议现在支付…"): a control's label says what it does.
+     * at any length ("我已阅读并同意服务协议现在支付…"): a control's label says what it does. In
+     * English, each part the label joins ("Send and delete") is read, the most severe deciding.
      */
-    fun ofControl(label: String): Hit? = classify(label) ?: Phrases.strong(label, complete = true)
+    fun ofControl(label: String): Hit? =
+        firstMax(classify(label) ?: Phrases.strong(label, complete = true), Phrases.english(label, true, parts = true))
 
     /**
      * The risk a control's label names as risk checks read it ([read]): the more severe of what
@@ -97,14 +99,35 @@ internal class Lexicon(
     ): Hit? = labels.of(label, screen)
 }
 
-/** What [text] names under the length limit [max]; exemptions only when [text] is [complete]. */
+/**
+ * The [Words.ENGLISH_PREFIX] phrase [text] starts with at a word boundary, else the
+ * [Words.ENGLISH_EXACT] phrase it is ([Phrases.english]).
+ */
+private fun englishPhrase(text: String): Pair<String, IntentKind>? =
+    Words.ENGLISH_PREFIX.firstOrNull { (phrase, _) -> text.startsWith(phrase) && !latinAt(text, phrase.length) }
+        ?: Words.ENGLISH_EXACT.firstOrNull { (phrase, _) -> text == phrase }
+
+/** [part] without the punctuation and spaces around it. */
+private fun trimmed(part: String): String = part.trim { !it.isLetterOrDigit() }
+
+private fun latinAt(
+    text: String,
+    at: Int,
+): Boolean = at < text.length && Character.UnicodeScript.of(text[at].code) == Character.UnicodeScript.LATIN
+
+/**
+ * What [text] names under the length limit [max]: strong words, and the parts of English joined
+ * actions, count only in a text that short; exemptions only when [text] is [complete].
+ */
 private fun match(
     text: String,
     max: Int,
     complete: Boolean,
-): Hit? =
-    Phrases.exact(text) ?: (if (Phrases.length(text) <= max) Phrases.strong(text, complete) else null)
-        ?: Phrases.english(text, complete)
+): Hit? {
+    val short = Phrases.length(text) <= max
+    return Phrases.exact(text) ?: (if (short) Phrases.strong(text, complete) else null)
+        ?: Phrases.english(text, complete, parts = short)
+}
 
 /**
  * What [read] finds in each distinct text, computed once while the screen stays the same object
@@ -198,22 +221,26 @@ internal object Phrases {
     /**
      * English ([Text.phrase] form): the label starts with an [Words.ENGLISH_PREFIX] phrase at a
      * word boundary (any non-Latin letter ends a word: "Send消息"), or is an [Words.ENGLISH_EXACT]
-     * phrase. Letters written apart ("s e n d") are read together. A [label] that is not
-     * [complete] is never vetoed.
+     * phrase. Letters written apart ("s e n d") are read together. With [parts], each part the
+     * label joins with [Words.ENGLISH_JOINERS] ("Delete and send") is read so, the most severe
+     * deciding, and it sends when any part does. A [label] that is not [complete] is never vetoed;
+     * a vetoed one is vetoed whole.
      */
     fun english(
         label: String,
         complete: Boolean,
+        parts: Boolean,
     ): Hit? {
         val spaced = Text.phrase(label).trimEnd { !it.isLetterOrDigit() }
         val letters = spaced.split(' ')
         val text = if (letters.size > 1 && letters.all { it.length == 1 }) letters.joinToString("") else spaced
-        val found =
-            Words.ENGLISH_PREFIX.firstOrNull { (phrase, _) -> text.startsWith(phrase) && !latinAt(text, phrase.length) }
-                ?: Words.ENGLISH_EXACT.firstOrNull { (phrase, _) -> text == phrase }
-        return found
-            ?.takeUnless { complete && vetoed(label, it.second) }
-            ?.let { (phrase, kind) -> Hit(kind, phrase, sends(phrase, kind)) }
+        val read = if (parts) text.split(Words.ENGLISH_JOINERS).map(::trimmed) else listOf(text)
+        return read
+            .map { part ->
+                englishPhrase(part)
+                    ?.takeUnless { complete && vetoed(label, it.second) }
+                    ?.let { (phrase, kind) -> Hit(kind, phrase, sends(phrase, kind)) }
+            }.fold(null, ::firstMax)
     }
 
     /** [word] of [kind] sends something to someone: an OUTWARD word, or a [Words.SENDING_SPENDS] one. */
@@ -221,11 +248,6 @@ internal object Phrases {
         word: String,
         kind: IntentKind,
     ): Boolean = kind == IntentKind.OUTWARD || word in Words.SENDING_SPENDS
-
-    private fun latinAt(
-        text: String,
-        at: Int,
-    ): Boolean = at < text.length && Character.UnicodeScript.of(text[at].code) == Character.UnicodeScript.LATIN
 
     /** [words] without names that contain a strong word but are not actions ("支付宝", "支持微信支付"). */
     private fun clean(words: String): String =

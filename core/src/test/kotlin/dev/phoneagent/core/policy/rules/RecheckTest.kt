@@ -309,6 +309,16 @@ class RecheckTest {
     }
 
     @Test
+    fun `an English label joining a send and a delete asks as a delete and binds the recipient and the draft`() {
+        for (label in listOf("Send and delete", "Delete and send", "Delete, then send")) {
+            val both = el("e1", label, bounds = box(820, 900, 999, 960))
+            for (level in listOf(CAUTIOUS, STANDARD)) {
+                bindsTheSend(Send(tap("e1"), ConfirmReason.DELETE, "（$label）"), level, both)
+            }
+        }
+    }
+
+    @Test
     fun `a red packet pays and sends - its card binds the recipient and the draft`() {
         val packet = el("e1", "发红包", bounds = box(820, 900, 999, 960))
         for (level in SecurityLevel.entries) {

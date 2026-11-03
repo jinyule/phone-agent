@@ -106,6 +106,34 @@ class LexiconTest {
     }
 
     @Test
+    fun `a control's own English label is read part by part where it joins actions`() {
+        val sendDelete = Hit(IntentKind.DELETE, "delete", sends = true)
+        for (label in listOf(
+            "Send and delete",
+            "Delete and send",
+            "DELETE & SEND",
+            "Send + delete",
+            "Delete, then send!",
+        )) {
+            assertEquals(sendDelete, lexicon.ofControl(label), label)
+        }
+        assertEquals(Hit(IntentKind.SPEND, "pay", sends = true), lexicon.ofControl("Reply and pay"))
+        // A part that names nothing adds nothing; a single part reads as before.
+        assertEquals(Hit(IntentKind.OUTWARD, "post"), lexicon.ofControl("Save and post"))
+        assertEquals(Hit(IntentKind.DELETE, "delete"), lexicon.ofControl("Delete photos and videos"))
+        listOf("Terms and conditions", "Photos and videos", "Payments & transfers", "Send code").forEach {
+            assertNull(lexicon.ofControl(it), it)
+        }
+        // A code to oneself is told from the whole label only.
+        assertEquals(sendDelete, lexicon.ofControl("Send code and delete"))
+        // Other text is split within the length limit only, as strong words count: past it, only its start.
+        assertEquals(sendDelete, lexicon.classify("Send & delete"))
+        assertEquals(Hit(IntentKind.OUTWARD, "send"), lexicon.classify("Send it to me and delete the rest"))
+        assertNull(lexicon.classify("Please review it and pay the bill"))
+        assertEquals(sendDelete, lexicon.inContext("Send this and delete the chat?"))
+    }
+
+    @Test
     fun `of matches read as one, the most severe counts, the first among equals, and it sends when any does`() {
         val delete = Hit(IntentKind.DELETE, "删除")
         val send = Hit(IntentKind.OUTWARD, "发送")

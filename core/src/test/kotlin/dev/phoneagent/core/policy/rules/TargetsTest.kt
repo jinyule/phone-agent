@@ -343,6 +343,26 @@ class TargetsTest {
     }
 
     @Test
+    fun `an English label joining two actions counts both, and one joining two names is no action`() {
+        val sent = { s: ScreenSnapshot ->
+            Fx.ctx(SecurityLevel.STANDARD, s, operated = setOfNotNull(s.pkg), outwardConfirmed = setOfNotNull(s.pkg))
+        }
+        for (label in listOf(
+            "Send and delete",
+            "Send & delete",
+            "Send + delete",
+            "Send then delete",
+            "Send, then delete",
+        )) {
+            assertEquals(ConfirmReason.DELETE, reason(decide(tap("e1"), sent(screen(el("e1", label))))), label)
+        }
+        assertEquals(ConfirmReason.SPEND, reason(decide(tap("e1"), sent(screen(el("e1", "Reply and pay"))))))
+        for (label in listOf("Terms and conditions", "Photos and videos", "Payments & transfers", "Help & feedback")) {
+            assertEquals(Verdict.Allow, decide(tap("e1"), sent(screen(el("e1", label)))), label)
+        }
+    }
+
+    @Test
     fun `OCR naming a sensitive settings entry refuses it`() {
         val s =
             screen(
