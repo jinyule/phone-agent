@@ -180,6 +180,7 @@ class AgentLoopUnsettledHandOverTest {
 
             assertFailedTakeBack(harness, hand, surfaces)
             assertEquals(1, harness.events().only<PromptWithdrawn>().size)
+            assertTrue(harness.events().only<HandoffEnded>().isEmpty(), "withdrawn, not ended")
         }
 
     @Test
@@ -224,6 +225,19 @@ class AgentLoopUnsettledHandOverTest {
         }
 
     @Test
+    fun `without a cut, a hand-over that throws an IllegalStateException is withdrawn, with no handoff end`() =
+        runTest {
+            // Only an IOException ends it FAILED; any other unsettled end is withdrawn, as a cut is.
+            val surfaces = Surfaces { throw IllegalStateException("moved, then a port bug") }
+            val hand = Hand { handOff -> handOff() }
+            val harness = played(harness(hand, surfaces))
+
+            assertFailedTakeBack(harness, hand, surfaces)
+            assertTrue(harness.events().only<HandoffEnded>().isEmpty(), "no handoff/end")
+            assertEquals(1, harness.events().only<PromptWithdrawn>().size)
+        }
+
+    @Test
     fun `a hand-over that throws an Error lets the Error propagate, with the failed take-back attached`() =
         runTest {
             val bug = NotImplementedError("port bug")
@@ -238,6 +252,7 @@ class AgentLoopUnsettledHandOverTest {
             assertFalse(hand.wentOn)
             assertEquals(1 to 0, surfaces.handed to surfaces.takenBack)
             assertEquals(1, harness.events().only<PromptWithdrawn>().size)
+            assertTrue(harness.events().only<HandoffEnded>().isEmpty(), "withdrawn, not ended")
             assertFalse(lookedAfterHandoff(harness.events()))
         }
 

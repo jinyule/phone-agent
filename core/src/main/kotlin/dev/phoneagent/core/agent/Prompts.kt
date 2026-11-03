@@ -50,10 +50,13 @@ import kotlin.coroutines.resume
  *    one failure it promises moved nothing, `SurfaceManager.handToUser`); any other end (another
  *    exception, an Error, the port's own timeout, a cancellation, whatever the job's state) may
  *    have moved the app and left no ticket, so it is a failed take-back even when the call was not
- *    cut (its `handoff/end` FAILED, and no fresh look). Tools must let it propagate, not go on
- *    acting. It is thrown whatever cut the call off: the call's own cut then ends as ERROR, its
- *    budget's as TIMEOUT (still with [LoopTexts.mayHaveTakenEffect] and [LoopTexts.screenUnknown]).
- *    An Error is never replaced: it propagates with what closing threw attached (suppressed).
+ *    cut, with no fresh look: a port's IOException (not cut) records `handoff/end` FAILED, any
+ *    other such end (another exception, the port's own timeout or cancellation, an Error) is
+ *    withdrawn as a cut is; either way where the app is is unknown, and the result is ERROR with
+ *    [LoopTexts.screenUnknown]. Tools must let it propagate, not go on acting. It is thrown
+ *    whatever cut the call off: the call's own cut then ends as ERROR, its budget's as TIMEOUT
+ *    (still with [LoopTexts.mayHaveTakenEffect] and [LoopTexts.screenUnknown]). An Error is never
+ *    replaced: it propagates with what closing threw suppressed.
  * 3. The only exceptions: a stopping task leaves the prompt to the repair and a handed-over app
  *    with the user; a failed log stops the task with ERROR.
  */
@@ -147,8 +150,10 @@ internal class Prompts(
          * ([IOException], as the ports report device trouble) end the handoff as FAILED with a
          * detail naming the move and the exception's class only (its text may quote the screen);
          * a hand-over that failed with anything but [ScreenUnavailableException] is unsettled, and
-         * handOff then throws ([Moves.giveBack]). A handoff the call cuts off itself is taken back
-         * at once ([Moves.giveBack]); a stop while handed over leaves the app with the user.
+         * handOff then throws ([Moves.giveBack]). A move that ends otherwise (another exception, a
+         * cancellation, an Error) writes no `handoff/end`: the prompt is withdrawn. A handoff the
+         * call cuts off itself is taken back at once ([Moves.giveBack]); a stop while handed over
+         * leaves the app with the user.
          */
         private suspend fun handOver(
             id: PromptId,
