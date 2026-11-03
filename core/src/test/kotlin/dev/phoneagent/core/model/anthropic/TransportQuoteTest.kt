@@ -222,7 +222,10 @@ class TransportQuoteTest {
             )
 
         /** What OkHttp's hex dumps of a line would show of any form. */
-        val HEX = FORMS.map { form -> form.toByteArray().joinToString("") { "%02x".format(it) } }
+        val HEX =
+            FORMS.map { form ->
+                form.toByteArray().joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
+            }
 
         @JvmStatic
         fun forms(): List<String> = FORMS
