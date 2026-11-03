@@ -17,12 +17,13 @@ import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
 
 /**
- * JSON with no message field to read, written back whole (model-layer §2, fix-list r8 B1): JSON
- * that is not an error object, an error object without a message field (the string a member name;
- * a value under `detail` is read as the message). Each string is masked while it is still decoded
- * text, where a newline or a tab before a credential shape is a word boundary: written back, the
- * control character is an escape that ends in a letter, and the shape after it would lose the
- * boundary it starts with. The rest of the JSON is shown, the shape masked in place; the
+ * JSON with no message field to read, written back whole (model-layer §2, fix-list r8 B1, r9 S1):
+ * JSON that is not an error object, and an error object without a message field (none of
+ * `message`, `detail`, `title`, `msg`), the string the value of another field (`note`) or a member
+ * name, in an HTTP error body or a stream's error chunk. Each string is masked while it is still
+ * decoded text, where a newline or a tab before a credential shape is a word boundary: written
+ * back, the control character is an escape that ends in a letter, and the shape after it would
+ * lose the boundary it starts with. The rest of the JSON is shown, the shape masked in place; the
  * credentials are placeholders this request did not send. The whole written back is masked once
  * more, for what no string holds: the request's key written as a number.
  */
@@ -33,7 +34,7 @@ class NoMessageJsonTest {
     private fun model(key: String = Kit.FAKE_KEY): ChatModel =
         Kit.adapters(Keys(key)).unprobed(Kit.profile(server.base()), Kit.MODEL, Kit.capabilities(), Kit.blobs())
 
-    /** JSON with no message field holding a string the test gives, answered with [status]. */
+    /** JSON with no message field holding a string the test gives; [status] is the error's. */
     enum class Body(
         val status: Int,
         val json: (String) -> String,
@@ -41,6 +42,12 @@ class NoMessageJsonTest {
         /** An array whose first element is not an error object. */
         NOT_OBJECT(502, { s -> """["$s"]""" }),
         MEMBER_NAME(500, { s -> """{"error":{"$s":"v"}}""" }),
+
+        /** The value of a field no message is read from. */
+        OBJECT_VALUE(500, { s -> """{"error":{"type":"x","note":"$s"}}""" }),
+
+        /** The same in a stream's error chunk: no status, so a server error (500). */
+        STREAM_CHUNK(500, { s -> """{"error":{"type":"x","note":"$s"}}""" }),
     }
 
     /** A control character, by the letter of its JSON escape. */
@@ -67,7 +74,11 @@ class NoMessageJsonTest {
         body: Body,
         text: String,
     ): ModelError {
-        server.enqueueError(body.status, body.json(text))
+        if (body == Body.STREAM_CHUNK) {
+            server.enqueueSse(Kit.sse(body.json(text)))
+        } else {
+            server.enqueueError(body.status, body.json(text))
+        }
         return assertThrows<ModelError> { model().send(Kit.request()) }
     }
 
