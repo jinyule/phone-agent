@@ -190,6 +190,10 @@ class LexiconTest {
                 "Send&delete. Continue?" to deletes,
                 "\"Send&delete\"" to deletes,
                 "Send && pay" to Hit(IntentKind.SPEND, "pay", sends = true),
+                // Quotes and the punctuation that ends a sentence (Claude r7 S-1).
+                "'Send+pay'" to Hit(IntentKind.SPEND, "pay", sends = true),
+                "“Send&delete”" to deletes,
+                "Send&delete。" to deletes,
             )
         val dialogs = listOf("Send+delete? This can't be undone.", "Send&delete. Continue?", "Send && delete?")
         // Two different signs are no one sign written twice; other punctuation joins nothing.
@@ -217,6 +221,59 @@ class LexiconTest {
                     Executable { assertEquals(Hit(IntentKind.OUTWARD, "send"), lexicon.ofControl(label), label) }
                 } +
                 none.map { label -> Executable { assertNull(lexicon.ofControl(label), label) } },
+        )
+    }
+
+    @Test
+    fun `a path, a hashtag, a mention or a word in other marks is not split at its signs`() {
+        // Claude r7 S-1: a path, a hashtag, a mention, a word in other marks. Only quotes and brackets
+        // come off its start, so it starts with a mark and is not split, by any reading, as before r6.
+        val marked =
+            listOf(
+                "/checkout/cart",
+                "/sdcard/Download/Transfer/",
+                "sdcard/Download/Transfer/ folder",
+                "#Buy&Sell",
+                "#Pay&Win",
+                "{buy+sell}",
+                "/delete/account",
+                "~/delete/tmp",
+                "/remove/background",
+                "*Delete/Archive*",
+                "_send&delete_",
+                "-Send&delete-",
+                "...send/delete",
+                "/send/receive",
+                "#send/receive",
+                "@post/reply",
+            )
+        val read = { label: String ->
+            listOf(lexicon.ofControl(label), lexicon.classify(label), lexicon.inContext(label), lexicon.ofLabel(label))
+        }
+        assertAll(
+            marked.map { label ->
+                Executable { assertEquals(listOf<Hit?>(null, null, null, null), read(label), label) }
+            },
+        )
+    }
+
+    @Test
+    fun `a word of one other mark written several times keeps its length`() {
+        // Claude r7 S-2: only a sign written several times reads as one sign. Seven dots keep
+        // "Send.......it" longer than labelMax, so the text is read whole; six do not.
+        assertAll(
+            Executable {
+                assertEquals(
+                    Hit(IntentKind.OUTWARD, "send"),
+                    lexicon.classify("Send ....... it and delete"),
+                )
+            },
+            Executable {
+                assertEquals(
+                    Hit(IntentKind.DELETE, "delete", sends = true),
+                    lexicon.classify("Send ...... it and delete"),
+                )
+            },
         )
     }
 

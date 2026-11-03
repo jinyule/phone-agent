@@ -438,6 +438,35 @@ class TargetsTest {
         names.forEach { assertEquals(Verdict.Allow, verdict(it), it) }
     }
 
+    @Test
+    fun `a path, a hashtag or a mention in a row's text is not split at its signs`() {
+        // Claude r7 S-1: as before r6, also where every tap asks for a payment.
+        val row = { name: String, said: String ->
+            screen(
+                el("e1", bounds = box(0, 300, 999, 400)),
+                text("t1", name, parent = "e1"),
+                text("t2", said, box(0, 350, 500, 390), parent = "e1"),
+            )
+        }
+        val rows =
+            listOf(
+                "Top pages" to "/checkout/cart",
+                "Folder" to "/sdcard/Download/Transfer/",
+                "Trending" to "#Buy&Sell",
+            )
+        assertAll(
+            rows.map { (name, said) ->
+                Executable {
+                    assertEquals(
+                        Verdict.Allow,
+                        decide(tap("e1"), on(row(name, said), SecurityLevel.AUTONOMOUS)),
+                        "$name $said",
+                    )
+                }
+            },
+        )
+    }
+
     /** A chat with 张三 as its title and 明天见 as the draft, with [extra] on it. */
     private fun chat(vararg extra: UiElement): ScreenSnapshot =
         screen(

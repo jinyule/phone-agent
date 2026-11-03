@@ -120,18 +120,20 @@ private fun englishPhrase(
 /**
  * [text] with the sign of each word made of Latin letters and one [Words.ENGLISH_SIGNS] sign
  * between them spaced out ("send&delete" → "send & delete"), so [Words.ENGLISH_JOINERS] splits
- * there. The punctuation around a word is left out of that ("send+delete? this…"), and a sign
- * written several times in a row counts once ("send&&delete", and "send && delete" too). A sign
- * at the start or end of a word is part of that punctuation and stays ("&pay=", left of
- * "?x=1&pay=2" once numbers are read as spaces; "c++"), and so does a sign in any other word
- * ("example.com/buy."). One pass over [text].
+ * there. Quotes and brackets around the word and the punctuation after it are left out of that
+ * ([Words.ENGLISH_WORD_WRAPPERS], [Words.ENGLISH_WORD_STOPS]: "\"send&delete\"", "send+delete? this…").
+ * A word that, without them, starts or ends with any other mark is not split: a path, a hashtag, a
+ * mention ("/checkout/cart", "#buy&sell", "@post/reply"), "&pay=" left of "?x=1&pay=2" once numbers
+ * are read as spaces, "c++"; nor is one with any other character in it ("example.com/buy."). A sign
+ * written several times in a row counts once ("send&&delete", and "send && delete" too). One pass
+ * over [text].
  */
 private fun spacedSigns(text: String): String = WORD.replace(text) { spacedSign(it.value) }
 
 private fun spacedSign(word: String): String {
-    val start = word.indexOfFirst(Char::isLetterOrDigit)
-    if (start < 0) return signOnce(word)
-    val end = word.indexOfLast(Char::isLetterOrDigit) + 1
+    if (word.none(Char::isLetterOrDigit)) return signOnce(word)
+    val start = word.indexOfFirst { it !in Words.ENGLISH_WORD_WRAPPERS }
+    val end = word.indexOfLast { it !in WORD_ENDS } + 1
     val core = word.substring(start, end)
     val sign = joiningSign(core)
     val spaced = if (sign == null) core else core.replace("$sign", " $sign ")
@@ -153,6 +155,9 @@ private fun signOnce(word: String): String {
 
 /** A run of characters other than spaces. */
 private val WORD = Regex("\\S+")
+
+/** What is left out at the end of a word before its sign is looked for ([spacedSigns]). */
+private val WORD_ENDS: Set<Char> = Words.ENGLISH_WORD_WRAPPERS + Words.ENGLISH_WORD_STOPS
 
 private fun isLatinLetter(c: Char): Boolean =
     c.isLetter() && Character.UnicodeScript.of(c.code) == Character.UnicodeScript.LATIN

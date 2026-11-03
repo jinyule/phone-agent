@@ -158,6 +158,22 @@ internal object Words {
     val ENGLISH_SIGNS: Set<Char> = setOf('&', '+', '/')
 
     /**
+     * Quotes and brackets around an English word ([Text.phrase] form), left out at its start and at
+     * its end before an [ENGLISH_SIGNS] sign is looked for between its letters ("\"send&delete\"",
+     * "send+pay)"; a pair of brackets is a note, gone by then). Any other mark at the start of a word
+     * keeps it whole: a path, a hashtag, a mention ("/checkout/cart", "#buy&sell", "@post/reply").
+     */
+    val ENGLISH_WORD_WRAPPERS: Set<Char> =
+        setOf('"', '\'', '“', '”', '‘', '’', '「', '」', '『', '』', '(', ')', '[', ']', '《', '》', '〈', '〉', '【', '】')
+
+    /**
+     * The punctuation that ends a clause or a sentence, left out at the end of an English word only,
+     * with [ENGLISH_WORD_WRAPPERS] ("send+delete? this…", "send&delete."); at its start it keeps the
+     * word whole ("...send/delete"). Full-width forms are these after NFKC.
+     */
+    val ENGLISH_WORD_STOPS: Set<Char> = setOf('.', ',', ';', ':', '!', '?', '…', '。', '，', '；', '：', '！', '？')
+
+    /**
      * A word left at the start of a part after a joiner ("Send and also delete"): taken off, so
      * the part is read by the phrase after it. "and" and "then" are joiners themselves.
      */
