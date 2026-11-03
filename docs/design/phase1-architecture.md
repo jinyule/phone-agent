@@ -657,7 +657,9 @@ screen s12 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · 坐标 0–
   - 对同一个端点先重试一次（`AdbConnectPort` 已经这样做）；
   - 仍然是 UNAUTHORIZED，才请用户重新配对。
 
-  我们自己的 TLS 栈按类型认出的错误（例如 bad_record_mac）算 TLS，不算 UNAUTHORIZED。对端发来的 alert 不在此列：Android 上 Conscrypt 把 adbd 的 alert 也报成 `SSLProtocolException`（实测未配对的 key 收到 `SSLV3_ALERT_CERTIFICATE_UNKNOWN`），只能靠消息里 BoringSSL 的原因名（`SSLV3_ALERT_*` / `TLSV1_ALERT_*`）认出来。
+  我们自己的 TLS 栈按类型认出的错误（例如 bad_record_mac）算 TLS，不算 UNAUTHORIZED。对端发来的 alert 不在此列，但有时类型也是 `SSLProtocolException`，只能靠消息认出来：
+  - Android 上 Conscrypt 收到任何 alert 都报成 `SSLProtocolException`（实测未配对的 key 收到 `SSLV3_ALERT_CERTIFICATE_UNKNOWN`）。认法是 BoringSSL 的原因：`SSLV3_ALERT_*` / `TLSV1_ALERT_*`，名字表里没有的写成 `SSL routines:OPENSSL_internal:reason(1NNN)`（例如 missing_extension 是 `reason(1109)`）。不按原因码的数值判断：BoringSSL 自己的原因也有 1000 以上的（1122 `PAKE_AND_KEY_SHARE_NOT_ALLOWED`）。
+  - JDK 收到 unexpected_message 或不认识的编号时报成 `SSLProtocolException`，消息里是 `Received fatal alert: ` / `Unknown alert description (`。
 
 ### 7.2 一步执行
 

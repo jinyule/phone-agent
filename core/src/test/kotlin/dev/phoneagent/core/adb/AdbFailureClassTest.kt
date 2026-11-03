@@ -9,6 +9,7 @@ import java.net.SocketTimeoutException
 import javax.crypto.AEADBadTagException
 import javax.crypto.BadPaddingException
 import javax.net.ssl.SSLException
+import javax.net.ssl.SSLHandshakeException
 import javax.net.ssl.SSLProtocolException
 
 /** How connect and command failures are classified, from the exceptions alone. */
@@ -98,18 +99,54 @@ class AdbFailureClassTest {
             // Before adbd asked for our certificate, an alert is no answer to our key.
             assertEquals(ConnectFailure.TLS, classify(TlsHandshakeException(false, alert), ConnectFailure.TLS))
         }
-        // What BoringSSL finds itself has a reason below 1000 and stays TLS, also when it is about an alert.
+        // What BoringSSL finds itself has a name of its own and stays TLS, also when it is about an
+        // alert or its code is above 1000; so does an alert's name or reason only inside another word.
         val ownFindings =
             listOf(
                 "error:1000008b:SSL routines:OPENSSL_internal:DECRYPTION_FAILED_OR_BAD_RECORD_MAC",
                 "error:10000066:SSL routines:OPENSSL_internal:BAD_ALERT",
                 "error:100000e3:SSL routines:OPENSSL_internal:UNKNOWN_ALERT_TYPE",
-            ).map { SSLProtocolException("Read error: ssl=0x1: Failure in SSL library, usually a protocol error\n$it") }
+                "error:10000462:SSL routines:OPENSSL_internal:PAKE_AND_KEY_SHARE_NOT_ALLOWED",
+                "error:10000416:SSL routines:OPENSSL_internal:XSSLV3_ALERT_CERTIFICATE_UNKNOWN",
+                "error:1000045c:SSL routines:OPENSSL_internal:_TLSV1_ALERT_CERTIFICATE_REQUIRED",
+                "error:10000455:SSL routines:OPENSSL_internal:Xreason(1109)",
+            ).map(::conscryptError)
         for (ownFinding in ownFindings) {
-            assertEquals(ConnectFailure.TLS, classify(ownFinding, ConnectFailure.UNAUTHORIZED))
+            assertEquals(ConnectFailure.TLS, classify(ownFinding, ConnectFailure.UNAUTHORIZED), "$ownFinding")
             assertEquals(ConnectFailure.TLS, classify(TlsHandshakeException(true, ownFinding), ConnectFailure.TLS))
         }
         assertEquals(ConnectFailure.TLS, classify(SSLProtocolException(null), ConnectFailure.UNAUTHORIZED))
+    }
+
+    @Test
+    fun `an alert the peer sends is a possible refusal on the JDK and on Conscrypt alike, named or not`() {
+        // The JDK's shapes (sun.security.ssl.Alert): a received unexpected_message, and an alert
+        // number it does not know, come as a protocol error without a cause.
+        val jdk =
+            listOf(
+                SSLProtocolException("(unexpected_message) Received fatal alert: unexpected_message"),
+                SSLHandshakeException("(missing_extension) Received fatal alert: missing_extension"),
+                SSLProtocolException("(unexpected_message) Unknown alert description (200)"),
+            )
+        // BoringSSL writes reason(N) for a code its table has no name for, as for these alerts.
+        val conscrypt =
+            listOf(
+                "error:100003f2:SSL routines:OPENSSL_internal:SSLV3_ALERT_UNEXPECTED_MESSAGE",
+                "error:10000455:SSL routines:OPENSSL_internal:reason(1109)",
+                "error:100004b0:SSL routines:OPENSSL_internal:reason(1200)",
+            ).map(::conscryptError)
+        val alerts = jdk + conscrypt
+
+        fun classifiedAll(
+            step: ConnectFailure,
+            wrap: (IOException) -> IOException,
+        ) = alerts.associateWith { AdbHandshake.classify(wrap(it), step).reason }
+        val refusals = alerts.associateWith { ConnectFailure.UNAUTHORIZED }
+        assertEquals(refusals, classifiedAll(ConnectFailure.UNAUTHORIZED) { it })
+        assertEquals(refusals, classifiedAll(ConnectFailure.TLS) { TlsHandshakeException(true, it) })
+        // Before adbd asked for our certificate, an alert is no answer to our key.
+        val early = alerts.associateWith { ConnectFailure.TLS }
+        assertEquals(early, classifiedAll(ConnectFailure.TLS) { TlsHandshakeException(false, it) })
     }
 
     @Test
@@ -125,3 +162,7 @@ class AdbFailureClassTest {
         assertEquals(CommandFailure.TIMEOUT, CommandExchange.classify(timeout).reason)
     }
 }
+
+/** An error as Conscrypt raises it for one entry of BoringSSL's error queue (jniutil.cc). */
+private fun conscryptError(entry: String) =
+    SSLProtocolException("Read error: ssl=0x1: Failure in SSL library, usually a protocol error\n$entry")

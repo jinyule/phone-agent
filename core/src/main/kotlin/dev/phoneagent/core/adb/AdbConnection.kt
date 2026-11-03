@@ -281,25 +281,29 @@ internal class AdbHandshake(
          * Whether our own TLS stack found fault with what it received and says so by type: a
          * protocol error ([SSLProtocolException]) or a cryptographic failure, here or behind it,
          * such as a record that fails its integrity check (bad_record_mac). Those are not adbd
-         * refusing us. An alert adbd sends arrives on the JDK as an exception without a cause; on
-         * Android, Conscrypt raises it as an [SSLProtocolException] too, and only BoringSSL's
-         * reason in the message ([namesPeerAlert]) tells it from Conscrypt's own finding.
+         * refusing us. A protocol error that reports an alert the peer sent ([reportsPeerAlert])
+         * is not our finding: the JDK raises a received unexpected_message, and an alert number
+         * it does not know, as one; Conscrypt on Android raises every received alert as one.
          */
         private fun IOException.isTlsFinding(): Boolean =
             generateSequence<Throwable>(this) { it.cause }.any {
-                (it is SSLProtocolException && !it.namesPeerAlert()) ||
+                (it is SSLProtocolException && !it.reportsPeerAlert()) ||
                     it is GeneralSecurityException
             }
 
         /**
-         * Whether [this] reports an alert the peer sent, by BoringSSL's reason for it: the alert's
-         * name after `SSLV3_ALERT_` or `TLSV1_ALERT_` (reason codes 1000 + alert number), such as
-         * `SSLV3_ALERT_CERTIFICATE_UNKNOWN`, which adbd sends for a key it does not know. An
-         * error BoringSSL finds itself has its own reason, such as
-         * `DECRYPTION_FAILED_OR_BAD_RECORD_MAC`.
+         * Whether [this] reports an alert the peer sent, by what each TLS stack writes for it:
+         * - BoringSSL (behind Conscrypt) records reason 1000 + the alert number, written as the
+         *   alert's name after `SSLV3_ALERT_` or `TLSV1_ALERT_`, such as
+         *   `SSLV3_ALERT_CERTIFICATE_UNKNOWN`, which adbd sends for a key it does not know, or as
+         *   `reason(1NNN)` where its table has no name (missing_extension, unassigned numbers).
+         *   Its own findings all have names, such as `DECRYPTION_FAILED_OR_BAD_RECORD_MAC`, some
+         *   above 1000 too (`PAKE_AND_KEY_SHARE_NOT_ALLOWED`, 1122), so the code is not looked at.
+         * - The JDK writes `Received fatal alert: ` and, for a number it does not know,
+         *   `Unknown alert description (`.
          */
-        private fun Throwable.namesPeerAlert(): Boolean =
-            message?.let { BORINGSSL_PEER_ALERT.containsMatchIn(it) } == true
+        private fun Throwable.reportsPeerAlert(): Boolean =
+            message?.let { BORINGSSL_PEER_ALERT.containsMatchIn(it) || JDK_PEER_ALERT.containsMatchIn(it) } == true
 
         @Throws(IOException::class)
         fun send(
@@ -312,8 +316,15 @@ internal class AdbHandshake(
     }
 }
 
-/** BoringSSL's reason for a received alert, e.g. `…:OPENSSL_internal:SSLV3_ALERT_CERTIFICATE_UNKNOWN`. */
-private val BORINGSSL_PEER_ALERT = Regex("""\b(?:SSLV3|TLSV1)_ALERT_[A-Z_]+""")
+/**
+ * BoringSSL's reason for a received alert, named (`…:OPENSSL_internal:SSLV3_ALERT_CERTIFICATE_UNKNOWN`)
+ * or not (`…:SSL routines:OPENSSL_internal:reason(1109)`).
+ */
+private val BORINGSSL_PEER_ALERT =
+    Regex("""\b(?:SSLV3|TLSV1)_ALERT_[A-Z_]+|SSL routines:OPENSSL_internal:reason\(1\d{3}\)""")
+
+/** The JDK's diagnostic for a received fatal alert (sun.security.ssl.Alert). */
+private val JDK_PEER_ALERT = Regex("""Received fatal alert: |Unknown alert description \(""")
 
 /** The TLS stream and adbd's CNXN, before the CNXN is checked. */
 private class PendingHandshake(
