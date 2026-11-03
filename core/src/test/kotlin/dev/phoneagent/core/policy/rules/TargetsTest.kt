@@ -23,9 +23,11 @@ import dev.phoneagent.core.ports.ScreenFlag
 import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.tool.RiskClass
 import dev.phoneagent.core.tool.ToolCall
+import org.junit.jupiter.api.Assertions.assertAll
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.function.Executable
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.EnumSource
 
@@ -370,6 +372,38 @@ class TargetsTest {
         for (label in listOf("Invite and earn", "Like and comment")) {
             assertEquals(Verdict.Allow, decide(tap("e1"), first(screen(el("e1", label)))), label)
         }
+    }
+
+    @Test
+    fun `English joiners split however they are spaced or repeated, and names joined by a sign stay names`() {
+        val sent = { s: ScreenSnapshot ->
+            Fx.ctx(SecurityLevel.STANDARD, s, operated = setOfNotNull(s.pkg), outwardConfirmed = setOfNotNull(s.pkg))
+        }
+        val verdict = { label: String -> decide(tap("e1"), sent(screen(el("e1", label)))) }
+        val asked = { kind: ConfirmReason?, labels: List<String> ->
+            labels.map { label ->
+                Executable { assertEquals(kind, (verdict(label) as? Verdict.Confirm)?.card?.reason, label) }
+            }
+        }
+        // Joiners one after another, and signs without spaces (Codex r5), then the forms that split before.
+        val deletes =
+            listOf(
+                "Send and then delete",
+                "Send & then delete",
+                "Send then then delete",
+                "Send&delete",
+                "Send and delete",
+                "Delete & send",
+                "Send, then delete",
+                "SEND And DeLeTe",
+                "Send ＆ delete",
+                "Send＆delete",
+            )
+        val spends = listOf("Pay and send", "Send and delete & pay", "Send+pay")
+        // Split at the sign, each part still reads only by the phrase it starts with: allowed.
+        val names = listOf("Q&A", "R&D", "AT&T", "Terms&Conditions", "Android and iOS", "Brand+")
+        assertAll(asked(ConfirmReason.DELETE, deletes) + asked(ConfirmReason.SPEND, spends) + asked(null, names))
+        names.forEach { assertEquals(Verdict.Allow, verdict(it), it) }
     }
 
     @Test

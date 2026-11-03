@@ -114,9 +114,16 @@ class LexiconTest {
             "DELETE & SEND",
             "Send + delete",
             "Delete, then send!",
+            "Send and then delete",
+            "Send & then delete",
+            "Send then then delete",
+            "Send&delete",
+            "Send＆delete",
+            "Send,then delete",
         )) {
             assertEquals(sendDelete, lexicon.ofControl(label), label)
         }
+        listOf("Q&A", "R&D", "AT&T", "Terms&Conditions").forEach { assertNull(lexicon.ofControl(it), it) }
         assertEquals(Hit(IntentKind.SPEND, "pay", sends = true), lexicon.ofControl("Reply and pay"))
         // A part that names nothing adds nothing; a single part reads as before.
         assertEquals(Hit(IntentKind.OUTWARD, "post"), lexicon.ofControl("Save and post"))

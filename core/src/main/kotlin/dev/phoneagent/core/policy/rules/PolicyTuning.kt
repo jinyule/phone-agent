@@ -95,7 +95,7 @@ public data class PolicyTuning(
     /** Constants. */
     public companion object {
         /** Version of the rules and of these defaults; bumped with every change that can alter a verdict. */
-        public const val RULES_VERSION: Int = 5
+        public const val RULES_VERSION: Int = 6
 
         private const val MAX_LENGTH = 1000
         private const val MAX_LIMIT = 10_000_000
