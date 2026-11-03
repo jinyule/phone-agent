@@ -120,16 +120,36 @@ private fun englishPhrase(
 /**
  * [text] with the sign of each word made of Latin letters and one [Words.ENGLISH_SIGNS] sign
  * between them spaced out ("send&delete" → "send & delete"), so [Words.ENGLISH_JOINERS] splits
- * there; a word that starts or ends with the sign keeps it ("&pay", left of "?x=1&pay=2" once
- * numbers are read as spaces), and so does any other word ("example.com/buy"). One pass over [text].
+ * there. The punctuation around a word is left out of that ("send+delete? this…"), and a sign
+ * written several times in a row counts once ("send&&delete", and "send && delete" too). A sign
+ * at the start or end of a word is part of that punctuation and stays ("&pay=", left of
+ * "?x=1&pay=2" once numbers are read as spaces; "c++"), and so does a sign in any other word
+ * ("example.com/buy."). One pass over [text].
  */
-private fun spacedSigns(text: String): String =
-    WORD.replace(text) { found ->
-        val word = found.value
-        val sign = word.firstOrNull { it in Words.ENGLISH_SIGNS } ?: return@replace word
-        val between = isLatinLetter(word.first()) && isLatinLetter(word.last())
-        if (between && word.all { it == sign || isLatinLetter(it) }) word.replace("$sign", " $sign ") else word
-    }
+private fun spacedSigns(text: String): String = WORD.replace(text) { spacedSign(it.value) }
+
+private fun spacedSign(word: String): String {
+    val start = word.indexOfFirst(Char::isLetterOrDigit)
+    if (start < 0) return signOnce(word)
+    val end = word.indexOfLast(Char::isLetterOrDigit) + 1
+    val core = word.substring(start, end)
+    val sign = joiningSign(core)
+    val spaced = if (sign == null) core else core.replace("$sign", " $sign ")
+    return word.substring(0, start) + spaced + word.substring(end)
+}
+
+/** The sign of [core] when it is Latin letters with one [Words.ENGLISH_SIGNS] sign between them, else `null`. */
+private fun joiningSign(core: String): Char? {
+    val sign = core.firstOrNull { it in Words.ENGLISH_SIGNS }
+    val between = isLatinLetter(core.first()) && isLatinLetter(core.last())
+    return sign?.takeIf { between && core.all { c -> c == sign || isLatinLetter(c) } }
+}
+
+/** A word that is one [Words.ENGLISH_SIGNS] sign written several times ("&&") is that sign once; any other stays. */
+private fun signOnce(word: String): String {
+    val sign = word.first()
+    return if (sign in Words.ENGLISH_SIGNS && word.all { it == sign }) "$sign" else word
+}
 
 /** A run of characters other than spaces. */
 private val WORD = Regex("\\S+")

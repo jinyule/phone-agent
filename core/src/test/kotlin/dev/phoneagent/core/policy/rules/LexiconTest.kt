@@ -179,6 +179,48 @@ class LexiconTest {
     }
 
     @Test
+    fun `a sign written twice, or with punctuation around its word, still joins, and an address still does not`() {
+        // Claude r6 S-2.
+        val deletes = Hit(IntentKind.DELETE, "delete", sends = true)
+        val joined =
+            listOf(
+                "Send && delete" to deletes,
+                "Send&&delete" to deletes,
+                "Send+delete? This can't be undone." to deletes,
+                "Send&delete. Continue?" to deletes,
+                "\"Send&delete\"" to deletes,
+                "Send && pay" to Hit(IntentKind.SPEND, "pay", sends = true),
+            )
+        val dialogs = listOf("Send+delete? This can't be undone.", "Send&delete. Continue?", "Send && delete?")
+        // Two different signs are no one sign written twice; other punctuation joins nothing.
+        val sends = listOf("Send &/ delete", "Send+&delete", "Send ... delete", "Send - delete")
+        // The addresses of the fix list, and names, with their punctuation.
+        val none =
+            listOf(
+                "https://www.example.com/checkout/cart",
+                "example.com/buy",
+                "example.com/buy.",
+                "https://example.com/blog/remove-background-tips",
+                "?x=1&pay=2",
+                "&pay=",
+                "Visit example.com/buy. Thanks",
+                "C++.",
+                "Q&A.",
+                "R&D?",
+                "A&&B",
+                "&&",
+            )
+        assertAll(
+            joined.map { (label, hit) -> Executable { assertEquals(hit, lexicon.ofControl(label), label) } } +
+                dialogs.map { text -> Executable { assertEquals(deletes, lexicon.inContext(text), text) } } +
+                sends.map { label ->
+                    Executable { assertEquals(Hit(IntentKind.OUTWARD, "send"), lexicon.ofControl(label), label) }
+                } +
+                none.map { label -> Executable { assertNull(lexicon.ofControl(label), label) } },
+        )
+    }
+
+    @Test
     fun `a strong word and an English part of one text both count, the most severe deciding`() {
         // Claude r6 B-1: in a control's own label an English part that sends hides no Chinese word
         // that pays or deletes, wherever it stands and however long the label is.

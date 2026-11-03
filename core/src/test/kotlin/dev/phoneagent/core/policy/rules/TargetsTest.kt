@@ -414,8 +414,13 @@ class TargetsTest {
                 "Yes, delete",
                 "Yes, remove",
                 "OK, delete",
+                // Claude r6 S-2: a sign written twice, and punctuation right after a word with a sign.
+                "Send && delete",
+                "Send&&delete",
+                "Send+delete? This can't be undone.",
+                "Send&delete. Continue?",
             )
-        val spends = listOf("Pay and send", "Send and delete & pay", "Send+pay")
+        val spends = listOf("Pay and send", "Send and delete & pay", "Send+pay", "Send && pay")
         // Split at the sign, each part still reads only by the phrase it starts with: allowed.
         val names =
             listOf("Q&A", "R&D", "AT&T", "Terms&Conditions", "Android and iOS", "Brand+", "Photos/Videos")
@@ -427,6 +432,8 @@ class TargetsTest {
                 .plus(listOf("https://www.example.com/\ncheckout/cart", "example.com/ remove-background-tips"))
                 // Nor at either end of one: numbers read as spaces leave "&pay" of this address; "C++" a name.
                 .plus(listOf("https://a.com/?x=1&pay=2", "C++ delete operator"))
+                // Nor in an address with the punctuation after it, or at a sign the punctuation ends with.
+                .plus(listOf("example.com/buy.", "&pay="))
         assertAll(asked(ConfirmReason.DELETE, deletes) + asked(ConfirmReason.SPEND, spends) + asked(null, names))
         names.forEach { assertEquals(Verdict.Allow, verdict(it), it) }
     }
