@@ -9,6 +9,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.phoneagent.app.service.ConnectionShadow
 import dev.phoneagent.app.service.InputMethodShadow
 import dev.phoneagent.app.service.boundServiceIme
+import dev.phoneagent.core.ids.SnapshotId
 import dev.phoneagent.core.ports.ActionOutcome
 import dev.phoneagent.core.ports.Bounds
 import dev.phoneagent.core.ports.ElementRef
@@ -84,7 +85,7 @@ class TypingOutcomeTest {
                 true,
                 identity,
             )
-        val aim = Aim.AtElement(read)
+        val aim = Aim.AtElement(read, Planned(SnapshotId("s1"), element.ref, listOf(element), listOf(element.ref)))
         val baseline = observer.baseline(host, GEOMETRY, SnapshotDetail.BRIEF)
         return ActionRun(parts, host, GEOMETRY, baseline, compareWith = null).perform(action, aim)
     }

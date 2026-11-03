@@ -1,9 +1,11 @@
 package dev.phoneagent.app.adapters.screen
 
+import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import dev.phoneagent.core.ports.ActionOutcome
+import dev.phoneagent.core.ports.ActionOutcome.StaleReason
 import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.ports.SnapshotAnalyzer
 import dev.phoneagent.core.ports.SurfaceRef
@@ -25,7 +27,8 @@ internal class PortParts(
  * chains, let the display settle, read it back at the baseline's detail, and judge the effect.
  * The outcome's diff compares [compareWith] (the screen the action was planned on, the latest one
  * when none was named, `null` when the named one was forgotten or there is none) with the screen
- * after.
+ * after. A press by ref that the fresh read gives to another element than the planned snapshot
+ * does ([NodeActions.press]) is stale (MOVED) and not made.
  */
 internal class ActionRun(
     private val parts: PortParts,
@@ -55,10 +58,14 @@ internal class ActionRun(
                 type(action, aim)
             }
 
+            action is UiAction.Tap && aim is Aim.AtElement -> {
+                press(action, aim)
+            }
+
             else -> {
                 ChangeWatch.watching(host.events, displayId, timings) { watch ->
                     watch.ignore(before.systemBars)
-                    finish(gesture(action, aim, watch), watch, timings.settleCapMs)
+                    finish(gesture(action, aim), watch, timings.settleCapMs)
                 }
             }
         }
@@ -66,11 +73,12 @@ internal class ActionRun(
     private suspend fun gesture(
         action: UiAction,
         aim: Aim,
-        watch: ChangeWatch,
     ): Actuator.Result =
         when (action) {
             is UiAction.Tap -> {
-                tap(action, aim, watch)
+                // A tap by ref is a press ([press]); a tap always has a target.
+                val pixel = (aim as? Aim.AtPixel)?.pixel ?: error("a tap here is at a pixel")
+                actuator.tapAt(pixel, action.long)
             }
 
             is UiAction.Scroll -> {
@@ -114,29 +122,35 @@ internal class ActionRun(
         return if (own) Actuator.Result.Refused else actuator.key(key, field)
     }
 
-    private suspend fun tap(
+    /**
+     * Presses [aim] where the planned snapshot gives the press ([NodeActions.press]); a press the
+     * fresh read gives elsewhere touches nothing and is stale (MOVED).
+     */
+    private suspend fun press(
         action: UiAction.Tap,
-        aim: Aim,
-        watch: ChangeWatch,
-    ): Actuator.Result =
-        when (aim) {
-            is Aim.AtElement -> {
-                actuator.tap(
-                    aim.element.target,
-                    NodeActions.pressTarget(aim.element, before, baseline.detail, action.long)?.node,
-                    action.long,
-                    WatchProbe(watch, parts.system, timings, ClickedWindow(aim.element, before)) {
-                        host.windowsOn(displayId)
-                    },
+        aim: Aim.AtElement,
+    ): ActionOutcome =
+        when (val press = NodeActions.press(aim, before, baseline.detail, action.long)) {
+            Press.Elsewhere -> {
+                // Only the ref, the screen id and the reason: nothing of what the screen shows.
+                val reason = StaleReason.MOVED
+                Log.i(
+                    AndroidScreen.TAG,
+                    "@${aim.planned.ref} planned on ${aim.planned.on} is stale: $reason (the press)",
                 )
+                Outcomes.stale(reason)
             }
 
-            is Aim.AtPixel -> {
-                actuator.tapAt(aim.pixel, action.long)
-            }
-
-            Aim.Anywhere -> {
-                error("a tap always has a target")
+            is Press.To -> {
+                ChangeWatch.watching(host.events, displayId, timings) { watch ->
+                    watch.ignore(before.systemBars)
+                    val probe =
+                        WatchProbe(watch, parts.system, timings, ClickedWindow(aim.element, before)) {
+                            host.windowsOn(displayId)
+                        }
+                    val result = actuator.tap(aim.element.target, press.element?.node, action.long, probe)
+                    finish(result, watch, timings.settleCapMs)
+                }
             }
         }
 

@@ -229,6 +229,17 @@ internal class NodeTarget(
     val pixels: Rect,
 )
 
+/** Where a press by ref goes ([NodeActions.press]). */
+internal sealed interface Press {
+    /** To [element] of the action's read, the one the planned snapshot gives it to; `null`: a gesture at the center. */
+    class To(
+        val element: ReadElement?,
+    ) : Press
+
+    /** The action's read gives it to another element than the planned snapshot does: it is not made. */
+    data object Elsewhere : Press
+}
+
 /** Node-level decisions of [Actuator], free of service state. */
 internal object NodeActions {
     /** Smallest side of an area a scroll swipe is drawn in. */
@@ -248,14 +259,15 @@ internal object NodeActions {
      * and covers the center of [element]; `null` when none does, and the press is a gesture there.
      *
      * Ancestors are those of the snapshot [detail] shows of [read] ([TreeRead.project]: each
-     * [UiElement.parent] up), not the accessibility tree's, so the press goes to the element the
-     * policy judged it by on the planned snapshot (the action's read is at that snapshot's detail
-     * and shows what it showed unless the screen changed). A node the read leaves out (invisible,
-     * too small, or alike to the nearest kept one above) or [detail] does not show is neither
-     * pressed nor counted: the limit counts elements of the snapshot, however many accessibility
-     * parents lie between, and is the 8 the policy takes. Taking the press and covering the
-     * center are judged as the snapshot shows them: [UiElement.states] and the 0–999
-     * [UiElement.bounds], edges included, around the center `((left + right) / 2, (top + bottom) / 2)`.
+     * [UiElement.parent] up), not the accessibility tree's: the rule the policy applies to the
+     * planned snapshot, and the action's read is at that snapshot's detail. When the screen changed
+     * since, so that the two give the press to different elements, [press] does not make it. A
+     * node the read leaves out (invisible, too small, or alike to the nearest kept one above) or
+     * [detail] does not show gets no node action and is not counted: the limit counts elements of
+     * the snapshot, however many accessibility parents lie between, and is the 8 the policy takes.
+     * Taking the press and covering the center are judged as the snapshot shows them:
+     * [UiElement.states] and the 0–999 [UiElement.bounds], edges included, around the center
+     * `((left + right) / 2, (top + bottom) / 2)`.
      */
     fun pressTarget(
         element: ReadElement,
@@ -268,17 +280,69 @@ internal object NodeActions {
             generateSequence(element.parent) { elements[it].parent }
                 .filter { detail == SnapshotDetail.FULL || elements[it].brief }
                 .map(elements::get)
+        return firstTaking(element.element, sequenceOf(element) + above, long) { it.element }
+    }
+
+    /**
+     * The element of a snapshot showing [elements] a press on its [element] goes to, by the rule of
+     * the other [pressTarget], which is the policy's: the ancestors are each [UiElement.parent] up.
+     */
+    fun pressTarget(
+        element: UiElement,
+        elements: List<UiElement>,
+        long: Boolean,
+    ): UiElement? {
+        val byRef = elements.associateBy { it.ref }
+        return firstTaking(element, generateSequence(element) { it.parent?.let(byRef::get) }, long) { it }
+    }
+
+    /**
+     * Where a press by ref on [aim] goes in [read], the action's read at [detail]: [Press.To] the
+     * element [pressTarget] gives it to in [read] when that is the element of the planned snapshot
+     * the same rule gives it to there (both none: a press at the center), else [Press.Elsewhere].
+     * The fresh element is told for a planned one by [Planned.carried], the pairing the ref was
+     * found by.
+     */
+    fun press(
+        aim: Aim.AtElement,
+        read: TreeRead,
+        detail: SnapshotDetail,
+        long: Boolean,
+    ): Press {
+        val planned = aim.planned
+        val expected = pressTarget(planned.element, planned.elements, long)
+        val actual = pressTarget(aim.element, read, detail, long)
+        val agrees =
+            if (actual == null) {
+                expected == null
+            } else {
+                expected != null && planned.carried[read.elements.indexOfFirst { it === actual }] == expected.ref
+            }
+        return if (agrees) Press.To(actual) else Press.Elsewhere
+    }
+
+    /**
+     * The first of [chain] (the element pressed, then its ancestors nearest first, as [shown]) that
+     * takes the press ([long]: a long click), is not disabled and covers [element]'s center, within
+     * [PRESS_ANCESTORS] ancestors.
+     */
+    private fun <T> firstTaking(
+        element: UiElement,
+        chain: Sequence<T>,
+        long: Boolean,
+        shown: (T) -> UiElement,
+    ): T? {
         val takes = if (long) ElementState.LONG_CLICKABLE else ElementState.CLICKABLE
-        val x = (element.element.bounds.left + element.element.bounds.right) / 2
-        val y = (element.element.bounds.top + element.element.bounds.bottom) / 2
-        return (sequenceOf(element) + above)
+        val x = (element.bounds.left + element.bounds.right) / 2
+        val y = (element.bounds.top + element.bounds.bottom) / 2
+        return chain
             .take(PRESS_ANCESTORS + 1)
             .firstOrNull { candidate ->
-                val shown = candidate.element
-                takes in shown.states &&
-                    ElementState.DISABLED !in shown.states &&
-                    x in shown.bounds.left..shown.bounds.right &&
-                    y in shown.bounds.top..shown.bounds.bottom
+                val seen = shown(candidate)
+                takes in seen.states &&
+                    ElementState.DISABLED !in seen.states &&
+                    x in seen.bounds.left..seen.bounds.right &&
+                    y in seen.bounds.top..seen.bounds.bottom
             }
     }
 

@@ -33,15 +33,38 @@ private class PressCase(
 )
 
 /**
+ * A screen shown when a press on its label is planned ([planned]) and the one shown when it is
+ * made ([acted]); [from] and [to] are the view ids the policy's rule gives the press to on each
+ * (`null`: a press at the center).
+ */
+private class ChangeCase(
+    val name: String,
+    val long: Boolean,
+    val from: String?,
+    val to: String?,
+    val planned: () -> AccessibilityNodeInfo,
+    val acted: () -> AccessibilityNodeInfo,
+)
+
+/**
  * A press by ref goes to the element the snapshot it was planned on gives it to (fix list r4,
  * 11:1x): the element, else the nearest of its ancestors in that snapshot that takes the press, is
  * enabled and covers the element's center, which is the element the policy judges; with none, a
  * press at the center. Ancestors are the snapshot's, at its detail, not the accessibility tree's.
+ * When the screen has changed so that the same rule now gives the press to another element (or
+ * to one where the snapshot gave none, or the other way round), the press is stale (MOVED) and
+ * nothing is pressed (fix list r7 S1).
  */
 @RunWith(AndroidJUnit4::class)
 class PressTargetTest {
     private val host = FakeHost()
     private val box = Rect(0, 400, 1000, 600)
+
+    /** A row's box inside [box], for the presses whose screen changes. */
+    private val rowBox = Rect(100, 420, 900, 580)
+
+    /** The label's box inside [rowBox]. */
+    private val textBox = Rect(200, 450, 800, 550)
 
     /** Every node the screen was made of, to tell which one was acted on. */
     private val made = ArrayList<AccessibilityNodeInfo>()
@@ -104,17 +127,20 @@ class PressTargetTest {
     /**
      * Presses the label by ref on a snapshot at [detail], and checks the press went where that
      * snapshot gives it: the node of that element took the click (and no other node any action),
-     * or, with none, one gesture at the label's center, held as a press of its kind is.
-     * Returns the element the snapshot gives the press to.
+     * or, with none, one gesture at the label's center, held as a press of its kind is. With
+     * [then], that screen is shown between the snapshot and the press. Returns the element the
+     * snapshot gives the press to.
      */
     private suspend fun TestScope.pressGoesWhereTheSnapshotSays(
         detail: SnapshotDetail,
         long: Boolean,
+        then: (() -> AccessibilityNodeInfo)? = null,
     ): UiElement? {
         val port = mainPort(host)
         val planned = port.snapshot(SnapshotOptions(detail = detail))
         val target = planned.elements.single { it.resourceId == "label" }
         val expected = planned.pressed(target, long)
+        then?.let { host.show(it()) }
 
         val outcome = port.act(UiAction.Tap(Target.Ref(target.ref), long = long), planned.id)
 
@@ -129,7 +155,8 @@ class PressTargetTest {
                     .single()
                     .second
                     .single()
-            val pixels = Rect().also(made.single { it.viewIdResourceName == "$APP:id/label" }::getBoundsInScreen)
+            // The label shown last, the one pressed.
+            val pixels = Rect().also(made.last { it.viewIdResourceName == "$APP:id/label" }::getBoundsInScreen)
             assertEquals(PixelPoint(pixels.exactCenterX(), pixels.exactCenterY()), stroke.points.single())
             assertEquals(if (long) TIMINGS.longPressMs else TIMINGS.tapMs, stroke.durationMs)
         } else {
@@ -295,6 +322,235 @@ class PressTargetTest {
                 val pressed = pressGoesWhereTheSnapshotSays(detail, long = true)
 
                 assertEquals("$wrappers wrappers in $detail", row, pressed?.resourceId)
+            }
+        }
+
+    /** View id of the element the policy's rule gives a press on the label to, on [screen] at [detail]. */
+    private suspend fun TestScope.policyPress(
+        screen: () -> AccessibilityNodeInfo,
+        detail: SnapshotDetail,
+        long: Boolean,
+    ): String? {
+        val elsewhere = FakeHost().apply { show(screen()) }
+        val snapshot = mainPort(elsewhere).snapshot(SnapshotOptions(detail = detail))
+        return snapshot.pressed(snapshot.elements.single { it.resourceId == "label" }, long)?.resourceId
+    }
+
+    /**
+     * Changes between the snapshot the policy judged a press by and the press, after which the same
+     * rule gives the press to another element, or to one where it gave none, or the other way round.
+     */
+    private val movedPresses =
+        listOf(
+            ChangeCase(
+                "the row is enabled",
+                long = false,
+                from = "outer",
+                to = "row",
+                planned = {
+                    layout("outer") { isClickable = true }.with(
+                        layout("row", rowBox) {
+                            isClickable = true
+                            isEnabled = false
+                        }.with(label(textBox)),
+                    )
+                },
+                acted = {
+                    layout("outer") { isClickable = true }.with(
+                        layout("row", rowBox) { isClickable = true }.with(label(textBox)),
+                    )
+                },
+            ),
+            ChangeCase(
+                "the label is enabled",
+                long = false,
+                from = "row",
+                to = "label",
+                planned = {
+                    layout("row") { isClickable = true }.with(
+                        label(textBox) {
+                            isClickable = true
+                            isEnabled = false
+                        },
+                    )
+                },
+                acted = { layout("row") { isClickable = true }.with(label(textBox) { isClickable = true }) },
+            ),
+            ChangeCase(
+                "the label is disabled",
+                long = false,
+                from = "label",
+                to = "row",
+                planned = { layout("row") { isClickable = true }.with(label(textBox) { isClickable = true }) },
+                acted = {
+                    layout("row") { isClickable = true }.with(
+                        label(textBox) {
+                            isClickable = true
+                            isEnabled = false
+                        },
+                    )
+                },
+            ),
+            ChangeCase(
+                "the row takes long clicks too",
+                long = true,
+                from = "outer",
+                to = "row",
+                planned = {
+                    layout("outer") { isLongClickable = true }.with(
+                        layout("row", rowBox) { isClickable = true }.with(label(textBox)),
+                    )
+                },
+                acted = {
+                    layout("outer") { isLongClickable = true }.with(
+                        layout("row", rowBox) {
+                            isClickable = true
+                            isLongClickable = true
+                        }.with(label(textBox)),
+                    )
+                },
+            ),
+            ChangeCase(
+                "the row shrinks off the label's center",
+                long = false,
+                from = "row",
+                to = "outer",
+                planned = {
+                    layout("outer") { isClickable = true }.with(
+                        layout("row", rowBox) { isClickable = true }.with(label(textBox)),
+                    )
+                },
+                acted = {
+                    layout("outer") { isClickable = true }.with(
+                        layout("row", Rect(100, 420, 400, 580)) { isClickable = true }.with(label(textBox)),
+                    )
+                },
+            ),
+            ChangeCase(
+                "the only row is enabled",
+                long = false,
+                from = null,
+                to = "row",
+                planned = {
+                    layout("row") {
+                        isClickable = true
+                        isEnabled = false
+                    }.with(label(textBox))
+                },
+                acted = { layout("row") { isClickable = true }.with(label(textBox)) },
+            ),
+            ChangeCase(
+                "the only row is disabled",
+                long = false,
+                from = "row",
+                to = null,
+                planned = { layout("row") { isClickable = true }.with(label(textBox)) },
+                acted = {
+                    layout("row") {
+                        isClickable = true
+                        isEnabled = false
+                    }.with(label(textBox))
+                },
+            ),
+            ChangeCase(
+                "the only row takes long clicks too",
+                long = true,
+                from = null,
+                to = "row",
+                planned = { layout("row") { isClickable = true }.with(label(textBox)) },
+                acted = {
+                    layout("row") {
+                        isClickable = true
+                        isLongClickable = true
+                    }.with(label(textBox))
+                },
+            ),
+        )
+
+    /** Changes between the snapshot and the press after which the rule gives the press where it did. */
+    private val keptPresses =
+        listOf(
+            ChangeCase(
+                "the outer is disabled",
+                long = false,
+                from = "row",
+                to = "row",
+                planned = {
+                    layout("outer") { isClickable = true }.with(
+                        layout("row", rowBox) { isClickable = true }.with(label(textBox)),
+                    )
+                },
+                acted = {
+                    layout("outer") {
+                        isClickable = true
+                        isEnabled = false
+                    }.with(layout("row", rowBox) { isClickable = true }.with(label(textBox)))
+                },
+            ),
+            ChangeCase(
+                "a disabled row shrinks",
+                long = false,
+                from = null,
+                to = null,
+                planned = {
+                    layout("row") {
+                        isClickable = true
+                        isEnabled = false
+                    }.with(label(textBox))
+                },
+                acted = {
+                    layout("row", rowBox) {
+                        isClickable = true
+                        isEnabled = false
+                    }.with(label(textBox))
+                },
+            ),
+        )
+
+    @Test
+    fun aPressByRefTheScreenNowGivesToAnotherElementIsStaleAndNotMade() =
+        runTest {
+            // Every cell is checked before the test fails, so a failure lists them all.
+            val stale = ActionOutcome.Status.StaleRef(ActionOutcome.StaleReason.MOVED)
+            val wanted = ArrayList<String>()
+            val seen = ArrayList<String>()
+            for (case in movedPresses) {
+                for (detail in SnapshotDetail.entries) {
+                    made.clear()
+                    host.gestures.clear()
+                    val from = policyPress(case.planned, detail, case.long)
+                    val to = policyPress(case.acted, detail, case.long)
+                    host.show(case.planned())
+                    val port = mainPort(host)
+                    val planned = port.snapshot(SnapshotOptions(detail = detail))
+                    val target = planned.elements.single { it.resourceId == "label" }
+                    host.show(case.acted())
+
+                    val outcome = port.act(UiAction.Tap(Target.Ref(target.ref), long = case.long), planned.id)
+
+                    val acted = made.filter { it.log.actions.isNotEmpty() }.map { it.viewIdResourceName }
+                    wanted += "${case.name} in $detail: ${case.from} -> ${case.to}, $stale, nodes [], gestures 0"
+                    seen += "${case.name} in $detail: $from -> $to, ${outcome.status}, nodes $acted, " +
+                        "gestures ${host.gestures.size}"
+                }
+            }
+            assertEquals(wanted, seen)
+        }
+
+    @Test
+    fun aChangeThatLeavesThePressWhereItWasDoesNotStopIt() =
+        runTest {
+            for (case in keptPresses) {
+                for (detail in SnapshotDetail.entries) {
+                    made.clear()
+                    host.gestures.clear()
+                    assertEquals("${case.name} in $detail, acted", case.to, policyPress(case.acted, detail, case.long))
+                    host.show(case.planned())
+
+                    val expected = pressGoesWhereTheSnapshotSays(detail, case.long, then = case.acted)
+
+                    assertEquals("${case.name} in $detail", case.from, expected?.resourceId)
+                }
             }
         }
 }

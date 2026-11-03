@@ -84,7 +84,11 @@ public data class ActionOutcome(
                 "scroll it into view or use its position instead",
         ),
 
-        /** It is there, but not where it was when planned. */
+        /**
+         * It is there, but not where it was when planned; or a press on it would now go elsewhere
+         * than the planned snapshot gives it: to another element, to one where that gave none, or
+         * to none where that gave one.
+         */
         MOVED("it moved since it was planned"),
 
         /** Several elements are alike and none can be told for it. */

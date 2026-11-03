@@ -61,9 +61,14 @@ internal class SnapshotHistory(
 internal object RefMatcher {
     /** Result of [match]. */
     sealed interface Match {
-        /** The planned element is [element] in the fresh read. */
+        /**
+         * The planned element is [element] in the fresh read; [carried] holds, for each element of
+         * the fresh read, the ref of the planned screen's element it is ([RefCarrier.pair]), or
+         * `null` for none.
+         */
         class Found(
             val element: ReadElement,
+            val carried: List<ElementRef?>,
         ) : Match
 
         /** The element is gone, moved, replaced or ambiguous ([reason]): the model must observe again. */
@@ -87,7 +92,7 @@ internal object RefMatcher {
         val element = fresh.elements.getOrNull(paired.indexOf(ref))
         return when {
             element == null -> Match.Stale(StaleReasons.of(entry, planned.tree, fresh.elements, paired.toSet()))
-            element.element.bounds == entry.bounds -> Match.Found(element)
+            element.element.bounds == entry.bounds -> Match.Found(element, paired)
             else -> Match.Stale(StaleReason.MOVED)
         }
     }

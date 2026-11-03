@@ -5,14 +5,17 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import dev.phoneagent.core.ids.SnapshotId
 import dev.phoneagent.core.ports.ActionOutcome.StaleReason
+import dev.phoneagent.core.ports.ElementRef
 import dev.phoneagent.core.ports.ElementRole
 import dev.phoneagent.core.ports.Target
+import dev.phoneagent.core.ports.UiElement
 
 /** What an action is aimed at once its target was resolved against a fresh read. */
 internal sealed interface Aim {
-    /** An element of the fresh read. */
+    /** An element of the fresh read, found again for the element it was [planned] on. */
     class AtElement(
         val element: ReadElement,
+        val planned: Planned,
     ) : Aim
 
     /** A pixel; [windowPackage] is the package of the top-most window under it, or `null`. */
@@ -23,6 +26,21 @@ internal sealed interface Aim {
 
     /** No explicit target: the focused field, the main list, the whole display. */
     data object Anywhere : Aim
+}
+
+/**
+ * The element [ref] of the snapshot [on] an action was planned on, among the [elements] that
+ * snapshot shows; [carried] holds, for each element of the fresh read, the ref of the planned
+ * screen's element it is ([RefMatcher.Match.Found.carried]), or `null` for none.
+ */
+internal class Planned(
+    val on: SnapshotId,
+    val ref: ElementRef,
+    val elements: List<UiElement>,
+    val carried: List<ElementRef?>,
+) {
+    /** The element [ref] as the planned snapshot shows it. */
+    val element: UiElement get() = elements.first { it.ref == ref }
 }
 
 /** Result of [Aims.resolve]. */
@@ -88,9 +106,18 @@ internal object Aims {
 
             else -> {
                 when (val match = RefMatcher.match(planned, target.ref, read)) {
-                    is RefMatcher.Match.Found -> Resolution.Aimed(Aim.AtElement(match.element))
-                    is RefMatcher.Match.Stale -> Resolution.Stale(match.reason)
-                    RefMatcher.Match.UnknownRef -> Resolution.Invalid("screen $on has no element @${target.ref}")
+                    is RefMatcher.Match.Found -> {
+                        val shown = Planned(on, target.ref, planned.snapshot.elements, match.carried)
+                        Resolution.Aimed(Aim.AtElement(match.element, shown))
+                    }
+
+                    is RefMatcher.Match.Stale -> {
+                        Resolution.Stale(match.reason)
+                    }
+
+                    RefMatcher.Match.UnknownRef -> {
+                        Resolution.Invalid("screen $on has no element @${target.ref}")
+                    }
                 }
             }
         }
