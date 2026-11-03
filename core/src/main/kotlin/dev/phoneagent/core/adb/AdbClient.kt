@@ -26,7 +26,9 @@ public data class AdbEndpoint(
 
 /**
  * Time and size limits of the adb client, validated on construction. Every timeout covers a whole
- * operation, TCP connect included, and is measured in coroutine time.
+ * operation, TCP connect included, and is measured in coroutine time. The socket of an operation
+ * also gets a read timeout of twice its timeout, so that a read ends even if closing the socket
+ * on the coroutine timeout did not end it.
  *
  * @property pairingTimeoutMs one [AdbClient.pair], > 0.
  * @property connectTimeoutMs one [AdbClient.connect] up to adbd's CNXN, > 0.
@@ -70,7 +72,8 @@ public data class AdbConfig(
 /**
  * The built-in wireless-debugging client (phase1 D3, §7.1 step ④): [pair] once with the code from
  * Settings, then [connect] and run fixed commands on the [AdbSession]. Pure JVM; the host supplies
- * the identity and the TLS exporter. Blocking I/O runs on [io]; cancellation closes the socket and
+ * the identity and the TLS exporter. Blocking I/O runs on [io]; cancellation closes the socket from
+ * the cancelling thread (so even an [io] whose threads are all blocked is no obstacle) and
  * propagates, and a timeout ends as a typed failure.
  *
  * Capability boundary: this is app setup code. It is not a tool and must never be reachable from
@@ -97,7 +100,7 @@ public class AdbClient(
         return try {
             val device =
                 withTimeoutOrNull(timeoutMs) {
-                    blockingIo(io, socket) { pairing.pair(socket, endpoint, code, timeoutMs.toSocketTimeout()) }
+                    blockingIo(io, socket) { pairing.pair(socket, endpoint, code, timeoutMs) }
                 }
             device?.let { PairingResult.Paired(it) }
                 ?: PairingResult.Failed(PairingFailure.TIMEOUT, "no answer from $endpoint within $timeoutMs ms")
@@ -116,7 +119,7 @@ public class AdbClient(
         return try {
             connected =
                 withTimeoutOrNull(timeoutMs) {
-                    blockingIo(io, socket) { handshake.connect(socket, endpoint, timeoutMs.toSocketTimeout()) }
+                    blockingIo(io, socket) { handshake.connect(socket, endpoint, timeoutMs) }
                 }
             connected?.let { ConnectResult.Connected(AdbSession(it, config, io)) }
                 ?: ConnectResult.Failed(ConnectFailure.TIMEOUT, "no answer from $endpoint within $timeoutMs ms")
@@ -126,8 +129,6 @@ public class AdbClient(
             if (connected == null) socket.closeQuietly()
         }
     }
-
-    private fun Long.toSocketTimeout(): Int = coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
 
     override fun toString(): String = "AdbClient($identity)"
 }

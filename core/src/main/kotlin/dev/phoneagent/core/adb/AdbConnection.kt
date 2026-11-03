@@ -20,6 +20,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.SocketTimeoutException
 import javax.net.ssl.SSLException
 
 /** Why connecting to adbd failed. */
@@ -64,9 +65,9 @@ internal class ConnectError(
     cause: Throwable? = null,
 ) : IOException(detail, cause)
 
-/** What adbd announced in its CNXN. */
+/** What adbd announced in its CNXN; [plain] is the TCP socket under the TLS one, closed to end the connection. */
 internal class Handshake(
-    val socket: Socket,
+    val plain: Socket,
     val input: InputStream,
     val output: OutputStream,
     val banner: String,
@@ -86,14 +87,21 @@ internal class Handshake(
 internal class AdbHandshake(
     private val tls: AdbTls,
 ) {
+    /**
+     * Connects [plain] and runs the handshake, bounding each blocking step by [timeoutMs] (the
+     * TCP connect, and reads through [socketTimeoutBackstop]).
+     */
     @Throws(ConnectError::class)
     fun connect(
         plain: Socket,
         endpoint: AdbEndpoint,
-        connectTimeoutMs: Int,
+        timeoutMs: Long,
     ): Handshake {
         val address = InetSocketAddress(endpoint.host, endpoint.port)
-        step(ConnectFailure.UNREACHABLE) { plain.connect(address, connectTimeoutMs) }
+        step(ConnectFailure.UNREACHABLE) {
+            plain.soTimeout = socketTimeoutBackstop(timeoutMs)
+            plain.connect(address, timeoutMs.toSocketTimeout())
+        }
         startTls(plain)
         val socket = step(ConnectFailure.TLS) { tls.handshake(plain, endpoint) }
         val input = step(ConnectFailure.TLS) { BufferedInputStream(socket.inputStream) }
@@ -104,7 +112,7 @@ internal class AdbHandshake(
                     ConnectFailure.UNAUTHORIZED,
                     "adbd closed the connection after TLS: our key is not paired",
                 )
-        return accept(PendingHandshake(socket, input, output, cnxn))
+        return accept(PendingHandshake(plain, input, output, cnxn))
     }
 
     /**
@@ -173,7 +181,7 @@ internal class AdbHandshake(
             }
         }
         return Handshake(
-            socket = handshake.socket,
+            plain = handshake.plain,
             input = handshake.input,
             output = handshake.output,
             banner = cnxn.payload.toString(Charsets.UTF_8).trimEnd('\u0000'),
@@ -210,12 +218,14 @@ internal class AdbHandshake(
             reason: ConnectFailure,
         ): ConnectError {
             if (failure is ConnectError) return failure
+            val timedOut = failure is SocketTimeoutException || failure.cause is SocketTimeoutException
             // Once adbd has our certificate, an alert, a reset or a hang-up is adbd refusing the key.
             val refusedInHandshake = failure is TlsHandshakeException && failure.certificateRequested
             val refusedAfterwards =
                 reason == ConnectFailure.UNAUTHORIZED && (failure is SSLException || failure is TruncatedFrameException)
             val classified =
                 when {
+                    timedOut -> ConnectFailure.TIMEOUT
                     refusedInHandshake || refusedAfterwards -> ConnectFailure.UNAUTHORIZED
                     failure is TruncatedFrameException -> reason
                     failure is AdbProtocolException -> ConnectFailure.PROTOCOL
@@ -238,7 +248,7 @@ internal class AdbHandshake(
 
 /** The TLS stream and adbd's CNXN, before the CNXN is checked. */
 private class PendingHandshake(
-    val socket: Socket,
+    val plain: Socket,
     val input: InputStream,
     val output: OutputStream,
     val cnxn: AdbMessage,
@@ -269,7 +279,7 @@ internal object AdbFeatures {
  * may be called at any time.
  */
 public class AdbSession internal constructor(
-    private val handshake: Handshake,
+    internal val handshake: Handshake,
     private val config: AdbConfig,
     private val io: CoroutineDispatcher,
 ) : AutoCloseable {
@@ -303,27 +313,30 @@ public class AdbSession internal constructor(
             val localId = nextLocalId++
             val shell = AdbFeatures.SHELL_V2 in features
             val exchange = CommandExchange(handshake, localId, shell, config)
-            val result =
-                try {
+            var outcome: CommandResult? = null
+            try {
+                outcome =
                     withTimeoutOrNull(config.commandTimeoutMs) {
-                        blockingIo(io, handshake.socket) { exchange.run(command, stdin) }
+                        blockingIo(io, handshake.plain) { exchange.run(command, stdin) }
                     }
                         ?: CommandResult.Failed(
                             CommandFailure.TIMEOUT,
                             "no exit status within ${config.commandTimeoutMs} ms",
                         )
-                } catch (failure: IOException) {
-                    CommandExchange.classify(failure)
-                } finally {
-                    if (!exchange.reusable) close()
-                }
-            result
+            } catch (failure: IOException) {
+                outcome = CommandExchange.classify(failure)
+            } finally {
+                // A timeout or a cancellation may cut off a stream that just ended cleanly: closed all the same.
+                val cutOff = outcome == null || (outcome as? CommandResult.Failed)?.reason == CommandFailure.TIMEOUT
+                if (cutOff || !exchange.reusable) close()
+            }
+            outcome
         }
 
     /** Closes the connection; a running command fails or is cancelled. Idempotent. */
     override fun close() {
         closed = true
-        handshake.socket.closeQuietly()
+        handshake.plain.closeQuietly()
     }
 
     override fun toString(): String = "AdbSession(open=$isOpen, features=$features)"
@@ -339,7 +352,7 @@ internal class CommandExchange(
     private val handshake: Handshake,
     private val localId: Int,
     private val shell: Boolean,
-    config: AdbConfig,
+    private val config: AdbConfig,
 ) {
     private val output =
         if (shell) OutputCollector.Shell(config.maxOutputBytes) else OutputCollector.Raw(config.maxOutputBytes)
@@ -367,6 +380,7 @@ internal class CommandExchange(
                 "the service name has ${open.size} bytes; adbd takes ${handshake.maxPayload} per packet",
             )
         }
+        handshake.plain.soTimeout = socketTimeoutBackstop(config.commandTimeoutMs)
         input = if (shell) ShellProtocol.stdinStream(stdin) else stdin
         send(AdbMessage(AdbMessage.OPEN, localId, 0, open))
         var result: CommandResult? = null
@@ -463,6 +477,7 @@ internal class CommandExchange(
                 is OutputTooLargeException -> CommandResult.Failed(CommandFailure.OUTPUT_TOO_LARGE, describe(failure))
                 is TruncatedFrameException -> CommandResult.Failed(CommandFailure.CLOSED, describe(failure))
                 is AdbProtocolException -> CommandResult.Failed(CommandFailure.PROTOCOL, describe(failure))
+                is SocketTimeoutException -> CommandResult.Failed(CommandFailure.TIMEOUT, describe(failure))
                 else -> CommandResult.Failed(CommandFailure.CLOSED, describe(failure))
             }
     }

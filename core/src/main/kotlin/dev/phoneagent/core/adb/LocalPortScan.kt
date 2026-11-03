@@ -25,8 +25,11 @@ import java.util.TreeSet
  *
  * @property budgetMs the whole scan, all hosts together, in coroutine time; > 0.
  * @property connectTimeoutMs one TCP connect (local refusals are immediate); 1..60000.
- * @property probeTimeoutMs one CNXN → STLS check on an open port, in coroutine time; > 0.
- * @property parallelism ports probed at once; 1..1024.
+ * @property probeTimeoutMs one CNXN → STLS check on an open port, in coroutine time; > 0. The
+ *   probe socket's read timeout is the [socketTimeoutBackstop] of it.
+ * @property parallelism ports probed at once, each holding a thread of the scan's I/O dispatcher
+ *   while it connects or reads; 1..[MAX_PARALLELISM], half the 64 threads of `Dispatchers.IO`, so
+ *   that a scan never takes the whole pool from the rest of the app.
  */
 public data class PortScanConfig(
     val budgetMs: Long = DEFAULT_BUDGET_MS,
@@ -54,11 +57,13 @@ public data class PortScanConfig(
         /** adbd answers CNXN at once; other services may never answer. */
         public const val DEFAULT_PROBE_TIMEOUT_MS: Long = 1_000L
 
-        /** Concurrent connects; each is a short-lived socket. */
-        public const val DEFAULT_PARALLELISM: Int = 64
+        /** Concurrent probes; local refusals are immediate, so a few suffice for a full sweep. */
+        public const val DEFAULT_PARALLELISM: Int = 16
+
+        /** Upper bound of [parallelism]: below the 64 threads `Dispatchers.IO` has at least. */
+        public const val MAX_PARALLELISM: Int = 32
 
         private const val MAX_CONNECT_TIMEOUT_MS = 60_000
-        private const val MAX_PARALLELISM = 1024
     }
 }
 
@@ -191,7 +196,10 @@ public class LocalPortScan internal constructor(
     }
 }
 
-/** Probes with sockets: a TCP connect bounded by the connect timeout, then CNXN → STLS in coroutine time. */
+/**
+ * Probes with sockets: a TCP connect bounded by the connect timeout, then CNXN → STLS in coroutine
+ * time, with the socket's read timeout behind it.
+ */
 internal class SocketPortProbe(
     private val config: PortScanConfig,
     private val io: CoroutineDispatcher,
@@ -213,11 +221,13 @@ internal class SocketPortProbe(
         }
     }
 
-    private fun connect(
+    /** Connects [socket], setting its read timeout first; `false` when nothing usable listens. Blocks. */
+    fun connect(
         socket: Socket,
         host: String,
         port: Int,
     ): Boolean {
+        socket.soTimeout = socketTimeoutBackstop(config.probeTimeoutMs)
         try {
             socket.connect(InetSocketAddress(host, port), config.connectTimeoutMs)
         } catch (expectedRefusal: IOException) {
@@ -227,7 +237,8 @@ internal class SocketPortProbe(
         return true
     }
 
-    private fun answersStls(socket: Socket): PortState {
+    /** What the connected [socket] is: adbd when it answers CNXN with STLS. Blocks. */
+    fun answersStls(socket: Socket): PortState {
         val reply =
             try {
                 cnxnReply(socket)

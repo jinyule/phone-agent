@@ -3,9 +3,14 @@ package dev.phoneagent.core.adb
 import dev.phoneagent.core.adb.FakeAdbd.Behavior
 import dev.phoneagent.core.adb.FakeAdbd.Reply
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
@@ -14,12 +19,21 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.RepeatedTest
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import org.junit.jupiter.api.assertTimeoutPreemptively
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
+import org.junit.jupiter.params.provider.ValueSource
 import java.io.IOException
+import java.net.InetAddress
+import java.net.ServerSocket
+import java.net.Socket
 import java.net.SocketException
+import java.net.SocketTimeoutException
+import java.time.Duration
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import javax.net.ssl.SSLException
+import kotlin.time.Duration.Companion.seconds
 
 class AdbConnectionTest {
     private val identity = TestTls.client
@@ -306,6 +320,19 @@ class AdbConnectionTest {
     }
 
     @Test
+    fun `a socket timeout is TIMEOUT in every step`() {
+        val timeout = SocketTimeoutException("Read timed out")
+        for (step in ConnectFailure.entries) {
+            assertEquals(ConnectFailure.TIMEOUT, AdbHandshake.classify(timeout, step).reason, "$step")
+        }
+        for (requested in listOf(true, false)) {
+            val inHandshake = TlsHandshakeException(requested, timeout)
+            assertEquals(ConnectFailure.TIMEOUT, AdbHandshake.classify(inHandshake, ConnectFailure.TLS).reason)
+        }
+        assertEquals(CommandFailure.TIMEOUT, CommandExchange.classify(timeout).reason)
+    }
+
+    @Test
     fun `adbd's CNXN has no checksum from the skip-checksum version on, an older one's must match`() =
         realTime {
             val banner = "device::ro.product.name=raw;features=shell_v2"
@@ -379,6 +406,120 @@ class AdbConnectionTest {
             }
         }
 
+    @ParameterizedTest
+    @ValueSource(strings = ["executor", "limitedParallelism"])
+    fun `with one IO thread a hanging command still times out and its socket is closed`(kind: String) =
+        withOneIoThread(kind) { io ->
+            FakeAdbd(paired, reply = { Reply.Hang }).use { adbd ->
+                val session = inRealTime { connect(adbd, AdbConfig(commandTimeoutMs = 2_500), io) }
+                assertTimeoutPreemptively(Duration.ofSeconds(20)) {
+                    runTest {
+                        val result = async { session.run(id) }
+                        holdTimeUntil(adbd.gotOpen)
+                        assertFailure(CommandFailure.TIMEOUT, result.await())
+                        assertEquals(2_500, virtualTime)
+                        assertFalse(session.isOpen)
+                        adbd.clientClosed.get(10, TimeUnit.SECONDS)
+                    }
+                }
+            }
+        }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["executor", "limitedParallelism"])
+    fun `with one IO thread a silent adbd still times out the connect`(kind: String) =
+        withOneIoThread(kind) { io ->
+            FakeAdbd(paired, Behavior.SILENT).use { adbd ->
+                assertTimeoutPreemptively(Duration.ofSeconds(20)) {
+                    runTest {
+                        val result = async { client(AdbConfig(connectTimeoutMs = 3_000), io).connect(adbd.endpoint) }
+                        holdTimeUntil(adbd.gotCnxn)
+                        assertConnectFailure(ConnectFailure.TIMEOUT, result.await())
+                        assertEquals(3_000, virtualTime)
+                        adbd.clientClosed.get(10, TimeUnit.SECONDS)
+                    }
+                }
+            }
+        }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["executor", "limitedParallelism"])
+    fun `with one IO thread cancelling a command closes its socket and ends`(kind: String) =
+        withOneIoThread(kind) { io ->
+            FakeAdbd(paired, reply = { Reply.Hang }).use { adbd ->
+                realTime {
+                    val session = connect(adbd, AdbConfig(), io)
+                    // Outside this scope, so that a stuck command fails the test instead of hanging it.
+                    val result = CoroutineScope(Job()).async { session.run(id) }
+                    adbd.gotOpen.awaitBarrier()
+                    result.cancel()
+                    assertTrue(withTimeoutOrNull(10.seconds) { result.join() } != null, "the command ended")
+                    assertTrue(result.isCancelled)
+                    assertFalse(session.isOpen)
+                    adbd.clientClosed.awaitBarrier()
+                }
+            }
+        }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["executor", "limitedParallelism"])
+    fun `with one IO thread cancelling a connect closes its socket and ends`(kind: String) =
+        withOneIoThread(kind) { io ->
+            FakeAdbd(paired, Behavior.SILENT_AFTER_TLS).use { adbd ->
+                realTime {
+                    // Outside this scope, so that a stuck connect fails the test instead of hanging it.
+                    val result = CoroutineScope(Job()).async { client(AdbConfig(), io).connect(adbd.endpoint) }
+                    adbd.gotTls.awaitBarrier()
+                    result.cancel()
+                    assertTrue(withTimeoutOrNull(10.seconds) { result.join() } != null, "the connect ended")
+                    assertTrue(result.isCancelled)
+                    adbd.clientClosed.awaitBarrier()
+                }
+            }
+        }
+
+    @Test
+    fun `a read that closing the socket did not end still ends at the socket timeout`() {
+        ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { silent ->
+            val endpoint = AdbEndpoint("127.0.0.1", silent.localPort)
+            val handshake = AdbHandshake(AdbTls(identity, TestTls.exporter))
+            val failure =
+                assertTimeoutPreemptively(Duration.ofSeconds(10)) {
+                    assertThrows<ConnectError> { Socket().use { handshake.connect(it, endpoint, 200) } }
+                }
+            assertEquals(ConnectFailure.TIMEOUT, failure.reason)
+        }
+    }
+
+    @Test
+    fun `a command read that closing the socket did not end still ends at the socket timeout`() {
+        ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { silent ->
+            Socket(silent.inetAddress, silent.localPort).use { plain ->
+                val handshake = Handshake(plain, plain.getInputStream(), plain.getOutputStream(), "device::", 1, 4096)
+                val exchange = CommandExchange(handshake, 1, true, AdbConfig(commandTimeoutMs = 200))
+                assertTimeoutPreemptively(Duration.ofSeconds(10)) {
+                    assertThrows<SocketTimeoutException> { exchange.run(id, ByteArray(0)) }
+                }
+                assertEquals(400, plain.soTimeout, "twice the command timeout")
+            }
+        }
+    }
+
+    @Test
+    fun `every socket has a read timeout of twice its operation's timeout`() =
+        realTime {
+            FakeAdbd(paired).use { adbd ->
+                val config = AdbConfig(connectTimeoutMs = 3_000, commandTimeoutMs = 7_000)
+                connect(adbd, config).use { session ->
+                    assertEquals(6_000, session.handshake.plain.soTimeout)
+                    assertEquals(CommandResult.Completed(0, "", ""), session.run(id))
+                    assertEquals(14_000, session.handshake.plain.soTimeout)
+                }
+            }
+            assertEquals(Int.MAX_VALUE - 1, socketTimeoutBackstop(Long.MAX_VALUE))
+            assertEquals(Int.MAX_VALUE, Long.MAX_VALUE.toSocketTimeout())
+        }
+
     @Test
     fun `features come from the banner's features entry`() {
         assertEquals(setOf("shell_v2", "cmd"), AdbFeatures.of("device::ro.product.name=x;features=shell_v2,,cmd"))
@@ -387,13 +528,17 @@ class AdbConnectionTest {
         assertEquals(emptySet<String>(), AdbFeatures.of("device::features="))
     }
 
-    private fun client(config: AdbConfig = AdbConfig()) = AdbClient(identity, TestTls.exporter, config)
+    private fun client(
+        config: AdbConfig = AdbConfig(),
+        io: CoroutineDispatcher = Dispatchers.IO,
+    ) = AdbClient(identity, TestTls.exporter, config, io)
 
     private suspend fun connect(
         adbd: FakeAdbd,
         config: AdbConfig = AdbConfig(),
+        io: CoroutineDispatcher = Dispatchers.IO,
     ): AdbSession {
-        val result = client(config).connect(adbd.endpoint)
+        val result = client(config, io).connect(adbd.endpoint)
         assertTrue(result is ConnectResult.Connected) { "expected a session, got $result" }
         return (result as ConnectResult.Connected).session
     }
@@ -418,6 +563,20 @@ class AdbConnectionTest {
         result: ConnectResult,
     ) {
         assertTrue(result is ConnectResult.Failed && result.reason == expected) { "expected $expected, got $result" }
+    }
+
+    /** Runs [block] with an IO dispatcher of a single thread, of the given [kind]. */
+    private fun withOneIoThread(
+        kind: String,
+        block: (CoroutineDispatcher) -> Unit,
+    ) {
+        val executor = Executors.newSingleThreadExecutor { task -> Thread(task, "one-io").apply { isDaemon = true } }
+        try {
+            val io = if (kind == "executor") executor.asCoroutineDispatcher() else testIo.limitedParallelism(1)
+            block(io)
+        } finally {
+            executor.shutdownNow()
+        }
     }
 
     /** adbd's CNXN written by hand as AOSP lays it out (`amessage`, little-endian), not by any encoder. */

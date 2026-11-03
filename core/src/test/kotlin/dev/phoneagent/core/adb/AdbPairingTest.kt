@@ -2,8 +2,12 @@ package dev.phoneagent.core.adb
 
 import dev.phoneagent.core.adb.FakePairingServer.Behavior
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -11,15 +15,21 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import org.junit.jupiter.api.assertTimeoutPreemptively
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
+import org.junit.jupiter.params.provider.ValueSource
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.InetAddress
 import java.net.ServerSocket
+import java.net.Socket
+import java.time.Duration
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import javax.net.ssl.SSLException
+import kotlin.time.Duration.Companion.seconds
 
 class AdbPairingTest {
     private val identity = TestTls.client
@@ -111,6 +121,78 @@ class AdbPairingTest {
                 device.clientClosed.get(10, TimeUnit.SECONDS)
             }
         }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["executor", "limitedParallelism"])
+    fun `with one IO thread cancelling a pairing closes its socket and ends`(kind: String) {
+        val executor = Executors.newSingleThreadExecutor { task -> Thread(task, "one-io").apply { isDaemon = true } }
+        try {
+            val io = if (kind == "executor") executor.asCoroutineDispatcher() else testIo.limitedParallelism(1)
+            FakePairingServer("482916", Behavior.SILENT_AFTER_SPAKE2).use { device ->
+                realTime {
+                    // Outside this scope, so that a stuck pairing fails the test instead of hanging it.
+                    val client = AdbClient(identity, TestTls.exporter, AdbConfig(), io)
+                    val result = CoroutineScope(Job()).async { client.pair(device.endpoint, code) }
+                    device.gotSpake2.awaitBarrier()
+                    result.cancel()
+                    assertTrue(withTimeoutOrNull(10.seconds) { result.join() } != null, "the pairing ended")
+                    assertTrue(result.isCancelled)
+                    device.clientClosed.awaitBarrier()
+                }
+            }
+        } finally {
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `a read after TLS that closing the socket did not end still ends at the socket timeout`() {
+        FakePairingServer("482916", Behavior.SILENT_AFTER_SPAKE2).use { device ->
+            val pairing = AdbPairing(AdbTls(identity, TestTls.exporter), identity)
+            val failure =
+                assertTimeoutPreemptively(Duration.ofSeconds(10)) {
+                    assertThrows<PairingError> { Socket().use { pairing.pair(it, device.endpoint, code, 200) } }
+                }
+            assertEquals(PairingFailure.TIMEOUT, failure.reason)
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["executor", "limitedParallelism"])
+    fun `with one IO thread a silent device still times out`(kind: String) {
+        val executor = Executors.newSingleThreadExecutor { task -> Thread(task, "one-io").apply { isDaemon = true } }
+        try {
+            val io = if (kind == "executor") executor.asCoroutineDispatcher() else testIo.limitedParallelism(1)
+            FakePairingServer("482916", Behavior.SILENT_AFTER_SPAKE2).use { device ->
+                assertTimeoutPreemptively(Duration.ofSeconds(20)) {
+                    runTest {
+                        val config = AdbConfig(pairingTimeoutMs = 4_000)
+                        val result =
+                            async { AdbClient(identity, TestTls.exporter, config, io).pair(device.endpoint, code) }
+                        holdTimeUntil(device.gotSpake2)
+                        assertFailure(PairingFailure.TIMEOUT, result.await())
+                        assertEquals(4_000, virtualTime)
+                        device.clientClosed.get(10, TimeUnit.SECONDS)
+                    }
+                }
+            }
+        } finally {
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `a read that closing the socket did not end still ends at the socket timeout`() {
+        ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { silent ->
+            val endpoint = AdbEndpoint("127.0.0.1", silent.localPort)
+            val pairing = AdbPairing(AdbTls(identity, TestTls.exporter), identity)
+            val failure =
+                assertTimeoutPreemptively(Duration.ofSeconds(10)) {
+                    assertThrows<PairingError> { Socket().use { pairing.pair(it, endpoint, code, 200) } }
+                }
+            assertEquals(PairingFailure.TIMEOUT, failure.reason)
+        }
+    }
 
     @Test
     fun `cancellation closes the socket and propagates`() =

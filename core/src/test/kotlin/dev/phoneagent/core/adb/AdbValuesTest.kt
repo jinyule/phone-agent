@@ -58,7 +58,8 @@ class AdbValuesTest {
         assertEquals(PortScanConfig.DEFAULT_PROBE_TIMEOUT_MS, defaults.probeTimeoutMs)
         assertEquals(PortScanConfig.DEFAULT_PARALLELISM, defaults.parallelism)
         PortScanConfig(1, 1, 1, 1)
-        PortScanConfig(connectTimeoutMs = 60_000, parallelism = 1024)
+        PortScanConfig(connectTimeoutMs = 60_000, parallelism = 32)
+        assertEquals(32, PortScanConfig.MAX_PARALLELISM, "half of the 64 threads Dispatchers.IO has at least")
         val bad =
             listOf(
                 { PortScanConfig(budgetMs = 0) },
@@ -66,7 +67,7 @@ class AdbValuesTest {
                 { PortScanConfig(connectTimeoutMs = 60_001) },
                 { PortScanConfig(probeTimeoutMs = 0) },
                 { PortScanConfig(parallelism = 0) },
-                { PortScanConfig(parallelism = 1025) },
+                { PortScanConfig(parallelism = 33) },
             )
         for (make in bad) assertThrows<IllegalArgumentException> { make() }
     }

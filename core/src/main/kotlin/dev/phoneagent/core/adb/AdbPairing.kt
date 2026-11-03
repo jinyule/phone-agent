@@ -3,7 +3,8 @@
  * Origin: Mika commit 9cef375, core/src/main/kotlin/com/wangzan101/mika/core/adb/AdbPairing.kt.
  * Modified by PhoneAgent contributors: English documentation; failures are a typed result with
  * six classes instead of exceptions; the exchange runs over a socket the caller can close on
- * cancellation; header checks follow AOSP's ReadHeader (version, type, 1..16384 bytes).
+ * cancellation, with a socket read timeout behind it; header checks follow AOSP's ReadHeader
+ * (version, type, 1..16384 bytes).
  */
 package dev.phoneagent.core.adb
 
@@ -13,6 +14,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.SocketTimeoutException
 import java.nio.ByteBuffer
 import javax.crypto.AEADBadTagException
 import javax.net.ssl.SSLException
@@ -97,16 +99,23 @@ internal class AdbPairing(
     private val tls: AdbTls,
     private val identity: AdbIdentity,
 ) {
-    /** Pairs over the unconnected [plain] socket, which the caller closes. Blocks; throws [PairingError]. */
+    /**
+     * Pairs over the unconnected [plain] socket, which the caller closes, within [timeoutMs] (the
+     * caller's coroutine timeout; the socket's read timeout is the [socketTimeoutBackstop] of it).
+     * Blocks; throws [PairingError].
+     */
     @Throws(PairingError::class)
     fun pair(
         plain: Socket,
         endpoint: AdbEndpoint,
         code: PairingCode,
-        connectTimeoutMs: Int,
+        timeoutMs: Long,
     ): PairedDevice {
         val address = InetSocketAddress(endpoint.host, endpoint.port)
-        step(PairingFailure.UNREACHABLE) { plain.connect(address, connectTimeoutMs) }
+        step(PairingFailure.UNREACHABLE) {
+            plain.soTimeout = socketTimeoutBackstop(timeoutMs)
+            plain.connect(address, timeoutMs.toSocketTimeout())
+        }
         val socket = step(PairingFailure.TLS) { tls.handshake(plain, endpoint) }
         val exported = step(PairingFailure.TLS) { tls.export(socket, EXPORT_LABEL, EXPORT_SIZE) }
         val input = step(PairingFailure.TLS) { BufferedInputStream(socket.inputStream) }
@@ -196,13 +205,18 @@ internal class AdbPairing(
         failure: IOException,
         reason: PairingFailure,
     ): PairingError =
-        when (failure) {
-            is PairingError -> failure
-            is TruncatedFrameException -> PairingError(reason, describe(failure), failure)
-            is AdbProtocolException -> PairingError(PairingFailure.PROTOCOL, describe(failure), failure)
-            is SSLException -> PairingError(PairingFailure.TLS, describe(failure), failure)
+        when {
+            failure is PairingError -> failure
+            failure.timedOut() -> PairingError(PairingFailure.TIMEOUT, describe(failure), failure)
+            failure is TruncatedFrameException -> PairingError(reason, describe(failure), failure)
+            failure is AdbProtocolException -> PairingError(PairingFailure.PROTOCOL, describe(failure), failure)
+            failure is SSLException -> PairingError(PairingFailure.TLS, describe(failure), failure)
             else -> PairingError(reason, describe(failure), failure)
         }
+
+    /** The socket read timeout fired, directly or inside the TLS handshake. */
+    private fun IOException.timedOut(): Boolean =
+        this is SocketTimeoutException || (this is TlsHandshakeException && cause is SocketTimeoutException)
 
     companion object {
         /** AOSP's `kExportedKeyLabel`: `sizeof("adb-label")` bytes, so the NUL is part of it. */

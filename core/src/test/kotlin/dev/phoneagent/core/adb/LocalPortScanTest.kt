@@ -1,16 +1,27 @@
 package dev.phoneagent.core.adb
 
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import org.junit.jupiter.api.assertTimeoutPreemptively
 import java.net.InetAddress
 import java.net.ServerSocket
+import java.net.Socket
+import java.time.Duration
 import java.util.Collections
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.thread
+import kotlin.time.Duration.Companion.seconds
 
 class LocalPortScanTest {
     @Test
@@ -51,6 +62,40 @@ class LocalPortScanTest {
                 assertEquals(700, virtualTime)
             }
         }
+
+    @Test
+    fun `with one IO thread a scan of silent ports still ends`() {
+        val silent = List(6) { ServerSocket(0, 1, InetAddress.getLoopbackAddress()) }
+        val executor = Executors.newSingleThreadExecutor { task -> Thread(task, "one-io").apply { isDaemon = true } }
+        try {
+            val config = PortScanConfig(budgetMs = 5_000, probeTimeoutMs = 100, parallelism = 4)
+            val sockets = SocketPortProbe(config, executor.asCoroutineDispatcher())
+            val probe = PortProbe { host, port -> sockets.probe(host, silent[port - 1].localPort) }
+            val scan = LocalPortScan({ listOf("127.0.0.1") }, 1..silent.size, config, probe)
+            // Outside the test's scope, so that a stuck scan fails the test instead of hanging it.
+            val result = CoroutineScope(Job()).async { scan.scan(emptySet()) }
+            assertEquals(
+                ScanResult(emptyList(), silent.size),
+                inRealTime { withTimeoutOrNull(10.seconds) { result.await() } },
+            )
+        } finally {
+            silent.forEach { it.close() }
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `a probe read that closing the socket did not end still ends at the socket timeout`() {
+        ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { silent ->
+            val probe = SocketPortProbe(PortScanConfig(probeTimeoutMs = 100), testIo)
+            Socket().use { socket ->
+                assertTrue(probe.connect(socket, "127.0.0.1", silent.localPort))
+                assertEquals(200, socket.soTimeout, "twice the probe timeout")
+                val state = assertTimeoutPreemptively(Duration.ofSeconds(10)) { probe.answersStls(socket) }
+                assertEquals(PortState.OPEN, state)
+            }
+        }
+    }
 
     @Test
     fun `scans hosts in order and stops after the first host with adbd`() =
