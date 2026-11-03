@@ -66,6 +66,9 @@ class JsonEscapesTest {
                 Arguments.of("unknown escape", "~x~a~0", "~x~a~0"),
                 Arguments.of("backslash at the end", "abc~", "abc~"),
                 Arguments.of("cut arguments", "{\"city\":\"~u0070lain~/key", "{\"city\":\"plain/key"),
+                Arguments.of("high surrogate before another high", "~uD83D~uD83D~uDE00", "~uD83D<U+D83D><U+DE00>"),
+                Arguments.of("escaped backslash before slash", "~~~/", "~/"),
+                Arguments.of("no escapes, not ASCII", "天气 café", "天气 café"),
                 Arguments.of("empty", "", ""),
             )
     }
