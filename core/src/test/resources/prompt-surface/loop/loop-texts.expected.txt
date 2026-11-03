@@ -10,7 +10,7 @@ handoffUnavailable: 未完成：这一步需要用户来做，但现在没有人
 interceptorFault: 未按判定执行：有扩展篡改了这次调用。
 invalidArgs: 未执行：参数不符合工具的 schema：
 invalidJson: 未执行：参数不是合法的 JSON：
-maxTokens: 未执行：这条回复达到了输出长度上限，其中的工具调用已被丢弃。
+maxTokens: 未执行：这条回复达到了输出长度上限，被截断了。这个调用的参数（你看到的可能是 {}）不完整，不是你原本要发的那一份。如果仍然需要，请重新发起这次调用。
 mayHaveTakenEffect: 这个操作可能已经生效：请先调用 phone_observe 确认，再做决定。
 notStarted: 未执行：这一步在调用开始之前就失败了。
 outcomeUnknown: 这一步在调用运行期间失败了，结果未知。

@@ -78,8 +78,13 @@ public data class LoopTexts(
     /** A call after the first one in a reply. */
     val skipped: String =
         "未执行：每条回复只执行第一个工具调用（每步一个动作）。如果仍然需要，请在之后的步骤里再调用。",
-    /** A call in a reply that hit the output limit. */
-    val maxTokens: String = "未执行：这条回复达到了输出长度上限，其中的工具调用已被丢弃。",
+    /**
+     * A call in a reply cut off at the output cap (SKIPPED): the arguments the model sees (maybe
+     * `{}`) are incomplete, not the ones it meant to send, so it is asked to call again.
+     */
+    val maxTokens: String =
+        "未执行：这条回复达到了输出长度上限，被截断了。这个调用的参数（你看到的可能是 {}）不完整，" +
+            "不是你原本要发的那一份。如果仍然需要，请重新发起这次调用。",
     /** The model named a tool that does not exist or is not available; followed by the name. */
     val unknownTool: String = "未执行：没有这个名字的可用工具：",
     /** The arguments are not JSON; followed by the parser's message. */
