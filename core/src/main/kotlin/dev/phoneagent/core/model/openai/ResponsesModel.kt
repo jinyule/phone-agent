@@ -73,13 +73,9 @@ public class ResponsesModel internal constructor(
             // Argument text shown before the failure may hold a secret only the whole text reveals.
             throw stream.failed(e)
         } catch (e: IllegalArgumentException) {
-            // Provider values that break neutral-type invariants (ids, counts) are protocol violations.
-            throw stream.failed(
-                ModelError.BadResponse(
-                    redactor.text("reply violates a model invariant: ${e.message}"),
-                    redactor.cause(e),
-                ),
-            )
+            // Provider values that break neutral-type invariants (ids, counts) are protocol violations,
+            // named by the failure's class: its message is not quoted (model-layer §2).
+            throw stream.failed(ModelError.BadResponse(INVARIANT, Unquoted.bare(e)))
         }
     }
 }

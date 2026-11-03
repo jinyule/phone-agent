@@ -58,7 +58,7 @@ internal class ChatCompletionsStream(
     private val ledger = DeltaLedger(onDelta, guard)
     private val text = StreamedText(ledger, holdBack = reading.recovers)
     private val refusal = StringBuilder()
-    private val calls = ToolCallAssembler(newCallId, ledger, redactor)
+    private val calls = ToolCallAssembler(newCallId, ledger)
     private var usage: Usage? = null
     private var finishReason: String? = null
     private var done = false
@@ -330,7 +330,6 @@ internal class StreamedText(
 internal class ToolCallAssembler(
     private val newCallId: () -> String,
     private val ledger: DeltaLedger,
-    private val redactor: Redactor,
 ) {
     private class Slot(
         val index: Int?,
@@ -379,7 +378,7 @@ internal class ToolCallAssembler(
             } catch (e: IllegalArgumentException) {
                 throw ModelError.BadResponse(
                     "tool call $position has an unusable id (${Unquoted.size(id)})",
-                    redactor.cause(e),
+                    Unquoted.bare(e),
                 )
             }
         }

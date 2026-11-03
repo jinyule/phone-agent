@@ -10,7 +10,7 @@ class ToolCallAssemblerTest {
     private val deltas = Deltas()
     private var ids = 0
     private val calls =
-        ToolCallAssembler({ "call_gen_${++ids}" }, DeltaLedger(deltas, EchoGuard.NONE), Redactor.SHAPES_ONLY)
+        ToolCallAssembler({ "call_gen_${++ids}" }, DeltaLedger(deltas, EchoGuard.NONE))
 
     private fun merge(fragment: String) = calls.merge(Json.parseToJsonElement(fragment) as JsonObject)
 

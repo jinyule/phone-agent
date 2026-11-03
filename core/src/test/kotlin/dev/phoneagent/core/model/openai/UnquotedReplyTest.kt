@@ -15,6 +15,7 @@ import mockwebserver3.junit5.StartStop
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.EnumSource
@@ -199,6 +200,49 @@ class UnquotedReplyTest {
             for (call in listOf(nameless, unusable)) {
                 server.enqueueSse(Kit.sse("""{"choices":[{"index":0,"delta":{"tool_calls":[$call]}}]}""", end))
                 assertTrue(failure(model(ModelProtocol.OPENAI_CHAT_COMPLETIONS)) is ModelError.BadResponse)
+            }
+        }
+
+    @Test
+    fun `a value that breaks a model invariant is named by the failure's class only`() =
+        runTest {
+            val unusable = JsonPrimitive("c" + CONTROL)
+            val end = """{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}"""
+
+            fun chat(function: String) =
+                Kit.sse(
+                    """{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":$unusable,$function}]}}]}""",
+                    end,
+                )
+            val replies =
+                listOf(
+                    // Announced while the stream is read, so the id fails there.
+                    ModelProtocol.OPENAI_CHAT_COMPLETIONS to chat(""""function":{"name":"tap","arguments":"{}"}"""),
+                    // Never announced, so the id fails when the parts are built.
+                    ModelProtocol.OPENAI_CHAT_COMPLETIONS to chat(""""function":{"name":"tap"}"""),
+                    ModelProtocol.OPENAI_RESPONSES to
+                        Kit.sse(
+                            """{"type":"response.output_item.added","output_index":0,""" +
+                                """"item":{"type":"function_call","id":"fc_1","call_id":$unusable,"name":"tap"}}""",
+                            done = false,
+                        ),
+                    ModelProtocol.OPENAI_RESPONSES to
+                        Kit.sse(
+                            """{"type":"response.completed","response":{"status":"completed","output":[""" +
+                                """{"type":"function_call","call_id":$unusable,"name":"tap","arguments":"{}"}]}}""",
+                            done = false,
+                        ),
+                )
+            for ((protocol, reply) in replies) {
+                server.enqueueSse(reply)
+                val error = failure(model(protocol))
+                assertTrue(error is ModelError.BadResponse, "$protocol: rejected")
+                assertFalse(
+                    error.message.orEmpty().contains("must not"),
+                    "$protocol: the invariant's text is not quoted",
+                )
+                val cause = checkNotNull(error.cause) { "$protocol: the failure is kept" }
+                assertEquals(IllegalArgumentException::class.java.name, cause.message, "$protocol: its class only")
             }
         }
 

@@ -94,7 +94,7 @@ internal class ResponsesStream(
         val output = items.merged(last.output)
         val reason = response.obj("incomplete_details")?.str("reason")
         val rawFirst = reasoningChannel == RAW_REASONING_DELTA
-        val parts = ResponsesOutput.parts(output, provider, model, redactor, rawFirst)
+        val parts = ResponsesOutput.parts(output, provider, model, rawFirst)
         guard.parts(parts)
         ledger.checkShownArguments()
         val hasCalls = parts.any { it is Part.ToolCall }
@@ -358,7 +358,6 @@ internal object ResponsesOutput {
         output: List<JsonObject>,
         provider: ProviderId,
         model: ModelId,
-        redactor: Redactor,
         rawFirst: Boolean,
     ): List<Part> =
         output.mapIndexedNotNull { index, item ->
@@ -372,7 +371,7 @@ internal object ResponsesOutput {
                 }
 
                 "function_call" -> {
-                    call(item, index, redactor)
+                    call(item, index)
                 }
 
                 else -> {
@@ -459,7 +458,6 @@ internal object ResponsesOutput {
     private fun call(
         item: JsonObject,
         index: Int,
-        redactor: Redactor,
     ): Part.ToolCall {
         val id = item.str("call_id")
         val name = item.str("name")
@@ -474,7 +472,7 @@ internal object ResponsesOutput {
         } catch (e: IllegalArgumentException) {
             throw ModelError.BadResponse(
                 "output item $index is a function_call with an unusable call_id (${Unquoted.size(id)})",
-                redactor.cause(e),
+                Unquoted.bare(e),
             )
         }
     }
