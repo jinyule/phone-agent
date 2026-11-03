@@ -12,6 +12,7 @@ import dev.phoneagent.core.model.ToolDef
 import dev.phoneagent.core.model.WireProfile
 import dev.phoneagent.core.model.openai.WireSupport.IMAGE_OMITTED
 import dev.phoneagent.core.model.openai.WireSupport.TEXT_SEPARATOR
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -47,6 +48,7 @@ import kotlinx.serialization.json.putJsonObject
  *   request's tools in one of these formats; any other text stays as written. Recovered ids are
  *   listed in the reply's `providerMetadata.recovered_tool_calls`.
  */
+@Serializable
 public data class ChatQuirks(
     val parallelToolCalls: Boolean = true,
     val streamUsage: Boolean = true,
@@ -63,6 +65,7 @@ public data class ChatQuirks(
 }
 
 /** How a model writes tool calls into the answer text ([ChatQuirks.recoverLeakedCalls]). */
+@Serializable
 public enum class LeakedCallFormat {
     /** DeepSeek's DSML: `<｜DSML｜function_calls>` blocks of `<｜DSML｜invoke name="…">` with parameters. */
     DSML,
@@ -72,6 +75,7 @@ public enum class LeakedCallFormat {
 }
 
 /** Where a Chat Completions provider takes the output cap (`ChatRequest.maxOutputTokens`). */
+@Serializable
 public enum class MaxTokensField(
     /** The request field. */
     public val wireName: String,
@@ -84,6 +88,7 @@ public enum class MaxTokensField(
 }
 
 /** Where a Chat Completions provider takes the reasoning level. */
+@Serializable
 public enum class ReasoningEffortStyle {
     /** Never sent: the provider has no such parameter (or it is unknown). */
     NONE,

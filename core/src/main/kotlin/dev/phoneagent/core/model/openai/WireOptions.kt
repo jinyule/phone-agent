@@ -1,6 +1,7 @@
 package dev.phoneagent.core.model.openai
 
 import dev.phoneagent.core.model.ProviderProfile
+import kotlinx.serialization.Serializable
 
 /**
  * What the adapters send for one provider profile besides the request itself (model-layer §3.1,
@@ -11,9 +12,14 @@ import dev.phoneagent.core.model.ProviderProfile
  * with [dev.phoneagent.core.model.ModelError.InvalidRequest] naming the parameter, and testing the
  * profile again fixes the options.
  *
+ * The serial field names here, in [ChatQuirks] and in [ResponsesQuirks] are the format the app
+ * stores them in (`model-settings.json`): renaming one means raising that file's version and
+ * migrating it.
+ *
  * @property chat Chat Completions request shape.
  * @property responses Responses request shape.
  */
+@Serializable
 public data class WireOptions(
     val chat: ChatQuirks = ChatQuirks.DEFAULT,
     val responses: ResponsesQuirks = ResponsesQuirks(),
@@ -30,8 +36,10 @@ public data class WireOptions(
     /**
      * Throws [IllegalArgumentException] unless these options fit [profile]'s route: a preset route
      * declares no formats of its own, and every recovered format is one [allowedLeakedCalls] allows.
+     * Models and "test and save" check it before any request; the app also checks saved options
+     * with it when it loads them.
      */
-    internal fun requireFits(profile: ProviderProfile) {
+    public fun requireFits(profile: ProviderProfile) {
         val preset = presetOf(profile)
         require(preset == null || chat.leakedCallFormats.isEmpty()) {
             "Provider ${profile.id}: on a preset route (${preset?.id}) the preset declares the leaked-call " +
@@ -65,6 +73,7 @@ public data class WireOptions(
  * @property includeEncryptedReasoning ask for replayable reasoning
  *   (`include: ["reasoning.encrypted_content"]`); models without reasoning refuse it.
  */
+@Serializable
 public data class ResponsesQuirks(
     val includeEncryptedReasoning: Boolean = true,
 )
