@@ -91,21 +91,24 @@ class AdbFailureClassTest {
                     "(external/boringssl/src/ssl/tls_record.cc:484 0xb400007670cb6f40:0x00000003)",
             )
         val tls13Alert =
-            SSLProtocolException("error:10000474:SSL routines:OPENSSL_internal:TLSV1_ALERT_CERTIFICATE_REQUIRED")
+            SSLProtocolException("error:1000045c:SSL routines:OPENSSL_internal:TLSV1_ALERT_CERTIFICATE_REQUIRED")
         for (alert in listOf(refusedOnDevice, tls13Alert)) {
             assertEquals(ConnectFailure.UNAUTHORIZED, classify(alert, ConnectFailure.UNAUTHORIZED), "$alert")
             assertEquals(ConnectFailure.UNAUTHORIZED, classify(TlsHandshakeException(true, alert), ConnectFailure.TLS))
             // Before adbd asked for our certificate, an alert is no answer to our key.
             assertEquals(ConnectFailure.TLS, classify(TlsHandshakeException(false, alert), ConnectFailure.TLS))
         }
-        // What BoringSSL finds itself names no alert, and stays TLS.
-        val ownFinding =
-            SSLProtocolException(
-                "Read error: ssl=0x1: Failure in SSL library, usually a protocol error\n" +
-                    "error:1000008b:SSL routines:OPENSSL_internal:DECRYPTION_FAILED_OR_BAD_RECORD_MAC",
-            )
-        assertEquals(ConnectFailure.TLS, classify(ownFinding, ConnectFailure.UNAUTHORIZED))
-        assertEquals(ConnectFailure.TLS, classify(TlsHandshakeException(true, ownFinding), ConnectFailure.TLS))
+        // What BoringSSL finds itself has a reason below 1000 and stays TLS, also when it is about an alert.
+        val ownFindings =
+            listOf(
+                "error:1000008b:SSL routines:OPENSSL_internal:DECRYPTION_FAILED_OR_BAD_RECORD_MAC",
+                "error:10000066:SSL routines:OPENSSL_internal:BAD_ALERT",
+                "error:100000e3:SSL routines:OPENSSL_internal:UNKNOWN_ALERT_TYPE",
+            ).map { SSLProtocolException("Read error: ssl=0x1: Failure in SSL library, usually a protocol error\n$it") }
+        for (ownFinding in ownFindings) {
+            assertEquals(ConnectFailure.TLS, classify(ownFinding, ConnectFailure.UNAUTHORIZED))
+            assertEquals(ConnectFailure.TLS, classify(TlsHandshakeException(true, ownFinding), ConnectFailure.TLS))
+        }
         assertEquals(ConnectFailure.TLS, classify(SSLProtocolException(null), ConnectFailure.UNAUTHORIZED))
     }
 
