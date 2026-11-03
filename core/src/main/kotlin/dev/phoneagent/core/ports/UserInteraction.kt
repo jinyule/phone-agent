@@ -61,10 +61,12 @@ public interface ToolInteraction {
      * `SurfaceManager.handToUser` returns a ticket or throws [ScreenUnavailableException] (nothing
      * moved: the handoff then ends FAILED and this returns it). When the port throws an
      * IOException (not cut off), `handoff/end` FAILED is recorded; any other unsettled end
-     * (another exception, the port's own timeout or cancellation, an Error) is closed with
+     * (another exception, the port's own timeout or cancellation) is closed with
      * `prompt/withdrawn`, as a cut is. Either way where the app is is unknown and the call ends
-     * as ERROR with the screen note. An Error propagates as it is, with the failed take-back
-     * suppressed on it. A stopping task leaves the app with the user and throws the cancellation.
+     * as ERROR with the screen note. An Error from the port is closed with `prompt/withdrawn`
+     * too: it propagates as it is, with the failed take-back suppressed on it, the task stops, and
+     * the stop fills the call in as CANCELLED. A stopping task leaves the app with the user and
+     * throws the cancellation.
      */
     public suspend fun handOff(
         kind: HandoffKind,

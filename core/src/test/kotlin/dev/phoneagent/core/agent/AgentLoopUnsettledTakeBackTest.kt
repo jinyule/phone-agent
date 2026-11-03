@@ -14,6 +14,9 @@ import dev.phoneagent.core.ports.SurfaceManager
 import dev.phoneagent.core.ports.SurfaceRef
 import dev.phoneagent.core.session.HandoffEnded
 import dev.phoneagent.core.session.PromptWithdrawn
+import dev.phoneagent.core.session.StopCause
+import dev.phoneagent.core.session.TaskStopped
+import dev.phoneagent.core.session.ToolExecuted
 import dev.phoneagent.core.session.ToolResultRecorded
 import dev.phoneagent.core.testing.FakeChatModel
 import dev.phoneagent.core.testing.FakeChatModel.Companion.call
@@ -176,6 +179,10 @@ class AgentLoopUnsettledTakeBackTest {
             assertFalse(hand.wentOn)
             assertEquals(1 to 1, surfaces.handed to surfaces.takenBack)
             assertEquals(1, harness.events().only<PromptWithdrawn>().size)
+            // The Error ends the run: the task stops, and the stop fills the call in as CANCELLED.
+            assertEquals(ToolStatus.CANCELLED, harness.resultOf(c1).status)
+            assertTrue(harness.events().only<ToolExecuted>().none { it.callId == c1 }, "no execution end")
+            assertEquals(TaskStopped(StopCause.SHUTDOWN), harness.events().last())
         }
 
     @Test

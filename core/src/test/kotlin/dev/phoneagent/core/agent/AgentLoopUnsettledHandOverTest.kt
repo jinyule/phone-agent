@@ -18,6 +18,9 @@ import dev.phoneagent.core.session.HandoffStarted
 import dev.phoneagent.core.session.PromptWithdrawn
 import dev.phoneagent.core.session.ScreenObserved
 import dev.phoneagent.core.session.SessionEvent
+import dev.phoneagent.core.session.StopCause
+import dev.phoneagent.core.session.TaskStopped
+import dev.phoneagent.core.session.ToolExecuted
 import dev.phoneagent.core.session.ToolResultRecorded
 import dev.phoneagent.core.testing.FakeChatModel
 import dev.phoneagent.core.testing.FakeChatModel.Companion.call
@@ -254,6 +257,10 @@ class AgentLoopUnsettledHandOverTest {
             assertEquals(1, harness.events().only<PromptWithdrawn>().size)
             assertTrue(harness.events().only<HandoffEnded>().isEmpty(), "withdrawn, not ended")
             assertFalse(lookedAfterHandoff(harness.events()))
+            // The Error ends the run: the task stops, and the stop fills the call in as CANCELLED.
+            assertEquals(ToolStatus.CANCELLED, harness.resultOf(c1).status)
+            assertTrue(harness.events().only<ToolExecuted>().none { it.callId == c1 }, "no execution end")
+            assertEquals(TaskStopped(StopCause.SHUTDOWN), harness.events().last())
         }
 
     @Test

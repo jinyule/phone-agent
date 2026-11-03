@@ -52,10 +52,12 @@ import kotlin.coroutines.resume
  *    one failure it promises moved nothing, `SurfaceManager.handToUser`); any other end (another
  *    exception, an Error, the port's own timeout, a cancellation, whatever the job's state) may
  *    have moved the app and left no ticket, so it is a failed take-back even when the call was not
- *    cut, with no fresh look: a port's IOException (not cut) records `handoff/end` FAILED, any
- *    other such end (another exception, the port's own timeout or cancellation, an Error) is
- *    withdrawn as a cut is; either way where the app is is unknown, and the result is ERROR with
- *    [LoopTexts.screenUnknown]. Tools must let it propagate, not go on acting. It is thrown
+ *    cut, with no fresh look: a port's IOException (not cut) records `handoff/end` FAILED; any
+ *    other such end (another exception, the port's own timeout or cancellation) is withdrawn as a
+ *    cut is; either way where the app is is unknown, and the result is ERROR with
+ *    [LoopTexts.screenUnknown]. An Error from the port is withdrawn too: it propagates with the
+ *    failed take-back suppressed, the task stops, and the stop fills the call in as CANCELLED.
+ *    Tools must let the exception propagate, not go on acting. It is thrown
  *    whatever cut the call off: the call's own cut then ends as ERROR, its budget's as TIMEOUT
  *    (still with [LoopTexts.mayHaveTakenEffect] and [LoopTexts.screenUnknown]). An Error is never
  *    replaced: it propagates with the failed take-back (or what else closing threw) suppressed.
