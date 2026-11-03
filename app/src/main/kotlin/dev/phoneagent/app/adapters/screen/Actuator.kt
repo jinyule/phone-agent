@@ -6,7 +6,10 @@ import android.view.Display
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction
 import dev.phoneagent.core.ports.Direction
+import dev.phoneagent.core.ports.ElementState
+import dev.phoneagent.core.ports.SnapshotDetail
 import dev.phoneagent.core.ports.SystemKey
+import dev.phoneagent.core.ports.UiElement
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -51,21 +54,23 @@ internal class Actuator(
     enum class Via { NODE, GESTURE, INJECTED }
 
     /**
-     * Taps (or long-presses) [element]: the action of its nearest clickable ancestor, else a gesture
-     * at its center. Apps may answer the action `false` although it ran, so a `false` is followed by
-     * a gesture only when [probe] sees no change and the answer came quickly; a `false` that took
+     * Taps (or long-presses) [element]: the click (long click) action of [press], the node the press
+     * goes to ([NodeActions.pressTarget]), else, with none, a gesture at [element]'s center. Apps
+     * may answer the action `false` although it ran, so a `false` is followed by a gesture only when
+     * [probe] sees no change and the answer came quickly; a `false` that took
      * [ScreenTimings.clickUncertainMs] or longer (the platform gave up waiting) is not retried.
      */
     suspend fun tap(
         element: NodeTarget,
+        press: AccessibilityNodeInfo?,
         long: Boolean,
         probe: ClickProbe,
     ): Result {
         val center = PixelPoint(element.pixels.exactCenterX(), element.pixels.exactCenterY())
         val action = if (long) AccessibilityNodeInfo.ACTION_LONG_CLICK else AccessibilityNodeInfo.ACTION_CLICK
-        val ancestor = NodeActions.clickableAncestor(element.node, center, long) ?: return tapAt(center, long)
+        if (press == null) return tapAt(center, long)
         val asked = probe.nowMs()
-        val clicked = ancestor.performAction(action)
+        val clicked = press.performAction(action)
         val answeredInMs = probe.nowMs() - asked
         return when {
             clicked -> {
@@ -233,21 +238,47 @@ internal object NodeActions {
     private const val EDGE_TOP = 5
     private const val EDGE_BOTTOM = 6
     private const val SWIPE_SPAN = 30
-    private const val MAX_ANCESTORS = 8
 
-    /** The node or nearest ancestor that takes the click and covers [center] (where a finger would land). */
-    fun clickableAncestor(
-        node: AccessibilityNodeInfo,
-        center: PixelPoint,
+    /** Ancestors in the snapshot, above the element pressed, that a press may go to. */
+    private const val PRESS_ANCESTORS = 8
+
+    /**
+     * The element of [read] a press on [element] goes to: [element] itself, else the nearest of its
+     * [PRESS_ANCESTORS] ancestors that takes the press (a long click when [long]), is not disabled
+     * and covers the center of [element]; `null` when none does, and the press is a gesture there.
+     *
+     * Ancestors are those of the snapshot [detail] shows of [read] ([TreeRead.project]: each
+     * [UiElement.parent] up), not the accessibility tree's, so the press goes to the element the
+     * policy judged it by on the planned snapshot (the action's read is at that snapshot's detail
+     * and shows what it showed unless the screen changed). A node the read leaves out (invisible,
+     * too small, or alike to the nearest kept one above) or [detail] does not show is neither
+     * pressed nor counted: the limit counts elements of the snapshot, however many accessibility
+     * parents lie between, and is the 8 the policy takes. Taking the press and covering the
+     * center are judged as the snapshot shows them: [UiElement.states] and the 0–999
+     * [UiElement.bounds], edges included, around the center `((left + right) / 2, (top + bottom) / 2)`.
+     */
+    fun pressTarget(
+        element: ReadElement,
+        read: TreeRead,
+        detail: SnapshotDetail,
         long: Boolean,
-    ): AccessibilityNodeInfo? {
-        val rect = Rect()
-        return generateSequence(node) { it.parent }
-            .take(MAX_ANCESTORS + 1)
+    ): ReadElement? {
+        val elements = read.elements
+        val above =
+            generateSequence(element.parent) { elements[it].parent }
+                .filter { detail == SnapshotDetail.FULL || elements[it].brief }
+                .map(elements::get)
+        val takes = if (long) ElementState.LONG_CLICKABLE else ElementState.CLICKABLE
+        val x = (element.element.bounds.left + element.element.bounds.right) / 2
+        val y = (element.element.bounds.top + element.element.bounds.bottom) / 2
+        return (sequenceOf(element) + above)
+            .take(PRESS_ANCESTORS + 1)
             .firstOrNull { candidate ->
-                candidate.getBoundsInScreen(rect)
-                val takes = if (long) candidate.isLongClickable else candidate.isClickable
-                takes && candidate.isEnabled && rect.contains(center.x.toInt(), center.y.toInt())
+                val shown = candidate.element
+                takes in shown.states &&
+                    ElementState.DISABLED !in shown.states &&
+                    x in shown.bounds.left..shown.bounds.right &&
+                    y in shown.bounds.top..shown.bounds.bottom
             }
     }
 

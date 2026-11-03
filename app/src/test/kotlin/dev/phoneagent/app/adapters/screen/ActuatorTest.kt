@@ -58,32 +58,29 @@ class ActuatorTest {
     private fun target(node: AccessibilityNodeInfo): NodeTarget = NodeTarget(node, Rect().also(node::getBoundsInScreen))
 
     @Test
-    fun tapsThroughTheClickableAncestor() =
+    fun aTapIsTheClickOfTheNodeThePressGoesTo() =
         runTest {
             val label = node("android.widget.TextView", Rect(100, 400, 500, 450)) { text = "Wi-Fi" }
             val row = node("android.widget.LinearLayout", Rect(0, 400, 1000, 500)) { isClickable = true }
             row.with(label)
-            val labelInTree = row.getChild(0)
 
-            val result = actuator().tap(target(labelInTree), long = false, unchanged)
+            val result = actuator().tap(target(row.getChild(0)), press = row, long = false, probe = unchanged)
 
             assertEquals(Actuator.Result.Done(Actuator.Via.NODE), result)
             assertEquals(listOf(AccessibilityNodeInfo.ACTION_CLICK), row.log.ids)
+            assertTrue(label.log.ids.isEmpty())
             assertTrue(host.gestures.isEmpty())
         }
 
     @Test
-    fun anAncestorThatDoesNotCoverTheCenterIsNotUsed() =
+    fun withNoNodeToPressATapIsAGestureAtTheCenter() =
         runTest {
-            // A clickable card whose bounds do not contain the label: tapping the card would hit elsewhere.
             val label = node("android.widget.TextView", Rect(100, 900, 500, 950)) { text = "Detail" }
-            val card = node("android.widget.FrameLayout", Rect(0, 0, 1000, 500)) { isClickable = true }
-            card.with(label)
 
-            val result = actuator(displayId = 4).tap(target(card.getChild(0)), long = false, unchanged)
+            val result = actuator(displayId = 4).tap(target(label), press = null, long = false, probe = unchanged)
 
             assertEquals(Actuator.Result.Done(Actuator.Via.GESTURE), result)
-            assertTrue(card.log.ids.isEmpty())
+            assertTrue(label.log.ids.isEmpty())
             val (display, strokes) = host.gestures.single()
             assertEquals(4, display)
             assertEquals(listOf(PixelPoint(300f, 925f)), strokes.single().points)
@@ -96,12 +93,15 @@ class ActuatorTest {
             val item = node("android.widget.TextView", Rect(0, 0, 100, 100)) { isLongClickable = true }
             val plain = node("android.widget.TextView", Rect(0, 100, 100, 200)) { isClickable = true }
 
-            assertEquals(Actuator.Result.Done(Actuator.Via.NODE), actuator().tap(target(item), long = true, unchanged))
+            assertEquals(
+                Actuator.Result.Done(Actuator.Via.NODE),
+                actuator().tap(target(item), press = item, long = true, probe = unchanged),
+            )
             assertEquals(listOf(AccessibilityNodeInfo.ACTION_LONG_CLICK), item.log.ids)
 
             assertEquals(
                 Actuator.Result.Done(Actuator.Via.GESTURE),
-                actuator().tap(target(plain), long = true, unchanged),
+                actuator().tap(target(plain), press = null, long = true, probe = unchanged),
             )
             assertTrue(plain.log.ids.isEmpty())
             assertEquals(
@@ -122,7 +122,7 @@ class ActuatorTest {
 
             assertEquals(
                 Actuator.Result.Done(Actuator.Via.GESTURE),
-                actuator().tap(target(button), long = false, unchanged),
+                actuator().tap(target(button), press = button, long = false, probe = unchanged),
             )
             assertEquals(listOf(AccessibilityNodeInfo.ACTION_CLICK), button.log.ids)
             assertEquals(

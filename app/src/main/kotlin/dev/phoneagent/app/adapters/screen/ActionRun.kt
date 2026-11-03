@@ -123,6 +123,7 @@ internal class ActionRun(
             is Aim.AtElement -> {
                 actuator.tap(
                     aim.element.target,
+                    NodeActions.pressTarget(aim.element, before, baseline.detail, action.long)?.node,
                     action.long,
                     WatchProbe(watch, parts.system, timings, ClickedWindow(aim.element, before)) {
                         host.windowsOn(displayId)
