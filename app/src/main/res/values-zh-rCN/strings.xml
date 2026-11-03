@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Accessibility service (shown in the system's accessibility settings) -->
+    <string name="accessibility_service_label">PhoneAgent 屏幕控制</string>
+    <string name="accessibility_service_description">让 PhoneAgent 读取屏幕，并在执行你交给它的任务时点按、输入和滑动。只在任务运行时操作。</string>
+
+    <!-- Navigation -->
+    <string name="nav_chat">对话</string>
+    <string name="nav_models">模型</string>
+    <string name="chat_placeholder">能运行任务以后，对话会显示在这里。</string>
+
+    <!-- Model settings: state -->
+    <string name="settings_loading">正在读取模型设置…</string>
+    <string name="settings_broken_title">模型设置无法使用</string>
+    <string name="settings_broken_where">位置：%1$s</string>
+    <string name="settings_broken_explain">什么都没有删除。重置会删掉已保存的服务商和它们的 key，然后需要重新设置模型。</string>
+    <string name="settings_reset">重置模型设置</string>
+    <string name="settings_current">当前设置</string>
+    <string name="settings_none">还没有设置模型。</string>
+    <string name="settings_role_main">主模型：%1$s</string>
+    <string name="settings_role_light">轻量模型：%1$s</string>
+    <string name="settings_role_vision">看图模型：%1$s</string>
+    <string name="settings_follows_main">同主模型</string>
+    <string name="settings_key_again">%1$s 的 API Key 需要重新填写。</string>
+
+    <!-- Model settings: why a saved file cannot be used -->
+    <string name="settings_problem_unreadable_file">设置文件读不出来。</string>
+    <string name="settings_problem_malformed">设置文件已损坏。</string>
+    <string name="settings_problem_invalid_value">设置文件里有本 App 不接受的值。</string>
+    <string name="settings_problem_unsupported_version">设置是另一个版本的 App 写的。</string>
+    <string name="settings_problem_duplicate_provider">有一个服务商出现了两次。</string>
+    <string name="settings_problem_duplicate_model">有一个模型出现了两次。</string>
+    <string name="settings_problem_unsupported_protocol">有服务商用的协议本 App 还不支持。</string>
+    <string name="settings_problem_unknown_preset">有服务商来自本 App 不认识的预设。</string>
+    <string name="settings_problem_options_do_not_fit">有服务商保存的请求选项和它的地址不符。</string>
+    <string name="settings_problem_no_main_model">没有设置主模型。</string>
+    <string name="settings_problem_unknown_model">某个用途指向了没有设置的模型。</string>
+    <string name="settings_problem_main_without_tools">主模型没有通过工具调用测试。</string>
+    <string name="settings_problem_vision_without_images">看图模型不能接收图片。</string>
+
+    <!-- Model settings: form -->
+    <string name="form_title">设置模型</string>
+    <string name="form_provider">服务商</string>
+    <string name="form_custom">自定义</string>
+    <string name="form_auth">认证</string>
+    <string name="form_auth_none">无（本地服务）</string>
+    <string name="form_auth_key">API Key</string>
+    <string name="form_key">API Key</string>
+    <string name="form_key_keep">留空则保留已保存的 key。</string>
+    <string name="form_base_url">地址（base URL）</string>
+    <string name="form_protocol">协议</string>
+    <string name="form_protocol_chat">Chat Completions</string>
+    <string name="form_protocol_responses">Responses</string>
+    <string name="form_main_model">主模型</string>
+    <string name="form_light_model">轻量模型（可选）</string>
+    <string name="form_vision_model">看图模型（可选）</string>
+    <string name="form_vision_images">看图模型能接收图片</string>
+    <string name="form_context">上下文长度（token，可选）</string>
+    <string name="form_test_and_save">测试并保存</string>
+    <string name="form_testing">正在测试 %1$s…</string>
+    <string name="hint_short_key">这么短的 key 会让回复常被误拒；本地服务不需要认证时请选“无”。</string>
+    <string name="hint_use_preset">这是 %1$s 的官方地址，建议改用对应的预设。</string>
+    <string name="hint_use_preset_action">改用预设</string>
+
+    <!-- Model settings: what keeps a form from being tested -->
+    <string name="problem_main_model_missing">请填写主模型。</string>
+    <string name="problem_model_id_invalid">有模型名太长或含控制字符。</string>
+    <string name="problem_key_missing">请填写 API Key，或者选“无”。</string>
+    <string name="problem_key_not_header_safe">API Key 里有无法发送的字符。</string>
+    <string name="problem_base_url_invalid">地址要写成 https://host[/path]，末尾不带斜杠；只有本地服务可以用 http。</string>
+    <string name="problem_header_invalid">有 header 名字像凭据，或者值无法发送。</string>
+    <string name="problem_unknown_preset">不认识这个预设。</string>
+    <string name="problem_protocol_unsupported">这个协议还不能调用。</string>
+    <string name="problem_context_invalid">上下文长度必须是正数。</string>
+    <string name="problem_vision_needs_images">看图模型必须能接收图片。</string>
+
+    <!-- Model settings: test results -->
+    <string name="result_model">模型 %1$s</string>
+    <string name="result_step_list_models">1. 获取模型列表</string>
+    <string name="result_step_tool_call">2. 试调用工具</string>
+    <string name="result_step_line">%1$s：%2$s</string>
+    <string name="result_passed">通过</string>
+    <string name="result_failed">失败</string>
+    <string name="result_not_run">未进行</string>
+    <string name="result_no_listing">服务商没有模型列表接口；试调用会检查地址。</string>
+    <string name="result_not_listed">模型列表里没有这个模型。</string>
+    <string name="result_saved">已保存。</string>
+    <string name="result_not_saved_key">测试都通过了，但 key 没能保存。之前的设置保持不变。</string>
+    <string name="result_not_saved_settings">测试都通过了，但设置没能写入。之前的设置保持不变。</string>
+    <string name="result_nothing_saved">没有保存任何内容。</string>
+    <string name="reason_credential_echoed">回复里出现了 key，所以被拒绝。请换一个 key；服务不需要 key 时请选“无”。</string>
+    <string name="reason_credential_in_trial">这个 key 本身就是试调用请求的一部分，任何正确的回复都会重复它。请换一个 key；服务不需要 key 时请选“无”。</string>
+
+    <!-- Model errors, by kind -->
+    <string name="kind_auth">key 被拒绝。</string>
+    <string name="kind_sign_in_expired">登录已过期。</string>
+    <string name="kind_plan_not_eligible">这个套餐不能使用该服务。</string>
+    <string name="kind_quota_exceeded">额度已用完。</string>
+    <string name="kind_rate_limited">请求太频繁，请稍后再试。</string>
+    <string name="kind_overloaded">服务商繁忙，请稍后再试。</string>
+    <string name="kind_context_overflow">请求超过了模型的上下文长度。</string>
+    <string name="kind_invalid_request">服务商拒绝了这个请求。</string>
+    <string name="kind_refusal">模型拒绝回答。</string>
+    <string name="kind_prefix_binding_mismatch">模型的推理内容和对话对不上了。</string>
+    <string name="kind_network">连不上服务商。</string>
+    <string name="kind_server">服务商出错。</string>
+    <string name="kind_bad_response">服务商的回复无法使用。</string>
+</resources>

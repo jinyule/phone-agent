@@ -1,7 +1,110 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">PhoneAgent</string>
-    <string name="placeholder_status">Engineering baseline (M0). Nothing to run yet.</string>
+    <string name="app_name" translatable="false">PhoneAgent</string>
+
+    <!-- Accessibility service (shown in the system's accessibility settings) -->
     <string name="accessibility_service_label">PhoneAgent screen control</string>
     <string name="accessibility_service_description">Lets PhoneAgent read the screen and tap, type and scroll for the tasks you give it. It acts only while a task runs.</string>
+
+    <!-- Navigation -->
+    <string name="nav_chat">Chat</string>
+    <string name="nav_models">Models</string>
+    <string name="chat_placeholder">Conversations will appear here once tasks can run.</string>
+
+    <!-- Model settings: state -->
+    <string name="settings_loading">Loading the model settings…</string>
+    <string name="settings_broken_title">The model settings cannot be used</string>
+    <string name="settings_broken_where">Where: %1$s</string>
+    <string name="settings_broken_explain">Nothing has been deleted. Resetting removes the saved providers and their keys; then set up a model again.</string>
+    <string name="settings_reset">Reset model settings</string>
+    <string name="settings_current">Current setup</string>
+    <string name="settings_none">No model is set up yet.</string>
+    <string name="settings_role_main">Main model: %1$s</string>
+    <string name="settings_role_light">Light model: %1$s</string>
+    <string name="settings_role_vision">Vision model: %1$s</string>
+    <string name="settings_follows_main">same as the main model</string>
+    <string name="settings_key_again">The API key of %1$s must be entered again.</string>
+
+    <!-- Model settings: why a saved file cannot be used -->
+    <string name="settings_problem_unreadable_file">The settings file cannot be read.</string>
+    <string name="settings_problem_malformed">The settings file is damaged.</string>
+    <string name="settings_problem_invalid_value">The settings file holds a value this app refuses.</string>
+    <string name="settings_problem_unsupported_version">The settings were written by another version of the app.</string>
+    <string name="settings_problem_duplicate_provider">A provider is listed twice.</string>
+    <string name="settings_problem_duplicate_model">A model is listed twice.</string>
+    <string name="settings_problem_unsupported_protocol">A provider uses a protocol this app cannot call yet.</string>
+    <string name="settings_problem_unknown_preset">A provider comes from a preset this app does not know.</string>
+    <string name="settings_problem_options_do_not_fit">A provider\'s saved request options do not fit its address.</string>
+    <string name="settings_problem_no_main_model">No main model is set.</string>
+    <string name="settings_problem_unknown_model">A role names a model that is not set up.</string>
+    <string name="settings_problem_main_without_tools">The main model has not passed a tool call.</string>
+    <string name="settings_problem_vision_without_images">The vision model does not accept images.</string>
+
+    <!-- Model settings: form -->
+    <string name="form_title">Set up a model</string>
+    <string name="form_provider">Provider</string>
+    <string name="form_custom">Custom</string>
+    <string name="form_auth">Authentication</string>
+    <string name="form_auth_none">None (local service)</string>
+    <string name="form_auth_key">API key</string>
+    <string name="form_key">API key</string>
+    <string name="form_key_keep">Leave empty to keep the saved key.</string>
+    <string name="form_base_url">Address (base URL)</string>
+    <string name="form_protocol">Protocol</string>
+    <string name="form_protocol_chat">Chat Completions</string>
+    <string name="form_protocol_responses">Responses</string>
+    <string name="form_main_model">Main model</string>
+    <string name="form_light_model">Light model (optional)</string>
+    <string name="form_vision_model">Vision model (optional)</string>
+    <string name="form_vision_images">The vision model accepts images</string>
+    <string name="form_context">Context window in tokens (optional)</string>
+    <string name="form_test_and_save">Test and save</string>
+    <string name="form_testing">Testing %1$s…</string>
+    <string name="hint_short_key">A key this short makes replies get rejected often. If the local service needs no authentication, choose None.</string>
+    <string name="hint_use_preset">This is the official address of %1$s. Use its preset instead.</string>
+    <string name="hint_use_preset_action">Use the preset</string>
+
+    <!-- Model settings: what keeps a form from being tested -->
+    <string name="problem_main_model_missing">Enter the main model.</string>
+    <string name="problem_model_id_invalid">A model name is too long or holds control characters.</string>
+    <string name="problem_key_missing">Enter the API key, or choose None.</string>
+    <string name="problem_key_not_header_safe">The API key holds characters that cannot be sent.</string>
+    <string name="problem_base_url_invalid">The address must be https://host[/path] without a trailing slash; plain http only for local servers.</string>
+    <string name="problem_header_invalid">A header name looks like a credential, or a value cannot be sent.</string>
+    <string name="problem_unknown_preset">This preset is not known.</string>
+    <string name="problem_protocol_unsupported">This protocol cannot be called yet.</string>
+    <string name="problem_context_invalid">The context window must be a positive number.</string>
+    <string name="problem_vision_needs_images">A vision model must accept images.</string>
+
+    <!-- Model settings: test results -->
+    <string name="result_model">Model %1$s</string>
+    <string name="result_step_list_models">1. List the models</string>
+    <string name="result_step_tool_call">2. Trial tool call</string>
+    <string name="result_step_line">%1$s: %2$s</string>
+    <string name="result_passed">Passed</string>
+    <string name="result_failed">Failed</string>
+    <string name="result_not_run">Not run</string>
+    <string name="result_no_listing">The provider has no model list; the trial call checks the address.</string>
+    <string name="result_not_listed">The model list does not include this model.</string>
+    <string name="result_saved">Saved.</string>
+    <string name="result_not_saved_key">All checks passed, but the key could not be stored. The previous setup stays.</string>
+    <string name="result_not_saved_settings">All checks passed, but the settings could not be written. The previous setup stays.</string>
+    <string name="result_nothing_saved">Nothing was saved.</string>
+    <string name="reason_credential_echoed">The reply contained the key, so it was rejected. Use another key, or choose None if the service needs no key.</string>
+    <string name="reason_credential_in_trial">The key is part of the trial request itself, so every correct reply would repeat it. Use another key, or choose None if the service needs no key.</string>
+
+    <!-- Model errors, by kind -->
+    <string name="kind_auth">The key was refused.</string>
+    <string name="kind_sign_in_expired">The sign-in has expired.</string>
+    <string name="kind_plan_not_eligible">This plan cannot use this service.</string>
+    <string name="kind_quota_exceeded">The quota is used up.</string>
+    <string name="kind_rate_limited">Too many requests; try again later.</string>
+    <string name="kind_overloaded">The provider is overloaded; try again later.</string>
+    <string name="kind_context_overflow">The request is too long for the model.</string>
+    <string name="kind_invalid_request">The provider refused the request.</string>
+    <string name="kind_refusal">The model refused.</string>
+    <string name="kind_prefix_binding_mismatch">The model\'s reasoning no longer matches the conversation.</string>
+    <string name="kind_network">The provider could not be reached.</string>
+    <string name="kind_server">The provider failed.</string>
+    <string name="kind_bad_response">The provider\'s reply could not be used.</string>
 </resources>
