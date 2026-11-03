@@ -207,8 +207,9 @@ class ProviderTextQuoteTest {
 
     /**
      * A key written with one escape more than the JSON takes, in JSON with no message field to read
-     * (an error object without one, JSON that is not an object, a stream error event without one):
-     * each string in it is checked once decoded, as a message field is (fix-list r7 S1). Checking the
+     * (an error object without one, also as a member name, JSON that is not an object, a stream
+     * error event without one): each string in it is checked once decoded, as a message field is
+     * (fix-list r7 S1). Checking the
      * whole written back would miss it: writing back escapes each backslash again, and one decoding
      * only takes that layer off.
      */
@@ -223,6 +224,12 @@ class ProviderTextQuoteTest {
             when (body) {
                 NO_MESSAGE -> {
                     val error = """{"type":"error","error":{"type":"$AUTH","detail":"key $written"}}"""
+                    server.enqueueError(UNAUTHORIZED, error)
+                    "authentication failed: $WITHHELD"
+                }
+
+                MEMBER_NAME -> {
+                    val error = """{"type":"error","error":{"type":"$AUTH","key $written":true}}"""
                     server.enqueueError(UNAUTHORIZED, error)
                     "authentication failed: $WITHHELD"
                 }
@@ -317,6 +324,7 @@ class ProviderTextQuoteTest {
         const val SENT = "the request's key"
         const val SHAPE_ONLY = "only its shape"
         const val AUTH = "authentication_error"
+        const val MEMBER_NAME = "a member name in JSON without a message"
         const val NOT_OBJECT = "JSON that is not an object"
         const val STREAM_NO_MESSAGE = "stream error without a message"
 
@@ -392,7 +400,7 @@ class ProviderTextQuoteTest {
 
         @JvmStatic
         fun doubleEscaped(): List<Arguments> =
-            listOf(NO_MESSAGE, NOT_OBJECT, STREAM_NO_MESSAGE).flatMap { body ->
+            listOf(NO_MESSAGE, MEMBER_NAME, NOT_OBJECT, STREAM_NO_MESSAGE).flatMap { body ->
                 listOf(SHAPED, GATEWAY).map { key -> Arguments.of(body, key) }
             }
 
