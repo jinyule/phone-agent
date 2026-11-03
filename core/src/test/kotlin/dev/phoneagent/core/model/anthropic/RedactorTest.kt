@@ -85,6 +85,7 @@ class RedactorTest {
         // Assembled at run time so secret scanners do not take the placeholders for real keys.
         val upstream = "s" + "k-proj-" + "abcdefghijklmnop1234"
         val split = "s" + "k-abcd" + "${backslash}u0065" + "fghijkl"
+        val late = "s" + "k-proj-abcdefgh" + "${backslash}u0069" + "jklmnop"
         val rewritten = """{"detail":"send $backslash"Bearer YOUR_KEY$backslash""}"""
         val hidden = "${backslash}u0070" + secret.drop(1)
         assertAll(
@@ -100,6 +101,7 @@ class RedactorTest {
             },
             { assertEquals(Redactor.WITHHELD, redactor.field("Invalid bearer $hidden"), "the key behind an escape") },
             { assertEquals(Redactor.WITHHELD, Redactor.SHAPES_ONLY.field("Invalid API key: $split"), "a split shape") },
+            { assertEquals(Redactor.WITHHELD, Redactor.SHAPES_ONLY.field("Invalid API key: $late"), "split late") },
         )
     }
 
