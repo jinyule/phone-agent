@@ -24,9 +24,9 @@ import java.util.concurrent.atomic.AtomicReference
 /**
  * Blocking OkHttp calls behind a suspend API. Blocking reads run on [io]; results come back to the
  * calling coroutine, so stream handlers (and `onDelta`) run there. Cancelling the caller cancels
- * the HTTP call, which aborts a read in progress. Transport failures become [ModelError.Network]
- * (their text masked by the request's [Redactor]); `CancellationException` always wins over the
- * `IOException` a cancelled call produces.
+ * the HTTP call, which aborts a read in progress. Transport failures become [ModelError.Network],
+ * described by type and step, never by their text ([Unquoted.io]); `CancellationException` always
+ * wins over the `IOException` a cancelled call produces.
  *
  * A copy of the OpenAI adapters' transport (capabilities may not share code); keep them in step.
  */
@@ -60,7 +60,7 @@ internal class HttpTransport(
                     }
                 }
             try {
-                val response = blocking(io, redactor) { call.execute().also(executed::set) }
+                val response = blocking(io, SENDING) { call.execute().also(executed::set) }
                 response.use { read(HttpReply(it, io, redactor)) }.also { finished.set(true) }
             } finally {
                 if (!finished.get()) {
@@ -91,7 +91,7 @@ internal class HttpReply(
      * before the cut. The cut never splits a surrogate pair. (Same as the OpenAI adapters' copy.)
      */
     suspend fun maskedText(limit: Int = ERROR_BODY_LIMIT): String =
-        blocking(io, redactor) {
+        blocking(io, READING_ERROR) {
             val source = response.body.source()
             val wanted = limit.toLong() + redactor.reach
             val more = source.request(wanted + 1)
@@ -109,7 +109,7 @@ internal class HttpReply(
      * CRLF is split between two reads. A last line without terminator still counts. `null` at the
      * end of the body.
      */
-    suspend fun lines(): List<String>? = blocking(io, redactor) { readLines(response.body.source()) }
+    suspend fun lines(): List<String>? = blocking(io, READING) { readLines(response.body.source()) }
 
     private fun readLines(source: BufferedSource): List<String>? {
         val lines = mutableListOf<String>()
@@ -246,23 +246,25 @@ internal object RetryAfterStash : Interceptor {
 }
 
 /**
- * Runs blocking I/O on [io]. An `IOException` becomes [ModelError.Network], unless the caller was
- * cancelled meanwhile (the cancelled call is what failed the read), in which case cancellation
- * propagates. Exception text can quote the server (status lines), so it is masked with [redactor].
- * An `IllegalArgumentException` (OkHttp rejecting a value the server sent) becomes
+ * Runs blocking I/O on [io], [step] naming it. An `IOException` becomes [ModelError.Network],
+ * unless the caller was cancelled meanwhile (the cancelled call is what failed the read), in which
+ * case cancellation propagates. Exception text can quote the server (status lines, chunk size
+ * lines, cut lines in hex), so the error says what failed by its type and [step] ([Unquoted.io])
+ * and its cause keeps class names and stack traces only ([Unquoted.bare]). An
+ * `IllegalArgumentException` (OkHttp rejecting a value the server sent) becomes
  * [ModelError.BadResponse] with fixed text and no cause; [HttpTransport.send] then cancels the call
  * and closes the response it holds.
  */
 private suspend fun <T> blocking(
     io: CoroutineDispatcher,
-    redactor: Redactor,
+    step: String,
     block: () -> T,
 ): T =
     try {
         withContext(io) { block() }
     } catch (e: IOException) {
         currentCoroutineContext().ensureActive()
-        throw ModelError.Network(redactor.text("${e::class.simpleName}: ${e.message}"), redactor.cause(e))
+        throw ModelError.Network(Unquoted.io(e, step), Unquoted.bare(e))
     } catch (ignoredQuotingValidation: IllegalArgumentException) {
         // OkHttp's validation errors quote the rejected value whole, and the value is the server's.
         throw ModelError.BadResponse(INVALID_HTTP)
@@ -270,3 +272,8 @@ private suspend fun <T> blocking(
 
 /** What a response OkHttp rejected fails with. */
 private const val INVALID_HTTP = "the server sent a response HTTP does not allow"
+
+/** The steps [blocking] names: the exchange up to the response headers, the reply, an error body. */
+private const val SENDING = "sending the request"
+private const val READING = "reading the reply"
+private const val READING_ERROR = "reading the error body"
