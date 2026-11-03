@@ -31,6 +31,7 @@
 
     <!-- Session logs, screenshots and credentials never leave the device (phase1-architecture §3.9). -->
     <application
+        android:name=".PhoneAgentApplication"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="false"

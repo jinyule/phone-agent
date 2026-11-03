@@ -21,7 +21,10 @@ sealed interface HelperState {
         override val name: String = "CONNECTED"
     }
 
-    /** The helper went away and has to be launched again (`scripts/start-helper.sh`, later the in-app ADB). */
+    /**
+     * The helper went away and has to be launched again: by HelperAutoLaunch once the built-in adb
+     * client is paired, else with `scripts/start-helper.sh`.
+     */
     data class NeedsLaunch(
         val reason: LaunchReason,
         /** pid of the helper that went away. */
