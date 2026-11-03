@@ -19,9 +19,9 @@ import org.junit.jupiter.params.provider.EnumSource
  * parsed before anything but the exact forms of the request's secrets is masked, so masking a
  * key's shape cannot stop at an escape and leave the rest of it readable once decoded; and text
  * the server wrote (a message field, OpenRouter's `metadata.raw`, a body that is not JSON or has
- * no message field) is not shown at all when its lenient decoding holds a credential, which also
- * catches an escape that JSON decoding left as text. The keys have the `sk-` shape; assertions
- * never print them.
+ * no message field) is not shown at all when its lenient decoding changes it and then shows a
+ * credential, which also catches an escape that JSON decoding left as text. The keys have the
+ * `sk-` shape; assertions never print them.
  */
 class EscapedErrorKeyTest {
     @StartStop
