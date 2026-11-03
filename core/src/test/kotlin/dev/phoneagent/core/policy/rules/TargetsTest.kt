@@ -422,6 +422,8 @@ class TargetsTest {
                 // A sign without spaces joins only inside a word of Latin letters and that sign.
                 .plus("https://www.example.com/checkout/cart")
                 .plus(listOf("example.com/buy", "example.com/remove-background-tips"))
+                // Nor at the edge of a word with a space on one side: an address wrapped after its slash.
+                .plus(listOf("https://www.example.com/\ncheckout/cart", "example.com/ remove-background-tips"))
         assertAll(asked(ConfirmReason.DELETE, deletes) + asked(ConfirmReason.SPEND, spends) + asked(null, names))
         names.forEach { assertEquals(Verdict.Allow, verdict(it), it) }
     }

@@ -133,6 +133,9 @@ class LexiconTest {
         val links =
             listOf("example.com/buy", "https://www.example.com/checkout/cart", "example.com/remove-background-tips")
         links.forEach { assertNull(lexicon.ofControl(it), it) }
+        // A sign joins alone between spaces, not at the edge of a word: an address wrapped after its slash.
+        val wrapped = listOf("https://www.example.com/\ncheckout/cart", "example.com/ remove-background-tips")
+        wrapped.forEach { assertNull(lexicon.ofControl(it), it) }
         assertEquals(Hit(IntentKind.OUTWARD, "send"), lexicon.ofControl("Send&好的"))
         // Other text is split where each part is within the length limit, however long the whole.
         assertEquals(sendDelete, lexicon.classify("Send and delete"))
