@@ -2,6 +2,7 @@ package dev.phoneagent.core.policy.rules
 
 import dev.phoneagent.core.policy.IntentKind
 import dev.phoneagent.core.ports.ScreenSnapshot
+import java.util.EnumMap
 import java.util.Optional
 import java.util.concurrent.ConcurrentHashMap
 
@@ -192,12 +193,13 @@ internal object Phrases {
         complete: Boolean,
     ): Hit? {
         val text = clean(Text.words(label))
+        val vetoes = Vetoes(label)
         val acting =
             Words.STRONG.filter { (word, kind) ->
                 generateSequence(text.indexOf(word)) { text.indexOf(word, it + 1) }
                     .takeWhile { it >= 0 }
                     .any { at -> isAction(text, word, at, kind) } &&
-                    !(complete && vetoed(label, kind))
+                    !(complete && vetoes.of(kind))
             }
         return acting.firstOrNull()?.let { (word, kind) ->
             Hit(kind, word, acting.any { (other, its) -> sends(other, its) })
@@ -213,10 +215,11 @@ internal object Phrases {
         complete: Boolean,
     ): Hit? {
         val text = clean(Text.words(label))
+        val vetoes = Vetoes(label)
         val found =
             Words.STRONG.firstOrNull { (word, kind) ->
                 Words.PREFIXES.any { text.startsWith(it + word) && isAction(text, word, it.length, kind) } &&
-                    !(complete && vetoed(label, kind))
+                    !(complete && vetoes.of(kind))
             }
         return found?.let { (word, kind) -> Hit(kind, word, sends(word, kind)) }
     }
@@ -240,10 +243,11 @@ internal object Phrases {
         val text = if (letters.size > 1 && letters.all { it.length == 1 }) letters.joinToString("") else spaced
         val pieces = if (parts) text.split(Words.ENGLISH_JOINERS) else listOf(text)
         val read = if (pieces.size > 1) pieces.map(::trimmed) else listOf(text)
+        val vetoes = Vetoes(label)
         return read
             .map { part ->
                 englishPhrase(part, whole = read.size == 1)
-                    ?.takeUnless { complete && vetoed(label, it.second) }
+                    ?.takeUnless { complete && vetoes.of(it.second) }
                     ?.let { (phrase, kind) -> Hit(kind, phrase, sends(phrase, kind)) }
             }.fold(null, ::firstMax)
     }
@@ -274,6 +278,19 @@ internal object Phrases {
         while (rest < text.length && !text[rest].isLetterOrDigit()) rest++
         val statuses = Words.STATUS_AFTER + Words.STATUS_AFTER_KIND[kind].orEmpty()
         return before !in Words.STATUS_BEFORE && statuses.none { text.startsWith(it, rest) }
+    }
+
+    /**
+     * Whether [label], read whole, is [vetoed] as each kind, found out at most once per kind: the
+     * parts of one label ("send and send and …") share it, so a match reads the label a bounded
+     * number of times however many parts it has (policy-rules.md §8).
+     */
+    private class Vetoes(
+        private val label: String,
+    ) {
+        private val known = EnumMap<IntentKind, Boolean>(IntentKind::class.java)
+
+        fun of(kind: IntentKind): Boolean = known.getOrPut(kind) { vetoed(label, kind) }
     }
 
     /**

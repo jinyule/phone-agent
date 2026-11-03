@@ -44,6 +44,12 @@ internal object Work {
     /** Texts gathered as what a touch shows ([Assessment.texts]), before duplicates are dropped. */
     val gathered: LongAdder = LongAdder()
 
+    /**
+     * Characters given to [Text]'s normalization, the step under every reading of a text: a
+     * measure in characters, bounded in proportion to the texts read, so not one of [counts].
+     */
+    val characters: LongAdder = LongAdder()
+
     /** Every count by name. */
     fun counts(): Map<String, Long> =
         mapOf(
@@ -76,6 +82,7 @@ internal object Work {
             fields,
             content,
             gathered,
+            characters,
         ).forEach(LongAdder::reset)
     }
 }

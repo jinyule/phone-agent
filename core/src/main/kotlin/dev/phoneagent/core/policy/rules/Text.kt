@@ -123,6 +123,7 @@ internal object Text {
      * the code points.
      */
     private fun normalize(raw: String): String {
+        Work.characters.add(raw.length.toLong())
         val folded = Normalizer.normalize(raw, Normalizer.Form.NFKC).lowercase(Locale.ROOT)
         return buildString(folded.length) {
             var at = 0

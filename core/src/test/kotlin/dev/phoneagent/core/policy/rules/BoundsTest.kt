@@ -1,5 +1,7 @@
 package dev.phoneagent.core.policy.rules
 
+import dev.phoneagent.core.policy.SecurityLevel
+import dev.phoneagent.core.tool.RiskClass
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -51,6 +53,25 @@ class BoundsTest {
         )
     }
 
+    @Test
+    fun `a label of many joined English actions is normalized in proportion to its length`() {
+        val policy = Fx.rules()
+        val tap = Fx.tap("e1")
+        // Per character of the label, for 50 and for 500 parts: within a bound that does not grow with them.
+        val perCharacter =
+            listOf("send", "delete").associateWith { word ->
+                listOf(50, 500).map { n ->
+                    val label = List(n) { word }.joinToString(" and ")
+                    val s = Fx.screen(Fx.el("e1", label))
+                    val ctx = Fx.ctx(SecurityLevel.STANDARD, s, operated = setOfNotNull(s.pkg))
+                    Work.reset()
+                    policy.engine.evaluate(tap, policy.resolver.resolve(tap, RiskClass.WRITE, s), ctx)
+                    Work.characters.sum() / label.length
+                }
+            }
+        assertTrue(perCharacter.values.flatten().all { it <= NORMALIZED_PER_CHARACTER }, "$perCharacter")
+    }
+
     @ParameterizedTest(name = "{0}")
     @MethodSource("cases")
     fun `every hostile case finishes, in a process of its own`(case: String) {
@@ -72,6 +93,9 @@ class BoundsTest {
     private companion object {
         const val LIMIT_SECONDS = 120L
         const val OUTPUT_SHOWN = 2000
+
+        /** Times a label is normalized reading one tap on it, at most, whatever it says. */
+        const val NORMALIZED_PER_CHARACTER = 64L
 
         @JvmStatic
         fun cases(): List<String> = BoundsProbe.CASES.keys.toList()
