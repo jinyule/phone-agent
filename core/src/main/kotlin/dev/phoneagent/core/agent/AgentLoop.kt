@@ -93,8 +93,8 @@ public data class AgentSetup(
  * record in progress, then records itself whatever input was accepted and not yet recorded and
  * clears the inbox (so accepted input is recorded, then recorded as removed, never lost). Only
  * then it closes the turn, writes `task/stopped` last and closes the log, and shows
- * [Phase.Stopped]. This runtime then ignores all input; the session itself may go on in a new
- * runtime from [resume] when `TaskStopped`'s contract allows it.
+ * [Phase.Stopped]. This runtime then ignores all input; the task goes on, after any stop, in a
+ * new runtime from [resume] on the same log.
  */
 public class AgentLoop private constructor(
     setup: AgentSetup,

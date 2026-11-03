@@ -52,17 +52,19 @@ public interface TaskRuntime {
     public fun changeLevel(level: SecurityLevel)
 
     /**
-     * Stops this task only, for [cause]; clears the inbox. An in-flight model request is cancelled
-     * (its delivered prefix kept as interrupted), a pending prompt is withdrawn, and pending or
-     * running tool calls end CANCELLED. Input accepted before the stop is recorded, then recorded
-     * as removed, never lost; the same holds when the runtime's scope is cancelled
-     * ([StopCause.SHUTDOWN]). The log ends with `task/stopped(cause)`, written after the turn's
-     * `turn/end` and once nothing else writes.
+     * Stops this task's current run only, for [cause]; clears the inbox, so continuing takes a new
+     * command of the user. An in-flight model request is cancelled (its delivered prefix kept as
+     * interrupted), a pending prompt is withdrawn, and pending or running tool calls end CANCELLED
+     * (`ToolStatus.CANCELLED` says what the model is told). Input accepted before the stop is
+     * recorded, then recorded as removed, never lost; the same holds when the runtime's scope is
+     * cancelled ([StopCause.SHUTDOWN]). `task/stopped(cause)` is recorded last, after the turn's
+     * `turn/end`, once everything that may still append was cancelled and joined (inbox recording
+     * included).
      *
-     * Two levels: this runtime ends for good, and later calls to any of its methods are ignored;
-     * the session does not necessarily end. Whether it may be resumed after [cause] is the
-     * contract of `TaskStopped`; resuming opens a new runtime on the same log, and its next turn
-     * starts only with new user input.
+     * Two levels: this runtime instance ends for good, appends nothing more, and ignores later
+     * calls to any of its methods. No cause ends the session (D14): the task continues on a new
+     * instance ([AgentLoop.resume] on the same log), which writes `session/resumed` first, when the
+     * user's next input opens a new turn, never on its own.
      */
     public fun stop(cause: StopCause)
 
@@ -116,7 +118,7 @@ public sealed interface Phase {
 
     /**
      * This runtime stopped (by [TaskRuntime.stop], a shutdown or a session log failure). Terminal
-     * for the runtime; the session may be resumed in a new one (see [TaskRuntime.stop]).
+     * for this runtime only; the task continues in a new one (see [TaskRuntime.stop]).
      */
     public data class Stopped(
         /** Why. */
