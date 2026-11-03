@@ -16,6 +16,7 @@ import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.Role
 import dev.phoneagent.core.model.StopReason
+import dev.phoneagent.core.model.openai.Kit.send
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -97,7 +98,7 @@ class OpenAiEndToEndTest {
         assumeFalse(stopped, "an earlier call hit a rate limit or quota; not calling again")
         val deltas = Deltas()
         try {
-            val reply = model.complete(request, deltas)
+            val reply = model.send(request, deltas)
             report(
                 "e2e: $label model=${model.info.model} stop=${reply.stopReason} usage=${reply.usage} " +
                     "calls=${reply.toolCalls.size}",

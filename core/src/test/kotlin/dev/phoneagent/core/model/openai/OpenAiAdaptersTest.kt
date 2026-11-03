@@ -3,6 +3,7 @@ package dev.phoneagent.core.model.openai
 import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.openai.Kit.base
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
+import dev.phoneagent.core.model.openai.Kit.send
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.junit5.StartStop
 import okhttp3.Headers.Companion.headersOf
@@ -35,7 +36,7 @@ class OpenAiAdaptersTest {
             assertEquals(ModelProtocol.OPENAI_CHAT_COMPLETIONS, chat.info.protocol)
             val id =
                 chat
-                    .complete(Kit.request())
+                    .send(Kit.request())
                     .toolCalls
                     .single()
                     .id.value
@@ -120,7 +121,7 @@ class OpenAiAdaptersTest {
                 Kit
                     .adapters(client = client)
                     .unprobed(Kit.profile(server.base()), Kit.MODEL, Kit.capabilities(), Kit.blobs())
-                    .complete(Kit.request())
+                    .send(Kit.request())
                 assertEquals(idle, client.connectionPool.idleConnectionCount(), "idle connections with $keepAlive")
             }
         }

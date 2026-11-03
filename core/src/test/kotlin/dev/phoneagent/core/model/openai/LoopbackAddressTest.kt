@@ -3,6 +3,7 @@ package dev.phoneagent.core.model.openai
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.openai.Kit.base
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
+import dev.phoneagent.core.model.openai.Kit.send
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.junit5.StartStop
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -71,7 +72,7 @@ class LoopbackAddressTest {
                         Kit.capabilities(),
                         Kit.blobs(),
                     )
-                val reply = model.complete(Kit.request())
+                val reply = model.send(Kit.request())
                 assertEquals(listOf(Part.Text("hi")), reply.parts)
                 assertEquals(1, server.requestCount, "the test server got the request")
                 assertEquals(0, accepted.get(), "nothing dialed the IPv6 listener")

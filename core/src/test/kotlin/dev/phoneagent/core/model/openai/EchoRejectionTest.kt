@@ -10,6 +10,7 @@ import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.openai.Kit.base
 import dev.phoneagent.core.model.openai.Kit.enqueueError
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
+import dev.phoneagent.core.model.openai.Kit.send
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonPrimitive
 import mockwebserver3.MockResponse
@@ -56,7 +57,7 @@ class EchoRejectionTest {
         secret: String = ECHOED,
         deltas: Deltas = Deltas(),
     ): ModelError {
-        val error = assertThrows<ModelError.BadResponse> { model.complete(Kit.request(), deltas) }
+        val error = assertThrows<ModelError.BadResponse> { model.send(Kit.request(), deltas) }
         assertTrue(CredentialEcho.discardsStreamed(error), "the rejection carries the marker")
         assertEquals("bad response: ${CredentialEcho.DETAIL}", error.message)
         assertFalse(error.stackTraceToString().contains(secret.take(PREFIX)), "the error holds the secret (not shown)")
@@ -263,7 +264,7 @@ class EchoRejectionTest {
             val shaped = "sk-" + "abcdefghijklmnop"
             server.enqueueSse(chat(content("Keys look like $shaped.")))
             val deltas = Deltas()
-            val reply = model().complete(Kit.request(), deltas)
+            val reply = model().send(Kit.request(), deltas)
             assertEquals(listOf(Part.Text("Keys look like $shaped.")), reply.parts)
             assertEquals(listOf<Delta>(Delta.Text("Keys look like $shaped.")), deltas.all)
         }

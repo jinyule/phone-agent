@@ -8,6 +8,7 @@ import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.openai.Kit.base
 import dev.phoneagent.core.model.openai.Kit.enqueueError
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
+import dev.phoneagent.core.model.openai.Kit.send
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.MockResponse
 import mockwebserver3.junit5.StartStop
@@ -55,7 +56,7 @@ class RedactionTest {
                 401,
                 """{"error":{"message":"Incorrect API key provided: $KEY.","code":"invalid_api_key"}}""",
             )
-            val error = assertThrows<ModelError.Auth> { chat().complete(Kit.request()) }
+            val error = assertThrows<ModelError.Auth> { chat().send(Kit.request()) }
             assertClean(error.stackTraceToString(), KEY)
             assertTrue(error.message!!.contains("Incorrect API key provided: ***."), "the provider's words stay")
         }
@@ -89,13 +90,13 @@ class RedactionTest {
     fun `an error chunk echoing the key keeps it out of the error`() =
         runTest {
             server.enqueueSse(Kit.sse("""{"error":{"message":"upstream rejected key $KEY","code":502}}"""))
-            val chat = assertThrows<ModelError> { chat().complete(Kit.request()) }
+            val chat = assertThrows<ModelError> { chat().send(Kit.request()) }
             assertClean(chat.stackTraceToString(), KEY)
             server.enqueueSse(
                 "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"bad key $KEY\"," +
                     "\"code\":\"server_error\"}}}\n\n",
             )
-            val responses = assertThrows<ModelError> { responses(Kit.KEY, Keys(KEY)).complete(Kit.request()) }
+            val responses = assertThrows<ModelError> { responses(Kit.KEY, Keys(KEY)).send(Kit.request()) }
             assertClean(responses.stackTraceToString(), KEY)
         }
 
@@ -103,7 +104,7 @@ class RedactionTest {
     fun `a chunk that is not JSON keeps the key out of the error and its cause`() =
         runTest {
             server.enqueueSse(Kit.sse("""{"error": "key $KEY is invalid" ]"""))
-            val error = assertThrows<ModelError.BadResponse> { chat().complete(Kit.request()) }
+            val error = assertThrows<ModelError.BadResponse> { chat().send(Kit.request()) }
             assertClean(error.stackTraceToString(), KEY)
         }
 
@@ -117,7 +118,7 @@ class RedactionTest {
                     .body("<html><body>Proxy saw Authorization: Bearer $KEY</body></html>")
                     .build(),
             )
-            val error = assertThrows<ModelError.Server> { chat().complete(Kit.request()) }
+            val error = assertThrows<ModelError.Server> { chat().send(Kit.request()) }
             assertClean(error.stackTraceToString(), KEY)
         }
 
@@ -129,7 +130,7 @@ class RedactionTest {
                 """{"error":{"message":"Provider returned error","code":400,""" +
                     """"metadata":{"raw":"{\"error\":\"invalid x-api-key $KEY\"}","provider_name":"Up"}}}""",
             )
-            val error = assertThrows<ModelError.InvalidRequest> { chat().complete(Kit.request()) }
+            val error = assertThrows<ModelError.InvalidRequest> { chat().send(Kit.request()) }
             assertClean(error.stackTraceToString(), KEY)
             assertTrue(error.message!!.contains("Provider returned error"), "the diagnosis stays")
         }
@@ -139,7 +140,7 @@ class RedactionTest {
         runTest {
             val plain = "plain-secret-not-real"
             server.enqueueError(400, """{"error":{"message":"bad key plain-\u0073ecret-not-real","param":"x"}}""")
-            val error = assertThrows<ModelError.InvalidRequest> { chat(Keys(plain)).complete(Kit.request()) }
+            val error = assertThrows<ModelError.InvalidRequest> { chat(Keys(plain)).send(Kit.request()) }
             assertClean(error.stackTraceToString(), plain)
         }
 
@@ -149,7 +150,7 @@ class RedactionTest {
             val other = "sk-proj-not-a-real-key-0123456789"
             val token = "test.not-a-real-bearer-token"
             server.enqueueError(403, """{"error":{"message":"key $other / header Bearer $token refused"}}""")
-            val error = assertThrows<ModelError> { chat().complete(Kit.request()) }
+            val error = assertThrows<ModelError> { chat().send(Kit.request()) }
             assertClean(error.stackTraceToString(), other, token)
             assertTrue(error.message!!.contains("Bearer ***"), error.message)
         }
@@ -162,7 +163,7 @@ class RedactionTest {
             server.enqueueError(401, """{"error":{"message":"token $old expired"}}""")
             server.enqueueError(400, """{"error":{"message":"stale token $old and new $new","param":"input"}}""")
             val error =
-                assertThrows<ModelError.InvalidRequest> { responses(Kit.PLAN, Keys(old, new)).complete(Kit.request()) }
+                assertThrows<ModelError.InvalidRequest> { responses(Kit.PLAN, Keys(old, new)).send(Kit.request()) }
             assertClean(error.stackTraceToString(), old, new)
         }
 

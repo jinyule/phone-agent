@@ -8,6 +8,7 @@ import dev.phoneagent.core.model.openai.Kit.enqueueError
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
 import dev.phoneagent.core.model.openai.Kit.json
 import dev.phoneagent.core.model.openai.Kit.next
+import dev.phoneagent.core.model.openai.Kit.send
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.junit5.StartStop
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -53,7 +54,7 @@ class NoNegotiationTest {
                     """{\"parallel_tool_calls\":false,\"stream_options\":{\"include_usage\":true}}"}}""",
             )
             server.enqueueSse(chatReply)
-            assertThrows<ModelError.ContextOverflow> { chat().complete(Kit.request()) }
+            assertThrows<ModelError.ContextOverflow> { chat().send(Kit.request()) }
             assertEquals(1, server.requestCount)
         }
 
@@ -68,11 +69,11 @@ class NoNegotiationTest {
             server.enqueueSse(chatReply)
             server.enqueueSse(chatReply)
             val model = chat()
-            val error = assertThrows<ModelError.InvalidRequest> { model.complete(Kit.request()) }
+            val error = assertThrows<ModelError.InvalidRequest> { model.send(Kit.request()) }
             assertEquals("parallel_tool_calls", error.param)
             assertTrue(error.message!!.contains("parallel_tool_calls"), "the message names the field for the UI")
             val first = server.next().json()
-            model.complete(Kit.request())
+            model.send(Kit.request())
             assertEquals(first, server.next().json(), "the same model sends the same wire")
             assertEquals(2, server.requestCount)
         }
@@ -88,11 +89,11 @@ class NoNegotiationTest {
             server.enqueueSse(responsesReply)
             server.enqueueSse(responsesReply)
             val model = responses()
-            val error = assertThrows<ModelError.InvalidRequest> { model.complete(Kit.request()) }
+            val error = assertThrows<ModelError.InvalidRequest> { model.send(Kit.request()) }
             assertEquals("input[1].encrypted_content", error.param)
             assertEquals(1, server.requestCount)
             val first = server.next().json()
-            model.complete(Kit.request())
+            model.send(Kit.request())
             val second = server.next().json()
             assertTrue("include" in first && first == second, "include stays on and the wire is unchanged")
         }
@@ -108,7 +109,7 @@ class NoNegotiationTest {
             server.enqueueSse(responsesReply)
             assertEquals(
                 "include",
-                assertThrows<ModelError.InvalidRequest> { responses().complete(Kit.request()) }.param,
+                assertThrows<ModelError.InvalidRequest> { responses().send(Kit.request()) }.param,
             )
             assertEquals(1, server.requestCount)
         }

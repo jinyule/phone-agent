@@ -16,6 +16,7 @@ import dev.phoneagent.core.model.openai.Kit.enqueueError
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
 import dev.phoneagent.core.model.openai.Kit.json
 import dev.phoneagent.core.model.openai.Kit.next
+import dev.phoneagent.core.model.openai.Kit.send
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
@@ -62,7 +63,7 @@ class ChatCompletionsModelTest {
     fun `posts a streamed request with the key and profile headers`() =
         runTest {
             server.enqueueSse(textReply)
-            val reply = model().complete(Kit.request())
+            val reply = model().send(Kit.request())
             assertEquals(listOf(Part.Text("Hi")), reply.parts)
             assertEquals(StopReason.END_TURN, reply.stopReason)
             val sent = server.next()
@@ -84,10 +85,10 @@ class ChatCompletionsModelTest {
             server.enqueueSse(textReply)
             server.enqueueSse(textReply)
             val keys = Keys(null)
-            model(Kit.profile(server.base(), credential = Credential.None), keys).complete(Kit.request())
+            model(Kit.profile(server.base(), credential = Credential.None), keys).send(Kit.request())
             server.next().assertBearer(null)
             assertEquals(listOf(Credential.None to false), keys.asked)
-            model(keys = Keys("   ")).complete(Kit.request())
+            model(keys = Keys("   ")).send(Kit.request())
             server.next().assertBearer(null)
         }
 
@@ -95,7 +96,7 @@ class ChatCompletionsModelTest {
     fun `a secret a header cannot carry fails without sending or echoing it`() =
         runTest {
             val broken = model(keys = Keys("sk-test\nnot-a-real-key"))
-            val error = assertThrows<ModelError.Auth> { broken.complete(Kit.request()) }
+            val error = assertThrows<ModelError.Auth> { broken.send(Kit.request()) }
             assertFalse(error.message!!.contains("not-a-real-key"))
             assertEquals(0, server.requestCount)
         }
@@ -104,7 +105,7 @@ class ChatCompletionsModelTest {
     fun `other 400s fail at once`() =
         runTest {
             server.enqueueError(400, """{"error":{"message":"messages[1]: bad role","param":"messages"}}""")
-            val error = assertThrows<ModelError.InvalidRequest> { model().complete(Kit.request()) }
+            val error = assertThrows<ModelError.InvalidRequest> { model().send(Kit.request()) }
             assertEquals("messages", error.param)
             assertEquals(1, server.requestCount)
         }
@@ -117,7 +118,7 @@ class ChatCompletionsModelTest {
                 """{"error":{"message":"Rate limit","code":"rate_limit_exceeded"}}""",
                 "retry-after" to "7",
             )
-            val error = assertThrows<ModelError.RateLimited> { model().complete(Kit.request()) }
+            val error = assertThrows<ModelError.RateLimited> { model().send(Kit.request()) }
             assertEquals(7000L, error.retryAfterMs)
             assertEquals(1, server.requestCount)
         }
@@ -132,7 +133,7 @@ class ChatCompletionsModelTest {
                     .body("<html>Bad Gateway</html>")
                     .build(),
             )
-            val error = assertThrows<ModelError.Server> { model().complete(Kit.request()) }
+            val error = assertThrows<ModelError.Server> { model().send(Kit.request()) }
             assertEquals(502, error.status)
             assertTrue(error.message!!.contains("Bad Gateway"))
         }
@@ -142,7 +143,7 @@ class ChatCompletionsModelTest {
         runTest {
             val call = Part.ToolCall(ToolCallId("c1"), "get_weather", "{}")
             val request = Kit.request(Kit.user("hi"), Message(Role.ASSISTANT, listOf(call)))
-            assertThrows<ModelError.InvalidRequest> { model().complete(request) }
+            assertThrows<ModelError.InvalidRequest> { model().send(request) }
             assertEquals(0, server.requestCount)
         }
 
@@ -151,10 +152,10 @@ class ChatCompletionsModelTest {
         runTest {
             val screen = Kit.blob('a')
             val image = Message(Role.USER, listOf(Part.Text("Look"), Part.Image(screen, "image/png", 2, 2)))
-            assertThrows<ModelError.InvalidRequest> { model(vision = true).complete(Kit.request(image)) }
+            assertThrows<ModelError.InvalidRequest> { model(vision = true).send(Kit.request(image)) }
             assertEquals(0, server.requestCount)
             server.enqueueSse(textReply)
-            model(vision = true, blobs = Kit.blobs(screen to "PNG".toByteArray())).complete(Kit.request(image))
+            model(vision = true, blobs = Kit.blobs(screen to "PNG".toByteArray())).send(Kit.request(image))
             val content = ((server.next().json()["messages"] as JsonArray)[1] as JsonObject)["content"] as JsonArray
             val url = ((content[1] as JsonObject)["image_url"] as JsonObject)["url"]
             assertEquals(JsonPrimitive("data:image/png;base64,UE5H"), url)
@@ -166,7 +167,7 @@ class ChatCompletionsModelTest {
             server.enqueueSse(textReply)
             val image = Message(Role.USER, listOf(Part.Image(Kit.blob('a'), "image/png", 2, 2)))
             val untouchable = BlobSource { error("blobs must not be read") }
-            model(blobs = untouchable).complete(Kit.request(image))
+            model(blobs = untouchable).send(Kit.request(image))
             assertEquals(1, server.requestCount)
         }
 
@@ -183,7 +184,7 @@ class ChatCompletionsModelTest {
                     .build(),
             )
             val deltas = Deltas()
-            val error = assertThrows<ModelError.Network> { model().complete(Kit.request(), deltas) }
+            val error = assertThrows<ModelError.Network> { model().send(Kit.request(), deltas) }
             assertEquals("Hi", deltas.text, "the connection broke mid-stream")
             // The cause keeps the class name and stack trace, not the message, which can quote the server.
             val cause = checkNotNull(error.cause)
@@ -202,7 +203,7 @@ class ChatCompletionsModelTest {
                     """{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}""",
                 ),
             )
-            assertThrows<ModelError.BadResponse> { model().complete(Kit.request()) }
+            assertThrows<ModelError.BadResponse> { model().send(Kit.request()) }
             server.enqueueSse(
                 Kit.sse(
                     """{"choices":[{"index":0,"delta":{"tool_calls":""" +
@@ -210,7 +211,7 @@ class ChatCompletionsModelTest {
                     """{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}""",
                 ),
             )
-            val nameless = assertThrows<ModelError.BadResponse> { model().complete(Kit.request()) }
+            val nameless = assertThrows<ModelError.BadResponse> { model().send(Kit.request()) }
             assertTrue(nameless.message!!.contains("has no name"))
         }
 
@@ -225,15 +226,15 @@ class ChatCompletionsModelTest {
                             "{\"type\":\"image\"},{\"type\":\"text\",\"text\":\"b\"}]},\"finish_reason\":\"weird\"}]}",
                     ).build(),
             )
-            val reply = model().complete(Kit.request())
+            val reply = model().send(Kit.request())
             assertEquals(listOf(Part.Text("ab")), reply.parts)
             assertEquals(StopReason.OTHER, reply.stopReason)
             server.enqueueSse(Kit.sse("""{"choices":[{"index":0,"delta":{"refusal":"No."},"finish_reason":"stop"}]}"""))
-            assertEquals("refusal", assertThrows<ModelError.Refusal> { model().complete(Kit.request()) }.category)
+            assertEquals("refusal", assertThrows<ModelError.Refusal> { model().send(Kit.request()) }.category)
             server.enqueueSse(
                 Kit.sse("""{"choices":[{"index":0,"delta":{"content":{"odd":1}},"finish_reason":null}]}""", "[1]"),
             )
-            assertThrows<ModelError.BadResponse> { model().complete(Kit.request()) }
+            assertThrows<ModelError.BadResponse> { model().send(Kit.request()) }
         }
 
     @Test
@@ -252,7 +253,7 @@ class ChatCompletionsModelTest {
                 ),
             )
             val deltas = Deltas()
-            val reply = model().complete(Kit.request(), deltas)
+            val reply = model().send(Kit.request(), deltas)
             val reasoning = reply.parts[0] as Part.Reasoning
             assertEquals("r1", reasoning.summary)
             assertEquals(Part.ToolCall(ToolCallId("t1"), "get_weather", "{\"city\":\"Paris\"}"), reply.parts[1])
@@ -303,7 +304,7 @@ class ChatCompletionsModelTest {
                     .build()
             val firstDelta = CompletableDeferred<Unit>()
             try {
-                val job = launch { model(client = client).complete(Kit.request()) { firstDelta.complete(Unit) } }
+                val job = launch { model(client = client).send(Kit.request()) { firstDelta.complete(Unit) } }
                 firstDelta.await()
                 job.cancelAndJoin()
                 assertTrue(job.isCancelled)

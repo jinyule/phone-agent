@@ -8,6 +8,7 @@ import dev.phoneagent.core.model.ToolDef
 import dev.phoneagent.core.model.openai.Kit.base
 import dev.phoneagent.core.model.openai.Kit.enqueueError
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
+import dev.phoneagent.core.model.openai.Kit.send
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
@@ -81,7 +82,7 @@ class LeakedCallsTest {
         return Kit
             .adapters()
             .model(profile, Kit.MODEL, Kit.capabilities(), Kit.blobs(), wire(preset, recover))
-            .complete(Kit.request(tools = tools))
+            .send(Kit.request(tools = tools))
     }
 
     private fun assertKept(

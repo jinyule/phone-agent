@@ -5,6 +5,7 @@ import dev.phoneagent.core.model.BlobSource
 import dev.phoneagent.core.model.CacheLayout
 import dev.phoneagent.core.model.ChatRequest
 import dev.phoneagent.core.model.ChatResponse
+import dev.phoneagent.core.model.CredentialKind
 import dev.phoneagent.core.model.Message
 import dev.phoneagent.core.model.ModelCapabilities
 import dev.phoneagent.core.model.ModelError
@@ -18,6 +19,7 @@ import dev.phoneagent.core.model.Role
 import dev.phoneagent.core.model.StopReason
 import dev.phoneagent.core.model.ToolDef
 import dev.phoneagent.core.model.VerifiedCapability
+import dev.phoneagent.core.model.WireProfile
 import dev.phoneagent.core.model.openai.WireSupport.array
 import dev.phoneagent.core.model.openai.WireSupport.int
 import dev.phoneagent.core.model.openai.WireSupport.obj
@@ -164,14 +166,15 @@ public class ProviderProbe internal constructor(
             while (true) {
                 val reply =
                     try {
-                        adapters
-                            .model(
+                        val model =
+                            adapters.model(
                                 profile,
                                 ModelInfo(profile.id, candidate, profile.protocol, capabilities),
                                 NO_IMAGES,
                                 options,
                                 env,
-                            ).complete(TrialCall.request(token))
+                            )
+                        model.complete(TrialCall.request(token, model.prepare(null).wire))
                     } catch (e: ModelError) {
                         options =
                             WireNegotiation.without(options, profile.protocol, e, env.statusOf(e)) ?: return failed(e)
@@ -359,11 +362,16 @@ private val IN_TRIAL =
 private object TrialCall {
     const val TOOL = "confirm_connection"
 
-    fun request(token: String): ChatRequest =
+    /** The trial request asking for [token], sent with [wire] (the probed model's, for no reasoning level). */
+    fun request(
+        token: String,
+        wire: WireProfile,
+    ): ChatRequest =
         ChatRequest(
             system = listOf(PromptBlock("probe", "You are a connection check. Do what the user asks, using the tool.")),
             tools = listOf(ToolDef(TOOL, "Confirms that the connection works.", TRIAL_SCHEMA)),
             messages = listOf(Message(Role.USER, listOf(Part.Text("Call $TOOL with token \"$token\".")))),
+            wire = wire,
             cache = CacheLayout.NONE,
         )
 
@@ -375,7 +383,7 @@ private object TrialCall {
         secret: String,
         token: String,
     ): Boolean {
-        val request = request(token)
+        val request = request(token, CONTENT_ONLY)
         val texts =
             request.system.map { it.text } +
                 request.tools.flatMap { listOf(it.name, it.description, it.parameters.toString()) } +
@@ -384,6 +392,9 @@ private object TrialCall {
         return texts.any { secret in it }
     }
 }
+
+/** A snapshot for reading the trial's content only; never sent. */
+private val CONTENT_ONLY = WireProfile(OPENAI_MAPPING_VERSION, CredentialKind.NONE)
 
 private val TRIAL_SCHEMA: JsonObject =
     buildJsonObject {

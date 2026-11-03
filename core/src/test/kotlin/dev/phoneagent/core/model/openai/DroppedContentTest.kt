@@ -8,6 +8,7 @@ import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.openai.Kit.base
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
+import dev.phoneagent.core.model.openai.Kit.send
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
@@ -55,7 +56,7 @@ class DroppedContentTest {
         val deltas = Deltas()
         val reply =
             try {
-                model.complete(Kit.request(), deltas)
+                model.send(Kit.request(), deltas)
             } catch (rejected: ModelError) {
                 // A stricter adapter may reject what it would drop: the error is an exit too.
                 assertNoPiece("the error", rejected.stackTraceToString())
@@ -117,7 +118,7 @@ class DroppedContentTest {
             val deltas = Deltas()
             // Any type: a failure message must not print an error before it is checked.
             val model = model(ModelProtocol.OPENAI_CHAT_COMPLETIONS)
-            val error = assertThrows<Throwable> { model.complete(Kit.request(), deltas) }
+            val error = assertThrows<Throwable> { model.send(Kit.request(), deltas) }
             assertNoPiece("the error", error.stackTraceToString())
             assertTrue(
                 error is ModelError.BadResponse && CredentialEcho.discardsStreamed(error),
@@ -199,7 +200,7 @@ class DroppedContentTest {
             val deltas = Deltas()
             // Any type: a failure message must not print an error before it is checked.
             val model = model(ModelProtocol.OPENAI_RESPONSES)
-            val error = assertThrows<Throwable> { model.complete(Kit.request(), deltas) }
+            val error = assertThrows<Throwable> { model.send(Kit.request(), deltas) }
             assertNoPiece("the error", error.stackTraceToString())
             assertTrue(
                 error is ModelError.BadResponse && CredentialEcho.discardsStreamed(error),

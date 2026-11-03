@@ -8,6 +8,7 @@ import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.StopReason
 import dev.phoneagent.core.model.openai.Kit.base
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
+import dev.phoneagent.core.model.openai.Kit.send
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -56,7 +57,7 @@ class ResponsesOutputOrderTest {
     fun `items the stream did not finish come from the final output`() =
         runTest {
             server.enqueueSse(done(0, reasoning) + completed(reasoning, call("call_1")))
-            val reply = model().complete(Kit.request())
+            val reply = model().send(Kit.request())
             assertEquals(listOf(ToolCallId("call_1")), reply.toolCalls.map { it.id })
             assertEquals(listOf(true, false), reply.parts.map { it is Part.Reasoning }, "reasoning, then the call")
             assertEquals(StopReason.TOOL_USE, reply.stopReason)
@@ -66,10 +67,10 @@ class ResponsesOutputOrderTest {
     fun `items are ordered by output_index, not by arrival`() =
         runTest {
             server.enqueueSse(done(1, call("call_b")) + done(0, call("call_a")) + completed())
-            assertEquals(listOf("call_a", "call_b"), model().complete(Kit.request()).toolCalls.map { it.id.value })
+            assertEquals(listOf("call_a", "call_b"), model().send(Kit.request()).toolCalls.map { it.id.value })
             val both = completed(call("call_a"), call("call_b"))
             server.enqueueSse(done(1, call("call_b")) + done(0, call("call_a")) + both)
-            assertEquals(listOf("call_a", "call_b"), model().complete(Kit.request()).toolCalls.map { it.id.value })
+            assertEquals(listOf("call_a", "call_b"), model().send(Kit.request()).toolCalls.map { it.id.value })
         }
 
     @Test
@@ -83,7 +84,7 @@ class ResponsesOutputOrderTest {
                 )
             for (stream in contradictions) {
                 server.enqueueSse(stream)
-                assertThrows<ModelError.BadResponse>(stream) { model().complete(Kit.request()) }
+                assertThrows<ModelError.BadResponse>(stream) { model().send(Kit.request()) }
             }
         }
 
@@ -100,11 +101,11 @@ class ResponsesOutputOrderTest {
     fun `an empty streamed message does not erase a final refusal`() =
         runTest {
             server.enqueueSse(done(0, message("[]")) + completed(message(refusal)))
-            assertThrows<ModelError.BadResponse> { model().complete(Kit.request()) }
+            assertThrows<ModelError.BadResponse> { model().send(Kit.request()) }
             server.enqueueSse(done(0, message("null")) + completed(message(refusal)))
-            assertThrows<ModelError.Refusal> { model().complete(Kit.request()) }
+            assertThrows<ModelError.Refusal> { model().send(Kit.request()) }
             server.enqueueSse(done(0, message(refusal)) + completed(message("null")))
-            assertThrows<ModelError.Refusal> { model().complete(Kit.request()) }
+            assertThrows<ModelError.Refusal> { model().send(Kit.request()) }
         }
 
     @Test
@@ -117,7 +118,7 @@ class ResponsesOutputOrderTest {
                 assertEquals(
                     "{\"x\":1}",
                     model()
-                        .complete(Kit.request())
+                        .send(Kit.request())
                         .toolCalls
                         .single()
                         .argsJson,
@@ -126,7 +127,7 @@ class ResponsesOutputOrderTest {
             val hi = message(text("hi"))
             for ((streamed, final) in listOf(message("null") to hi, hi to message("null"))) {
                 server.enqueueSse(done(0, streamed) + completed(final))
-                assertEquals(listOf(Part.Text("hi")), model().complete(Kit.request()).parts)
+                assertEquals(listOf(Part.Text("hi")), model().send(Kit.request()).parts)
             }
         }
 
@@ -134,9 +135,9 @@ class ResponsesOutputOrderTest {
     fun `ids the adapter does not use may differ`() =
         runTest {
             server.enqueueSse(done(0, call("call_a")) + completed(call("call_a", id = "fc_other")))
-            assertEquals(listOf("call_a"), model().complete(Kit.request()).toolCalls.map { it.id.value })
+            assertEquals(listOf("call_a"), model().send(Kit.request()).toolCalls.map { it.id.value })
             server.enqueueSse(done(0, message(text("hi"))) + completed(message(text("hi"), id = "msg_2")))
-            assertEquals(listOf(Part.Text("hi")), model().complete(Kit.request()).parts)
+            assertEquals(listOf(Part.Text("hi")), model().send(Kit.request()).parts)
         }
 
     @Test
@@ -147,14 +148,14 @@ class ResponsesOutputOrderTest {
                 """{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"s"}],""" +
                     """"encrypted_content":null,"status":"completed"}"""
             server.enqueueSse(done(0, streamed) + completed(final))
-            val part = model().complete(Kit.request()).parts.single() as Part.Reasoning
+            val part = model().send(Kit.request()).parts.single() as Part.Reasoning
             val opaque = part.opaque as JsonObject
             assertEquals("s", part.summary, "the final summary")
             assertEquals(JsonPrimitive("enc"), opaque["encrypted_content"], "the streamed encrypted content")
             assertEquals(JsonPrimitive("completed"), opaque["status"])
             for (other in listOf(streamed.replace("rs_1", "rs_2"), streamed.replace("\"enc\"", "\"other\""))) {
                 server.enqueueSse(done(0, streamed) + completed(other))
-                assertThrows<ModelError.BadResponse>(other) { model().complete(Kit.request()) }
+                assertThrows<ModelError.BadResponse>(other) { model().send(Kit.request()) }
             }
         }
 
@@ -171,7 +172,7 @@ class ResponsesOutputOrderTest {
                 )
             for ((streamed, final) in pairs) {
                 server.enqueueSse(done(0, message(streamed)) + completed(message(final)))
-                assertThrows<ModelError.BadResponse>(final) { model().complete(Kit.request()) }
+                assertThrows<ModelError.BadResponse>(final) { model().send(Kit.request()) }
             }
         }
 }

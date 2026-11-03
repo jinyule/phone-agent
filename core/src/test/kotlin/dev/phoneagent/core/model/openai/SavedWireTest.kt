@@ -7,6 +7,7 @@ import dev.phoneagent.core.model.openai.Kit.enqueueError
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
 import dev.phoneagent.core.model.openai.Kit.json
 import dev.phoneagent.core.model.openai.Kit.next
+import dev.phoneagent.core.model.openai.Kit.send
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
 import mockwebserver3.junit5.StartStop
@@ -51,7 +52,7 @@ class SavedWireTest {
         val model = Kit.adapters().model(profile, Kit.MODEL, Kit.capabilities(), Kit.blobs(), saved)
         return List(2) {
             server.enqueueSse(reply)
-            model.complete(Kit.request())
+            model.send(Kit.request())
             server.next().json()
         }
     }

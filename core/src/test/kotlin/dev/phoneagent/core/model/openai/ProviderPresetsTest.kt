@@ -8,6 +8,7 @@ import dev.phoneagent.core.model.openai.Kit.base
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
 import dev.phoneagent.core.model.openai.Kit.json
 import dev.phoneagent.core.model.openai.Kit.next
+import dev.phoneagent.core.model.openai.Kit.send
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -131,7 +132,7 @@ class ProviderPresetsTest {
                 server.enqueueSse(reply)
                 val profile = Kit.profile(server.base(), preset = preset)
                 val model = Kit.adapters().unprobed(profile, Kit.MODEL, Kit.capabilities(levels = levels), Kit.blobs())
-                model.complete(Kit.request(reasoning = ReasoningLevel.MEDIUM, maxOutputTokens = 64))
+                model.send(Kit.request(reasoning = ReasoningLevel.MEDIUM, maxOutputTokens = 64))
                 return server.next().json()
             }
             val custom = sent(null)

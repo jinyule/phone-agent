@@ -6,6 +6,7 @@ import dev.phoneagent.core.model.ModelErrorKind
 import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.openai.Kit.base
 import dev.phoneagent.core.model.openai.Kit.enqueueError
+import dev.phoneagent.core.model.openai.Kit.send
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonPrimitive
 import mockwebserver3.MockResponse
@@ -50,7 +51,7 @@ class CutRedactionTest {
         runTest {
             enqueueCutBody(tail)
             val error =
-                assertThrows<ModelError.Server> { model(ModelProtocol.OPENAI_CHAT_COMPLETIONS).complete(Kit.request()) }
+                assertThrows<ModelError.Server> { model(ModelProtocol.OPENAI_CHAT_COMPLETIONS).send(Kit.request()) }
             Straddle.assertNoPrefix("the Chat error", error.stackTraceToString(), CURRENT)
             assertTrue(error.message!!.endsWith(Redactor.MASK), "the key is masked whole, not dropped")
         }
@@ -61,7 +62,7 @@ class CutRedactionTest {
         runTest {
             enqueueCutBody(tail)
             val error =
-                assertThrows<ModelError.Server> { model(ModelProtocol.OPENAI_RESPONSES).complete(Kit.request()) }
+                assertThrows<ModelError.Server> { model(ModelProtocol.OPENAI_RESPONSES).send(Kit.request()) }
             Straddle.assertNoPrefix("the Responses error", error.stackTraceToString(), CURRENT)
         }
 

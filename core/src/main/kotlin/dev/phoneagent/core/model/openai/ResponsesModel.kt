@@ -9,14 +9,16 @@ import dev.phoneagent.core.model.Delta
 import dev.phoneagent.core.model.ModelError
 import dev.phoneagent.core.model.ModelInfo
 import dev.phoneagent.core.model.ProviderProfile
+import dev.phoneagent.core.model.ReasoningLevel
+import dev.phoneagent.core.model.RequestSettings
 import okhttp3.HttpUrl.Companion.toHttpUrl
 
 /**
  * OpenAI Responses (model-layer §3.2): `POST {baseUrl}/responses`, stateless and streamed. Wire
  * mapping: [ResponsesWire]; stream assembly: [ResponsesStream].
  *
- * One `complete()` is one HTTP request, shaped by the [WireOptions] given at creation and nothing
- * else (no mutable state). The one exception keeps the request as it is: with
+ * One `complete()` is one HTTP request, shaped by the request and its wire snapshot and nothing
+ * else ([WireRules]; no mutable state). The one exception keeps the request as it is: with
  * [Credential.ChatGptPlan] the request is cut to the plan channel's constraints ([PlanMode]) and a
  * 401 gets one fresh token from the resolver, then fails as [ModelError.SignInExpired]. Every
  * other failure goes to the caller (`requestError`); a 400 about `include` is
@@ -31,26 +33,27 @@ public class ResponsesModel internal constructor(
     private val env: AdapterEnv,
 ) : ChatModel {
     private val endpoint = "${profile.baseUrl}/responses".toHttpUrl()
-    private val inputs = WireInputs.of(profile, options)
-    private val plan = inputs.plan
-    private val wire =
-        ResponsesWire(profile.id, info.model, info.capabilities.vision, info.capabilities.reasoningLevels)
+    private val rules = WireRules.of(profile, info.capabilities, options)
+
+    override fun prepare(reasoning: ReasoningLevel?): RequestSettings = rules.prepare(reasoning)
 
     override suspend fun complete(
         request: ChatRequest,
         onDelta: (Delta) -> Unit,
     ): ChatResponse {
+        val sent = rules.accept(request)
+        val plan = sent.plan
         WireSupport.preflight(request)
-        val images = if (info.capabilities.vision) ImageData.load(request, blobs) else ImageData.NONE
-        val built = wire.body(request, images, inputs.options.responses.includeEncryptedReasoning)
+        val images = if (sent.vision) ImageData.load(request, blobs) else ImageData.NONE
+        val built = ResponsesWire(profile.id, info.model, sent.wire).body(request, images)
         val body = if (plan) PlanMode.enforce(built) else built
         var secret = env.secret(profile.credential, rejected = false)
         // Every secret sent so far: after a refresh the rejected token may still be echoed.
         var redactor = env.redactor(secret)
         var refreshed = false
         while (true) {
-            val post = env.post(endpoint, inputs.headers, secret, body)
-            val exchange = env.exchange(post, redactor) { read(it, redactor, onDelta) }
+            val post = env.post(endpoint, sent.headers, secret, body)
+            val exchange = env.exchange(post, redactor) { read(it, plan, redactor, onDelta) }
             if (exchange is Exchange.Done) return exchange.value
             val failure = (exchange as Exchange.Failed).failure
             if (failure.status != Status.UNAUTHORIZED || !plan) throw env.error(failure, plan, redactor)
@@ -63,6 +66,7 @@ public class ResponsesModel internal constructor(
 
     private suspend fun read(
         reply: HttpReply,
+        plan: Boolean,
         redactor: Redactor,
         onDelta: (Delta) -> Unit,
     ): ChatResponse {

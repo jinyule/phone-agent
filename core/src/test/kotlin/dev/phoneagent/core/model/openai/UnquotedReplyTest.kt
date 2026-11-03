@@ -8,6 +8,7 @@ import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.openai.Kit.base
 import dev.phoneagent.core.model.openai.Kit.enqueueError
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
+import dev.phoneagent.core.model.openai.Kit.send
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonPrimitive
 import mockwebserver3.MockResponse
@@ -78,7 +79,7 @@ class UnquotedReplyTest {
     /** The error of [model]'s call, after checking that nothing it prints holds a piece of the secret. */
     private suspend fun failure(model: ChatModel): Throwable {
         // Any type: a failure message must not print an error before it is checked.
-        val error = assertThrows<Throwable> { model.complete(Kit.request()) }
+        val error = assertThrows<Throwable> { model.send(Kit.request()) }
         assertNoPiece("the error", "${error.message} $error ${error.stackTraceToString()}")
         return error
     }

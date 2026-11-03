@@ -6,6 +6,7 @@ import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.openai.Kit.base
 import dev.phoneagent.core.model.openai.Kit.enqueueError
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
+import dev.phoneagent.core.model.openai.Kit.send
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -153,8 +154,8 @@ class SuccessRedactionTest {
                     Kit.blobs(),
                     WireOptions.defaultsFor(profile),
                 )
-            assertMetadata(mapOf("finish_reason" to "stop"), model.complete(Kit.request()).providerMetadata)
-            assertMetadata(mapOf("id" to "c-1", "model" to "m"), model.complete(Kit.request()).providerMetadata)
+            assertMetadata(mapOf("finish_reason" to "stop"), model.send(Kit.request()).providerMetadata)
+            assertMetadata(mapOf("id" to "c-1", "model" to "m"), model.send(Kit.request()).providerMetadata)
         }
 
     @Test
@@ -173,7 +174,7 @@ class SuccessRedactionTest {
                     Kit.blobs(),
                     WireOptions.defaultsFor(profile),
                 )
-            assertMetadata(mapOf("status" to "incomplete"), model.complete(Kit.request()).providerMetadata)
+            assertMetadata(mapOf("status" to "incomplete"), model.send(Kit.request()).providerMetadata)
         }
 
     private fun assertMetadata(

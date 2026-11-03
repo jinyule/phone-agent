@@ -2,6 +2,7 @@ package dev.phoneagent.core.model.openai
 
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.openai.Kit.base
+import dev.phoneagent.core.model.openai.Kit.send
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.MockResponse
 import mockwebserver3.SocketEffect
@@ -45,9 +46,9 @@ class IdleConnectionTest {
             enqueueThenClose()
             enqueueThenClose()
             val model = Kit.adapters().unprobed(Kit.profile(server.base()), Kit.MODEL, Kit.capabilities(), Kit.blobs())
-            assertEquals(listOf(Part.Text("hi")), model.complete(Kit.request()).parts)
+            assertEquals(listOf(Part.Text("hi")), model.send(Kit.request()).parts)
             assertTrue(sockets.closed.await(WAIT_S, TimeUnit.SECONDS), "the server closed the first connection")
-            assertEquals(listOf(Part.Text("hi")), model.complete(Kit.request()).parts)
+            assertEquals(listOf(Part.Text("hi")), model.send(Kit.request()).parts)
             assertEquals(2, server.requestCount, "one request per call")
         }
 

@@ -7,13 +7,10 @@ import dev.phoneagent.core.model.Message
 import dev.phoneagent.core.model.ModelError
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.PromptBlock
-import dev.phoneagent.core.model.ReasoningLevel
-import dev.phoneagent.core.model.ReasoningLevel.HIGH
-import dev.phoneagent.core.model.ReasoningLevel.LOW
-import dev.phoneagent.core.model.ReasoningLevel.MEDIUM
-import dev.phoneagent.core.model.ReasoningLevel.MINIMAL
 import dev.phoneagent.core.model.Role
+import dev.phoneagent.core.model.WireSetting
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.buildJsonObject
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
@@ -31,23 +28,14 @@ class WireSupportTest {
     private fun tool(vararg ids: String) = Message(Role.TOOL, ids.map(::result))
 
     private fun preflight(vararg messages: Message) =
-        WireSupport.preflight(ChatRequest(emptyList(), emptyList(), messages.toList()))
+        WireSupport.preflight(ChatRequest(emptyList(), emptyList(), messages.toList(), Kit.UNPREPARED))
 
     @Test
-    fun `effort is clamped to the supported levels`() {
-        assertNull(WireSupport.effort(null, listOf(LOW)))
-        assertEquals("high", WireSupport.effort(HIGH, null))
-        assertEquals("medium", WireSupport.effort(MEDIUM, listOf(LOW, MEDIUM, HIGH)))
-        assertEquals("medium", WireSupport.effort(HIGH, listOf(LOW, MEDIUM)))
-        assertEquals("medium", WireSupport.effort(MINIMAL, listOf(HIGH, MEDIUM)))
-        assertNull(WireSupport.effort(LOW, emptyList()))
-        assertEquals(
-            ReasoningLevel.entries.size,
-            ReasoningLevel.entries
-                .map { WireSupport.effort(it, null) }
-                .toSet()
-                .size,
-        )
+    fun `a dotted setting is a nested object`() {
+        val flat = buildJsonObject { WireSupport.put(this, WireSetting("reasoning_effort", "low")) }
+        assertEquals("""{"reasoning_effort":"low"}""", flat.toString())
+        val nested = buildJsonObject { WireSupport.put(this, WireSetting("reasoning.effort", "high")) }
+        assertEquals("""{"reasoning":{"effort":"high"}}""", nested.toString())
     }
 
     @Test
@@ -81,6 +69,7 @@ class WireSupportTest {
                 emptyList(),
                 emptyList(),
                 listOf(Kit.user("hi")),
+                Kit.UNPREPARED,
                 contextEdits = ContextEditPolicy.ServerSide(null, 1, null),
             )
         assertEquals("contextEdits", assertThrows<ModelError.InvalidRequest> { WireSupport.preflight(request) }.param)
@@ -107,6 +96,7 @@ class WireSupportTest {
                         assistant(call),
                         Message(Role.TOOL, listOf(Part.ToolResult(call.id, listOf(image(b)), isError = false))),
                     ),
+                    Kit.UNPREPARED,
                 )
             val data = ImageData.load(request, blobs)
             assertEquals("YQ==", data[a])
@@ -122,6 +112,7 @@ class WireSupportTest {
                     emptyList(),
                     emptyList(),
                     listOf(Message(Role.USER, listOf(Part.Image(Kit.blob('c'), "image/png", 1, 1)))),
+                    Kit.UNPREPARED,
                 )
             val error = assertThrows<ModelError.InvalidRequest> { ImageData.load(request, Kit.blobs()) }
             assertEquals("image", error.param)

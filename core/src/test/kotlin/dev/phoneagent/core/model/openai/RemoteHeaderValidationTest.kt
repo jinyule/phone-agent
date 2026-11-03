@@ -4,6 +4,7 @@ import dev.phoneagent.core.model.ModelError
 import dev.phoneagent.core.model.ModelErrorKind
 import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.openai.Kit.base
+import dev.phoneagent.core.model.openai.Kit.send
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.MockResponse
 import mockwebserver3.junit5.StartStop
@@ -72,14 +73,14 @@ class RemoteHeaderValidationTest {
     fun `Chat Completions`() =
         runTest {
             enqueueRateLimited()
-            assertRateLimited { model(ModelProtocol.OPENAI_CHAT_COMPLETIONS).complete(Kit.request()) }
+            assertRateLimited { model(ModelProtocol.OPENAI_CHAT_COMPLETIONS).send(Kit.request()) }
         }
 
     @Test
     fun `Responses`() =
         runTest {
             enqueueRateLimited()
-            assertRateLimited { model(ModelProtocol.OPENAI_RESPONSES).complete(Kit.request()) }
+            assertRateLimited { model(ModelProtocol.OPENAI_RESPONSES).send(Kit.request()) }
         }
 
     @Test

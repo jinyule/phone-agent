@@ -8,17 +8,21 @@ import dev.phoneagent.core.model.Delta
 import dev.phoneagent.core.model.ModelError
 import dev.phoneagent.core.model.ModelInfo
 import dev.phoneagent.core.model.ProviderProfile
+import dev.phoneagent.core.model.ReasoningLevel
+import dev.phoneagent.core.model.RequestSettings
 import okhttp3.HttpUrl.Companion.toHttpUrl
 
 /**
  * OpenAI Chat Completions and compatible gateways (model-layer §3.1): `POST {baseUrl}/chat/completions`,
  * always streamed. Wire mapping: [ChatCompletionsWire]; stream assembly: [ChatCompletionsStream].
  *
- * One `complete()` is one HTTP request, shaped by the [WireOptions] given at creation and nothing
- * else: there is no mutable state, so concurrent calls and later calls send the same wire for the
- * same request. Every failure goes to the caller (`requestError`), which retries and logs; a 400
- * about an optional field is [ModelError.InvalidRequest] with the provider's `param`. Create
- * instances with [OpenAiAdapters.model].
+ * One `complete()` is one HTTP request, shaped by the request and its wire snapshot and nothing
+ * else ([WireRules]): [prepare] gives the snapshot of the [WireOptions] given at creation, and
+ * there is no mutable state, so concurrent calls and later calls send the same bytes for the same
+ * request, and a request read back from a log sends what it sent then. Every failure goes to the
+ * caller (`requestError`), which retries and logs; a 400 about an optional field is
+ * [ModelError.InvalidRequest] with the provider's `param`. Create instances with
+ * [OpenAiAdapters.model].
  */
 public class ChatCompletionsModel internal constructor(
     private val profile: ProviderProfile,
@@ -28,44 +32,46 @@ public class ChatCompletionsModel internal constructor(
     private val env: AdapterEnv,
 ) : ChatModel {
     private val endpoint = "${profile.baseUrl}/chat/completions".toHttpUrl()
-    private val inputs = WireInputs.of(profile, options)
-    private val reasoningFields = listOfNotNull(inputs.reasoningField).ifEmpty { DEFAULT_REASONING_FIELDS }
-    private val wire =
-        ChatCompletionsWire(
-            profile.id,
-            info.model,
-            inputs.reasoningField,
-            inputs.echoReasoning,
-            info.capabilities.vision,
-            info.capabilities.reasoningLevels,
-        )
+    private val rules = WireRules.of(profile, info.capabilities, options)
+
+    override fun prepare(reasoning: ReasoningLevel?): RequestSettings = rules.prepare(reasoning)
 
     override suspend fun complete(
         request: ChatRequest,
         onDelta: (Delta) -> Unit,
     ): ChatResponse {
+        val sent = rules.accept(request)
         WireSupport.preflight(request)
-        val images = if (info.capabilities.vision) ImageData.load(request, blobs) else ImageData.NONE
+        val images = if (sent.vision) ImageData.load(request, blobs) else ImageData.NONE
         val secret = env.secret(profile.credential, rejected = false)
         val redactor = env.redactor(secret)
-        val body = wire.body(request, images, inputs.options.chat)
-        val post = env.post(endpoint, inputs.headers, secret, body)
-        return when (val exchange = env.exchange(post, redactor) { read(request, it, redactor, onDelta) }) {
+        val body = ChatCompletionsWire(profile.id, info.model, sent.wire).body(request, images)
+        val post = env.post(endpoint, sent.headers, secret, body)
+        return when (val exchange = env.exchange(post, redactor) { read(request, sent, it, redactor, onDelta) }) {
             is Exchange.Done -> exchange.value
             is Exchange.Failed -> throw env.error(exchange.failure, false, redactor)
         }
     }
 
-    private fun reading(request: ChatRequest): ChatReading =
-        ChatReading(reasoningFields, request.tools.mapTo(HashSet()) { it.name }, inputs.options.chat.recoverLeakedCalls)
+    private fun reading(
+        request: ChatRequest,
+        sent: SentWire,
+    ): ChatReading =
+        ChatReading(
+            listOfNotNull(sent.wire.reasoningField).ifEmpty { DEFAULT_REASONING_FIELDS },
+            request.tools.mapTo(HashSet()) { it.name },
+            sent.leakedCalls,
+        )
 
     private suspend fun read(
         request: ChatRequest,
+        sent: SentWire,
         reply: HttpReply,
         redactor: Redactor,
         onDelta: (Delta) -> Unit,
     ): ChatResponse {
-        val stream = ChatCompletionsStream(profile.id, info.model, reading(request), env.newCallId, redactor, onDelta)
+        val stream =
+            ChatCompletionsStream(profile.id, info.model, reading(request, sent), env.newCallId, redactor, onDelta)
         return try {
             stream.readAll(reply)
         } catch (e: ModelError) {

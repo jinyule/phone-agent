@@ -3,13 +3,14 @@ package dev.phoneagent.core.model.openai
 import dev.phoneagent.core.ids.ModelId
 import dev.phoneagent.core.ids.ProviderId
 import dev.phoneagent.core.model.ChatRequest
+import dev.phoneagent.core.model.ImageMode
 import dev.phoneagent.core.model.Message
 import dev.phoneagent.core.model.ModelError
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.ReasoningKind
-import dev.phoneagent.core.model.ReasoningLevel
 import dev.phoneagent.core.model.Role
 import dev.phoneagent.core.model.ToolDef
+import dev.phoneagent.core.model.WireProfile
 import dev.phoneagent.core.model.openai.WireSupport.IMAGE_OMITTED
 import dev.phoneagent.core.model.openai.WireSupport.TEXT_SEPARATOR
 import dev.phoneagent.core.model.openai.WireSupport.str
@@ -37,17 +38,22 @@ import kotlinx.serialization.json.putJsonObject
  *   statelessly), `output_text` messages, `function_call` items.
  * - Tool messages: a `function_call_output` per result; its `output` is the text, or a content
  *   array once the result holds an image. `isError` has no wire field: the text states the failure.
+ *
+ * Everything besides the neutral request comes from the request's snapshot, [wire]: images inline
+ * only when it says so, `parallel_tool_calls:false` with tools, `include`, the reasoning setting
+ * and the output cap.
  */
 internal class ResponsesWire(
     private val provider: ProviderId,
     private val model: ModelId,
-    private val vision: Boolean,
-    private val reasoningLevels: List<ReasoningLevel>?,
+    private val wire: WireProfile,
 ) {
+    private val vision = wire.images == ImageMode.INLINE
+
+    /** [request] as sent; its own snapshot is [wire]. */
     fun body(
         request: ChatRequest,
         images: ImageData,
-        includeReasoning: Boolean,
     ): JsonObject =
         buildJsonObject {
             put("model", model.value)
@@ -56,15 +62,13 @@ internal class ResponsesWire(
             if (request.tools.isNotEmpty()) {
                 put("tools", JsonArray(request.tools.map(::tool)))
                 put("tool_choice", "auto")
-                put("parallel_tool_calls", false)
+                if (wire.disableParallelToolCalls) put("parallel_tool_calls", false)
             }
             put("store", false)
             put("stream", true)
-            if (includeReasoning) putJsonArray("include") { add(ENCRYPTED_REASONING) }
-            WireSupport.effort(request.reasoning, reasoningLevels)?.let { effort ->
-                putJsonObject("reasoning") { put("effort", effort) }
-            }
-            request.maxOutputTokens?.let { put("max_output_tokens", it) }
+            if (wire.includeEncryptedReasoning) putJsonArray("include") { add(ENCRYPTED_REASONING) }
+            wire.reasoningEffort?.let { WireSupport.put(this, it) }
+            wire.maxTokensField?.let { field -> request.maxOutputTokens?.let { put(field, it) } }
         }
 
     private fun input(

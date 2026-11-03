@@ -10,6 +10,7 @@ import dev.phoneagent.core.model.StopReason
 import dev.phoneagent.core.model.openai.Kit.base
 import dev.phoneagent.core.model.openai.Kit.enqueueError
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
+import dev.phoneagent.core.model.openai.Kit.send
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonPrimitive
 import mockwebserver3.MockResponse
@@ -86,7 +87,7 @@ class EscapedArgumentEchoTest {
         deltas: Deltas = Deltas(),
     ) {
         // Any type: a failure message must not print an error before it is checked.
-        val error = assertThrows<Throwable> { model.complete(Kit.request(), deltas) }
+        val error = assertThrows<Throwable> { model.send(Kit.request(), deltas) }
         assertNoPiece("the error", error.stackTraceToString(), key)
         assertTrue(
             error is ModelError.BadResponse && CredentialEcho.discardsStreamed(error),
@@ -353,7 +354,7 @@ class EscapedArgumentEchoTest {
             for (ending in Ending.entries) {
                 val args = ending.args("Par~u0069s".replace('~', BACKSLASH))
                 server.enqueueSse(chatStream(listOf(args), ending.chatReason))
-                val reply = model(ModelProtocol.OPENAI_CHAT_COMPLETIONS, Style.UNICODE.key).complete(Kit.request())
+                val reply = model(ModelProtocol.OPENAI_CHAT_COMPLETIONS, Style.UNICODE.key).send(Kit.request())
                 assertEquals(ending.stop, reply.stopReason)
                 assertEquals(listOf(args), reply.toolCalls.map { it.argsJson }, "the arguments are not rewritten")
             }

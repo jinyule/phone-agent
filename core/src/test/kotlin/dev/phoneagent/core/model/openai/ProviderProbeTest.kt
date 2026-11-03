@@ -12,6 +12,7 @@ import dev.phoneagent.core.model.openai.Kit.enqueueSse
 import dev.phoneagent.core.model.openai.Kit.json
 import dev.phoneagent.core.model.openai.Kit.literalUrl
 import dev.phoneagent.core.model.openai.Kit.next
+import dev.phoneagent.core.model.openai.Kit.send
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -142,7 +143,7 @@ class ProviderProbeTest {
                     Kit.capabilities(),
                     Kit.blobs(),
                     result.wire,
-                ).complete(Kit.request())
+                ).send(Kit.request())
             assertEquals(
                 sent[2].keys,
                 server.next().json().keys,

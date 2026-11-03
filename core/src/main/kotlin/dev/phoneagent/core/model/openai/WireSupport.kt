@@ -9,16 +9,18 @@ import dev.phoneagent.core.model.Message
 import dev.phoneagent.core.model.ModelError
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.PromptBlock
-import dev.phoneagent.core.model.ReasoningLevel
 import dev.phoneagent.core.model.Role
+import dev.phoneagent.core.model.WireSetting
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
 import java.io.IOException
 import java.util.Base64
-import java.util.Locale
 
 /** Pieces both OpenAI-style wire formats share. Pure, except [ImageData.load]. */
 internal object WireSupport {
@@ -31,22 +33,17 @@ internal object WireSupport {
     /** The system prompt blocks as one string. */
     fun systemText(blocks: List<PromptBlock>): String = blocks.joinToString(TEXT_SEPARATOR) { it.text }
 
-    /**
-     * The wire value for [requested], clamped to [supported]: the nearest supported level at or
-     * below it, else the lowest supported one. `null` when nothing was requested or the model has
-     * no selectable levels; unknown support (`null`) sends the request as is.
-     */
-    fun effort(
-        requested: ReasoningLevel?,
-        supported: List<ReasoningLevel>?,
-    ): String? {
-        val level =
-            when {
-                requested == null -> null
-                supported == null || requested in supported -> requested
-                else -> supported.filter { it < requested }.maxOrNull() ?: supported.minOrNull()
-            }
-        return level?.name?.lowercase(Locale.ROOT)
+    /** Puts [setting] into [body] at its field; a dotted field (`reasoning.effort`) is a nested object. */
+    fun put(
+        body: JsonObjectBuilder,
+        setting: WireSetting,
+    ) {
+        val head = setting.field.substringBefore('.')
+        if (head == setting.field) {
+            body.put(head, setting.value)
+        } else {
+            body.putJsonObject(head) { put(this, WireSetting(setting.field.substringAfter('.'), setting.value)) }
+        }
     }
 
     /**

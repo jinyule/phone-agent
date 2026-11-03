@@ -6,6 +6,7 @@ import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.StopReason
 import dev.phoneagent.core.model.openai.Kit.base
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
+import dev.phoneagent.core.model.openai.Kit.send
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonPrimitive
 import mockwebserver3.junit5.StartStop
@@ -49,7 +50,7 @@ class ChatStopReasonTest {
         withCall: Boolean,
     ): StopReason {
         server.enqueueSse(reply(finishReason, withCall))
-        val response = model().complete(Kit.request())
+        val response = model().send(Kit.request())
         // The adapter keeps the calls whatever the reason; the stop reason alone says whether they run.
         assertEquals(withCall, response.parts.any { it is Part.ToolCall }, "parts: ${response.parts}")
         return response.stopReason
@@ -79,7 +80,7 @@ class ChatStopReasonTest {
     fun `a filtered reply is a refusal even with calls`(finishReason: String) =
         runTest {
             server.enqueueSse(reply(finishReason, withCall = true))
-            assertEquals(finishReason, assertThrows<ModelError.Refusal> { model().complete(Kit.request()) }.category)
+            assertEquals(finishReason, assertThrows<ModelError.Refusal> { model().send(Kit.request()) }.category)
         }
 
     @ParameterizedTest

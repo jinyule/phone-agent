@@ -5,9 +5,12 @@ import dev.phoneagent.core.ids.ProviderId
 import dev.phoneagent.core.ids.ToolCallId
 import dev.phoneagent.core.model.ChatRequest
 import dev.phoneagent.core.model.Message
+import dev.phoneagent.core.model.ModelCapabilities
 import dev.phoneagent.core.model.ModelError
+import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.PromptBlock
+import dev.phoneagent.core.model.ProviderProfile
 import dev.phoneagent.core.model.ReasoningKind
 import dev.phoneagent.core.model.ReasoningLevel
 import dev.phoneagent.core.model.Role
@@ -57,6 +60,7 @@ class WireGoldenTest {
     private val conversation =
         ChatRequest(
             system = listOf(PromptBlock("role", "You operate a phone."), PromptBlock("rules", "Be careful.")),
+            wire = Kit.UNPREPARED,
             tools = listOf(Kit.WEATHER, tap),
             messages =
                 listOf(
@@ -120,21 +124,50 @@ class WireGoldenTest {
             reasoning = ReasoningLevel.HIGH,
         )
 
+    /** [request] mapped by a Chat model of these settings: its snapshot as `prepare` gives it, then the body. */
+    @Suppress("LongParameterList") // Named test defaults; every caller sets a few.
     private fun chat(
+        request: ChatRequest,
         vision: Boolean,
         echo: Boolean,
+        images: ImageData = this.images,
         field: String? = "reasoning_content",
         levels: List<ReasoningLevel>? = null,
-    ) = ChatCompletionsWire(Kit.PROVIDER, Kit.MODEL, field, echo, vision, levels)
+        quirks: ChatQuirks = ChatQuirks.DEFAULT,
+    ): JsonObject {
+        val profile = Kit.profile(BASE, reasoningField = field, echoReasoning = echo)
+        val prepared = prepared(request, profile, Kit.capabilities(vision, levels), WireOptions(chat = quirks))
+        return ChatCompletionsWire(Kit.PROVIDER, Kit.MODEL, prepared.wire).body(prepared, images)
+    }
 
+    /** [request] mapped by a Responses model of these settings, like [chat]. */
     private fun responses(
+        request: ChatRequest,
         vision: Boolean,
-        levels: List<ReasoningLevel>? = null,
-    ) = ResponsesWire(Kit.PROVIDER, Kit.MODEL, vision, levels)
+        includeReasoning: Boolean,
+        images: ImageData = this.images,
+        plan: Boolean = false,
+    ): JsonObject {
+        val profile =
+            Kit.profile(BASE, ModelProtocol.OPENAI_RESPONSES, credential = if (plan) Kit.PLAN else Kit.KEY)
+        val options = WireOptions(responses = ResponsesQuirks(includeReasoning))
+        val prepared = prepared(request, profile, Kit.capabilities(vision), options)
+        return ResponsesWire(Kit.PROVIDER, Kit.MODEL, prepared.wire).body(prepared, images)
+    }
+
+    private fun prepared(
+        request: ChatRequest,
+        profile: ProviderProfile,
+        capabilities: ModelCapabilities,
+        options: WireOptions,
+    ): ChatRequest {
+        val settings = WireRules.of(profile, capabilities, options).prepare(request.reasoning)
+        return request.copy(reasoning = settings.reasoning, wire = settings.wire)
+    }
 
     @Test
     fun `chat completions with vision and echoed reasoning`() {
-        val body = chat(vision = true, echo = true).body(conversation, images, ChatQuirks.DEFAULT)
+        val body = chat(conversation, vision = true, echo = true)
         Kit.assertGolden("golden/chat-vision-echo.json", body)
     }
 
@@ -142,6 +175,7 @@ class WireGoldenTest {
     private val splitResults =
         ChatRequest(
             system = emptyList(),
+            wire = Kit.UNPREPARED,
             tools = listOf(Kit.WEATHER, tap),
             messages =
                 listOf(
@@ -184,7 +218,7 @@ class WireGoldenTest {
 
     @Test
     fun `chat completions put tool images after the whole run of tool messages`() {
-        val body = chat(vision = true, echo = true).body(splitResults, images, ChatQuirks.DEFAULT)
+        val body = chat(splitResults, vision = true, echo = true)
         val messages = (body["messages"] as JsonArray).map { it as JsonObject }
         assertEquals(
             listOf("user", "assistant", "tool", "tool", "tool", "user", "assistant"),
@@ -197,7 +231,7 @@ class WireGoldenTest {
         Kit.assertGolden("golden/chat-tool-results-split.json", body)
 
         val endingInResults = splitResults.copy(messages = splitResults.messages.dropLast(1))
-        val next = chat(vision = true, echo = true).body(endingInResults, images, ChatQuirks.DEFAULT)
+        val next = chat(endingInResults, vision = true, echo = true)
         assertEquals(
             messages.dropLast(1),
             (next["messages"] as JsonArray).map { it as JsonObject },
@@ -216,24 +250,34 @@ class WireGoldenTest {
             )
         val body =
             chat(
+                conversation,
                 vision = false,
                 echo = false,
+                images = ImageData.NONE,
                 levels = listOf(ReasoningLevel.LOW),
-            ).body(conversation, ImageData.NONE, options)
+                quirks = options,
+            )
         Kit.assertGolden("golden/chat-text-only.json", body)
     }
 
     @Test
     fun `chat completions minimal request`() {
-        val minimal = ChatRequest(emptyList(), emptyList(), listOf(Kit.user("Hi")), reasoning = ReasoningLevel.LOW)
+        val minimal =
+            ChatRequest(
+                emptyList(),
+                emptyList(),
+                listOf(Kit.user("Hi")),
+                Kit.UNPREPARED,
+                reasoning = ReasoningLevel.LOW,
+            )
         val noEffort = ChatQuirks(reasoningEffort = ReasoningEffortStyle.NONE)
-        val body = chat(vision = true, echo = true).body(minimal, ImageData.NONE, noEffort)
+        val body = chat(minimal, vision = true, echo = true, images = ImageData.NONE, quirks = noEffort)
         Kit.assertGolden("golden/chat-minimal.json", body)
     }
 
     @Test
     fun `responses with vision and encrypted reasoning`() {
-        val body = responses(vision = true).body(conversation, images, includeReasoning = true)
+        val body = responses(conversation, vision = true, includeReasoning = true)
         Kit.assertGolden("golden/responses-vision.json", body)
     }
 
@@ -246,26 +290,22 @@ class WireGoldenTest {
                 maxOutputTokens = null,
                 reasoning = null,
             )
-        val body = responses(vision = false).body(minimal, ImageData.NONE, includeReasoning = false)
+        val body = responses(minimal, vision = false, includeReasoning = false, images = ImageData.NONE)
         Kit.assertGolden("golden/responses-text-only.json", body)
     }
 
     @Test
     fun `plan mode cuts the request to the allowed fields`() {
-        val body = PlanMode.enforce(responses(vision = true).body(conversation, images, includeReasoning = true))
+        val body = PlanMode.enforce(responses(conversation, vision = true, includeReasoning = true, plan = true))
         Kit.assertGolden("golden/responses-plan.json", body)
         assertFalse("max_output_tokens" in body)
     }
 
     @Test
     fun `wire bodies are pure functions of the request`() {
-        val options = ChatQuirks.DEFAULT
-        assertEquals(
-            chat(vision = true, echo = true).body(conversation, images, options),
-            chat(vision = true, echo = true).body(conversation, images, options),
-        )
-        val withoutEcho = chat(vision = true, echo = false).body(conversation, images, options)
-        assertNotEquals(chat(vision = true, echo = true).body(conversation, images, options), withoutEcho)
+        assertEquals(chat(conversation, vision = true, echo = true), chat(conversation, vision = true, echo = true))
+        val withoutEcho = chat(conversation, vision = true, echo = false)
+        assertNotEquals(chat(conversation, vision = true, echo = true), withoutEcho)
         assertFalse("reasoning_content" in withoutEcho.toString())
     }
 
@@ -350,3 +390,5 @@ class WireGoldenTest {
         assertEquals(withTool(type)["tools"], PlanMode.enforce(withTool(type))["tools"])
     }
 }
+
+private const val BASE = "http://127.0.0.1:1/v1"

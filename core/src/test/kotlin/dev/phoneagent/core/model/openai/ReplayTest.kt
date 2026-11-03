@@ -12,6 +12,7 @@ import dev.phoneagent.core.model.openai.Kit.base
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
 import dev.phoneagent.core.model.openai.Kit.json
 import dev.phoneagent.core.model.openai.Kit.next
+import dev.phoneagent.core.model.openai.Kit.send
 import dev.phoneagent.core.model.openai.WireSupport.array
 import dev.phoneagent.core.model.openai.WireSupport.str
 import kotlinx.coroutines.test.runTest
@@ -94,7 +95,7 @@ class ReplayTest {
         val model = model(meta)
         val deltas = Deltas()
         return try {
-            val response = model.complete(Kit.request(), deltas)
+            val response = model.send(Kit.request(), deltas)
             checkInvariants(response, deltas)
             buildJsonObject {
                 put("response", Json.encodeToJsonElement(serializer<ChatResponse>(), response))
@@ -161,7 +162,7 @@ class ReplayTest {
             )
         val responses = meta.str("protocol") == "responses"
         server.enqueueSse(Kit.wire(if (responses) "openai-responses/text.sse" else "chat/text-include-usage.sse"))
-        model(meta).complete(request, Deltas())
+        model(meta).send(request, Deltas())
         repeat(REPLAYS) { server.next() }
         return checkNotNull(server.next().json()[if (responses) "input" else "messages"])
     }

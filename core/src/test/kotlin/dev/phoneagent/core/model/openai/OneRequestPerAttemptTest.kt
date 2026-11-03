@@ -7,6 +7,7 @@ import dev.phoneagent.core.model.openai.Kit.enqueueError
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
 import dev.phoneagent.core.model.openai.Kit.literalUrl
 import dev.phoneagent.core.model.openai.Kit.next
+import dev.phoneagent.core.model.openai.Kit.send
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.MockResponse
 import mockwebserver3.SocketEffect
@@ -47,7 +48,7 @@ class OneRequestPerAttemptTest {
         runTest {
             server.enqueueError(408, """{"error":{"message":"request timeout"}}""")
             server.enqueueSse(success)
-            assertThrows<ModelError.Network> { model().complete(Kit.request()) }
+            assertThrows<ModelError.Network> { model().send(Kit.request()) }
             assertEquals(1, server.requestCount)
         }
 
@@ -56,7 +57,7 @@ class OneRequestPerAttemptTest {
         runTest {
             server.enqueueError(503, """{"error":{"message":"busy"}}""", "Retry-After" to "0")
             server.enqueueSse(success)
-            val error = assertThrows<ModelError.Overloaded> { model().complete(Kit.request()) }
+            val error = assertThrows<ModelError.Overloaded> { model().send(Kit.request()) }
             assertEquals(0L, error.retryAfterMs, "the wait still reaches the caller")
             assertEquals(1, server.requestCount)
         }
@@ -71,10 +72,10 @@ class OneRequestPerAttemptTest {
     ) {
         val model = model(timeouts)
         server.enqueueSse(success)
-        model.complete(Kit.request())
+        model.send(Kit.request())
         server.enqueue(MockResponse.Builder().onResponseStart(SocketEffect.CloseSocket()).build())
         server.enqueueSse(success)
-        assertThrows<ModelError.Network> { model.complete(Kit.request()) }
+        assertThrows<ModelError.Network> { model.send(Kit.request()) }
         assertEquals(2, server.requestCount, "one request per call")
         val first = server.next().connectionIndex
         val second = server.next().connectionIndex
@@ -101,7 +102,7 @@ class OneRequestPerAttemptTest {
                     .build(),
             )
             server.enqueueSse(success)
-            val error = assertThrows<ModelError.InvalidRequest> { model().complete(Kit.request()) }
+            val error = assertThrows<ModelError.InvalidRequest> { model().send(Kit.request()) }
             assertNull(error.param)
             assertTrue(error.detail.contains("/v2/chat/completions"), "the target is named: ${error.detail}")
             assertTrue(error.detail.contains("base URL"), "the fix is named: ${error.detail}")

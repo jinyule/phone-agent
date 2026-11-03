@@ -4,6 +4,7 @@ import dev.phoneagent.core.ids.ModelId
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
 import dev.phoneagent.core.model.openai.Kit.json
 import dev.phoneagent.core.model.openai.Kit.next
+import dev.phoneagent.core.model.openai.Kit.send
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonPrimitive
 import mockwebserver3.junit5.StartStop
@@ -52,7 +53,7 @@ class OfficialEndpointTest {
             Kit
                 .adapters(Keys(), routedToServer())
                 .unprobed(profile, ModelId("gpt-test"), Kit.capabilities(), Kit.blobs())
-                .complete(Kit.request(maxOutputTokens = 256))
+                .send(Kit.request(maxOutputTokens = 256))
             val body = server.next().json()
             assertEquals(JsonPrimitive(256), body["max_completion_tokens"])
             assertFalse("max_tokens" in body, "the deprecated field is not sent")

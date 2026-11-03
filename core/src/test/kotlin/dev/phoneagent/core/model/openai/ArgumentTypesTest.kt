@@ -5,6 +5,7 @@ import dev.phoneagent.core.model.ModelError
 import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.openai.Kit.base
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
+import dev.phoneagent.core.model.openai.Kit.send
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.junit5.StartStop
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -81,7 +82,7 @@ class ArgumentTypesTest {
         expected: String,
     ) = runTest {
         enqueueCall(protocol, arguments.takeIf { it != "absent" })
-        val reply = model(protocol).complete(Kit.request())
+        val reply = model(protocol).send(Kit.request())
         assertEquals(listOf(expected), reply.toolCalls.map { it.argsJson })
     }
 
@@ -91,7 +92,7 @@ class ArgumentTypesTest {
         runTest {
             enqueueCall(protocol, NUMBER)
             // Any type: a failure message must not print an error before it is checked.
-            val error = assertThrows<Throwable> { model(protocol, NUMBER).complete(Kit.request()) }
+            val error = assertThrows<Throwable> { model(protocol, NUMBER).send(Kit.request()) }
             assertFalse(error.stackTraceToString().contains(NUMBER), "the error holds the key (value not shown)")
             assertTrue(
                 error is ModelError.BadResponse && CredentialEcho.discardsStreamed(error),

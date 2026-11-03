@@ -7,7 +7,9 @@ import dev.phoneagent.core.ids.ToolCallId
 import dev.phoneagent.core.model.BlobSource
 import dev.phoneagent.core.model.ChatModel
 import dev.phoneagent.core.model.ChatRequest
+import dev.phoneagent.core.model.ChatResponse
 import dev.phoneagent.core.model.Credential
+import dev.phoneagent.core.model.CredentialKind
 import dev.phoneagent.core.model.CredentialResolver
 import dev.phoneagent.core.model.Delta
 import dev.phoneagent.core.model.Message
@@ -20,6 +22,7 @@ import dev.phoneagent.core.model.ReasoningLevel
 import dev.phoneagent.core.model.Role
 import dev.phoneagent.core.model.SecretRef
 import dev.phoneagent.core.model.ToolDef
+import dev.phoneagent.core.model.WireProfile
 import dev.phoneagent.core.ports.Clock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.serialization.json.Json
@@ -94,6 +97,10 @@ internal object Kit {
 
     fun user(text: String): Message = Message(Role.USER, listOf(Part.Text(text)))
 
+    /**
+     * A request with [UNPREPARED] as its snapshot, which every model refuses: send it with [send],
+     * which puts in what the model's `prepare` gives, as the agent does.
+     */
     fun request(
         vararg messages: Message,
         tools: List<ToolDef> = listOf(WEATHER),
@@ -105,9 +112,25 @@ internal object Kit {
             system = listOfNotNull(system?.let { PromptBlock("sys", it) }),
             tools = tools,
             messages = messages.toList().ifEmpty { listOf(user("Weather in Paris?")) },
+            wire = UNPREPARED,
             maxOutputTokens = maxOutputTokens,
             reasoning = reasoning,
         )
+
+    /** A snapshot no adapter maps: a request still carrying it was never prepared. */
+    val UNPREPARED: WireProfile = WireProfile(Int.MAX_VALUE, CredentialKind.NONE)
+
+    /** [request] with the level and snapshot this model's `prepare` gives for its level, then completed. */
+    suspend fun ChatModel.send(
+        request: ChatRequest,
+        onDelta: (Delta) -> Unit = {},
+    ): ChatResponse = complete(prepared(request), onDelta)
+
+    /** [request] with the level and snapshot this model's `prepare` gives for its level. */
+    fun ChatModel.prepared(request: ChatRequest): ChatRequest {
+        val settings = prepare(request.reasoning)
+        return request.copy(reasoning = settings.reasoning, wire = settings.wire)
+    }
 
     /** Call ids `call_gen_1`, `call_gen_2`, … */
     fun ids(): () -> String {

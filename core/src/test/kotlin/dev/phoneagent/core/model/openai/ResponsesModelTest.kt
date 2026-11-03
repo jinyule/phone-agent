@@ -13,6 +13,7 @@ import dev.phoneagent.core.model.openai.Kit.enqueueError
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
 import dev.phoneagent.core.model.openai.Kit.json
 import dev.phoneagent.core.model.openai.Kit.next
+import dev.phoneagent.core.model.openai.Kit.send
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
@@ -46,7 +47,7 @@ class ResponsesModelTest {
     fun `posts a stateless streamed request`() =
         runTest {
             server.enqueueSse(completed)
-            val reply = model().complete(Kit.request(maxOutputTokens = 100))
+            val reply = model().send(Kit.request(maxOutputTokens = 100))
             assertEquals(listOf(Part.Text("Hi")), reply.parts)
             val sent = server.next()
             assertEquals("/v1/responses", sent.url.encodedPath)
@@ -65,7 +66,7 @@ class ResponsesModelTest {
             server.enqueueError(401, """{"error":{"message":"token expired"}}""")
             server.enqueueSse(completed)
             val keys = Keys("plan-token-old", "plan-token-new")
-            model(Kit.PLAN, keys).complete(Kit.request(maxOutputTokens = 100))
+            model(Kit.PLAN, keys).send(Kit.request(maxOutputTokens = 100))
             assertEquals(listOf(Kit.PLAN to false, Kit.PLAN to true), keys.asked)
             server.next().assertBearer("plan-token-old")
             val retried = server.next()
@@ -78,7 +79,7 @@ class ResponsesModelTest {
         runTest {
             server.enqueueError(401, "{}")
             server.enqueueError(401, "{}")
-            assertThrows<ModelError.SignInExpired> { model(Kit.PLAN, Keys("a", "b")).complete(Kit.request()) }
+            assertThrows<ModelError.SignInExpired> { model(Kit.PLAN, Keys("a", "b")).send(Kit.request()) }
             assertEquals(2, server.requestCount)
         }
 
@@ -87,7 +88,7 @@ class ResponsesModelTest {
         runTest {
             server.enqueueError(401, """{"error":{"message":"Incorrect API key","code":"invalid_api_key"}}""")
             val keys = Keys()
-            assertThrows<ModelError.Auth> { model(keys = keys).complete(Kit.request()) }
+            assertThrows<ModelError.Auth> { model(keys = keys).send(Kit.request()) }
             assertEquals(1, keys.asked.size)
             assertEquals(1, server.requestCount)
         }
@@ -96,16 +97,16 @@ class ResponsesModelTest {
     fun `plan 403 is not eligible`() =
         runTest {
             server.enqueueError(403, """{"detail":"Your plan does not include this."}""")
-            assertThrows<ModelError.PlanNotEligible> { model(Kit.PLAN).complete(Kit.request()) }
+            assertThrows<ModelError.PlanNotEligible> { model(Kit.PLAN).send(Kit.request()) }
         }
 
     @Test
     fun `other failures go to the caller at once`() =
         runTest {
             server.enqueueError(400, """{"error":{"message":"input[0]: bad","param":"input"}}""")
-            assertEquals("input", assertThrows<ModelError.InvalidRequest> { model().complete(Kit.request()) }.param)
+            assertEquals("input", assertThrows<ModelError.InvalidRequest> { model().send(Kit.request()) }.param)
             server.enqueueError(500, """{"error":{"message":"include broke"}}""")
-            assertThrows<ModelError.Server> { model().complete(Kit.request()) }
+            assertThrows<ModelError.Server> { model().send(Kit.request()) }
             assertEquals(2, server.requestCount)
         }
 
@@ -115,7 +116,7 @@ class ResponsesModelTest {
             server.enqueueSse(completed)
             val profile = Kit.profile(server.base(), protocol = ModelProtocol.OPENAI_RESPONSES)
             val wire = WireOptions(responses = ResponsesQuirks(includeEncryptedReasoning = false))
-            Kit.adapters().model(profile, Kit.MODEL, Kit.capabilities(), Kit.blobs(), wire).complete(Kit.request())
+            Kit.adapters().model(profile, Kit.MODEL, Kit.capabilities(), Kit.blobs(), wire).send(Kit.request())
             assertFalse("include" in server.next().json())
         }
 
@@ -135,7 +136,7 @@ class ResponsesModelTest {
             server.enqueueSse(completed)
             val model = model()
             val deltas = Deltas()
-            val reply = model.complete(Kit.request(), deltas)
+            val reply = model.send(Kit.request(), deltas)
             val reasoning = reply.parts.single() as Part.Reasoning
             assertEquals(ReasoningKind.RESPONSES_ENCRYPTED, reasoning.kind)
             assertEquals("raw", reasoning.summary)
@@ -148,7 +149,7 @@ class ResponsesModelTest {
                     dev.phoneagent.core.model
                         .Message(dev.phoneagent.core.model.Role.ASSISTANT, reply.parts),
                 )
-            model.complete(history)
+            model.send(history)
             val input = server.next().json()["input"] as JsonArray
             assertEquals(
                 kotlinx.serialization.json.Json
@@ -166,39 +167,39 @@ class ResponsesModelTest {
                         """{"error":{"code":"server_is_overloaded","message":"busy"}}}""",
                 ),
             )
-            assertThrows<ModelError.Overloaded> { model().complete(Kit.request()) }
+            assertThrows<ModelError.Overloaded> { model().send(Kit.request()) }
             server.enqueueSse(event("""{"type":"error","error":{"code":"insufficient_quota","message":"pay"}}"""))
-            assertThrows<ModelError.QuotaExceeded> { model().complete(Kit.request()) }
+            assertThrows<ModelError.QuotaExceeded> { model().send(Kit.request()) }
             server.enqueueSse(event("""not json"""))
-            assertThrows<ModelError.BadResponse> { model().complete(Kit.request()) }
+            assertThrows<ModelError.BadResponse> { model().send(Kit.request()) }
             server.enqueueSse(event("""[1]"""))
-            assertThrows<ModelError.BadResponse> { model().complete(Kit.request()) }
+            assertThrows<ModelError.BadResponse> { model().send(Kit.request()) }
             server.enqueueSse(
                 event("""{"type":"response.output_item.done","item":{"type":"function_call","name":"x"}}""") +
                     event("""{"type":"response.completed","response":{"status":"completed"}}"""),
             )
-            assertThrows<ModelError.BadResponse> { model().complete(Kit.request()) }
+            assertThrows<ModelError.BadResponse> { model().send(Kit.request()) }
             server.enqueueSse(
                 event(
                     """{"type":"response.output_item.done","item":{"type":"function_call","name":"x","call_id":" "}}""",
                 ) +
                     event("""{"type":"response.completed","response":{"status":"completed"}}"""),
             )
-            assertThrows<ModelError.BadResponse> { model().complete(Kit.request()) }
+            assertThrows<ModelError.BadResponse> { model().send(Kit.request()) }
             server.enqueue(
                 mockwebserver3.MockResponse
                     .Builder()
                     .body("{\"error\":{\"code\":\"rate_limit_exceeded\",\"message\":\"later\"}}")
                     .build(),
             )
-            assertThrows<ModelError.RateLimited> { model().complete(Kit.request()) }
+            assertThrows<ModelError.RateLimited> { model().send(Kit.request()) }
             server.enqueueSse(
                 event(
                     """{"type":"response.output_item.added",""" +
                         """"item":{"type":"function_call","name":"x","call_id":" "}}""",
                 ),
             )
-            assertThrows<ModelError.BadResponse> { model().complete(Kit.request()) }
+            assertThrows<ModelError.BadResponse> { model().send(Kit.request()) }
         }
 
     @Test
@@ -214,11 +215,11 @@ class ResponsesModelTest {
                     "event: response.incomplete\ndata: {\"response\":{\"status\":\"incomplete\"}}\n\n",
             )
             val deltas = Deltas()
-            val reply = model().complete(Kit.request(), deltas)
+            val reply = model().send(Kit.request(), deltas)
             assertEquals(emptyList<Part>(), reply.parts)
             assertEquals(StopReason.OTHER, reply.stopReason)
             assertEquals("A", deltas.text)
             server.enqueueSse(event("""{"type":"response.completed","response":{"status":"completed"}}"""))
-            assertEquals(StopReason.END_TURN, model().complete(Kit.request()).stopReason)
+            assertEquals(StopReason.END_TURN, model().send(Kit.request()).stopReason)
         }
 }

@@ -6,6 +6,7 @@ import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.openai.Kit.base
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
+import dev.phoneagent.core.model.openai.Kit.send
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
@@ -76,7 +77,7 @@ class DeltaConsistencyTest {
                 val end = """{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"""
                 server.enqueueSse(Kit.sse(*chunks.toTypedArray(), end))
                 val deltas = Deltas()
-                val response = chat().complete(Kit.request(), deltas)
+                val response = chat().send(Kit.request(), deltas)
                 val label = "pieces of $size: ${JsonPrimitive(answer)}"
                 assertEquals(calls, response.toolCalls.size, label)
                 assertEquals(if (calls == 0) answer else "", text(response), label)
@@ -112,7 +113,7 @@ class DeltaConsistencyTest {
             val order = if (summaryFirst) arrayOf(summary, raw) else arrayOf(raw, summary)
             server.enqueueSse(reasoningStream(*order))
             val deltas = Deltas()
-            val response = responses().complete(Kit.request(), deltas)
+            val response = responses().send(Kit.request(), deltas)
             assertEquals(if (summaryFirst) "summary" else "private", summaries(response))
             assertEquals(summaries(response), deltas.reasoning, "the deltas follow the channel the summary uses")
             assertNull(response.providerMetadata?.get(PREVIEW_DIVERGED))
@@ -131,7 +132,7 @@ class DeltaConsistencyTest {
                 ).joinToString("") { "data: $it\n\n" },
             )
             val deltas = Deltas()
-            val response = responses().complete(Kit.request(), deltas)
+            val response = responses().send(Kit.request(), deltas)
             assertEquals(final, text(response), "the final output is the reply")
             val flagged = response.providerMetadata?.get(PREVIEW_DIVERGED)
             assertEquals(if (contradict) JsonArray(listOf(JsonPrimitive("text"))) else null, flagged)
@@ -150,7 +151,7 @@ class DeltaConsistencyTest {
                 ).joinToString("") { "data: $it\n\n" },
             )
             val deltas = Deltas()
-            val response = responses().complete(Kit.request(), deltas)
+            val response = responses().send(Kit.request(), deltas)
             assertEquals(emptyList<Part.ToolCall>(), response.toolCalls, "the final output is the reply")
             assertEquals(listOf("call_1"), deltas.started.map { it.id.value }, "the preview showed it")
             assertEquals(JsonArray(listOf(JsonPrimitive("calls"))), response.providerMetadata?.get(PREVIEW_DIVERGED))
@@ -170,7 +171,7 @@ class DeltaConsistencyTest {
                 ).joinToString("") { "data: $it\n\n" },
             )
             val deltas = Deltas()
-            val response = responses().complete(Kit.request(), deltas)
+            val response = responses().send(Kit.request(), deltas)
             assertEquals(
                 listOf("call_1", "call_2"),
                 response.toolCalls.map { it.id.value },

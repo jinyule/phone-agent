@@ -3,12 +3,13 @@ package dev.phoneagent.core.model.openai
 import dev.phoneagent.core.ids.ModelId
 import dev.phoneagent.core.ids.ProviderId
 import dev.phoneagent.core.model.ChatRequest
+import dev.phoneagent.core.model.ImageMode
 import dev.phoneagent.core.model.Message
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.ReasoningKind
-import dev.phoneagent.core.model.ReasoningLevel
 import dev.phoneagent.core.model.Role
 import dev.phoneagent.core.model.ToolDef
+import dev.phoneagent.core.model.WireProfile
 import dev.phoneagent.core.model.openai.WireSupport.IMAGE_OMITTED
 import dev.phoneagent.core.model.openai.WireSupport.TEXT_SEPARATOR
 import kotlinx.serialization.json.JsonArray
@@ -111,15 +112,16 @@ public enum class ReasoningEffortStyle {
 internal class ChatCompletionsWire(
     private val provider: ProviderId,
     private val model: ModelId,
-    private val reasoningField: String?,
-    private val echoReasoning: Boolean,
-    private val vision: Boolean,
-    private val reasoningLevels: List<ReasoningLevel>?,
+    private val wire: WireProfile,
 ) {
+    private val reasoningField = wire.reasoningField
+    private val echoReasoning = wire.echoReasoning
+    private val vision = wire.images == ImageMode.INLINE
+
+    /** [request] as sent; its own snapshot is [wire]. */
     fun body(
         request: ChatRequest,
         images: ImageData,
-        options: ChatQuirks,
     ): JsonObject =
         buildJsonObject {
             put("model", model.value)
@@ -127,18 +129,12 @@ internal class ChatCompletionsWire(
             if (request.tools.isNotEmpty()) {
                 put("tools", JsonArray(request.tools.map(::tool)))
                 put("tool_choice", "auto")
-                if (options.parallelToolCalls) put("parallel_tool_calls", false)
+                if (wire.disableParallelToolCalls) put("parallel_tool_calls", false)
             }
-            request.maxOutputTokens?.let { put(options.maxTokensField.wireName, it) }
-            WireSupport.effort(request.reasoning, reasoningLevels)?.let { effort ->
-                when (options.reasoningEffort) {
-                    ReasoningEffortStyle.NONE -> Unit
-                    ReasoningEffortStyle.REASONING_EFFORT -> put("reasoning_effort", effort)
-                    ReasoningEffortStyle.OPENROUTER -> putJsonObject("reasoning") { put("effort", effort) }
-                }
-            }
+            wire.maxTokensField?.let { field -> request.maxOutputTokens?.let { put(field, it) } }
+            wire.reasoningEffort?.let { WireSupport.put(this, it) }
             put("stream", true)
-            if (options.streamUsage) putJsonObject("stream_options") { put("include_usage", true) }
+            if (wire.streamOptions) putJsonObject("stream_options") { put("include_usage", true) }
         }
 
     private fun messages(

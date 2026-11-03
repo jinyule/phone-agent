@@ -4,6 +4,7 @@ import dev.phoneagent.core.model.ModelError
 import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.openai.Kit.base
 import dev.phoneagent.core.model.openai.Kit.enqueueSse
+import dev.phoneagent.core.model.openai.Kit.send
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
@@ -120,7 +121,7 @@ class ParseErrorRedactionTest {
                 Kit.blobs(),
                 WireOptions.defaultsFor(profile),
             )
-        return assertThrows<ModelError.BadResponse> { model.complete(Kit.request()) }
+        return assertThrows<ModelError.BadResponse> { model.send(Kit.request()) }
     }
 
     @ParameterizedTest
