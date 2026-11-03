@@ -247,13 +247,45 @@ class LexiconTest {
                 "#send/receive",
                 "@post/reply",
             )
-        val read = { label: String ->
-            listOf(lexicon.ofControl(label), lexicon.classify(label), lexicon.inContext(label), lexicon.ofLabel(label))
-        }
         assertAll(
             marked.map { label ->
-                Executable { assertEquals(listOf<Hit?>(null, null, null, null), read(label), label) }
+                Executable { assertEquals(listOf<Hit?>(null, null, null, null), readings(label), label) }
             },
+        )
+    }
+
+    /** What the four readings of [label] find: as a control's own label, a row's text, a dialog's text, any label. */
+    private fun readings(label: String): List<Hit?> =
+        listOf(lexicon.ofControl(label), lexicon.classify(label), lexicon.inContext(label), lexicon.ofLabel(label))
+
+    @Test
+    fun `a word in other quotes or brackets, or before 、 or ⋯, joins as one in “ ” or before 。 does`() {
+        // Claude r8 S-1. Each mark once where it decides: an opening one at the start of a label (the
+        // end of a label is left out anyway), a closing one before more text.
+        val deletes = List(4) { Hit(IntentKind.DELETE, "delete", sends = true) }
+        val pairs =
+            listOf(
+                "«" to "»",
+                "„" to "“",
+                "‚" to "‘",
+                "‹" to "›",
+                "`" to "`",
+                "〝" to "〞",
+                "〔" to "〕",
+                "〖" to "〗",
+            )
+        val opening = pairs.map { (open, close) -> "${open}Send&delete$close" to "“Send&delete”" }
+        val closing =
+            pairs.filter { (_, close) -> close in "»›〞〕〗" }.map { (open, close) ->
+                "${open}Send&delete$close 确定吗" to "“Send&delete” 确定吗"
+            }
+        val stops = listOf("、", "⋯").map { stop -> "Send&delete$stop 确定吗" to "Send&delete。 确定吗" }
+        val like = opening + closing + stops
+        assertAll(
+            like.map { (label, quoted) -> Executable { assertEquals(readings(quoted), readings(label), label) } } +
+                like.map { (_, quoted) -> quoted }.distinct().map { quoted ->
+                    Executable { assertEquals(deletes, readings(quoted), quoted) }
+                },
         )
     }
 
