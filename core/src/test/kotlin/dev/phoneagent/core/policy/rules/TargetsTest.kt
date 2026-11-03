@@ -324,6 +324,12 @@ class TargetsTest {
         val settings = screen(field("f1", focused = true), pkg = Pages.SETTINGS)
         val submit = call("phone_type", "text" to "abc", "submit" to true)
         assertEquals(ConfirmReason.SETTINGS, reason(decide(submit, sent(settings))))
+        // Enter there is the same submit, also with no field focused.
+        val enter = call("phone_key", "key" to "enter")
+        assertEquals(ConfirmReason.SETTINGS, reason(decide(enter, sent(settings))))
+        val unfocused = screen(field("f1"), pkg = Pages.SETTINGS)
+        assertEquals(ConfirmReason.SETTINGS, reason(decide(enter, sent(unfocused))))
+        assertEquals(ConfirmReason.SETTINGS, reason(decide(enter, sent(screen(pkg = Pages.SETTINGS)))))
         // A control on a field's row that deletes as well as sends still makes it no search field.
         val row =
             screen(

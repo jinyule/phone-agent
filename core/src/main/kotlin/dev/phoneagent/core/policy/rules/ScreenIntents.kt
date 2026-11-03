@@ -132,8 +132,9 @@ internal class ScreenIntents(
     }
 
     /**
-     * Enter: on a payment page it pays; in a field it sends unless the field searches; on a focused
-     * control it activates it; with nothing focused it sends unless every field searches.
+     * Enter: on a payment page it pays; in a field it submits unless the field searches; on a
+     * focused control it activates it; with nothing focused it submits unless every field searches.
+     * Submitting changes settings in the settings app, as typing there does, and sends elsewhere.
      */
     private fun key(
         key: SystemKey,
@@ -146,7 +147,7 @@ internal class ScreenIntents(
                 key != SystemKey.ENTER -> IntentKind.NAVIGATE
                 pressed != null -> pressed.kind
                 pages.isPayment(screen) -> IntentKind.SPEND
-                focused != null -> if (searches.isSearch(focused, screen)) IntentKind.NAVIGATE else IntentKind.OUTWARD
+                focused != null -> if (searches.isSearch(focused, screen)) IntentKind.NAVIGATE else submitted(screen)
                 else -> enterUnfocused(screen)
             }
         return ActionIntent(kind, screen.pkg, if (pressed == null) focused else pressed.target)
@@ -155,8 +156,12 @@ internal class ScreenIntents(
     private fun enterUnfocused(screen: ScreenSnapshot): IntentKind {
         val fields = screen.elements.filter(Elements::editable)
         val searches = fields.isNotEmpty() && fields.all { this.searches.isSearch(it, screen) }
-        return if (searches) IntentKind.NAVIGATE else IntentKind.OUTWARD
+        return if (searches) IntentKind.NAVIGATE else submitted(screen)
     }
+
+    /** What Enter that does not search does on [screen]: changes settings in the settings app, else sends. */
+    private fun submitted(screen: ScreenSnapshot): IntentKind =
+        if (screen.pkg == Pages.SETTINGS) IntentKind.SETTINGS else IntentKind.OUTWARD
 }
 
 /** Roles that set a value when scrolled. */
