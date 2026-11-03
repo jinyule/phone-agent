@@ -147,6 +147,7 @@ class AdbConnectionTest {
         "UnknownCommand, PROTOCOL",
         "UnsolicitedOkay, PROTOCOL",
         "ToUnknownStream, PROTOCOL",
+        "CloseBeforeOkayWithId, PROTOCOL",
     )
     fun `a broken stream fails with its class and closes the session`(
         name: String,
@@ -641,6 +642,7 @@ class AdbConnectionTest {
                 "UnknownCommand" to Reply.UnknownCommand,
                 "UnsolicitedOkay" to Reply.UnsolicitedOkay,
                 "ToUnknownStream" to Reply.ToUnknownStream,
+                "CloseBeforeOkayWithId" to Reply.CloseBeforeOkayWithId,
             )
     }
 }

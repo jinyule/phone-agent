@@ -79,6 +79,9 @@ class FakeAdbd(
 
         data object Refuse : Reply
 
+        /** Before its OKAY, the stream is closed with a CLSE that carries a remote id (adbd refuses with 0). */
+        data object CloseBeforeOkayWithId : Reply
+
         data object CloseWithoutExit : Reply
 
         data object DropConnection : Reply
@@ -329,6 +332,7 @@ class FakeAdbd(
         val early =
             when {
                 reply == Reply.Refuse -> packet(Aosp.A_CLSE, 0, stream.clientId)
+                reply == Reply.CloseBeforeOkayWithId -> packet(Aosp.A_CLSE, stream.myId, stream.clientId)
                 reply == Reply.WriteBeforeOkay -> packet(Aosp.A_WRTE, stream.myId, stream.clientId, byteArrayOf(1))
                 reply == Reply.OkayWithoutId -> packet(Aosp.A_OKAY, 0, stream.clientId)
                 else -> null
