@@ -124,15 +124,19 @@ public sealed interface Verdict {
  * @property taskId the task.
  * @property level user-selected security level.
  * @property unattended no user is watching (scheduled tasks): spending is always refused.
- * @property screen the screen the call is judged on, derived from the log: the latest screen
+ * @property screen the screen the call is judged on, derived from the log: the newest screen
  *   recorded under a call that already has its `tool/result` (a `screen/snapshot`, the re-check
- *   screen S' included, or the `after` screen of a `screen/action` or `screen/launch`), provided
- *   no boundary came after it. Boundaries: `handoff/start`, `handoff/end`, `session/resumed`, the
+ *   screen S' and the look after a handoff included, or the `after` screen of a `screen/action`
+ *   or `screen/launch`), unless a boundary that may have changed the screen came after it. Each
+ *   boundary hides every screen recorded before it: `handoff/start` and `handoff/end` (so the
+ *   screens recorded while handed over too, however the handoff ended), `session/resumed`, the
  *   `tool/started` of a non-READ call (by the intent of the verdict it started on), and every
  *   `screen/action` and `screen/launch`, whose own `after` screen counts as recorded after them.
- *   It may be newer than what the model saw. During the re-check after approval it is S',
- *   recorded under this call. `null` when there is no such screen (none read, a read failed, or
- *   a boundary came after the last one), screen tools included: the policy decides.
+ *   Screens of a call without a result yet, and screens under no call, do not count. It may be
+ *   newer than what the model saw. During the re-check after approval it is S', recorded under
+ *   this call. `null` when there is no such screen (none read, a read failed, or a boundary came
+ *   after the last one), screen tools included: the policy decides, and screen-bound actions get
+ *   NO_SCREEN, telling the model to observe first.
  * @property operatedPackages the `intent.pkg` of every non-READ call that started in this task
  *   (`tool/started`), taking the intent of the verdict it started on (`verdictSeq`); this includes
  *   the target package of `phone_launch`. A refused or handed-off call, one waiting for or denied

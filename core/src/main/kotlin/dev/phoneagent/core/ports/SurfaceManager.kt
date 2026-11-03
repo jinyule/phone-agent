@@ -26,7 +26,12 @@ public interface SurfaceManager {
      * Moves [task]'s app to the main display so the user can act; see [takeBack]. Throws
      * [ScreenUnavailableException] when it cannot be moved; nothing has moved then. The runtime
      * ends the handoff without asking the user and records `handoff/end` with
-     * [HandoffResult.FAILED] and the exception message as detail.
+     * [HandoffResult.FAILED] and a detail naming the move and the exception's class only.
+     *
+     * Cancelling it may leave the move half done: the app may have moved, and no ticket came back
+     * to take it back with. The runtime counts a cancelled hand-over as a failed take-back (the
+     * call ends with [ScreenUnavailableException], see `ToolInteraction.handOff`) and never calls
+     * [takeBack] for it.
      */
     public suspend fun handToUser(
         task: TaskId,
@@ -37,7 +42,14 @@ public interface SurfaceManager {
      * Moves the app back to the agent display after a handoff. The caller must observe again.
      * Throws [ScreenUnavailableException] when it cannot be moved back; the app stays on the main
      * display and [ticket] is spent. The runtime then records `handoff/end` with
-     * [HandoffResult.FAILED] and the exception message as detail, whatever the user answered.
+     * [HandoffResult.FAILED] and a detail naming the move and the exception's class only, whatever
+     * the user answered.
+     *
+     * A handoff its call cuts off (its budget, a cancellation inside the tool) is taken back at
+     * once, waiting at most `LoopConfig.takeBackTimeoutMs`; it is closed with `prompt/withdrawn`,
+     * not `handoff/end`. On a stop or a shutdown the app stays with the user. Cancelling this
+     * call may leave the move unfinished; the runtime counts a cancelled take-back as failed and
+     * does not call it again for the same ticket.
      */
     public suspend fun takeBack(ticket: HandoffTicket): SurfaceRef
 }

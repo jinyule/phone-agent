@@ -190,8 +190,8 @@ public data class HandoffStarted(
 ) : SessionEvent
 
 /**
- * `handoff/end`: the task is back on the agent display (or never left it); the next step must
- * observe first.
+ * `handoff/end`: the handoff ended: the task is back on the agent display, never left it, or
+ * could not be moved ([HandoffResult.FAILED]); the next step must observe first.
  *
  * @property promptId the prompt.
  * @property result the result returned to the waiting call.
@@ -212,8 +212,10 @@ public data class HandoffEnded(
 /**
  * `prompt/withdrawn`: the prompt at [promptId] (card, question or handoff) was withdrawn without an
  * answer. Either the task stopped (or died) while it waited, and the waiting call was cancelled
- * and got no result; or the call cut its own wait off (its budget, a cancellation inside the tool)
- * and went on to its result, which follows this record.
+ * and got no result; or the prompt was cut off while the task went on (the call's budget, a
+ * cancellation inside the tool, a failure), and the call goes on to its result, which follows this
+ * record. A handoff cut off so has its app taken back first, or its call ends with a failed
+ * take-back (`ToolInteraction.handOff`).
  */
 @Serializable
 @SerialName("prompt/withdrawn")
