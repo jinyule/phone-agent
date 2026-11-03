@@ -133,6 +133,18 @@ class LexiconTest {
         val links =
             listOf("example.com/buy", "https://www.example.com/checkout/cart", "example.com/remove-background-tips")
         links.forEach { assertNull(lexicon.ofControl(it), it) }
+        // Claude r5's addresses; numbers are read as spaces, so "x=1&pay=2" leaves "&pay", which a sign starts.
+        val addresses =
+            listOf(
+                "https://a.com/?x=1&pay=2",
+                "https://shop.example.com/pay?id=12&ref=abc",
+                "Check this: https://example.com/delete-account-guide",
+                "https://example.com/blog/remove-background-tips",
+                "Download/Remove.txt",
+                "medium.com/@alice/post-about-cats",
+                "看看这个 https://example.com/send/abc",
+            )
+        addresses.forEach { assertNull(lexicon.ofControl(it), it) }
         // A sign joins alone between spaces, not at the edge of a word: an address wrapped after its slash.
         val wrapped = listOf("https://www.example.com/\ncheckout/cart", "example.com/ remove-background-tips")
         wrapped.forEach { assertNull(lexicon.ofControl(it), it) }

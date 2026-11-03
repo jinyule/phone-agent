@@ -130,7 +130,7 @@ internal object Words {
      * & send", "Save + post", "Delete, then send". Only the joiner itself is taken: "and" and
      * "then" as whole words, at word boundaries, so joiners in a row ("and then", "& then") each
      * split and so do hyphenated ones ("Send-and-delete"); an [ENGLISH_SIGNS] sign that stands
-     * alone between spaces, as one does once spaced out of a word of Latin letters and that sign
+     * alone between spaces, as one does once spaced out from between the Latin letters of a word
      * ([ENGLISH_SIGNS]). The spaces and commas around a joiner stay with the parts, which are read
      * without them. A control's own label and a dialog also split at [ENGLISH_PAUSES]. Each part is
      * read by the [ENGLISH_PREFIX] phrase it starts with, never as an [ENGLISH_EXACT] one, and only
@@ -148,9 +148,10 @@ internal object Words {
 
     /**
      * Signs that join two actions ("Send & delete", "Save + post", "Send / delete"; full-width
-     * forms are these after NFKC). Without spaces they join only inside a word made of Latin
-     * letters and that one sign ("Send&delete", "Send+pay", "Send/delete", "R&D"), read then as
-     * if spaced; in any other word they are part of it ("example.com/buy",
+     * forms are these after NFKC). Without spaces they join only between the letters of a word
+     * made of Latin letters and that one sign ("Send&delete", "Send+pay", "Send/delete", "R&D"),
+     * read then as if spaced; at either end of a word ("Send& delete", "&pay" of "?x=1&pay=2",
+     * numbers read as spaces) or in any other word they are part of it ("example.com/buy",
      * "https://www.example.com/checkout/cart"). Names so joined ("Q&A", "Photos/Videos") split
      * into parts that start with no phrase; "Add/Remove" removes.
      */

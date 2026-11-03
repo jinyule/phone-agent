@@ -116,14 +116,16 @@ private fun englishPhrase(
 
 /**
  * [text] with the sign of each word made of Latin letters and one [Words.ENGLISH_SIGNS] sign
- * spaced out ("send&delete" → "send & delete"), so [Words.ENGLISH_JOINERS] splits there; any
- * other word keeps its signs ("example.com/buy"). One pass over [text].
+ * between them spaced out ("send&delete" → "send & delete"), so [Words.ENGLISH_JOINERS] splits
+ * there; a word that starts or ends with the sign keeps it ("&pay", left of "?x=1&pay=2" once
+ * numbers are read as spaces), and so does any other word ("example.com/buy"). One pass over [text].
  */
 private fun spacedSigns(text: String): String =
     WORD.replace(text) { found ->
         val word = found.value
         val sign = word.firstOrNull { it in Words.ENGLISH_SIGNS } ?: return@replace word
-        if (word.all { it == sign || isLatinLetter(it) }) word.replace("$sign", " $sign ") else word
+        val between = isLatinLetter(word.first()) && isLatinLetter(word.last())
+        if (between && word.all { it == sign || isLatinLetter(it) }) word.replace("$sign", " $sign ") else word
     }
 
 /** A run of characters other than spaces. */
