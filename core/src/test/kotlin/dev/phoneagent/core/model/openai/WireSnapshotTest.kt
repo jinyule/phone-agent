@@ -271,6 +271,22 @@ class WireSnapshotTest {
     }
 
     @Test
+    fun `a snapshot logged before the caller changes its leaked-call formats is still sent`() =
+        runTest {
+            val declared = mutableSetOf(LeakedCallFormat.DSML)
+            val recovered = mutableSetOf(LeakedCallFormat.DSML)
+            val defaults = WireOptions()
+            val options = defaults.copy(chat = ChatQuirks(leakedCallFormats = declared, recoverLeakedCalls = recovered))
+            val model = model(options = options)
+            val logged = model.prepare(null).wire
+            declared.clear()
+            recovered.clear()
+            val body = sent(model, request(logged)).json()
+            assertEquals(1, server.requestCount, "the logged snapshot is sent")
+            assertTrue("messages" in body)
+        }
+
+    @Test
     fun `a request still carrying the unprepared snapshot is refused`() =
         runTest {
             assertThrows<ModelError.InvalidRequest> { model().complete(Kit.request()) }
