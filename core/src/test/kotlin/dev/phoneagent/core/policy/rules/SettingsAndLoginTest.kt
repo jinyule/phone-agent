@@ -4,6 +4,7 @@ import dev.phoneagent.core.policy.PolicyContext
 import dev.phoneagent.core.policy.SecurityLevel
 import dev.phoneagent.core.policy.Verdict
 import dev.phoneagent.core.policy.rules.Fx.box
+import dev.phoneagent.core.policy.rules.Fx.call
 import dev.phoneagent.core.policy.rules.Fx.ctx
 import dev.phoneagent.core.policy.rules.Fx.el
 import dev.phoneagent.core.policy.rules.Fx.field
@@ -195,6 +196,31 @@ class SettingsAndLoginTest {
                 pkg = Pages.SETTINGS,
             )
         assertEquals("hard.app_management", refusal(decide(tap("e9"), on(stop, level))))
+    }
+
+    @ParameterizedTest
+    @EnumSource(SecurityLevel::class)
+    fun `a dialog that manages the app is checked on every control a touch may reach`(level: SecurityLevel) {
+        // A small "取消" over a large "确定" in one window: either may take the touch.
+        val s =
+            screen(
+                text("t3", "要停用此应用吗？", box(100, 400, 900, 450)).copy(window = 2),
+                el("e8", "取消", bounds = box(450, 600, 550, 650)).copy(window = 2),
+                el("e9", "确定", bounds = box(400, 580, 800, 680)).copy(window = 2),
+                pkg = Pages.SETTINGS,
+            ).copy(activity = "com.android.settings.Settings\$AppStorageSettingsActivity")
+        val point = call("phone_tap", "screen" to "s1", "x" to 500, "y" to 625)
+        val swipe = call("phone_swipe", "x1" to 500, "y1" to 625, "x2" to 510, "y2" to 625)
+        assertEquals("hard.app_management", refusal(decide(point, on(s, level))))
+        assertEquals("hard.app_management", refusal(decide(swipe, on(s, level))))
+        // Only "取消" there: the touch leaves the dialog.
+        val alone = s.copy(elements = s.elements.filterNot { it.ref.value == "e9" })
+        assertFalse(decide(point, on(alone, level)) is Verdict.Refuse)
+        assertFalse(decide(swipe, on(alone, level)) is Verdict.Refuse)
+        // A scroll acts on its target alone: "取消", or the page.
+        val scroll = call("phone_scroll", "screen" to "s1", "ref" to "e8", "direction" to "down")
+        assertFalse(decide(scroll, on(s, level)) is Verdict.Refuse)
+        assertFalse(decide(call("phone_scroll", "direction" to "down"), on(s, level)) is Verdict.Refuse)
     }
 
     @ParameterizedTest

@@ -3,6 +3,7 @@ package dev.phoneagent.core.policy.rules
 import dev.phoneagent.core.policy.ElementRisk
 import dev.phoneagent.core.policy.IntentKind
 import dev.phoneagent.core.ports.ElementRole
+import dev.phoneagent.core.ports.ElementState
 import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.ports.UiElement
 import java.util.concurrent.ConcurrentHashMap
@@ -14,17 +15,22 @@ import java.util.concurrent.ConcurrentHashMap
  *   among equals), or `null` when there is no element there.
  * @property risk what activating it does, or `null` when ordinary.
  * @property texts all visible text on what the touch may reach: names, content and OCR.
- * @property candidates every element the touch may reach, smallest first; empty when there is none.
+ * @property reached every element the touch may reach with its own risk, smallest first; empty
+ *   when there is none.
  */
 internal data class Assessment(
     val target: UiElement?,
     val risk: ElementRisk?,
     val texts: List<String>,
-    val candidates: List<UiElement>,
+    val reached: List<Reached>,
 ) {
     /** The kind of what the touch does: [risk]'s, or NAVIGATE when ordinary. */
     val kind: IntentKind
         get() = if (risk == null) IntentKind.NAVIGATE else risk.kind
+
+    /** The elements of [reached]. */
+    val candidates: List<UiElement>
+        get() = reached.map(Reached::element)
 }
 
 /**
@@ -35,7 +41,7 @@ internal data class Assessment(
 internal class Risks(
     private val controls: Controls,
 ) {
-    private val byRisk: Comparator<Judged> = compareBy { severity(it.risk?.kind) }
+    private val byRisk: Comparator<Reached> = compareBy { severity(it.risk?.kind) }
 
     /** Clicks of a control, by the control and the OCR lines at the point; read once per snapshot. */
     private val clicks = PerScreen { ConcurrentHashMap<Pair<UiElement, List<String>>, Assessment>() }
@@ -86,6 +92,15 @@ internal class Risks(
         screen: ScreenSnapshot,
     ): Assessment = touches.of(screen).computeIfAbsent(point) { assess(Tree.under(screen, it.x, it.y), it, screen) }
 
+    /**
+     * What Enter on [screen] presses: the focused control, as a tap by ref on it ([activation]);
+     * `null` when nothing is focused or the focused element is an input.
+     */
+    fun pressed(screen: ScreenSnapshot): Assessment? {
+        val focused = screen.elements.firstOrNull { ElementState.FOCUSED in it.states }
+        return if (focused == null || Elements.editable(focused)) null else activation(focused, screen)
+    }
+
     /** The visible text on [element], as a tap by ref at its center sees it. */
     fun texts(
         element: UiElement,
@@ -101,10 +116,10 @@ internal class Risks(
         val judged =
             candidates.map { element ->
                 val texts = Evidence.of(element, point, screen)
-                Judged(element, controls.risk(element, texts, screen), texts)
+                Reached(element, controls.risk(element, texts, screen), texts)
             }
         val riskiest = judged.maxWithOrNull(byRisk)
-        val texts = (judged.flatMap(Judged::texts) + drawn).distinct()
+        val texts = (judged.flatMap(Reached::texts) + drawn).distinct()
         return Assessment(
             riskiest?.element,
             if (riskiest ==
@@ -115,13 +130,13 @@ internal class Risks(
                 riskiest.risk
             },
             texts,
-            candidates,
+            judged,
         )
     }
 }
 
 /** A control a touch may reach, with its risk and its text. */
-private data class Judged(
+internal data class Reached(
     val element: UiElement,
     val risk: ElementRisk?,
     val texts: List<String>,

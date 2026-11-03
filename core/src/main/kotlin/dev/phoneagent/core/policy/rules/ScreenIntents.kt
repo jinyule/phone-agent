@@ -119,7 +119,7 @@ internal class ScreenIntents(
         screen: ScreenSnapshot,
     ): ActionIntent {
         val focused = screen.elements.firstOrNull { ElementState.FOCUSED in it.states }
-        val pressed = if (focused == null || Elements.editable(focused)) null else risks.activation(focused, screen)
+        val pressed = risks.pressed(screen)
         val kind =
             when {
                 key != SystemKey.ENTER -> IntentKind.NAVIGATE

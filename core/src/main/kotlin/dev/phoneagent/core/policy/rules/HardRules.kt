@@ -84,43 +84,76 @@ internal class HardRules(
     ): Refusal? {
         val details = settings.isAppDetails(screen)
         val managed = if (details) reading.pages.shortTexts(screen).firstNotNullOfOrNull(apps::byName) else null
-        val texts = touched(step, intent, screen)
+        val reached = reached(step, screen)
+        val texts =
+            if (reached ==
+                null
+            ) {
+                intent.target?.let { reading.risks.texts(it, screen) }.orEmpty()
+            } else {
+                reached.texts
+            }
         return when {
-            settings.isSensitive(screen) -> Refusal.SENSITIVE_SETTINGS
-            managed != null -> managed
-            settings.sensitiveEntry(texts, screen) != null -> Refusal.SENSITIVE_SETTINGS
-            details && (settings.managesApp(texts) || confirmsManaging(intent, screen)) -> Refusal.APP_MANAGEMENT
-            screen.pkg in LAUNCHERS -> texts.firstNotNullOfOrNull(apps::byName)
-            else -> null
+            settings.isSensitive(screen) -> {
+                Refusal.SENSITIVE_SETTINGS
+            }
+
+            managed != null -> {
+                managed
+            }
+
+            settings.sensitiveEntry(texts, screen) != null -> {
+                Refusal.SENSITIVE_SETTINGS
+            }
+
+            details && (settings.managesApp(texts) || confirmsManaging(reached, intent, screen)) -> {
+                Refusal.APP_MANAGEMENT
+            }
+
+            screen.pkg in LAUNCHERS -> {
+                texts.firstNotNullOfOrNull(apps::byName)
+            }
+
+            else -> {
+                null
+            }
         }
     }
 
     /**
-     * [intent] confirms a dialog about managing the app: a generic or deleting button ("确定",
-     * "删除") whose dialog (its window, or the whole screen when the window is unknown) stops,
-     * clears, disables or uninstalls an app.
+     * Everything [step] may activate (policy-rules.md §6): for a tap every control it may reach,
+     * for a swipe every one where it starts, for a key (Enter: the engine lets the others through
+     * before the hard rules) every one the focused control may be; `null` for a step that acts on
+     * its target alone.
+     */
+    private fun reached(
+        step: Step,
+        screen: ScreenSnapshot,
+    ): Assessment? =
+        when {
+            step is Step.Tap -> reading.risks.tap(step.aim, screen)
+            step is Step.Swipe -> reading.risks.at(step.from, screen)
+            step is Step.Key -> reading.risks.pressed(screen)
+            else -> null
+        }
+
+    /**
+     * The step confirms a dialog about managing the app: one of the controls it may activate
+     * ([reached]), or its target, is a generic or deleting button ("确定", "删除") whose dialog
+     * (its window, or the whole screen when the window is unknown) stops, clears, disables or
+     * uninstalls an app. Each control is checked with its own risk; the target with the intent's.
      */
     private fun confirmsManaging(
+        reached: Assessment?,
         intent: ActionIntent,
         screen: ScreenSnapshot,
     ): Boolean {
-        val target = intent.target
-        return target != null &&
-            (intent.kind == IntentKind.DELETE || reading.lexicon.isGeneric(Elements.label(target, screen))) &&
-            settings.managesApp(Elements.context(target, screen))
-    }
-
-    /** The visible text on everything [step] may activate: for a tap every control it may reach, else its target. */
-    private fun touched(
-        step: Step,
-        intent: ActionIntent,
-        screen: ScreenSnapshot,
-    ): List<String> {
-        val target = intent.target
-        return when {
-            step is Step.Tap -> reading.risks.tap(step.aim, screen).texts
-            target != null -> reading.risks.texts(target, screen)
-            else -> emptyList()
+        val each =
+            reached?.reached.orEmpty().map { it.element to it.risk?.kind } +
+                listOfNotNull(intent.target?.let { it to intent.kind })
+        return each.any { (element, kind) ->
+            (kind == IntentKind.DELETE || reading.lexicon.isGeneric(Elements.label(element, screen))) &&
+                settings.managesApp(Elements.context(element, screen))
         }
     }
 
