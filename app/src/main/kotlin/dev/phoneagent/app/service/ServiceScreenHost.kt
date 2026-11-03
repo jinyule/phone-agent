@@ -223,14 +223,19 @@ internal class ServiceImeConnection(
         return if (start < 0 || end < 0) null else start == end && end == around.text.length
     }
 
-    // One character before and after the selection is asked for: none comes back only when it is all.
+    // One character before and after the selection is asked for: none comes back only when it is
+    // all. The selection is relative to the text returned, which starts at its offset in the
+    // editor's text: all of it is selected only from offset 0; an unknown offset tells nothing.
     override fun selectAll(): Boolean? {
         val connection = ime.currentInputConnection ?: return null
         connection.performContextMenuAction(android.R.id.selectAll)
         return connection.getSurroundingText(1, 1, 0)?.let { around ->
             val start = around.selectionStart
             val end = around.selectionEnd
-            if (start < 0 || end < 0) null else start == 0 && end == around.text.length
+            when {
+                start < 0 || end < 0 || around.offset < 0 -> null
+                else -> around.offset == 0 && start == 0 && end == around.text.length
+            }
         }
     }
 }

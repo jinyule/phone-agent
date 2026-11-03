@@ -182,8 +182,9 @@ internal interface ImeConnection {
 
     /**
      * Selects all of the editor's text and reports whether the editor confirms that nothing is left
-     * before or after the selection, or `null` when that cannot be read. Works for password fields;
-     * the text looked at is not kept.
+     * before or after the selection, from the start of its text on, or `null` when that cannot be
+     * read (the offset of what the editor tells unknown included). Works for password fields; the
+     * text looked at is not kept.
      */
     fun selectAll(): Boolean?
 }
