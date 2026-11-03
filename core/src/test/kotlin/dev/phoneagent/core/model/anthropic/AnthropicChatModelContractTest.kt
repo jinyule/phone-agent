@@ -1,6 +1,7 @@
 package dev.phoneagent.core.model.anthropic
 
 import dev.phoneagent.core.model.ChatModelContract
+import dev.phoneagent.core.model.ReasoningLevel
 import dev.phoneagent.core.model.anthropic.Kit.base
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
@@ -9,8 +10,11 @@ import org.junit.jupiter.api.AfterEach
 
 /**
  * [ChatModelContract] on the Anthropic adapter: a model on a mock server that answers every
- * request with a short text reply. Its capabilities are Claude Opus 5.5's, whose levels start at
- * `low`, so `minimal` clamps. The live settings are the profile's headers, which the hook edits.
+ * request with a short text reply. Its capabilities are Claude Opus 5.5's with only `low` and
+ * `high` declared, so `medium` clamps to `low` and the two map to different efforts: mapping the
+ * level asked for instead of the clamped one fails the contract (`minimal` alone would not show
+ * it, since it maps to `low` as well). The live settings are the profile's headers, which the
+ * hook edits.
  */
 class AnthropicChatModelContractTest : ChatModelContract() {
     private val server = Kit.loopbackServer()
@@ -30,7 +34,8 @@ class AnthropicChatModelContractTest : ChatModelContract() {
             }
         val live = mutableMapOf("x-client" to "phone-agent")
         val profile = Kit.profile(server.base(), headers = live)
-        val model = Kit.adapters().model(profile, Kit.MODEL, Kit.CAPABILITIES, Kit.blobs())
+        val capabilities = Kit.CAPABILITIES.copy(reasoningLevels = listOf(ReasoningLevel.LOW, ReasoningLevel.HIGH))
+        val model = Kit.adapters().model(profile, Kit.MODEL, capabilities, Kit.blobs())
         return Subject(model, { server.requestCount }) {
             live["x-client"] = "edited"
             live["x-extra"] = "added"
