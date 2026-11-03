@@ -158,7 +158,12 @@ internal class Redactor(
         /** Masks only credential-shaped text (no request secrets known). */
         val SHAPES_ONLY: Redactor = Redactor(emptyList())
 
-        private val BEARER = Regex("""(?i)(\bbearer\s+)[^\s"',;]+""")
+        /**
+         * `Bearer <token>`, the token masked. No word boundary before the word: an escape a provider
+         * wrote as text right before it (`\nBearer`) ends in a letter and would leave none. A word
+         * that ends in `bearer` (`forbearer x`) masks the word after it too, which only shows less.
+         */
+        private val BEARER = Regex("""(?i)(bearer\s+)[^\s"',;]+""")
         private val SHAPES =
             listOf(
                 // OpenAI-style keys: sk-…, sk-proj-…
