@@ -28,7 +28,7 @@ internal data class AnthropicError(
 
         /**
          * Parses an error body; anything that is not an Anthropic error object becomes its own
-         * message, masked, or not quoted at all when its lenient decoding holds a credential
+         * message, masked, or not quoted at all when an escape in it hides a credential
          * ([Redactor.quote]). Only the request's secrets are masked before the body is parsed
          * ([Redactor.exact]); credential shapes are masked in what was decoded, since a shape
          * matched before decoding stops at the first escape inside it.

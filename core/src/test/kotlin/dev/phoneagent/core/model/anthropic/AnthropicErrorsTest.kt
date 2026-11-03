@@ -131,7 +131,7 @@ class AnthropicErrorsTest {
     }
 
     @Test
-    fun `redirects are configuration errors that name their target, or withhold it, and cut it`() {
+    fun `redirects are configuration errors that name their target, masked and cut`() {
         val error = map(307, "", headersOf("Location", "https://proxy.example.com/v1/messages"))
         assertTrue(error is ModelError.InvalidRequest, error.toString())
         assertNull((error as ModelError.InvalidRequest).param)
@@ -140,14 +140,15 @@ class AnthropicErrorsTest {
         assertTrue(error.detail.contains("check the base URL"), error.detail)
         val keyed = map(307, "", headersOf("Location", "https://proxy.example.com/v1/messages?key=sk-abcdefghijklmnop"))
         val detail = (keyed as ModelError.InvalidRequest).detail
-        assertEquals("HTTP 307 redirect to ${Redactor.WITHHELD}: check the base URL and use the final address", detail)
+        val target = "https://proxy.example.com/v1/messages?key=***"
+        assertEquals("HTTP 307 redirect to $target: check the base URL and use the final address", detail)
         assertTrue(map(308, "").message!!.contains("an unnamed address"))
         val long = map(301, "", headersOf("Location", "https://proxy.example.com/" + "a".repeat(1000)))
         assertTrue(long.message!!.length < 500, "the target is cut: ${long.message!!.length}")
     }
 
     @Test
-    fun `a redirect target with a key across the cut is withheld, leaving no piece`() {
+    fun `a redirect target is masked before it is cut, so a key across the cut leaves no piece`() {
         val key = "plain-placeholder-location-0001"
         val prefix = "https://proxy.example.com/"
         val location = prefix + "a".repeat(KEY_AT - prefix.length) + key
@@ -156,7 +157,7 @@ class AnthropicErrorsTest {
         val detail = (error as ModelError.InvalidRequest).detail
         val pieces = key.windowed(PIECE).filter { it in detail }
         assertTrue(pieces.isEmpty(), "pieces of the key in the target: ${pieces.size} (not shown)")
-        assertTrue(detail.startsWith("HTTP 307 redirect to ${Redactor.WITHHELD}:"), detail)
+        assertTrue(detail.contains(prefix + "a".repeat(KEY_AT - prefix.length)), "the target up to the key is kept")
     }
 
     @Test

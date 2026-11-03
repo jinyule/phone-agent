@@ -92,7 +92,7 @@
 - **入口**：`AnthropicAdapters(credentials, timeouts, clock).model(profile, model, capabilities, blobs)`，按 `ModelProtocol.ANTHROPIC_MESSAGES` 创建 `ChatModel`。
 - **HTTP 客户端**：和 OpenAI 系适配器（WP03）的行为一致。
   - 关掉连接失败重试（`retryOnConnectionFailure(false)`）、重定向和 SSL 重定向跟随。
-  - 3xx 映射成**不可重试**的 `InvalidRequest(param = null)`：同一个地址再发还是重定向，这是用户要改的配置。`detail` 里带上 `Location`：宽松解码后含凭据就整段换成固定说明，否则打码（`Redactor.quote`），再截断。
+  - 3xx 映射成**不可重试**的 `InvalidRequest(param = null)`：同一个地址再发还是重定向，这是用户要改的配置。`detail` 里带上 `Location`：没有可解码的转义就原地打码，有转义、解码后含密钥或凭据形状就整段换成固定说明（`Redactor.quote`，model-layer §2），再截断。
   - SSE 的行结尾认 LF、CRLF 和单独的 CR。
   - `Retry-After` 只接受有限、非负的值。
   - 取消时取消 Call，并释放响应和连接。

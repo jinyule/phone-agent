@@ -12,9 +12,10 @@ import java.util.IdentityHashMap
  * is masked whether or not this request used it. Error codes and parameter names never match these
  * shapes, so the diagnosis survives.
  *
- * Shapes are matched on decoded text only: matched on text not decoded yet, a shape stops at the
- * first escape inside it (`\u0064`, `\/`) and leaves the rest of the key readable. Text not decoded
- * yet gets [exact] (whole forms, which no escape splits); [text] and [quote] go on decoded text.
+ * Shapes are matched on decoded text, or on text with nothing to decode: matched on text not
+ * decoded yet, a shape stops at the first escape inside it (`\u0064`, `\/`) and leaves the rest of
+ * the key readable. Text not decoded yet gets [exact] (whole forms, which no escape splits); [text]
+ * goes on decoded text, and [quote] decodes before it decides.
  *
  * Every cut comes after masking: callers redact the full text, then cut it. A reader that must
  * stop early reads [reach] bytes past its limit and drops the [openEnd] of what it read, so a cut
@@ -62,20 +63,28 @@ internal class Redactor(
     /**
      * [raw] provider text that was not read as JSON fields (an error body that is not JSON or not a
      * JSON object, the whole of one without a message, a redirect target) masked as [text] masks
-     * it; or not quoted at all ([WITHHELD]) when its lenient decoding ([JsonEscapes.lenientDecode])
-     * needs masking, since masking it as written would miss a secret behind an escape and leave the
-     * rest readable. The OpenAI adapters' rule (WP03).
+     * it; or not quoted at all ([WITHHELD]) when it has escapes its lenient decoding
+     * ([JsonEscapes.lenientDecode]) changes and the decoded text holds a form of this request's
+     * secrets or a credential shape (`sk-…`, JWT), since masking it as written would miss what an
+     * escape hides and leave the rest readable. Text with nothing to decode is masked in place,
+     * which then covers all of it. A `Bearer` word never withholds: [text] masks the token after
+     * it. The rule both adapters keep (WP03).
      */
     fun quote(raw: String): String {
         val decoded = JsonEscapes.lenientDecode(raw)
-        return if (text(decoded) != decoded) WITHHELD else text(raw)
+        return if (decoded != raw && holdsCredential(decoded)) WITHHELD else text(raw)
     }
+
+    /** Whether [decoded] text holds a form of this request's secrets or a credential shape; `Bearer` is left out. */
+    private fun holdsCredential(decoded: String): Boolean =
+        exact(decoded) != decoded || SHAPES.any { it.containsMatchIn(decoded) }
 
     /**
      * A field the provider wrote, read decoded from JSON (an error's message, a refusal's category):
      * this request's secrets in it masked ([exact]), then [quote]d. So a key the field writes plainly
-     * is masked and the field still says what went wrong; a credential shape, or a secret its own
-     * text writes with escapes the JSON decoding left (`\u0073k-…` inside the string), makes it
+     * is masked and the field still says what went wrong, and so is a credential shape when the
+     * field has no escape left to decode; a credential shape or a secret behind escapes the field's
+     * own text writes (`\u0073k-…` inside the string, left by the JSON decoding) makes it
      * [WITHHELD]. No shape is masked before [quote] decodes the field.
      */
     fun field(decoded: String): String = quote(exact(decoded))

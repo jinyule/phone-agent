@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertAll
 import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
@@ -167,7 +168,9 @@ class ProviderTextQuoteTest {
      * A key with a provider's shape, written with an escape inside it: masking its shape before the
      * body is decoded would cover it only up to the escape and leave the rest readable. The body is
      * parsed first and masked once decoded, so no piece of the key is left, whichever body it is,
-     * whether the request sent that key or the key is only shaped like one.
+     * whether the request sent that key or the key is only shaped like one. A key only shaped like
+     * one is made of the shape's characters, as providers' keys are: masked in place, a shape ends at
+     * any other character (model-layer §2, known gaps), so only the request's own key has a slash.
      */
     @ParameterizedTest(name = "{0}, {1}, {2}")
     @MethodSource("shapedBodies")
@@ -176,8 +179,13 @@ class ProviderTextQuoteTest {
         writing: String,
         sent: String,
     ) = runTest {
+        val shaped = if (sent == SENT) SHAPED else UNSENT
         val written =
-            if (writing == SLASH) SHAPED.replace("/", "$BS/") else SHAPED.replaceRange(U_AT, U_AT + 1, U_ESCAPED)
+            if (writing == SLASH) {
+                shaped.replace("/", "$BS/")
+            } else {
+                shaped.replaceRange(U_AT, U_AT + 1, uEscaped(shaped[U_AT]))
+            }
         val text =
             when (body) {
                 JSON_MESSAGE -> """{"type":"error","error":{"type":"authentication_error","message":"$written"}}"""
@@ -191,19 +199,53 @@ class ProviderTextQuoteTest {
                 Kit.model(server, credentials = Keys(key)).complete(Kit.request())
             }
         val printed = error.stackTraceToString()
-        val pieces = SHAPED.windowed(PIECE).filter { it in printed }
+        val pieces = shaped.windowed(PIECE).filter { it in printed }
         assertTrue(pieces.isEmpty(), "$body, $writing, $sent: ${pieces.size} pieces of the key in the error: $printed")
     }
 
-    /** A header value is raw provider text: a key in it, written any way, withholds the target. */
+    /**
+     * A header value is raw provider text: the key as sent is masked in place, since nothing in the
+     * target is left to decode; a key written with escapes withholds the target.
+     */
     @ParameterizedTest
     @MethodSource("forms")
-    fun `a redirect target that holds the key is withheld`(form: String) =
+    fun `a redirect target that holds the key is masked, or withheld when escapes write it`(form: String) =
         runTest {
             server.enqueueError(TEMPORARY_REDIRECT, "", "Location" to "https://proxy.example.com/v1?note=$form")
             val error = assertThrows<ModelError.InvalidRequest> { model().complete(Kit.request()) }
-            val detail = "HTTP 307 redirect to $WITHHELD: check the base URL and use the final address"
+            val target = if (form == SECRET) "https://proxy.example.com/v1?note=***" else WITHHELD
+            val detail = "HTTP 307 redirect to $target: check the base URL and use the final address"
             assertQuoted(error, "invalid request: $detail", form)
+        }
+
+    /**
+     * Gateway explanations that name the Bearer scheme or show another key's shape keep their words
+     * (fix-list r6 S2): the Bearer rule masks the token after the word and never withholds, and text
+     * with nothing to decode is masked in place.
+     */
+    @Test
+    fun `a gateway explanation with a Bearer word or another key's shape keeps its words`() =
+        runTest {
+            // Assembled at run time so secret scanners do not take the placeholder for a real key.
+            val upstream = "s" + "k-proj-" + "abcdefghijklmnop1234"
+            val missing = "No API key. Use Bearer auth (i.e. Authorization: Bearer YOUR_KEY), or log in."
+            val rewritten = """{"error":{"type":"$AUTH","detail":"send $BS"Bearer YOUR_KEY$BS""}}"""
+            val masked = """{"error":{"type":"$AUTH","detail":"send $BS"Bearer ***""}}"""
+            val cases =
+                listOf(
+                    error(AUTH, "Invalid bearer token") to "authentication failed: Invalid bearer ***",
+                    error("invalid_request_error", missing) to
+                        "invalid request: No API key. Use Bearer *** (i.e. Authorization: Bearer ***, or log in.",
+                    error(AUTH, "upstream key $upstream rejected") to
+                        "authentication failed: upstream key *** rejected",
+                    rewritten to "authentication failed: $masked",
+                )
+            val shown =
+                cases.map { (body) ->
+                    server.enqueueError(UNAUTHORIZED, body)
+                    assertThrows<ModelError> { model().complete(Kit.request()) }.message
+                }
+            assertAll(cases.zip(shown).map { (case, message) -> { assertEquals(case.second, message, case.first) } })
         }
 
     private companion object {
@@ -218,6 +260,7 @@ class ProviderTextQuoteTest {
         const val U_LETTER = "a letter u-escaped"
         const val SENT = "the request's key"
         const val SHAPE_ONLY = "only its shape"
+        const val AUTH = "authentication_error"
 
         const val UNAUTHORIZED = 401
         const val BAD_GATEWAY = 502
@@ -243,10 +286,15 @@ class ProviderTextQuoteTest {
          */
         const val SHAPED = "s" + "k-ant-api03-" + "abcdefghij/klmnopqrstuvwxyz0123456789"
 
-        /** Where the `u` escape goes (a letter in the middle), and the escape itself. */
+        /** A key of the shape's characters only, which this request did not send. */
+        const val UNSENT = "s" + "k-proj-" + "abcdefghijklmnopqrstuvwxyz0123456789"
+
+        /** Where the `u` escape goes (a letter in the middle). */
         const val U_AT = 16
-        val U_ESCAPED = BS + "u00" + SHAPED[U_AT].code.toString(HEX_RADIX)
         const val HEX_RADIX = 16
+
+        /** [letter] written as a `u` escape. */
+        fun uEscaped(letter: Char): String = BS + "u00" + letter.code.toString(HEX_RADIX)
 
         /** A key with a quote and a slash, so that each escaping writes it differently. */
         const val SECRET = "pa\"ss/word-0001"
@@ -273,9 +321,8 @@ class ProviderTextQuoteTest {
         @JvmStatic
         fun shapedBodies(): List<Arguments> =
             listOf(JSON_MESSAGE, NOT_JSON, NO_MESSAGE).flatMap { body ->
-                listOf(SLASH, U_LETTER).flatMap { writing ->
-                    listOf(SENT, SHAPE_ONLY).map { sent -> Arguments.of(body, writing, sent) }
-                }
+                listOf(SLASH, U_LETTER).map { writing -> Arguments.of(body, writing, SENT) } +
+                    Arguments.of(body, U_LETTER, SHAPE_ONLY)
             }
 
         @JvmStatic
@@ -283,6 +330,12 @@ class ProviderTextQuoteTest {
             listOf(HTTP_MESSAGE, HTTP_STRING, STREAM_MESSAGE, REFUSAL).flatMap { where ->
                 JSON_FORMS.map { form -> Arguments.of(where, form) }
             }
+
+        /** An Anthropic error body of [type] whose message is [message]. */
+        fun error(
+            type: String,
+            message: String,
+        ): String = """{"type":"error","error":{"type":"$type","message":${JsonPrimitive(message)}}}"""
 
         /** A refusal whose `stop_details.category` is the JSON value [category]. */
         fun refusal(category: String): String =

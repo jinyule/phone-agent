@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertAll
 import java.io.IOException
 
 class RedactorTest {
@@ -64,10 +65,42 @@ class RedactorTest {
             assertEquals(Redactor.WITHHELD, redactor.quote("$cut\"}}"), "a broken text")
             assertEquals(Redactor.WITHHELD, redactor.quote("$cut\"}"), "JSON written back")
         }
-        assertEquals(Redactor.WITHHELD, redactor.quote("not json $slashed {"), "the secret as sent")
+        assertEquals("not json *** {", redactor.quote("not json $slashed {"), "the secret as sent, no escape")
         // Assembled at run time so secret scanners do not take the placeholder for a real key.
         val shaped = "s${backslash}u006b-" + "abcdefghijkl"
         assertEquals(Redactor.WITHHELD, Redactor.SHAPES_ONLY.quote("""{"note":"$shaped"""), "a credential shape")
+    }
+
+    /**
+     * The rule both adapters keep (fix-list r6 S2): text its lenient decoding leaves as it is is
+     * masked in place; text with escapes is withheld only when its decoding shows a form of the
+     * request's secrets or a credential shape. The Bearer rule masks the token after the word and
+     * never withholds.
+     */
+    @Test
+    fun `a Bearer word never withholds, and text without escapes is masked in place`() {
+        val redactor = Redactor(listOf(secret))
+        val backslash = Char(92)
+        val missing = "No API key. Use Bearer auth (i.e. Authorization: Bearer YOUR_KEY), or log in."
+        // Assembled at run time so secret scanners do not take the placeholders for real keys.
+        val upstream = "s" + "k-proj-" + "abcdefghijklmnop1234"
+        val split = "s" + "k-abcd" + "${backslash}u0065" + "fghijkl"
+        val rewritten = """{"detail":"send $backslash"Bearer YOUR_KEY$backslash""}"""
+        val hidden = "${backslash}u0070" + secret.drop(1)
+        assertAll(
+            { assertEquals("Invalid bearer ***", redactor.field("Invalid bearer token")) },
+            {
+                val expected = "No API key. Use Bearer *** (i.e. Authorization: Bearer ***, or log in."
+                assertEquals(expected, redactor.field(missing))
+            },
+            { assertEquals("upstream key *** rejected", redactor.field("upstream key $upstream rejected")) },
+            {
+                val expected = """{"detail":"send $backslash"Bearer ***""}"""
+                assertEquals(expected, redactor.quote(rewritten), "escapes and a Bearer word, nothing else")
+            },
+            { assertEquals(Redactor.WITHHELD, redactor.field("Invalid bearer $hidden"), "the key behind an escape") },
+            { assertEquals(Redactor.WITHHELD, Redactor.SHAPES_ONLY.field("Invalid API key: $split"), "a split shape") },
+        )
     }
 
     @Test
