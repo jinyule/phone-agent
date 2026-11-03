@@ -276,7 +276,21 @@ object SessionSamples {
                             added = listOf(element),
                             removed = listOf(ElementRef("e9")),
                             changed = listOf(field),
+                            ocrAdded = listOf(OcrLine("10:00", Bounds(0, 0, 50, 20), 0.9)),
+                            ocrRemoved = listOf(OcrLine("09:59", Bounds(0, 0, 50, 20), 0.8)),
                         ),
+                ),
+            ),
+            // Read without OCR after a read with OCR lines: those lines are unverified, not removed.
+            ScreenActed(
+                call,
+                SnapshotId("s1"),
+                UiAction.Scroll(null, Direction.UP),
+                ActionOutcome(
+                    ActionOutcome.Status.Ok,
+                    ActionOutcome.Effect.CHANGED,
+                    after = snapshot.copy(id = SnapshotId("s2"), ocr = null, fingerprint = "fp-2"),
+                    diff = ScreenDiff(changed = listOf(field), ocrUnverified = true),
                 ),
             ),
             ScreenActed(
