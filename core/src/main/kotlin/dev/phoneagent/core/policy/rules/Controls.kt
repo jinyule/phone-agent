@@ -44,8 +44,9 @@ internal class Controls(
 
     /**
      * The risk of activating [element] where [drawn] is drawn over it; inputs and clear buttons
-     * only edit. A risk that keeps a would-be clear button from being one ([Fields.clearing])
-     * counts too.
+     * only edit. Every risk a reading finds counts, the most severe deciding (policy-rules.md §0):
+     * a sensitive settings entry, the words on the control ([labelled]), a settings control, and
+     * a risk that keeps a would-be clear button from being one ([Fields.clearing]).
      */
     fun risk(
         element: UiElement,
@@ -60,11 +61,12 @@ internal class Controls(
         return if (clearing != null && veto == null) {
             null
         } else {
-            val found =
-                said.sensitive?.let { ElementRisk(IntentKind.SETTINGS, "settings:$it") }
-                    ?: labelled(own, said, screen)
-                    ?: own.settings
-            listOfNotNull(found, veto?.let { ElementRisk(it.kind, it.matched) }).maxWithOrNull(byRisk)
+            listOfNotNull(
+                said.sensitive?.let { ElementRisk(IntentKind.SETTINGS, "settings:$it") },
+                labelled(own, said, screen),
+                own.settings,
+                veto?.let { ElementRisk(it.kind, it.matched) },
+            ).maxWithOrNull(byRisk)
         }
     }
 
@@ -81,10 +83,12 @@ internal class Controls(
 
     /**
      * The riskiest word among the control's own label, its label as a whole ([Lexicon.ofLabel]) and
-     * each text; an icon's resource id when there is no text; a generic button by its dialog. A
-     * strong word counts at any length in the control's own label: its name, or the one text it
-     * shows, or on a payment page any text on it. A control that shows several texts elsewhere (a
-     * list row: a name, a preview, a time) is read text by text, so a long preview is not a button.
+     * each text; an icon's resource id when there is no text; and with these, what a generic
+     * button's dialog makes it do and a control without text on a payment page, the most severe
+     * deciding. A strong word counts at any length in the control's own label: its name, or the
+     * one text it shows, or on a payment page any text on it. A control that shows several texts
+     * elsewhere (a list row: a name, a preview, a time) is read text by text, so a long preview is
+     * not a button.
      */
     private fun labelled(
         own: Own,
@@ -101,7 +105,8 @@ internal class Controls(
                 (own.name ?: said.single)?.let { lexicon.ofControl(it, screen) }
             }
         val hit = listOf(own.ofLabel, if (said.isEmpty) own.icon else null, said.classified).fold(whole, ::firstMax)
-        return hit?.let { ElementRisk(it.kind, it.matched) } ?: if (own.generic) own.dialog else unlabeled(said, screen)
+        return listOfNotNull(hit?.let { ElementRisk(it.kind, it.matched) }, own.dialog, unlabeled(said, screen))
+            .maxWithOrNull(byRisk)
     }
 
     /** No text at all on a payment page: it may well be the pay button. */
@@ -153,9 +158,9 @@ internal class Controls(
         /** What its resource id names, counted when it shows no text at all. */
         val icon: Hit? = icon(element)
 
-        /** It is a generic button ("确定"), and [dialog] is what its dialog makes it do. */
-        val generic: Boolean = lexicon.isGeneric(label)
-        val dialog: ElementRisk? = if (generic) dialogs.generic(element, screen, lexicon.read(label)) else null
+        /** What its dialog makes it do when it is a generic button ("确定"), else `null`. */
+        val dialog: ElementRisk? =
+            if (lexicon.isGeneric(label)) dialogs.generic(element, screen, lexicon.read(label)) else null
 
         /** It changes the system in the settings app. */
         val settings: ElementRisk? = settingsControl(element, label, screen)

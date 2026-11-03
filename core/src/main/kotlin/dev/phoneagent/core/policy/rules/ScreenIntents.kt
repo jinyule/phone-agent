@@ -42,8 +42,8 @@ internal class ScreenIntents(
 
     /**
      * Typing: a password, code or payment-password field is INPUT with that class (handed off);
-     * submitting on a payment page pays; submitting anywhere else but a search field reaches out;
-     * typing in the settings app changes settings.
+     * submitting on a payment page pays; typing in the settings app changes settings, also when
+     * submitted; submitting anywhere else but a search field reaches out.
      */
     private fun type(
         step: Step.Type,
@@ -56,8 +56,8 @@ internal class ScreenIntents(
             when {
                 fieldClass in Fields.HAND_OFF -> IntentKind.INPUT
                 step.submit && pages.isPayment(screen) -> IntentKind.SPEND
-                step.submit && !searches -> IntentKind.OUTWARD
                 screen.pkg == Pages.SETTINGS -> IntentKind.SETTINGS
+                step.submit && !searches -> IntentKind.OUTWARD
                 else -> IntentKind.INPUT
             }
         return ActionIntent(kind, screen.pkg, field, fieldClass = fieldClass.takeIf { kind == IntentKind.INPUT })

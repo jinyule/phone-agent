@@ -1,5 +1,7 @@
 package dev.phoneagent.core.policy.rules
 
+import dev.phoneagent.core.policy.ElementRisk
+import dev.phoneagent.core.policy.IntentKind
 import dev.phoneagent.core.policy.PolicyContext
 import dev.phoneagent.core.policy.SecurityLevel
 import dev.phoneagent.core.policy.Verdict
@@ -279,6 +281,59 @@ class TargetsTest {
     private companion object {
         /** Takes a long press only. */
         val LONG = setOf(ElementState.LONG_CLICKABLE)
+    }
+
+    @Test
+    fun `a risk one reading of a control finds counts, whatever another reading finds`() {
+        // A generic button with "发送" drawn over it, in a dialog that deletes: the dialog counts.
+        val dialog =
+            screen(
+                el("e1", "确定", bounds = box(400, 400, 600, 450)).copy(window = 1),
+                text("t1", "删除全部记录？", window = 1),
+                ocr = listOf(ocr("发送", box(450, 405, 550, 445))),
+            )
+        assertEquals(ConfirmReason.DELETE, reason(decide(tap("e1"), on(dialog))))
+        // An icon without any text whose id deletes, on a payment page: it may still be the pay button.
+        val icon =
+            screen(
+                el("e1", bounds = box(400, 400, 600, 450)).copy(resourceId = "com.x:id/btn_delete"),
+                flags = setOf(ScreenFlag.PAYMENT),
+            )
+        assertEquals(ConfirmReason.SPEND, reason(decide(tap("e1"), on(icon))))
+        // A sensitive settings entry that also deletes: the delete counts with the entry.
+        val entry = screen(el("e1", "删除无障碍快捷方式"), pkg = Pages.SETTINGS)
+        val risk = Reading(PolicyTuning()).risks.activation(entry.elements[0], entry).risk
+        assertEquals(ElementRisk(IntentKind.DELETE, "删除"), risk)
+    }
+
+    @Test
+    fun `of several risks found, the one asked about at more levels counts`() {
+        // At 标准, sending asks once per app and deleting or changing settings every time; the app
+        // has had its send confirmed.
+        val sent = { s: ScreenSnapshot ->
+            Fx.ctx(SecurityLevel.STANDARD, s, operated = setOfNotNull(s.pkg), outwardConfirmed = setOfNotNull(s.pkg))
+        }
+        val stacked =
+            screen(
+                el("e1", "发送", bounds = box(400, 400, 600, 450)).copy(window = 1),
+                el("e2", "删除", bounds = box(0, 300, 999, 600)).copy(window = 2),
+            )
+        assertEquals(ConfirmReason.DELETE, reason(decide(point(500, 425), sent(stacked))))
+        val both = screen(el("e1", "发送并删除原图"))
+        assertEquals(ConfirmReason.DELETE, reason(decide(tap("e1"), sent(both))))
+        val settings = screen(field("f1", focused = true), pkg = Pages.SETTINGS)
+        val submit = call("phone_type", "text" to "abc", "submit" to true)
+        assertEquals(ConfirmReason.SETTINGS, reason(decide(submit, sent(settings))))
+        // A control on a field's row that deletes as well as sends still makes it no search field.
+        val row =
+            screen(
+                field("f1", hint = "搜索", focused = true, bounds = box(0, 900, 700, 960)),
+                el("e1", "删除并发送", bounds = box(720, 900, 999, 960)),
+            )
+        assertEquals(
+            ConfirmReason.OUTWARD,
+            reason(decide(call("phone_key", "key" to "enter"), on(row, SecurityLevel.CAUTIOUS))),
+        )
     }
 
     @Test

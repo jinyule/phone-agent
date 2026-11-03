@@ -220,15 +220,21 @@ internal object Evidence {
     }
 }
 
-/** Least to most severe: which of several risks counts, and how far a declared risk class raises an intent. */
+/**
+ * Least to most severe: which of several risks counts, and how far a declared risk class raises an
+ * intent. Each kind is asked about at every level and in every case the one before it is
+ * (policy-rules.md §6.2): sending asks at 谨慎 and once per app at 标准, changing settings and
+ * deleting at 谨慎 and 标准, spending at every level; so the most severe of several risks found
+ * gives the strictest verdict.
+ */
 private val SEVERITY: List<IntentKind> =
     listOf(
         IntentKind.READ,
         IntentKind.NAVIGATE,
         IntentKind.INPUT,
+        IntentKind.OUTWARD,
         IntentKind.SETTINGS,
         IntentKind.DELETE,
-        IntentKind.OUTWARD,
         IntentKind.SPEND,
     )
 

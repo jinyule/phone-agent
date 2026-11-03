@@ -212,17 +212,15 @@ internal class Searches(
     }
 
     /**
-     * [element]'s label is not read whole, or activating it sends or pays, as a tap by ref sees it
-     * ([Risks.activation]).
+     * [element]'s label is not read whole, or activating it sends or does something more severe
+     * (whatever else it does, it may also send), as a tap by ref sees it ([Risks.activation]).
      */
     private fun mayReach(
         element: UiElement,
         screen: ScreenSnapshot,
     ): Boolean =
         reaching.of(screen).computeIfAbsent(element) {
-            !lexicon.whole(Elements.label(it, screen)) || risks.activation(it, screen).kind in REACHES
+            !lexicon.whole(Elements.label(it, screen)) ||
+                severity(risks.activation(it, screen).kind) >= severity(IntentKind.OUTWARD)
         }
 }
-
-/** What a control on a field's row does that makes the field no search field. */
-private val REACHES = setOf(IntentKind.OUTWARD, IntentKind.SPEND)
