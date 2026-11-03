@@ -124,8 +124,9 @@ class LexiconTest {
         listOf("Terms and conditions", "Photos and videos", "Payments & transfers", "Send code").forEach {
             assertNull(lexicon.ofControl(it), it)
         }
-        // A code to oneself is told from the whole label only.
+        // A code to oneself is told from the whole label only, also where the text is split only once.
         assertEquals(sendDelete, lexicon.ofControl("Send code and delete"))
+        assertEquals(sendDelete, lexicon.inContext("Send code and delete"))
         // Other text is split within the length limit only, as strong words count: past it, only its start.
         assertEquals(sendDelete, lexicon.classify("Send & delete"))
         assertEquals(Hit(IntentKind.OUTWARD, "send"), lexicon.classify("Send it to me and delete the rest"))
