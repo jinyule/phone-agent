@@ -1,11 +1,13 @@
 package dev.phoneagent.core.policy.rules
 
 import dev.phoneagent.core.policy.IntentKind
+import org.junit.jupiter.api.Assertions.assertAll
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.function.Executable
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
 import org.junit.jupiter.params.provider.ValueSource
@@ -174,6 +176,42 @@ class LexiconTest {
         assertEquals(Hit(IntentKind.OUTWARD, "send"), lexicon.classify("Send it to me and delete the rest"))
         assertNull(lexicon.classify("Please review it and pay the bill"))
         assertEquals(sendDelete, lexicon.inContext("Send this and delete the chat?"))
+    }
+
+    @Test
+    fun `a strong word and an English part of one text both count, the most severe deciding`() {
+        // Claude r6 B-1: in a control's own label an English part that sends hides no Chinese word
+        // that pays or deletes, wherever it stands and however long the label is.
+        val own =
+            listOf(
+                "Photos and send 立即支付全部款项" to Hit(IntentKind.SPEND, "支付", sends = true),
+                "Done and send 删除聊天记录" to Hit(IntentKind.DELETE, "删除", sends = true),
+                "Confirm and send / 确认删除" to Hit(IntentKind.DELETE, "删除", sends = true),
+                "OK and send, 删除全部记录" to Hit(IntentKind.DELETE, "删除", sends = true),
+                "Send 删除聊天记录全部内容" to Hit(IntentKind.DELETE, "删除", sends = true),
+            )
+        // In a short text of any kind a Chinese strong word hides no English part that does more,
+        // or that also sends.
+        val short =
+            listOf(
+                "发送 and delete" to Hit(IntentKind.DELETE, "delete", sends = true),
+                "发送 & delete" to Hit(IntentKind.DELETE, "delete", sends = true),
+                "删除 and pay" to Hit(IntentKind.SPEND, "pay"),
+                "删除 and send" to Hit(IntentKind.DELETE, "删除", sends = true),
+            )
+        val readings =
+            listOf<Pair<String, (String) -> Hit?>>(
+                "classify" to lexicon::classify,
+                "inContext" to lexicon::inContext,
+                "ofLabel" to lexicon::ofLabel,
+                "ofControl" to lexicon::ofControl,
+            )
+        assertAll(
+            own.map { (label, hit) -> Executable { assertEquals(hit, lexicon.ofControl(label), label) } } +
+                short.flatMap { (text, hit) ->
+                    readings.map { (name, read) -> Executable { assertEquals(hit, read(text), "$name: $text") } }
+                },
+        )
     }
 
     @Test

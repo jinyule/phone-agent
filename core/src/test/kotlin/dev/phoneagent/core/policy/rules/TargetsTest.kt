@@ -21,6 +21,7 @@ import dev.phoneagent.core.ports.ElementState
 import dev.phoneagent.core.ports.HandoffKind
 import dev.phoneagent.core.ports.ScreenFlag
 import dev.phoneagent.core.ports.ScreenSnapshot
+import dev.phoneagent.core.ports.UiElement
 import dev.phoneagent.core.tool.RiskClass
 import dev.phoneagent.core.tool.ToolCall
 import org.junit.jupiter.api.Assertions.assertAll
@@ -428,6 +429,80 @@ class TargetsTest {
                 .plus(listOf("https://a.com/?x=1&pay=2", "C++ delete operator"))
         assertAll(asked(ConfirmReason.DELETE, deletes) + asked(ConfirmReason.SPEND, spends) + asked(null, names))
         names.forEach { assertEquals(Verdict.Allow, verdict(it), it) }
+    }
+
+    /** A chat with 张三 as its title and 明天见 as the draft, with [extra] on it. */
+    private fun chat(vararg extra: UiElement): ScreenSnapshot =
+        screen(
+            text("t1", "张三", box(0, 40, 500, 100)),
+            field("e2", hint = "发消息", focused = true).copy(value = "明天见"),
+            *extra,
+        )
+
+    /** At 标准, in an app that has had a send confirmed. */
+    private fun sent(s: ScreenSnapshot): PolicyContext =
+        ctx(SecurityLevel.STANDARD, s, operated = setOfNotNull(s.pkg), outwardConfirmed = setOfNotNull(s.pkg))
+
+    /** The reason, target and content of the card [verdict] asks with, or `null` when it does not ask. */
+    private fun shown(verdict: Verdict): Triple<ConfirmReason, String?, String?>? =
+        (verdict as? Verdict.Confirm)?.card?.let { Triple(it.reason, it.target, it.content) }
+
+    @Test
+    fun `a strong word and an English part that sends both count, on a control, in a dialog and in a row`() {
+        // Claude r6 B-1, on a chat whose app has had a send confirmed.
+        // A control's own label: the Chinese word decides, and the card names the recipient and the draft.
+        val own =
+            listOf(
+                "Photos and send 立即支付全部款项" to ConfirmReason.SPEND,
+                "Done and send 删除聊天记录" to ConfirmReason.DELETE,
+                "Confirm and send / 确认删除" to ConfirmReason.DELETE,
+                "OK and send, 删除全部记录" to ConfirmReason.DELETE,
+                "Send 删除聊天记录全部内容" to ConfirmReason.DELETE,
+            )
+        val control = { label: String -> chat(el("e1", label, bounds = box(820, 900, 999, 960))) }
+        val pays = own.first().first
+        val owns =
+            own.map { (label, reason) ->
+                Executable {
+                    assertEquals(
+                        Triple(reason, "张三（$label）", "明天见"),
+                        shown(decide(tap("e1"), sent(control(label)))),
+                        label,
+                    )
+                }
+            } +
+                listOf(SecurityLevel.AUTONOMOUS, SecurityLevel.CAUTIOUS).map { level ->
+                    Executable {
+                        assertEquals(
+                            ConfirmReason.SPEND,
+                            shown(decide(tap("e1"), on(control(pays), level)))?.first,
+                            "$level",
+                        )
+                    }
+                }
+        // A dialog's text: a Chinese word that sends hides no English one that deletes, and a Chinese
+        // one that deletes no English one that sends.
+        val dialog = { said: String -> chat(el("b1", "OK").copy(window = 1), text("t3", said, window = 1)) }
+        val dialogs =
+            listOf("发送 and delete?", "发送 & delete?", "删除 and send?").map { said ->
+                Executable {
+                    assertEquals(
+                        Triple(ConfirmReason.DELETE, "张三（OK）", "明天见"),
+                        shown(decide(tap("b1"), sent(dialog(said)))),
+                        said,
+                    )
+                }
+            }
+        // A short text of a row, beside a name too long to be read with it.
+        val row =
+            screen(
+                el("e1", bounds = box(0, 300, 999, 400)),
+                text("t1", "Alice Wonderland Smith", parent = "e1"),
+                text("t2", "发送 and delete", box(0, 350, 500, 390), parent = "e1"),
+            )
+        val rows =
+            listOf(Executable { assertEquals(ConfirmReason.DELETE, shown(decide(tap("e1"), sent(row)))?.first, "row") })
+        assertAll(owns + dialogs + rows)
     }
 
     @Test

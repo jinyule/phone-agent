@@ -42,13 +42,16 @@ internal class Lexicon(
     /**
      * The risk a control's own label names: as [classify], and a strong word anywhere in it counts
      * at any length ("我已阅读并同意服务协议现在支付…"): a control's label says what it does. In
-     * English, each part the label joins ("Send and delete") is read, the most severe deciding.
+     * English, each part the label joins ("Send and delete") is read. Every reading counts, the
+     * most severe deciding, and it [Hit.sends] when any does: an English part that sends hides no
+     * strong word that pays ("Photos and send 立即支付全部款项").
      */
     fun ofControl(label: String): Hit? =
-        firstMax(
-            classify(label) ?: Phrases.strong(label, complete = true),
+        listOf(
+            classify(label),
+            Phrases.strong(label, complete = true),
             Phrases.english(label, true, partMax = null, pauses = true),
-        )
+        ).fold(null, ::firstMax)
 
     /**
      * The risk a control's label names as risk checks read it ([read]): the more severe of what
@@ -145,7 +148,8 @@ private fun latinAt(
 /**
  * What [text] names under the length limit [max]: strong words count only in a text that short,
  * English joined actions split only where each part is ([Phrases.english]), at [pauses] too
- * when told; exemptions only when [text] is [complete].
+ * when told; exemptions only when [text] is [complete]. Every reading counts, the most severe
+ * deciding, and it [Hit.sends] when any does: "发送 and delete" deletes, and sends; "删除 and pay" pays.
  */
 private fun match(
     text: String,
@@ -153,9 +157,9 @@ private fun match(
     complete: Boolean,
     pauses: Boolean,
 ): Hit? {
-    val short = Phrases.length(text) <= max
-    return Phrases.exact(text) ?: (if (short) Phrases.strong(text, complete) else null)
-        ?: Phrases.english(text, complete, partMax = max, pauses = pauses)
+    val strong = if (Phrases.length(text) <= max) Phrases.strong(text, complete) else null
+    return listOf(Phrases.exact(text), strong, Phrases.english(text, complete, partMax = max, pauses = pauses))
+        .fold(null, ::firstMax)
 }
 
 /**
