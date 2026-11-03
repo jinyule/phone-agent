@@ -66,8 +66,14 @@ internal class HandToUserTool(
                 ToolResult.failure(ToolStatus.ERROR, "现在没有人能接手（无人值守的任务）。这一步只能用户来做：end_not_done(cause=blocked)。")
             }
 
+            // Either the app could not be moved to the user, or it could not be taken back and stays
+            // on the main screen, whatever the user answered (SurfaceManager.takeBack).
             HandoffResult.FAILED -> {
-                ToolResult.failure(ToolStatus.ERROR, "没能把画面交给用户（切换屏幕失败）。先 phone_observe 看看现在的画面，再决定。")
+                ToolResult.failure(
+                    ToolStatus.ERROR,
+                    "切换屏幕失败：可能没能把 App 交到用户手上，也可能用户处理完以后没能把 App 收回来，它还留在用户的屏幕上。" +
+                        "先 phone_observe 看看现在的画面，再决定。",
+                )
             }
         }
 

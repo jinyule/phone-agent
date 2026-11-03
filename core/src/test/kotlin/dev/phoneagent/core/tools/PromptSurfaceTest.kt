@@ -8,6 +8,7 @@ import dev.phoneagent.core.ports.ElementRef
 import dev.phoneagent.core.ports.ElementRole
 import dev.phoneagent.core.ports.ElementState
 import dev.phoneagent.core.ports.Frame
+import dev.phoneagent.core.ports.HandoffResult
 import dev.phoneagent.core.ports.OcrLine
 import dev.phoneagent.core.ports.ScreenFlag
 import dev.phoneagent.core.ports.ScreenSnapshot
@@ -431,6 +432,15 @@ class PromptSurfaceTest {
                     .getValue(
                         "hand_to_user",
                     ).execute(call("hand_to_user", """{"kind":"login"}""", reason = "请登录微信"), ctx)
+            // Moving the app failed, either to the user or back from them.
+            val handFailed =
+                tools
+                    .getValue(
+                        "hand_to_user",
+                    ).execute(
+                        call("hand_to_user", """{"kind":"login"}""", reason = "请登录微信"),
+                        FakeContext(interaction = FakeInteraction(handoffResult = HandoffResult.FAILED)),
+                    )
             val confirmed =
                 tools.getValue("request_confirmation").execute(
                     call("request_confirmation", """{"action":"发送消息","target":"张三","content":"十点半到"}"""),
@@ -443,7 +453,7 @@ class PromptSurfaceTest {
                     ).execute(call("end_not_done", """{"cause":"blocked","summary":"需要登录"}"""), ctx)
             Golden.assertMatches(
                 "results/interaction-and-end.expected.txt",
-                listOf(asked, handed, confirmed, ended).joinToString("\n\n=====\n\n") { it.text() },
+                listOf(asked, handed, handFailed, confirmed, ended).joinToString("\n\n=====\n\n") { it.text() },
             )
         }
 

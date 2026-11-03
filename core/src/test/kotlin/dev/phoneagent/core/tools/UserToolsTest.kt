@@ -118,6 +118,10 @@ class UserToolsTest {
             assertEquals(4, texts.toSet().size)
             assertTrue(texts[0].contains("不要绕过这一步"))
             assertTrue(texts[2].contains("end_not_done(cause=blocked)"))
+            // FAILED is recorded when the app could not be moved to the user, and also when it could
+            // not be taken back: it then stays on the user's screen, whatever the user answered.
+            assertTrue(texts[3].contains("可能没能把 App 交到用户手上"), texts[3])
+            assertTrue(texts[3].contains("也可能用户处理完以后没能把 App 收回来"), texts[3])
         }
 
     @Test
