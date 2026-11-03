@@ -23,7 +23,7 @@ import org.junit.jupiter.api.assertThrows
 /**
  * A reply whose model-produced content holds a secret the request sent is rejected whole, never
  * rewritten (model-layer §2): text, call arguments (recovered calls too), reasoning and encrypted
- * reasoning, as sent or JSON-escaped, whole or split over deltas. The rejection carries the
+ * reasoning (its member names too), as sent or JSON-escaped, whole or split over deltas. The rejection carries the
  * "streamed output is not kept" marker ([CredentialEcho]) and none of the echo; the delta that
  * completes the secret is not shown, the ones before it are not held back. Every secret counts,
  * however short. Assertions never print a secret.
@@ -209,6 +209,28 @@ class EchoRejectionTest {
             val encrypted = """[{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"x$ECHOED"}]"""
             server.enqueueSse(responses(output = encrypted))
             assertRejected(model(ModelProtocol.OPENAI_RESPONSES))
+        }
+
+    @Test
+    fun `Responses reasoning with a member named by the key is rejected, streamed or as one JSON body`() =
+        runTest {
+            val named =
+                listOf(
+                    """{"type":"reasoning","id":"rs_1","summary":[],"$ECHOED":"x"}""",
+                    """{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"Hm.","$ECHOED":1}]}""",
+                )
+            for (item in named) {
+                server.enqueueSse(responses(output = "[$item]"))
+                assertRejected(model(ModelProtocol.OPENAI_RESPONSES))
+                server.enqueue(
+                    MockResponse
+                        .Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"id":"resp_1","object":"response","status":"completed","output":[$item]}""")
+                        .build(),
+                )
+                assertRejected(model(ModelProtocol.OPENAI_RESPONSES))
+            }
         }
 
     @Test
