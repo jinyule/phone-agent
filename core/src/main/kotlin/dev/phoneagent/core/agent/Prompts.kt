@@ -21,6 +21,8 @@ import dev.phoneagent.core.session.QuestionAnswered
 import dev.phoneagent.core.session.QuestionAsked
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.job
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -41,8 +43,9 @@ import kotlin.coroutines.resume
  *    budget or inside the tool, a failure).
  * 2. A handoff that ended without its end (a cut, a failure) is taken back first, or the call
  *    ends with a failed take-back: a take-back that fails, takes too long or began and was cut
- *    off makes handOff throw [ScreenUnavailableException] (the move and the exception's class
- *    only) in place of the cancellation or failure. Tools must let it propagate, not go on acting.
+ *    off, or a hand-over cut off (it may have moved the app, with no ticket to take it back),
+ *    makes handOff throw [ScreenUnavailableException] (the move and the exception's class only)
+ *    in place of the cancellation or failure. Tools must let it propagate, not go on acting.
  *    It is thrown whatever cut the call off: the call's own cut then ends as ERROR, its budget's
  *    as TIMEOUT (still with [LoopTexts.mayHaveTakenEffect] and [LoopTexts.screenUnknown]).
  * 3. The only exceptions: a stopping task leaves the prompt to the repair and a handed-over app
@@ -147,20 +150,22 @@ internal class Prompts(
 
         /**
          * The moves of one handoff over [surfaces]: its ticket is taken back at most once (it is no
-         * longer held once the take-back began; [giveBack] runs once, when the prompt is settled),
-         * and a take-back that began and was cut off counts as failed.
+         * longer held once the take-back began; [giveBack] runs once, when the prompt is settled).
+         * A move that began and was cut off counts as a failed take-back: a take-back, and a
+         * hand-over too (it may have moved the app, and left no ticket to take it back with).
          */
         private inner class Moves(
             private val surfaces: SurfaceManager,
         ) : GiveBack {
             private var held: HandoffTicket? = null
+            private var handing = false
             private var backing = false
 
             suspend fun handOver(
                 id: PromptId,
                 kind: HandoffKind,
             ): Pair<HandoffResult, String?> =
-                moving("hand over") { surfaces.handToUser(loop.setup.taskId, kind) }.fold(
+                handToUser(kind).fold(
                     onSuccess = { ticket ->
                         held = ticket
                         val result = awaitHandoff(id)
@@ -174,14 +179,34 @@ internal class Prompts(
                 )
 
             /**
+             * Hands the app over; [handing] stays set only when a cancellation ends it, as the app
+             * may have moved. A failure (or a bug) means it did not.
+             */
+            private suspend fun handToUser(kind: HandoffKind): Result<HandoffTicket> {
+                var returned = false
+                handing = true
+                try {
+                    return moving("hand over") { surfaces.handToUser(loop.setup.taskId, kind) }
+                        .also { returned = true }
+                } finally {
+                    handing = stillHanding(returned)
+                }
+            }
+
+            /** Whether a hand-over that did not return was ended by a cancellation. */
+            private suspend fun stillHanding(returned: Boolean): Boolean =
+                !returned && currentCoroutineContext().job.isCancelled
+
+            /**
              * Takes the task back after the call cut its handoff off, unless the app is not with
-             * the user (never handed over). A take-back that already began and was cut off, or one
-             * that fails or takes longer than [LoopConfig.takeBackTimeoutMs], throws
-             * [ScreenUnavailableException] naming the move and the exception's class only, in place
-             * of the cancellation: the call must not go on as if the app were back.
+             * the user (never handed over). A hand-over or a take-back that already began and was
+             * cut off, or a take-back that fails or takes longer than
+             * [LoopConfig.takeBackTimeoutMs], throws [ScreenUnavailableException] naming the move
+             * and the exception's class only, in place of the cancellation: the call must not go on
+             * as if the app were back.
              */
             override suspend fun giveBack() {
-                if (backing) throw ScreenUnavailableException("take back failed: cut off")
+                if (backing || handing) throw ScreenUnavailableException("take back failed: cut off")
                 val ticket = held ?: return
                 val back =
                     withTimeoutOrNull(loop.config.takeBackTimeoutMs) {

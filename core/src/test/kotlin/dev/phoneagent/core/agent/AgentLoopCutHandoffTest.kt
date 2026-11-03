@@ -9,6 +9,7 @@ import dev.phoneagent.core.ports.HandoffKind
 import dev.phoneagent.core.ports.HandoffResult
 import dev.phoneagent.core.ports.HandoffTicket
 import dev.phoneagent.core.ports.Question
+import dev.phoneagent.core.ports.ScreenUnavailableException
 import dev.phoneagent.core.ports.SurfaceAllocation
 import dev.phoneagent.core.ports.SurfaceCapability
 import dev.phoneagent.core.ports.SurfaceKind
@@ -30,7 +31,9 @@ import dev.phoneagent.core.tool.ToolStatus
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.test.TestScope
@@ -40,6 +43,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -57,15 +61,17 @@ class AgentLoopCutHandoffTest {
     private val texts = LoopTexts()
 
     /**
-     * Counts the moves; handing over takes [handMs], to its end despite a cancellation; taking back
-     * takes [takeBackMs] (to its end despite a cancellation when [finishesBack]), then throws
-     * [backFailure].
+     * Counts the moves; handing over takes [handMs], to its end despite a cancellation, and then,
+     * when [handCancellable], throws a cancellation that came meanwhile (as a move done on another
+     * dispatcher returns: the app is moved, the ticket lost); taking back takes [takeBackMs] (to
+     * its end despite a cancellation when [finishesBack]), then throws [backFailure].
      */
     private class CountingSurfaces(
         private val takeBackMs: Long = 0,
         private val backFailure: IOException? = null,
         private val finishesBack: Boolean = false,
         private val handMs: Long = 0,
+        private val handCancellable: Boolean = false,
     ) : SurfaceManager {
         var handed = 0
         var takenBack = 0
@@ -83,6 +89,7 @@ class AgentLoopCutHandoffTest {
         ): HandoffTicket {
             handed++
             withContext(NonCancellable) { delay(handMs) }
+            if (handCancellable) currentCoroutineContext().ensureActive()
             return HandoffTicket(task, kind, SurfaceRef(7, SurfaceKind.AGENT), "t1")
         }
 
@@ -282,6 +289,83 @@ class AgentLoopCutHandoffTest {
             assertEquals(ToolStatus.TIMEOUT, result.status, "the budget decides, whatever the take-back threw")
             assertEquals("${texts.timeout}${texts.mayHaveTakenEffect}\n${texts.screenUnknown}", result.text())
             assertTrue(harness.events().none { it is ToolExecuted }, "the cut-off call records no execution end")
+            assertEquals(1 to 1, surfaces.handed to surfaces.takenBack)
+            assertEquals(1, harness.events().only<PromptWithdrawn>().size)
+        }
+
+    /** hand, with a budget of [timeoutMs]: c1 hands off, around [cut], and then [wentOn] is set. */
+    private class GoingOn(
+        timeoutMs: Long,
+        cut: suspend (suspend () -> Unit) -> Unit,
+    ) {
+        var wentOn = false
+        val tool =
+            FakeTool("hand", RiskClass.WRITE, timeoutMs) { _, ctx ->
+                cut { ctx.interaction.handOff(HandoffKind.LOGIN, "请登录") }
+                wentOn = true
+                ToolResult.ok("没等到用户")
+            }
+    }
+
+    private fun TestScope.single(
+        tool: FakeTool,
+        surfaces: CountingSurfaces,
+    ): LoopHarness =
+        LoopHarness(this, FakeChatModel().calls(call("c1", "hand")).answers("好了"), listOf(tool), surfaces = surfaces)
+
+    @Test
+    fun `a hand-over the tool cuts off ends the call with a failed take-back`() =
+        runTest {
+            // The app is moved, but the cut lands as the move returns: there is no ticket to take it back with.
+            val surfaces = CountingSurfaces(handMs = 2_000, handCancellable = true)
+            val hand = GoingOn(timeoutMs = 10_000) { handOff -> withTimeoutOrNull(1_000) { handOff() } }
+            val harness = single(hand.tool, surfaces)
+            val loop = harness.start()
+            loop.followup(text("登录"))
+            loop.awaitPhase(Phase.Done)
+
+            val result = harness.resultOf(c1)
+            assertEquals(ToolStatus.ERROR, result.status, "not OK as if the app were back")
+            assertEquals(
+                "${texts.toolError}${ScreenUnavailableException::class.java.name}\n${texts.screenUnknown}",
+                result.text(),
+            )
+            assertFalse(hand.wentOn, "the tool did not go on acting")
+            assertEquals(1 to 0, surfaces.handed to surfaces.takenBack)
+            assertEquals(1, harness.events().only<PromptWithdrawn>().size)
+        }
+
+    @Test
+    fun `a hand-over the budget cuts off ends the call as TIMEOUT`() =
+        runTest {
+            val surfaces = CountingSurfaces(handMs = 2_000, handCancellable = true)
+            val hand = GoingOn(timeoutMs = 1_000) { handOff -> handOff() }
+            val harness = single(hand.tool, surfaces)
+            val loop = harness.start()
+            loop.followup(text("登录"))
+            loop.awaitPhase(Phase.Done)
+
+            val result = harness.resultOf(c1)
+            assertEquals(ToolStatus.TIMEOUT, result.status)
+            assertEquals("${texts.timeout}${texts.mayHaveTakenEffect}\n${texts.screenUnknown}", result.text())
+            assertFalse(hand.wentOn)
+            assertTrue(harness.events().none { it is ToolExecuted })
+            assertEquals(1 to 0, surfaces.handed to surfaces.takenBack)
+            assertEquals(1, harness.events().only<PromptWithdrawn>().size)
+        }
+
+    @Test
+    fun `control - a hand-over that returned before the cut is taken back as before`() =
+        runTest {
+            val surfaces = CountingSurfaces(handMs = 500, handCancellable = true)
+            val hand = GoingOn(timeoutMs = 10_000) { handOff -> withTimeoutOrNull(1_000) { handOff() } }
+            val harness = single(hand.tool, surfaces)
+            val loop = harness.start()
+            loop.followup(text("登录"))
+            loop.awaitPhase(Phase.Done)
+
+            assertEquals(ToolStatus.OK, harness.resultOf(c1).status)
+            assertTrue(hand.wentOn, "the app was back when the tool went on")
             assertEquals(1 to 1, surfaces.handed to surfaces.takenBack)
             assertEquals(1, harness.events().only<PromptWithdrawn>().size)
         }
