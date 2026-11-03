@@ -428,7 +428,7 @@ interface TaskRuntime {
 - 输入方法都不挂起、立即返回；先记成 `inbox/spliced`，再生效。
 - `Idle`：还没开始，或上一个 turn 没有最终回答就结束了（失败、上限、`preStep` 拒绝、max-tokens）。`Done`：上一个 turn 以最终回答或 `end_not_done` 结束。两者都接受 followup，都不会自己继续。
 - `Stopped(cause)` 有两层意思：这个 `TaskRuntime` 实例终止了，之后它不再写日志，对它的输入一律忽略；会话本身没有结束，任何原因的停止之后都能继续（D14）：`AgentLoop.resume` 在同一份日志上开一个新实例，先写 `session/resumed`，下一个 turn 要由新的用户输入开始。会话日志写不了或刷不了盘时，任务以 `StopCause.ERROR` 停止。
-- `events` 缓冲 256 条，收集者跟不上时丢最旧的；UI 不能错过的状态要从 `phase` 或日志恢复。待答提示也一样：`Phase.Waiting.promptId` 就是日志里 `approval/asked`、`question/asked` 或 `handoff/started` 的 id，完整的卡片、问题或接管说明都在那条记录里。
+- `events` 缓冲 256 条，收集者跟不上时丢最旧的；UI 不能错过的状态要从 `phase` 或日志恢复。待答提示也一样：`Phase.Waiting.promptId` 就是日志里 `approval/asked`、`question/asked` 或 `handoff/start` 的 id，完整的卡片、问题或接管说明都在那条记录里。
 - `answer` 返回 `true` 当且仅当这条回复成了提示的答案。每个提示是一个原子状态：待答 → 已答 / 已关闭，先到的一方生效。停止、关闭 scope 或到期时，提示在被取消的那一刻就关闭，之后的回复一律返回 `false`；到期前已被接受的回复照样算数，即使计时器先触发。
 
 **层级关系**：
@@ -507,10 +507,10 @@ fun interface Chain<I, O> { suspend fun proceed(input: I): O }   // 不调用 pr
 
 **`toolPreExecute` 与 PolicyEngine**：
 - 拦截器链先跑。PolicyEngine 再用 `IntentResolver` 解析调用，在 `ctx.screen` 上判定。`ctx.screen` 从日志推导：**已经有 `tool/result` 的调用所记录的最近一屏**（包括 runtime 记在那个调用名下的屏：批准后复核读的屏 S'，以及接管结束后读的屏，§7.3）；还没有结果的调用记的屏、不属于任何调用的屏都不算。记下以后，只要发生下面任何一种作废边界，它和之前记的屏就都不算了：
-  - `handoff/started`、`handoff/end`：从 `handoff/started` 起之前的屏都不算，`handoff/end` 再把接管期间记的屏也作废；接管不论怎样结束（正常结束、被停止、超时、意外异常、进程被杀后修复）都一样；
-  - `session/resumed`：进程结束过，App 可能也不在原来的状态；
+  - `handoff/start`、`handoff/end`：从 `handoff/start` 起之前的屏都不算，`handoff/end` 再把接管期间记的屏也作废；接管不论怎样结束（正常结束、被停止、超时、意外异常、进程被杀后修复）都一样；
+  - `session/resumed`：新实例接管了日志（进程结束过，或停止以后继续），App 可能已经不在原来的状态；
   - 非 READ 调用的 `tool/started`（按 verdictSeq 指向的那条 verdict 的 `intent.kind` 判断）：一开始执行，动作就可能改变了屏幕，不论之后正常返回、超时、被停止还是进程被杀；
-  - `screen/acted`、`screen/launched`：事件自带的回读屏（`after`）算作在边界之后记录的，所在调用有了结果就有效；`after` 为 null 时就没有有效的屏。动作或启动抛异常、被取消时也照样记一条（`Failed`，只写异常类名，`effect = UNKNOWN`，`after` 为 null），因为它可能已经到达设备（ScreenPort 契约）；被截断以后才返回的动作，记它返回的结果。这两种记录都在 `NonCancellable` 里写，日志被别的写入占住时等它放开；日志已经失败时，补写抛日志的异常，任务以 `ERROR` 停止。它们和其他 `screen/*` 事件一样不进模型请求。
+  - `screen/action`、`screen/launch`：事件自带的回读屏（`after`）算作在边界之后记录的，所在调用有了结果就有效；`after` 为 null 时就没有有效的屏。动作或启动抛异常、被取消时也照样记一条（`Failed`，只写异常类名，`effect = UNKNOWN`，`after` 为 null），因为它可能已经到达设备（ScreenPort 契约）；被截断以后才返回的动作，记它返回的结果。这两种记录都在 `NonCancellable` 里写，日志被别的写入占住时等它放开；日志已经失败时，补写抛日志的异常，任务以 `ERROR` 停止。它们和其他 `screen/*` 事件一样不进模型请求。
 
   边界之后还没读到屏，就是 `screen = null`，交给 PolicyEngine 处理（WP05 对依赖屏幕的动作返回 `NO_SCREEN`，提示先 `phone_observe`）。全部只从日志推导，不用内存状态。
   - 这一屏可能比模型看到的更新：调用的结果不一定把它记录的屏展示给模型（比如动作之后回读的屏）。这样取是有意的：用更新的屏，最坏是带 ref 的调用多一次 stale 拒绝（快照 id 对不上）；如果严格按"模型看到的屏"判，坐标点击会在过期的屏上解析，可能放行一次在当前屏上本该确认的点击。
@@ -763,7 +763,7 @@ TaskRuntime 循环（每个 step，对应 §3.8 的拦截点）：
 
 1. 遇到 `hand_to_user`、PolicyEngine 判为转交、或检测到防截屏页时触发；
 2. 用 `moveTask` 把任务挪到主屏，同时发通知和悬浮胶囊，提示"请处理：登录 / 验证码 / 付款"；
-3. 用户点"处理好了"后，把任务挪回后台屏，并告诉模型"用户已处理，请核实结果"。每次接管结束（不论结局，也不论是 PolicyEngine 判的转交还是工具自己发起的）、下一次模型请求之前，runtime 都重新读屏（等待上限同复核，`LoopConfig.recheckScreenTimeoutMs`），记成这个调用名下的 `screen/snapshot`，之后的调用就在这一屏上判定。读不到时不报错：接管开始之前的屏一律不再算数，之后的调用以 `screen = null` 判定（§3.8），这个调用的结果末尾加上"读不到屏，先 phone_observe"（`LoopTexts.screenUnknown`）。接管没有正常结束时同样如此：停止、超出工具预算、意外异常都没有 `handoff/end`，也来不及读屏，旧屏从 `handoff/started` 起就已作废；补结果的两条路径（正常派发和 `repairOf`）都给这个调用加上同一句提示；接管被调用自己截断或者因为意外异常结束、任务没有在停止时，释放单提示锁之前写 `prompt/withdrawn` 并收回任务（§3.2）；停止、turn 失败和崩溃恢复时由修复路径关掉，停止时 App 留给用户；
+3. 用户点"处理好了"后，把任务挪回后台屏，并告诉模型"用户已处理，请核实结果"。每次接管结束（不论结局，也不论是 PolicyEngine 判的转交还是工具自己发起的）、下一次模型请求之前，runtime 都重新读屏（等待上限同复核，`LoopConfig.recheckScreenTimeoutMs`），记成这个调用名下的 `screen/snapshot`，之后的调用就在这一屏上判定。读不到时不报错：接管开始之前的屏一律不再算数，之后的调用以 `screen = null` 判定（§3.8），这个调用的结果末尾加上"读不到屏，先 phone_observe"（`LoopTexts.screenUnknown`）。接管没有正常结束时同样如此：停止、超出工具预算、意外异常都没有 `handoff/end`，也来不及读屏，旧屏从 `handoff/start` 起就已作废；补结果的两条路径（正常派发和 `repairOf`）都给这个调用加上同一句提示；接管被调用自己截断或者因为意外异常结束、任务没有在停止时，释放单提示锁之前写 `prompt/withdrawn` 并收回任务（§3.2）；停止、turn 失败和崩溃恢复时由修复路径关掉，停止时 App 留给用户；
 4. 同一时间只交一个 App 给用户，多个任务排队。
 
 ---

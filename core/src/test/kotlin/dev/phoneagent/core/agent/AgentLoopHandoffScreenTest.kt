@@ -41,7 +41,7 @@ import org.junit.jupiter.api.Test
 
 /**
  * However a handoff ends, the screens from before it no longer count (phase1 §7.3, contracts
- * addendum §14): from `handoff/started` on, the next call is judged on a screen recorded after it,
+ * addendum §14): from `handoff/start` on, the next call is judged on a screen recorded after it,
  * or on none, and the handing-off call's result tells the model to observe first.
  */
 class AgentLoopHandoffScreenTest {

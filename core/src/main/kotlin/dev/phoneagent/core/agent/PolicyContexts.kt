@@ -34,15 +34,16 @@ import dev.phoneagent.core.tool.ToolStatus
  * call: the re-check after its approval, the look after its handoff), unless something that may
  * have changed the screen was recorded after it. Snapshots of a call still running, and any
  * without a call, do not count. These boundaries hide every screen recorded before them:
- * - `handoff/started` and `handoff/end`: the user may have changed what is shown, however the
+ * - `handoff/start` and `handoff/end`: the user may have changed what is shown, however the
  *   handoff ends (normally, stopped, timed out, broken); so screens recorded while handed over
  *   are hidden too;
- * - `session/resumed`: the process ended, and the app with it, perhaps;
+ * - `session/resumed`: a new runtime took the log over (after the process ended, or after a stop),
+ *   and the app may have changed meanwhile;
  * - the `tool/started` of a non-READ call (by the intent of the verdict it started on): from the
  *   start of its execution its action may have changed the screen, whether it then finishes, times
  *   out, is stopped or dies; a call refused after its re-check never starts, so its S' still
  *   counts;
- * - `screen/acted` and `screen/launched`: their own read-back counts as recorded after the
+ * - `screen/action` and `screen/launch`: their own read-back counts as recorded after the
  *   boundary (once their call has a result); without one there is no screen.
  *
  * `null` before any screen counts and after a boundary until a screen is recorded after it; the

@@ -78,7 +78,7 @@ public interface TaskRuntime {
      *
      * A UI that did not see a prompt being asked recovers it from the session log:
      * [Phase.Waiting.promptId] is the id of its `approval/asked`, `question/asked` or
-     * `handoff/started` record, which holds the whole card, question or handoff.
+     * `handoff/start` record, which holds the whole card, question or handoff.
      */
     public fun answer(
         promptId: PromptId,
