@@ -181,6 +181,22 @@ class PressTargetTest {
                     PressCase("a tap on a row taking long clicks only", long = false, expected = null) {
                         layout("row") { isLongClickable = true }.with(label(inner))
                     },
+                    PressCase("a tap on a disabled label taking clicks", long = false, expected = "row") {
+                        layout("row") { isClickable = true }.with(
+                            label(inner) {
+                                isClickable = true
+                                isEnabled = false
+                            },
+                        )
+                    },
+                    PressCase("a long press on a disabled label taking long clicks", long = true, expected = "row") {
+                        layout("row") { isLongClickable = true }.with(
+                            label(inner) {
+                                isLongClickable = true
+                                isEnabled = false
+                            },
+                        )
+                    },
                 ),
             )
         }
