@@ -73,8 +73,12 @@ public data class AdbConfig(
  * The built-in wireless-debugging client (phase1 D3, §7.1 step ④): [pair] once with the code from
  * Settings, then [connect] and run fixed commands on the [AdbSession]. Pure JVM; the host supplies
  * the identity and the TLS exporter. Blocking I/O runs on [io]; cancellation closes the socket from
- * the cancelling thread (so even an [io] whose threads are all blocked is no obstacle) and
- * propagates, and a timeout ends as a typed failure.
+ * the cancelling thread and propagates, and a timeout ends as a typed failure. So a read or write
+ * blocked on this client's own socket never holds up a cancellation or a timeout. The I/O itself
+ * still needs a thread of [io], though: while every thread of [io] is busy with other blocking
+ * work, an operation that has not started waits, and its timeout takes effect only once a thread
+ * is free. Give it `Dispatchers.IO` (the default) or a dispatcher that no other long blocking work
+ * uses.
  *
  * Capability boundary: this is app setup code. It is not a tool and must never be reachable from
  * the model or the tool layer (AGENTS.md §3.4); `PackageDependencyTest` keeps every other core
@@ -84,7 +88,7 @@ public class AdbClient(
     private val identity: AdbIdentity,
     exporter: TlsKeyExporter,
     private val config: AdbConfig = AdbConfig(),
-    /** Where blocking socket and storage I/O runs. */
+    /** Where blocking socket and storage I/O runs; not shared with other long blocking work. */
     internal val io: CoroutineDispatcher = Dispatchers.IO,
 ) {
     private val tls = AdbTls(identity, exporter)
