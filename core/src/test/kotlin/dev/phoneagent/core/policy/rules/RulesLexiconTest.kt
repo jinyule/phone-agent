@@ -63,6 +63,10 @@ class RulesLexiconTest {
         )
         assertNull(risk(el("b1").copy(resourceId = "com.x:id/iv_avatar")))
         assertNull(risk(el("b1")))
+        // Of several words, the most severe decides, and the touch also sends.
+        val both = el("b1").copy(resourceId = "com.x:id/btn_send_delete")
+        assertEquals(ElementRisk(IntentKind.DELETE, "id:delete"), risk(both))
+        assertEquals(true, Reading(PolicyTuning()).risks.activation(both, screen(both)).sends)
         // A label wins over the id: "收藏" with id "btn_send" is not judged by the id.
         assertNull(risk(el("b1", "收藏").copy(resourceId = "com.x:id/btn_send")))
     }

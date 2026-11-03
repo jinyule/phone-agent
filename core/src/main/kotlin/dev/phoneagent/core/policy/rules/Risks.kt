@@ -15,12 +15,16 @@ import java.util.concurrent.ConcurrentHashMap
  * @property risk what activating it does, or `null` when ordinary.
  * @property reached every element the touch may reach with its own risk, smallest first; empty
  *   when there is none.
+ * @property sends some reading of some element the touch may reach (of the text drawn there
+ *   when there is none) sends, whatever [risk] is ([Hit.sends]): its card names the recipient and
+ *   the draft (policy-rules.md §6.3).
  * @param texts computes [texts] when first asked for.
  */
 internal class Assessment(
     val target: UiElement?,
     val risk: ElementRisk?,
     val reached: List<Reached>,
+    val sends: Boolean,
     texts: () -> List<String>,
 ) {
     /** All visible text on what the touch may reach: names, content and OCR. */
@@ -152,8 +156,9 @@ internal class Risks(
         Work.judged.add(candidates.size.toLong())
         val judged = candidates.map { Reached(it, controls.risk(it, drawn.said, screen)) }
         val riskiest = judged.maxWithOrNull(byRisk)
-        val risk = if (riskiest == null) controls.ofText(drawn.said, screen) else riskiest.risk
-        return Assessment(riskiest?.element, risk, judged) {
+        val hit = if (riskiest == null) controls.ofText(drawn.said, screen) else riskiest.hit
+        val sends = judged.any(Reached::sends) || hit?.sends == true
+        return Assessment(riskiest?.element, hit?.let(::asRisk), judged, sends) {
             val shown = candidates.flatMap { controls.shown(it, screen) + drawn.texts } + drawn.texts
             Work.gathered.add(shown.size.toLong())
             shown.distinct()
@@ -161,11 +166,20 @@ internal class Risks(
     }
 }
 
-/** A control a touch may reach, with its risk. */
+/** A control a touch may reach, with what activating it does ([Controls.risk]). */
 internal data class Reached(
     val element: UiElement,
-    val risk: ElementRisk?,
-)
+    val hit: Hit?,
+) {
+    /** Its risk, or `null` when ordinary. */
+    val risk: ElementRisk? = hit?.let(::asRisk)
+
+    /** Some reading of it sends ([Hit.sends]). */
+    val sends: Boolean = hit?.sends == true
+}
+
+/** [hit] as the risk of activating an element. */
+private fun asRisk(hit: Hit): ElementRisk = ElementRisk(hit.kind, hit.matched)
 
 /** The OCR lines at a point and what they say. */
 private class Drawn(
@@ -241,8 +255,25 @@ private val SEVERITY: List<IntentKind> =
 /** The rank of [kind] in [SEVERITY]; no risk ranks lowest. */
 internal fun severity(kind: IntentKind?): Int = SEVERITY.indexOf(kind)
 
-/** The more severe of [first] and [next], [first] among equals. */
+/**
+ * The more severe of [first] and [next], [first] among equals; it [Hit.sends] when either does,
+ * so what the other one says about sending is kept.
+ */
 internal fun firstMax(
     first: Hit?,
     next: Hit?,
-): Hit? = if (next != null && severity(next.kind) > severity(first?.kind)) next else first
+): Hit? =
+    when {
+        first == null -> {
+            next
+        }
+
+        next == null -> {
+            first
+        }
+
+        else -> {
+            val max = if (severity(next.kind) > severity(first.kind)) next else first
+            if (max.sends || !(first.sends || next.sends)) max else max.copy(sends = true)
+        }
+    }

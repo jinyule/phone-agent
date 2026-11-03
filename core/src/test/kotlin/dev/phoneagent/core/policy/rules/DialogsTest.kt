@@ -23,17 +23,18 @@ import kotlin.random.Random
 class DialogsTest {
     private val reading = Reading(PolicyTuning())
 
-    /** What a generic button does, read from its dialog directly. */
+    /** What a generic button does, and whether it sends, read from its dialog directly. */
     private fun direct(
         button: UiElement,
         s: ScreenSnapshot,
-    ): ElementRisk? {
+    ): Pair<ElementRisk?, Boolean> {
         val hits = Elements.context(button, s).mapNotNull(reading.lexicon::inContext)
         val spend =
             hits.firstOrNull { it.kind == IntentKind.SPEND }
                 ?: Hit(IntentKind.SPEND, "payment page").takeIf { reading.pages.isPayment(s) }
         val found = spend ?: hits.firstOrNull { it.kind == IntentKind.DELETE } ?: hits.firstOrNull()
-        return found?.let { ElementRisk(it.kind, "${Text.bare(button.name.orEmpty())}:${it.matched}") }
+        val risk = found?.let { ElementRisk(it.kind, "${Text.bare(button.name.orEmpty())}:${it.matched}") }
+        return risk to hits.any(Hit::sends)
     }
 
     @Test
@@ -60,7 +61,8 @@ class DialogsTest {
             val blank = el("e9", bounds = box(0, 800, 100, 850)).copy(window = WINDOWS.random(rnd))
             val s = screen(*(buttons + texts + blank).toTypedArray(), ocr = drawn.ifEmpty { null })
             for (button in buttons) {
-                assertEquals(direct(button, s), reading.risks.activation(button, s).risk, "round $round ${button.ref}")
+                val activated = reading.risks.activation(button, s)
+                assertEquals(direct(button, s), activated.risk to activated.sends, "round $round ${button.ref}")
                 val manages = reading.settings.managesApp(Elements.context(button, s))
                 assertEquals(manages, reading.settings.dialogManages(button, s), "round $round ${button.ref}")
             }
@@ -97,6 +99,8 @@ class DialogsTest {
                 "确认支付？",
                 "删除全部记录？",
                 "发送给张三？",
+                "删除并发送给张三？",
+                "转账给张三",
                 "要停用此应用吗？",
                 "卸载",
                 "强行停止",

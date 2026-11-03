@@ -32,6 +32,27 @@ internal class ScreenIntents(
             is Step.Key -> key(step.key, screen)
         }
 
+    /**
+     * [step] may send something to someone on [screen] (policy-rules.md §6.3), whatever else it
+     * does: it reaches out, or some reading of a control a tap or Enter may activate sends
+     * ([Assessment.sends]). Its card then names the recipient and the draft.
+     */
+    fun sends(
+        step: ScreenStep,
+        screen: ScreenSnapshot,
+    ): Boolean = resolve(step, screen).kind == IntentKind.OUTWARD || activated(step, screen)?.sends == true
+
+    /** What a tap, or Enter on a focused control, activates; `null` for other steps. */
+    private fun activated(
+        step: ScreenStep,
+        screen: ScreenSnapshot,
+    ): Assessment? =
+        when (step) {
+            is Step.Tap -> risks.tap(step.aim, step.long, screen)
+            is Step.Key -> if (step.key == SystemKey.ENTER) risks.pressed(screen) else null
+            is Step.Type, is Step.Scroll, is Step.Swipe -> null
+        }
+
     private fun tap(
         step: Step.Tap,
         screen: ScreenSnapshot,

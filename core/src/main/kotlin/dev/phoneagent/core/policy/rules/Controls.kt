@@ -1,6 +1,5 @@
 package dev.phoneagent.core.policy.rules
 
-import dev.phoneagent.core.policy.ElementRisk
 import dev.phoneagent.core.policy.IntentKind
 import dev.phoneagent.core.ports.ElementRole
 import dev.phoneagent.core.ports.ScreenSnapshot
@@ -25,7 +24,6 @@ internal class Controls(
 ) {
     private val says = Says(lexicon, fields, settings)
     private val dialogs = Dialogs(lexicon, pages)
-    private val byRisk: Comparator<ElementRisk> = compareBy { severity(it.kind) }
 
     /** What each element shows itself, read once per snapshot. */
     private val owns = PerScreen { ConcurrentHashMap<UiElement, Own>() }
@@ -43,16 +41,17 @@ internal class Controls(
     ): List<String> = own(element, screen).texts
 
     /**
-     * The risk of activating [element] where [drawn] is drawn over it; inputs and clear buttons
-     * only edit. Every risk a reading finds counts, the most severe deciding (policy-rules.md §0):
-     * a sensitive settings entry, the words on the control ([labelled]), a settings control, and
-     * a risk that keeps a would-be clear button from being one ([Fields.clearing]).
+     * What activating [element] where [drawn] is drawn over it does, or `null` when ordinary;
+     * inputs and clear buttons only edit. Every risk a reading finds counts, the most severe
+     * deciding, and it [Hit.sends] when any reading sends (policy-rules.md §0): a sensitive
+     * settings entry, the words on the control ([labelled]), a settings control, and a risk that
+     * keeps a would-be clear button from being one ([Fields.clearing]).
      */
     fun risk(
         element: UiElement,
         drawn: Said,
         screen: ScreenSnapshot,
-    ): ElementRisk? {
+    ): Hit? {
         if (Elements.editable(element)) return null
         val own = own(element, screen)
         val said = own.said.then(drawn)
@@ -61,20 +60,20 @@ internal class Controls(
         return if (clearing != null && veto == null) {
             null
         } else {
-            listOfNotNull(
-                said.sensitive?.let { ElementRisk(IntentKind.SETTINGS, "settings:$it") },
+            listOf(
+                said.sensitive?.let { Hit(IntentKind.SETTINGS, "settings:$it") },
                 labelled(own, said, screen),
                 own.settings,
-                veto?.let { ElementRisk(it.kind, it.matched) },
-            ).maxWithOrNull(byRisk)
+                veto,
+            ).fold(null, ::firstMax)
         }
     }
 
-    /** The risk of touching where there is no element and only [drawn] (OCR) is. */
+    /** What touching where there is no element and only [drawn] (OCR) is does. */
     fun ofText(
         drawn: Said,
         screen: ScreenSnapshot,
-    ): ElementRisk? = drawn.classified?.let { ElementRisk(it.kind, it.matched) } ?: unlabeled(drawn, screen)
+    ): Hit? = drawn.classified ?: unlabeled(drawn, screen)
 
     private fun own(
         element: UiElement,
@@ -94,7 +93,7 @@ internal class Controls(
         own: Own,
         said: Said,
         screen: ScreenSnapshot,
-    ): ElementRisk? {
+    ): Hit? {
         val whole =
             if (pages.isPayment(
                     screen,
@@ -104,20 +103,19 @@ internal class Controls(
             } else {
                 (own.name ?: said.single)?.let { lexicon.ofControl(it, screen) }
             }
-        val hit = listOf(own.ofLabel, if (said.isEmpty) own.icon else null, said.classified).fold(whole, ::firstMax)
-        return listOfNotNull(hit?.let { ElementRisk(it.kind, it.matched) }, own.dialog, unlabeled(said, screen))
-            .maxWithOrNull(byRisk)
+        val icon = if (said.isEmpty) own.icon else null
+        return listOf(own.ofLabel, icon, said.classified, own.dialog, unlabeled(said, screen)).fold(whole, ::firstMax)
     }
 
     /** No text at all on a payment page: it may well be the pay button. */
     private fun unlabeled(
         said: Said,
         screen: ScreenSnapshot,
-    ): ElementRisk? =
+    ): Hit? =
         if (said.isEmpty &&
             pages.isPayment(screen)
         ) {
-            ElementRisk(IntentKind.SPEND, Words.UNLABELED_ON_PAYMENT_PAGE)
+            Hit(IntentKind.SPEND, Words.UNLABELED_ON_PAYMENT_PAGE)
         } else {
             null
         }
@@ -127,11 +125,11 @@ internal class Controls(
         element: UiElement,
         label: String,
         screen: ScreenSnapshot,
-    ): ElementRisk? {
+    ): Hit? {
         if (screen.pkg != Pages.SETTINGS) return null
         val toggles = element.role in TOGGLES || ScreenIndex.of(screen).children(element).any { it.role in TOGGLES }
         val acts = toggles || Text.bare(lexicon.read(label)) in SETTINGS_ACTIONS
-        return ElementRisk(IntentKind.SETTINGS, "settings:control").takeIf { acts }
+        return Hit(IntentKind.SETTINGS, "settings:control").takeIf { acts }
     }
 
     /** What [element] shows itself, and what that says about activating it ([risk]); read when built. */
@@ -159,20 +157,24 @@ internal class Controls(
         val icon: Hit? = icon(element)
 
         /** What its dialog makes it do when it is a generic button ("确定"), else `null`. */
-        val dialog: ElementRisk? =
+        val dialog: Hit? =
             if (lexicon.isGeneric(label)) dialogs.generic(element, screen, lexicon.read(label)) else null
 
         /** It changes the system in the settings app. */
-        val settings: ElementRisk? = settingsControl(element, label, screen)
+        val settings: Hit? = settingsControl(element, label, screen)
     }
 }
 
-/** An icon button without any text: its resource id ("btn_send") says what it does. */
+/**
+ * An icon button without any text: its resource id ("btn_send") says what it does, the most
+ * severe of its words deciding ("btn_send_delete" deletes, and sends).
+ */
 private fun icon(element: UiElement): Hit? =
     element.resourceId
         ?.let(Text::idWords)
         .orEmpty()
-        .firstNotNullOfOrNull { word -> Words.ID_WORDS[word]?.let { Hit(it, "id:$word") } }
+        .mapNotNull { word -> Words.ID_WORDS[word]?.let { Hit(it, "id:$word") } }
+        .fold(null, ::firstMax)
 
 /**
  * What a list of texts on a control says, as far as [Controls.risk] reads it: how many distinct
@@ -279,25 +281,29 @@ private class Dialogs(
 ) {
     private val tables = PerScreen { DialogTable(it, lexicon) }
 
-    /** What generic [element] (labelled [label]) does in its dialog, or `null`. */
+    /**
+     * What generic [element] (labelled [label]) does in its dialog, or `null`; it [Hit.sends]
+     * when some text of the dialog sends, whatever it does.
+     */
     fun generic(
         element: UiElement,
         screen: ScreenSnapshot,
         label: String,
-    ): ElementRisk? {
+    ): Hit? {
         val table = tables.of(screen)
         val spend =
-            table.first(element, IntentKind.SPEND)
+            table.first(element, Wanted.SPEND)
                 ?: Hit(IntentKind.SPEND, "payment page").takeIf { pages.isPayment(screen) }
-        val found = spend ?: table.first(element, IntentKind.DELETE) ?: table.first(element, null)
-        return found?.let { ElementRisk(it.kind, "${Text.bare(label)}:${it.matched}") }
+        val found = spend ?: table.first(element, Wanted.DELETE) ?: table.first(element, Wanted.ANY)
+        val sends = table.first(element, Wanted.SENDING) != null
+        return found?.let { Hit(it.kind, "${Text.bare(label)}:${it.matched}", sends) }
     }
 }
 
 /**
  * The dialog risk ([Lexicon.inContext]) of every named element and OCR line of one screen, in
  * reading order, OCR last; kept for the whole screen and for each window as the first hit of each
- * kind, and the first one on another element than that.
+ * [Wanted] sort, and the first one on another element than that.
  */
 private class DialogTable(
     screen: ScreenSnapshot,
@@ -311,39 +317,40 @@ private class DialogTable(
                 ?.let { e to it }
         }
     private val drawn: List<Hit> = screen.ocr.orEmpty().mapNotNull { lexicon.inContext(it.text) }
-    private val all: Map<IntentKind?, First> = firsts(named)
-    private val windows: Map<Int?, Map<IntentKind?, First>> =
+    private val all: Map<Wanted, First> = firsts(named)
+    private val windows: Map<Int?, Map<Wanted, First>> =
         named
             .groupBy {
                 it.first.window
             }.mapValues { firsts(it.value) }
-    private val none: Map<IntentKind?, First> = firsts(emptyList())
-    private val ocr: Map<IntentKind?, Hit?> =
-        KINDS.associateWith { kind ->
-            drawn.firstOrNull {
-                kind == null ||
-                    it.kind == kind
-            }
-        }
+    private val none: Map<Wanted, First> = firsts(emptyList())
+    private val ocr: Map<Wanted, Hit?> = Wanted.entries.associateWith { wanted -> drawn.firstOrNull(wanted.takes) }
 
     /**
-     * The first hit of [kind] (any kind when `null`) in [element]'s dialog ([Elements.around]): on
-     * another element in its window (any window when its own is unknown), else drawn.
+     * The first [wanted] hit in [element]'s dialog ([Elements.around]): on another element in its
+     * window (any window when its own is unknown), else drawn.
      */
     fun first(
         element: UiElement,
-        kind: IntentKind?,
+        wanted: Wanted,
     ): Hit? {
         val window = if (element.window == null) all else windows[element.window] ?: none
-        return window.getValue(kind).except(element) ?: ocr.getValue(kind)
+        return window.getValue(wanted).except(element) ?: ocr.getValue(wanted)
     }
 
-    private fun firsts(hits: List<Pair<UiElement, Hit>>): Map<IntentKind?, First> =
-        KINDS.associateWith { kind -> First(hits.filter { kind == null || it.second.kind == kind }) }
+    private fun firsts(hits: List<Pair<UiElement, Hit>>): Map<Wanted, First> =
+        Wanted.entries.associateWith { wanted -> First(hits.filter { wanted.takes(it.second) }) }
 }
 
-/** The kinds of dialog hit a generic button reads, `null` for any. */
-private val KINDS: List<IntentKind?> = listOf(IntentKind.SPEND, IntentKind.DELETE, null)
+/** The sorts of dialog hit a generic button reads ([Dialogs.generic]). */
+private enum class Wanted(
+    val takes: (Hit) -> Boolean,
+) {
+    SPEND({ it.kind == IntentKind.SPEND }),
+    DELETE({ it.kind == IntentKind.DELETE }),
+    ANY({ true }),
+    SENDING(Hit::sends),
+}
 
 /** The first of [hits], and the first one on another element than that one. */
 private class First(

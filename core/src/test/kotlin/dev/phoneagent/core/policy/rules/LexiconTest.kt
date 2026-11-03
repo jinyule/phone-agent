@@ -58,7 +58,7 @@ class LexiconTest {
         kind: IntentKind,
         matched: String,
     ) {
-        assertEquals(Hit(kind, matched), lexicon.classify(label))
+        assertEquals(kind to matched, lexicon.classify(label)?.let { it.kind to it.matched })
     }
 
     @ParameterizedTest(name = "{0}")
@@ -84,6 +84,40 @@ class LexiconTest {
     )
     fun `ordinary labels are not risky`(label: String) {
         assertNull(lexicon.classify(label))
+    }
+
+    @Test
+    fun `a match tells whether its text also sends, whatever it does`() {
+        // Strong words: any word that acts there; one that is a status does not.
+        assertEquals(Hit(IntentKind.DELETE, "删除", sends = true), lexicon.classify("发送并删除原图"))
+        assertEquals(Hit(IntentKind.DELETE, "删除", sends = false), lexicon.classify("删除已发送"))
+        assertEquals(Hit(IntentKind.DELETE, "删除", sends = false), lexicon.classify("删除原图"))
+        assertEquals(Hit(IntentKind.SPEND, "支付", sends = true), lexicon.ofControl("我已阅读并同意服务协议现在支付并发送给张三"))
+        // Payments that send: red packets and transfers, in every reading.
+        listOf("发红包", "立即发红包", "转账", "转账给张三", "Send money").forEach {
+            assertEquals(IntentKind.SPEND to true, lexicon.classify(it)?.let { hit -> hit.kind to hit.sends }, it)
+        }
+        listOf("立即预订", "立即支付", "Pay now").forEach {
+            assertEquals(IntentKind.SPEND to false, lexicon.classify(it)?.let { hit -> hit.kind to hit.sends }, it)
+        }
+        listOf("评论", "发送", "Send message", "Submit").forEach { assertTrue(lexicon.classify(it)?.sends == true, it) }
+        assertTrue(lexicon.ofLabel("转账给张三" + "，".repeat(130))?.sends == true)
+        assertFalse(lexicon.ofLabel("立即支付" + "，".repeat(130))?.sends == true)
+    }
+
+    @Test
+    fun `of matches read as one, the most severe counts, the first among equals, and it sends when any does`() {
+        val delete = Hit(IntentKind.DELETE, "删除")
+        val send = Hit(IntentKind.OUTWARD, "发送")
+        val sending = delete.copy(sends = true)
+        assertEquals(null, firstMax(null, null))
+        assertEquals(send, firstMax(null, send))
+        assertEquals(send, firstMax(send, null))
+        assertEquals(sending, firstMax(send, delete))
+        assertEquals(sending, firstMax(delete, send))
+        assertEquals(sending, firstMax(sending, delete))
+        assertEquals(delete, firstMax(delete, Hit(IntentKind.DELETE, "清空")))
+        assertEquals(Hit(IntentKind.SPEND, "支付"), firstMax(delete, Hit(IntentKind.SPEND, "支付")))
     }
 
     @Test
@@ -144,7 +178,7 @@ class LexiconTest {
         kind: IntentKind,
         matched: String,
     ) {
-        assertEquals(Hit(kind, matched), lexicon.classify(label))
+        assertEquals(kind to matched, lexicon.classify(label)?.let { it.kind to it.matched })
     }
 
     @Test

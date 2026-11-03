@@ -80,14 +80,12 @@ internal class RulesResolver(
      * Without a screen, or on one beyond the limits ([Reading.readable]), nothing can be looked
      * up: typing that submits and Enter count as reaching out.
      */
-    private fun blind(step: ScreenStep): ActionIntent {
-        val sends = (step is Step.Type && step.submit) || step == Step.Key(SystemKey.ENTER)
-        return when {
-            sends -> ActionIntent(IntentKind.OUTWARD)
+    private fun blind(step: ScreenStep): ActionIntent =
+        when {
+            submits(step) -> ActionIntent(IntentKind.OUTWARD)
             step is Step.Type -> ActionIntent(IntentKind.INPUT, fieldClass = FieldClass.PLAIN)
             else -> ActionIntent(IntentKind.NAVIGATE)
         }
-    }
 
     /** `request_confirmation`: SPEND when it states an amount, else what its action text names, else OUTWARD. */
     private fun confirmation(step: Step.Confirmation): ActionIntent {
@@ -110,6 +108,10 @@ internal class RulesResolver(
         return if (raise) intent.copy(kind = minimum, fieldClass = null) else intent
     }
 }
+
+/** Typing that submits, or Enter: what may send when the screen cannot be read. */
+internal fun submits(step: ScreenStep): Boolean =
+    (step is Step.Type && step.submit) || step == Step.Key(SystemKey.ENTER)
 
 private val FLOORS =
     mapOf(

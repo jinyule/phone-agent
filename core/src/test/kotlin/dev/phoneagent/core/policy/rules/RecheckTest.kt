@@ -244,4 +244,91 @@ class RecheckTest {
         assertNull(none.amount)
         assertEquals(Verdict.Allow, recheck(tap("e1"), none, plain("s2")))
     }
+
+    /** A chat titled [contact] with [draft] in its field and [controls] beside the field. */
+    private fun chatWith(
+        vararg controls: UiElement,
+        contact: String = "张三",
+        draft: String = "明天见",
+        id: String = "s1",
+    ): ScreenSnapshot =
+        screen(
+            text("t1", contact, box(0, 40, 500, 100)),
+            field("e2", hint = "发消息", focused = true).copy(value = draft),
+            *controls,
+            id = id,
+        )
+
+    /**
+     * [call] on a chat asks for [reason] with a card that names the recipient, then [shown], and
+     * holds the draft; the same screen runs, and a changed recipient or draft asks again
+     * (policy-rules.md §6.3). The tool declares [risk].
+     */
+    private class Send(
+        val call: ToolCall,
+        val reason: ConfirmReason,
+        val shown: String,
+        val risk: RiskClass = RiskClass.WRITE,
+    )
+
+    /** [send] on a chat with [controls] at [level] binds the recipient and the draft. */
+    private fun bindsTheSend(
+        send: Send,
+        level: SecurityLevel,
+        vararg controls: UiElement,
+    ) {
+        val (call, risk) = send.call to send.risk
+        val approved = ask(call, chatWith(*controls), level, risk)
+        val shown = Triple(approved.reason, approved.target, approved.content)
+        assertEquals(Triple(send.reason, "张三${send.shown}", "明天见"), shown, "$level")
+        assertEquals(Verdict.Allow, recheck(call, approved, chatWith(*controls, id = "s2"), level, risk), "$level")
+        val other = card(recheck(call, approved, chatWith(*controls, contact = "李四", id = "s2"), level, risk))
+        assertEquals("李四${send.shown}", other.target, "$level")
+        val draft = card(recheck(call, approved, chatWith(*controls, draft = "转我1000", id = "s2"), level, risk))
+        assertEquals("转我1000", draft.content, "$level")
+    }
+
+    @Test
+    fun `a control that sends and deletes asks as a delete and binds the recipient and the draft`() {
+        val both = el("e1", "发送并删除原图", bounds = box(820, 900, 999, 960))
+        for (level in listOf(CAUTIOUS, STANDARD)) {
+            bindsTheSend(Send(tap("e1"), ConfirmReason.DELETE, "（发送并删除原图）"), level, both)
+        }
+    }
+
+    @Test
+    fun `stacked send and delete controls ask as a delete and bind the recipient and the draft`() {
+        val at = box(820, 900, 999, 960)
+        val send = el("e1", "发送", bounds = at).copy(window = 1)
+        val delete = el("e3", "删除", bounds = at).copy(window = 2)
+        val touch = Send(call("phone_tap", "x" to 909, "y" to 930), ConfirmReason.DELETE, "（删除）")
+        for (level in listOf(CAUTIOUS, STANDARD)) {
+            bindsTheSend(touch, level, send, delete)
+            bindsTheSend(touch, level, delete, send)
+        }
+    }
+
+    @Test
+    fun `a red packet pays and sends - its card binds the recipient and the draft`() {
+        val packet = el("e1", "发红包", bounds = box(820, 900, 999, 960))
+        for (level in SecurityLevel.entries) {
+            bindsTheSend(Send(tap("e1"), ConfirmReason.SPEND, "（发红包）"), level, packet)
+        }
+    }
+
+    @Test
+    fun `a send raised to a settings change by its tool still binds the recipient and the draft`() {
+        val send = el("e1", "发送", bounds = box(820, 900, 999, 960))
+        bindsTheSend(Send(tap("e1"), ConfirmReason.SETTINGS, "（发送）", RiskClass.SETUP), STANDARD, send)
+        // Enter in the field sends what it holds.
+        val enter = call("phone_key", "key" to "enter")
+        bindsTheSend(Send(enter, ConfirmReason.SETTINGS, "", RiskClass.SETUP), CAUTIOUS)
+        // Typing that submits sends what it types, whatever the field held.
+        val type = call("phone_type", "screen" to "s1", "ref" to "e2", "text" to "后天见", "submit" to true)
+        val typed = ask(type, chatWith(), risk = RiskClass.SETUP)
+        assertEquals(Triple(ConfirmReason.SETTINGS, "张三", "后天见"), Triple(typed.reason, typed.target, typed.content))
+        assertEquals(Verdict.Allow, recheck(type, typed, chatWith(draft = "x", id = "s2"), risk = RiskClass.SETUP))
+        val other = recheck(type, typed, chatWith(contact = "李四", id = "s2"), risk = RiskClass.SETUP)
+        assertEquals("李四", card(other).target)
+    }
 }

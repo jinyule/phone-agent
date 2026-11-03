@@ -5,10 +5,17 @@ import dev.phoneagent.core.ports.ScreenSnapshot
 import java.util.Optional
 import java.util.concurrent.ConcurrentHashMap
 
-/** A vocabulary match: the effect class and the entry that matched. */
+/**
+ * A vocabulary match: the effect class and the entry that matched. Where several matches are
+ * read as one ([firstMax]), the most severe is kept, and [sends] tells whether any of them sends.
+ *
+ * @property sends the text also sends something to someone (policy-rules.md §6.3): an OUTWARD
+ *   word acts in it, or a payment that also sends ([Words.SENDING_SPENDS]), whatever [kind] is.
+ */
 internal data class Hit(
     val kind: IntentKind,
     val matched: String,
+    val sends: Boolean = kind == IntentKind.OUTWARD,
 )
 
 /**
@@ -47,8 +54,7 @@ internal class Lexicon(
     fun ofLabel(label: String): Hit? {
         val read = read(label)
         val complete = whole(label)
-        return listOfNotNull(match(read, tuning.labelMax, complete), Phrases.leading(read, complete))
-            .maxWithOrNull(compareBy { severity(it.kind) })
+        return firstMax(match(read, tuning.labelMax, complete), Phrases.leading(read, complete))
     }
 
     /** "确定", "OK" and the like: the dialog decides what they do. Reads [read] of [label]. */
@@ -141,7 +147,7 @@ internal object Phrases {
                 .flatMap { form ->
                     Words.PREFIXES.filter(form::startsWith).mapNotNull { EXACT_RANKS[form.drop(it.length)] }
                 }.minOrNull()
-        return first?.let { Words.EXACT[it].let { (word, kind) -> Hit(kind, word) } }
+        return first?.let { Words.EXACT[it].let { (word, kind) -> Hit(kind, word, sends(word, kind)) } }
     }
 
     /** The place of each [Words.EXACT] word in its list: the first one listed wins. */
@@ -152,21 +158,24 @@ internal object Phrases {
 
     /**
      * The first [Words.STRONG] word that acts somewhere in [label] (not as a status), unless
-     * vetoed; a [label] that is not [complete] is never vetoed.
+     * vetoed; a [label] that is not [complete] is never vetoed. It [Hit.sends] when any word
+     * that acts there sends: "发送并删除原图" deletes, and sends.
      */
     fun strong(
         label: String,
         complete: Boolean,
     ): Hit? {
         val text = clean(Text.words(label))
-        val found =
-            Words.STRONG.firstOrNull { (word, kind) ->
+        val acting =
+            Words.STRONG.filter { (word, kind) ->
                 generateSequence(text.indexOf(word)) { text.indexOf(word, it + 1) }
                     .takeWhile { it >= 0 }
                     .any { at -> isAction(text, word, at, kind) } &&
                     !(complete && vetoed(label, kind))
             }
-        return found?.let { (word, kind) -> Hit(kind, word) }
+        return acting.firstOrNull()?.let { (word, kind) ->
+            Hit(kind, word, acting.any { (other, its) -> sends(other, its) })
+        }
     }
 
     /**
@@ -183,7 +192,7 @@ internal object Phrases {
                 Words.PREFIXES.any { text.startsWith(it + word) && isAction(text, word, it.length, kind) } &&
                     !(complete && vetoed(label, kind))
             }
-        return found?.let { (word, kind) -> Hit(kind, word) }
+        return found?.let { (word, kind) -> Hit(kind, word, sends(word, kind)) }
     }
 
     /**
@@ -202,8 +211,16 @@ internal object Phrases {
         val found =
             Words.ENGLISH_PREFIX.firstOrNull { (phrase, _) -> text.startsWith(phrase) && !latinAt(text, phrase.length) }
                 ?: Words.ENGLISH_EXACT.firstOrNull { (phrase, _) -> text == phrase }
-        return found?.takeUnless { complete && vetoed(label, it.second) }?.let { (phrase, kind) -> Hit(kind, phrase) }
+        return found
+            ?.takeUnless { complete && vetoed(label, it.second) }
+            ?.let { (phrase, kind) -> Hit(kind, phrase, sends(phrase, kind)) }
     }
+
+    /** [word] of [kind] sends something to someone: an OUTWARD word, or a [Words.SENDING_SPENDS] one. */
+    private fun sends(
+        word: String,
+        kind: IntentKind,
+    ): Boolean = kind == IntentKind.OUTWARD || word in Words.SENDING_SPENDS
 
     private fun latinAt(
         text: String,

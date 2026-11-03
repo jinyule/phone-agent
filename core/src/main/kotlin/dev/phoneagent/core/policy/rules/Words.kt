@@ -85,6 +85,13 @@ internal object Words {
             "添加到通讯录" to IntentKind.OUTWARD,
         )
 
+    /**
+     * Payments ([STRONG], [EXACT] and [ENGLISH_PREFIX] entries) that also send something to
+     * someone, as a message in the conversation they are made from: a red packet, a transfer.
+     * Their cards name the recipient and the draft as a send's do (policy-rules.md §6.3).
+     */
+    val SENDING_SPENDS: Set<String> = setOf("红包", "发红包", "塞钱进红包", "转账", "转帐", "send money")
+
     /** Prefixes an [EXACT] word may carry ("立即预订", "去评论"). */
     val PREFIXES: List<String> = listOf("", "立即", "马上", "一键", "去", "确认")
 
