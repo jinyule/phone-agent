@@ -34,21 +34,6 @@ internal object LaunchIntents {
         ) : Built
     }
 
-    /**
-     * The only schemes `phone_launch link=` opens, with why each is safe to hand to the system as a
-     * browsable VIEW. The URI is never parsed into an Intent (no `Intent.parseUri`), so a link
-     * cannot name a component, extras or flags. App-specific deep-link schemes are not listed: each
-     * one needs its own review before it is added here.
-     */
-    val LINK_SCHEMES: Map<String, String> =
-        mapOf(
-            "https" to "a web page in the user's browser",
-            "http" to "a web page in the user's browser",
-            "geo" to "a place in the maps app; navigation still needs the user",
-            "mailto" to "the mail composer; sending is a separate, confirmed step",
-            "market" to "an app's page in the store; installing is a separate step",
-        )
-
     /** Why the schemes models most often try are refused (others get the generic reason). */
     private val REFUSED_SCHEMES: Map<String, String> =
         mapOf(
@@ -105,8 +90,10 @@ internal object LaunchIntents {
     }
 
     /**
-     * A browsable VIEW intent for [target] when its scheme is in [LINK_SCHEMES]; anything else is
-     * Invalid with the reason.
+     * A browsable VIEW intent for [target] when its scheme is in the shared whitelist
+     * [LaunchTarget.Link.SCHEMES]; anything else is Invalid with the reason. The URI is never
+     * parsed into an Intent (no `Intent.parseUri`), so a link cannot name a component, extras or
+     * flags.
      */
     fun link(target: LaunchTarget.Link): Built {
         val uri = target.uri.trim().toUri()
@@ -117,9 +104,9 @@ internal object LaunchIntents {
                 Built.Invalid("link needs an absolute URI with a scheme, got '${target.uri}'")
             }
 
-            scheme !in LINK_SCHEMES -> {
+            scheme !in LaunchTarget.Link.SCHEMES -> {
                 val why = REFUSED_SCHEMES[scheme] ?: "it is not a web or known deep link"
-                val allowed = LINK_SCHEMES.keys.sorted()
+                val allowed = LaunchTarget.Link.SCHEMES.sorted()
                 Built.Invalid("links with scheme '$scheme' are not opened: $why; allowed: $allowed")
             }
 

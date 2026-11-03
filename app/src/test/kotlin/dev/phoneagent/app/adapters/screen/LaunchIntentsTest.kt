@@ -68,7 +68,17 @@ class LaunchIntentsTest {
         for (uri in listOf("http://example.com", "geo:0,0?q=cafe", "mailto:a@example.com", "market://details?id=a.b")) {
             assertEquals(uri, uri, ready(link(uri)).intent.dataString)
         }
-        assertEquals(setOf("geo", "http", "https", "mailto", "market"), LaunchIntents.LINK_SCHEMES.keys)
+        // The adapter opens exactly the whitelist tools check against (fix list r4, rebase follow-up 2).
+        for (scheme in LaunchTarget.Link.SCHEMES) {
+            for (uri in listOf("$scheme://example.com/a", "${scheme.uppercase()}://example.com/a")) {
+                assertEquals(uri, uri, ready(link(uri)).intent.dataString)
+            }
+        }
+        assertEquals(
+            "links with scheme 'tel' are not opened: it is not a web or known deep link; " +
+                "allowed: ${LaunchTarget.Link.SCHEMES.sorted()}",
+            invalid(link("tel:5551234")),
+        )
     }
 
     @Test
