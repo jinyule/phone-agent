@@ -72,9 +72,11 @@ internal fun interface Bind {
  * `server_tool_use` ids of one reply are distinct; anything else is a protocol violation, not
  * something to sort or deduplicate. Each block takes only its own delta types.
  *
- * Every block start and delta passes the [guard] before anything of it is shown: each string
- * member through a window per block and member name (a start's `text` and its deltas' `text` are
- * one channel), anything else whole. The `input_json_delta` text of every block (calls,
+ * Every block start and delta passes the [guard] before anything of it is shown: each member's
+ * name (`thinking`, `redacted_thinking` and `compaction` keep their start verbatim, unknown
+ * members included), then its value, a string through a window per block and member name (a
+ * start's `text` and its deltas' `text` are one channel), anything else whole with every nested
+ * name and value. The `input_json_delta` text of every block (calls,
  * `server_tool_use`, any block this adapter does not know, a declined attempt's too) is also
  * checked whole as call arguments ([EchoGuard.arguments]) at the block's stop, or by [abandon]
  * when the reply fails first. Only the `type` members are left out (protocol, not content).
@@ -168,12 +170,16 @@ internal class ContentBlocks(
         block.stopped(shown)
     }
 
-    /** One member of a block's start or delta: a string joined to that member's earlier fragments, else whole. */
+    /**
+     * One member of a block's start or delta: its name, then its value, a string joined to that
+     * member's earlier fragments, anything else whole.
+     */
     private fun screen(
         index: Int,
         key: String,
         value: JsonElement,
     ) {
+        guard.check(key)
         if (value is JsonPrimitive && value.isString) {
             windows.getOrPut(index to key) { guard.Window() }.next(value.content)
         } else {
