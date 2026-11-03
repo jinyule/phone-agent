@@ -17,6 +17,7 @@ internal class Reading(
     val settings: SettingsPages = SettingsPages(tuning, pages)
     val fields: Fields = Fields(tuning, lexicon, pages)
     val risks: Risks = Risks(Controls(lexicon, pages, settings, fields))
+    val searches: Searches = Searches(lexicon, fields, risks)
 
     /**
      * What a spend is about (policy-rules.md §4); the resolver puts its money on the intent and the

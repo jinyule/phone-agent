@@ -152,8 +152,11 @@ internal object Words {
     /** Removed from a label before matching: names that contain a strong word but are not actions. */
     val NOT_ACTIONS: List<String> = listOf("支付宝", "支付方式", "付款方式", "支付设置", "货到付款", "先用后付", "花呗")
 
-    /** Removed before matching: "支持微信支付" and similar advertise a payment method. */
-    val PAYMENT_ADVERT: Regex = Regex("支持.{0,8}?(?:支付|付款)")
+    /**
+     * Removed before matching: "支持微信支付" and similar advertise a payment method. Up to eight
+     * letters between, none of them starting a call to act now ("支持一下立即支付" pays).
+     */
+    val PAYMENT_ADVERT: Regex = Regex("支持(?:(?!立即|马上|确认|现在|去)\\p{L}){0,8}?(?:支付|付款)")
 
     /**
      * The whole label ([Text.words] form) asks for a code sent to the user's own phone: not
@@ -166,9 +169,49 @@ internal object Words {
     val SELF_CODE_EN: Regex =
         Regex("(?:re)?send (?:(?:a|the|an|sms|verification|one-time|login) ){0,4}(?:code|otp|passcode)")
 
-    /** A label containing one of these deletes nothing the user cannot get back (policy-rules.md §3.3). */
+    /**
+     * What a delete may name and still delete nothing the user cannot get back ([Text.words] form,
+     * longest first where one holds another; policy-rules.md §3.3).
+     */
     val HARMLESS_DELETES: List<String> =
-        listOf("搜索历史", "历史搜索", "搜索记录", "缓存", "searchhistory", "recentsearch", "cache")
+        listOf("搜索历史", "历史搜索", "搜索记录", "缓存", "searchhistory", "recentsearches", "recentsearch", "cache")
+
+    /** Words a harmless delete may say besides its object ("一键清空全部缓存", "Clear all cache"). */
+    val DELETE_FILLERS: List<String> =
+        listOf(
+            "删除",
+            "清空",
+            "清除",
+            "移除",
+            "清理",
+            "一键",
+            "立即",
+            "马上",
+            "确认",
+            "确定",
+            "全部",
+            "所有",
+            "的",
+            "要",
+            "是否",
+            "吗",
+            "您",
+            "你",
+            "delete",
+            "clear",
+            "remove",
+            "all",
+            "the",
+            "my",
+            "your",
+        )
+
+    /**
+     * Sizes in [Text.compact] form ("128mb", "1.5g"), which a harmless delete may show. A size
+     * starts only where no digit precedes and takes its digits without backtracking, so a match
+     * costs time in proportion to what it covers.
+     */
+    val SIZES: Regex = Regex("(?<![\\d.,])\\d[\\d,.]*+(?:[kmgt]i?b?|b|字节)")
 
     /** Generic confirmations ([Text.bare] form): their risk comes from the dialog around them. */
     val GENERIC: Set<String> =

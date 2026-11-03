@@ -20,19 +20,30 @@ internal class Lexicon(
     private val tuning: PolicyTuning,
 ) {
     /** The risk a label names, or `null`. Strong words count in labels up to [PolicyTuning.labelMax]. */
-    fun classify(label: String): Hit? = match(label, tuning.labelMax)
+    fun classify(label: String): Hit? = match(label, tuning.labelMax, complete = true)
 
     /** The risk a dialog text names, for the generic button in that dialog ([PolicyTuning.contextMax]). */
-    fun inContext(text: String): Hit? = match(text, tuning.contextMax)
+    fun inContext(text: String): Hit? = match(text, tuning.contextMax, complete = true)
 
     /**
      * The risk a control's own label names: as [classify], and a strong word anywhere in it counts
      * at any length ("我已阅读并同意服务协议现在支付…"): a control's label says what it does.
      */
-    fun ofControl(label: String): Hit? = classify(label) ?: Phrases.strong(label)
+    fun ofControl(label: String): Hit? = classify(label) ?: Phrases.strong(label, complete = true)
 
-    /** A strong word [text] starts with, at any length ("确认支付并同意…" read from a row's texts joined). */
-    fun leading(text: String): Hit? = Phrases.leading(text)
+    /**
+     * The risk a control's label names as risk checks read it ([read]): the more severe of what
+     * [classify] finds there and a strong word it starts with at any length ("确认支付并同意…" read
+     * from a row's texts joined), the first among equals. An exemption (a code sent to the user's
+     * own phone, a harmless delete) holds only on a label read whole ([whole]); in one cut short,
+     * the words read count as they are (policy-rules.md §0).
+     */
+    fun ofLabel(label: String): Hit? {
+        val read = read(label)
+        val complete = whole(label)
+        return listOfNotNull(match(read, tuning.labelMax, complete), Phrases.leading(read, complete))
+            .maxWithOrNull(compareBy { severity(it.kind) })
+    }
 
     /** "确定", "OK" and the like: the dialog decides what they do. Reads [read] of [label]. */
     fun isGeneric(label: String): Boolean = Text.bare(read(label)) in Words.GENERIC
@@ -53,6 +64,7 @@ internal class Lexicon(
 
     private val classified = TextMemo(::classify)
     private val controls = TextMemo(::ofControl)
+    private val labels = TextMemo(::ofLabel)
 
     /** [classify], read once per distinct text on [screen]. */
     fun classify(
@@ -66,13 +78,21 @@ internal class Lexicon(
         screen: ScreenSnapshot,
     ): Hit? = controls.of(text, screen)
 
-    private fun match(
-        text: String,
-        max: Int,
-    ): Hit? =
-        Phrases.exact(text) ?: (if (Phrases.length(text) <= max) Phrases.strong(text) else null)
-            ?: Phrases.english(text)
+    /** [ofLabel], read once per distinct label on [screen]. */
+    fun ofLabel(
+        label: String,
+        screen: ScreenSnapshot,
+    ): Hit? = labels.of(label, screen)
 }
+
+/** What [text] names under the length limit [max]; exemptions only when [text] is [complete]. */
+private fun match(
+    text: String,
+    max: Int,
+    complete: Boolean,
+): Hit? =
+    Phrases.exact(text) ?: (if (Phrases.length(text) <= max) Phrases.strong(text, complete) else null)
+        ?: Phrases.english(text, complete)
 
 /**
  * What [read] finds in each distinct text, computed once while the screen stays the same object
@@ -90,7 +110,9 @@ private class TextMemo(
 }
 
 /**
- * The matching of [Words] lists, without length limits. Every function takes the raw text.
+ * The matching of [Words] lists, without length limits. Every function takes the raw text; one
+ * that may find an exemption ([vetoed]) applies it only when told the text is complete, never
+ * to a part of a label (policy-rules.md §0).
  *
  * Adapted from the label matching of Mika's `IrreversibleDetector` (strong words at each of
  * their occurrences unless they read as a status, whole words after prefixes, English phrases at
@@ -122,26 +144,38 @@ internal object Phrases {
     /** How long [label] is for the length limits: its [Text.words] without names that are not actions. */
     fun length(label: String): Int = clean(Text.words(label)).length
 
-    /** The first [Words.STRONG] word that acts somewhere in [label] (not as a status), unless vetoed. */
-    fun strong(label: String): Hit? {
+    /**
+     * The first [Words.STRONG] word that acts somewhere in [label] (not as a status), unless
+     * vetoed; a [label] that is not [complete] is never vetoed.
+     */
+    fun strong(
+        label: String,
+        complete: Boolean,
+    ): Hit? {
         val text = clean(Text.words(label))
         val found =
             Words.STRONG.firstOrNull { (word, kind) ->
                 generateSequence(text.indexOf(word)) { text.indexOf(word, it + 1) }
                     .takeWhile { it >= 0 }
                     .any { at -> isAction(text, word, at, kind) } &&
-                    !vetoed(label, kind)
+                    !(complete && vetoed(label, kind))
             }
         return found?.let { (word, kind) -> Hit(kind, word) }
     }
 
-    /** A [Words.STRONG] word acting right at the start of [label], after an optional [Words.PREFIXES] entry. */
-    fun leading(label: String): Hit? {
+    /**
+     * A [Words.STRONG] word acting right at the start of [label], after an optional [Words.PREFIXES]
+     * entry, unless vetoed; a [label] that is not [complete] is never vetoed.
+     */
+    fun leading(
+        label: String,
+        complete: Boolean,
+    ): Hit? {
         val text = clean(Text.words(label))
         val found =
             Words.STRONG.firstOrNull { (word, kind) ->
                 Words.PREFIXES.any { text.startsWith(it + word) && isAction(text, word, it.length, kind) } &&
-                    !vetoed(label, kind)
+                    !(complete && vetoed(label, kind))
             }
         return found?.let { (word, kind) -> Hit(kind, word) }
     }
@@ -149,16 +183,20 @@ internal object Phrases {
     /**
      * English ([Text.phrase] form): the label starts with an [Words.ENGLISH_PREFIX] phrase at a
      * word boundary (any non-Latin letter ends a word: "Send消息"), or is an [Words.ENGLISH_EXACT]
-     * phrase. Letters written apart ("s e n d") are read together.
+     * phrase. Letters written apart ("s e n d") are read together. A [label] that is not
+     * [complete] is never vetoed.
      */
-    fun english(label: String): Hit? {
+    fun english(
+        label: String,
+        complete: Boolean,
+    ): Hit? {
         val spaced = Text.phrase(label).trimEnd { !it.isLetterOrDigit() }
         val letters = spaced.split(' ')
         val text = if (letters.size > 1 && letters.all { it.length == 1 }) letters.joinToString("") else spaced
         val found =
             Words.ENGLISH_PREFIX.firstOrNull { (phrase, _) -> text.startsWith(phrase) && !latinAt(text, phrase.length) }
                 ?: Words.ENGLISH_EXACT.firstOrNull { (phrase, _) -> text == phrase }
-        return found?.takeUnless { vetoed(label, it.second) }?.let { (phrase, kind) -> Hit(kind, phrase) }
+        return found?.takeUnless { complete && vetoed(label, it.second) }?.let { (phrase, kind) -> Hit(kind, phrase) }
     }
 
     private fun latinAt(
@@ -188,7 +226,10 @@ internal object Phrases {
         return before !in Words.STATUS_BEFORE && statuses.none { text.startsWith(it, rest) }
     }
 
-    /** [label] is not of [kind] after all: a code sent to the user's own phone, or a harmless delete. */
+    /**
+     * [label], read whole, is not of [kind] after all: a code sent to the user's own phone, or a
+     * delete of only what the user gets back ([harmless]).
+     */
     private fun vetoed(
         label: String,
         kind: IntentKind,
@@ -200,11 +241,24 @@ internal object Phrases {
             }
 
             kind == IntentKind.DELETE -> {
-                Words.HARMLESS_DELETES.any { it in Text.compact(label) }
+                harmless(label)
             }
 
             else -> {
                 false
             }
         }
+
+    /**
+     * [label] deletes only what the user gets back (policy-rules.md §3.3): it names a
+     * [Words.HARMLESS_DELETES] object, and once those objects, the [Words.DELETE_FILLERS] and the
+     * sizes ("128MB") are taken out of its [Text.words], no letter or digit is left: "清空缓存", not
+     * "删除聊天记录和缓存".
+     */
+    private fun harmless(label: String): Boolean {
+        val words = Text.words(Words.SIZES.replace(Text.compact(label), " "))
+        val objects = Words.HARMLESS_DELETES.fold(words) { acc, word -> acc.replace(word, " ") }
+        val rest = Words.DELETE_FILLERS.fold(objects) { acc, word -> acc.replace(word, " ") }
+        return objects != words && rest.none(Char::isLetterOrDigit)
+    }
 }

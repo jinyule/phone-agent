@@ -18,6 +18,7 @@ internal class ScreenIntents(
     private val risks = reading.risks
     private val pages = reading.pages
     private val fields = reading.fields
+    private val searches = reading.searches
 
     fun resolve(
         step: ScreenStep,
@@ -50,7 +51,7 @@ internal class ScreenIntents(
     ): ActionIntent {
         val field = if (step.aim == null) fields.typingTarget(screen) else Elements.byRef(screen, step.aim.ref)
         val fieldClass = if (field == null) FieldClass.PLAIN else fields.classify(field, screen)
-        val searches = field != null && fields.isSearch(field, screen)
+        val searches = field != null && this.searches.isSearch(field, screen)
         val kind =
             when {
                 fieldClass in Fields.HAND_OFF -> IntentKind.INPUT
@@ -124,7 +125,7 @@ internal class ScreenIntents(
                 key != SystemKey.ENTER -> IntentKind.NAVIGATE
                 pressed != null -> pressed.kind
                 pages.isPayment(screen) -> IntentKind.SPEND
-                focused != null -> if (fields.isSearch(focused, screen)) IntentKind.NAVIGATE else IntentKind.OUTWARD
+                focused != null -> if (searches.isSearch(focused, screen)) IntentKind.NAVIGATE else IntentKind.OUTWARD
                 else -> enterUnfocused(screen)
             }
         return ActionIntent(kind, screen.pkg, if (pressed == null) focused else pressed.target)
@@ -132,7 +133,7 @@ internal class ScreenIntents(
 
     private fun enterUnfocused(screen: ScreenSnapshot): IntentKind {
         val fields = screen.elements.filter(Elements::editable)
-        val searches = fields.isNotEmpty() && fields.all { this.fields.isSearch(it, screen) }
+        val searches = fields.isNotEmpty() && fields.all { this.searches.isSearch(it, screen) }
         return if (searches) IntentKind.NAVIGATE else IntentKind.OUTWARD
     }
 }

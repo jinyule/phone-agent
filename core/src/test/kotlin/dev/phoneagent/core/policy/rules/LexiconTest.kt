@@ -106,8 +106,26 @@ class LexiconTest {
         assertNull(lexicon.ofControl("待付款的订单一共有三个请尽快处理"))
         assertNull(lexicon.ofControl("发送验证码到手机"))
         // A row's texts joined: only a strong word at the start counts.
-        assertEquals(Hit(IntentKind.SPEND, "支付"), lexicon.leading(long))
-        assertNull(lexicon.leading("这条消息里提到了删除两个字但它只是正文"))
+        assertEquals(Hit(IntentKind.SPEND, "支付"), lexicon.ofLabel(long))
+        assertNull(lexicon.ofLabel("这条消息里提到了删除两个字但它只是正文"))
+    }
+
+    @Test
+    fun `an exemption holds only on a label read whole`() {
+        val pad = "，".repeat(130)
+        assertNull(lexicon.ofLabel("发送验证码"))
+        assertEquals(Hit(IntentKind.OUTWARD, "发送"), lexicon.ofLabel("发送验证码${pad}给张三"))
+        assertNull(lexicon.ofLabel("Send code"))
+        assertEquals(IntentKind.OUTWARD, lexicon.ofLabel("Send code$pad")?.kind)
+        assertNull(lexicon.ofLabel("清空缓存"))
+        assertEquals(IntentKind.DELETE, lexicon.ofLabel("清空缓存$pad")?.kind)
+        // A harmless delete names nothing else, sizes aside.
+        listOf("清空缓存 128MB", "清除缓存（1.5G）", "Clear recent searches", "一键清理全部缓存").forEach {
+            assertNull(lexicon.ofLabel(it), it)
+        }
+        listOf("删除聊天记录和缓存", "清空缓存和相册", "Delete cache and photos").forEach {
+            assertEquals(IntentKind.DELETE, lexicon.ofLabel(it)?.kind, it)
+        }
     }
 
     @ParameterizedTest(name = "{0}")

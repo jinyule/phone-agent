@@ -185,8 +185,8 @@ internal object BoundsProbe {
             lexicon.ofControl(text)
             lexicon.isGeneric(text)
             lexicon.isEscape(text)
-            Phrases.strong(text)
-            Phrases.leading(text)
+            Phrases.strong(text, complete = true)
+            Phrases.leading(text, complete = true)
             Prices.scan(text)
             Text.isPackage(text)
             val ask =

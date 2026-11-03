@@ -41,34 +41,19 @@ internal class Fields(
     private fun secretClass(screen: ScreenSnapshot): FieldClass =
         if (pages.isPaymentPassword(screen)) FieldClass.PAYMENT_PASSWORD else FieldClass.PASSWORD
 
-    /** The elements labelled to send and those labelled "搜索" on a screen, read once per snapshot. */
-    private val buttons =
-        PerScreen { screen ->
-            val labelled = screen.elements.map { it to Elements.label(it, screen) }
-            Buttons(
-                sends = labelled.filter { (_, label) -> sends(label, screen) }.map { it.first },
-                searches = labelled.filter { (_, label) -> searches(label) }.map { it.first },
-            )
-        }
+    /** [field] says it searches: "搜索" or "search" in its hint or name, or "search" in its resource id. */
+    fun saysSearch(field: UiElement): Boolean {
+        val own = Text.compact(listOfNotNull(field.hint, field.name).joinToString(" "))
+        return "搜索" in own || "search" in own || "search" in field.resourceId?.let(Text::idWords).orEmpty()
+    }
 
-    private fun sends(
-        label: String,
-        screen: ScreenSnapshot,
-    ): Boolean = lexicon.classify(lexicon.read(label), screen)?.kind == IntentKind.OUTWARD
-
-    private fun searches(label: String): Boolean = lexicon.whole(label) && Text.bare(label) in SEARCH
-
-    /** Enter in this field searches rather than sends: it says so, and nothing on its row sends. */
-    fun isSearch(
-        field: UiElement,
+    /** [element] is a search button: its label, read whole ([Lexicon.whole]), is "搜索" or "search". */
+    fun searchButton(
+        element: UiElement,
         screen: ScreenSnapshot,
     ): Boolean {
-        val own = Text.compact(listOfNotNull(field.hint, field.name).joinToString(" "))
-        val ids = field.resourceId?.let(Text::idWords).orEmpty()
-        val found = buttons.of(screen)
-        val onRow = { e: UiElement -> e.ref != field.ref && Geometry.sameRow(e.bounds, field.bounds) }
-        return found.sends.none(onRow) &&
-            ("搜索" in own || "search" in own || "search" in ids || found.searches.any(onRow))
+        val label = Elements.label(element, screen)
+        return lexicon.whole(label) && Text.bare(label) in SEARCH
     }
 
     /**
@@ -184,8 +169,36 @@ internal class Clearing(
     val veto: Hit?,
 )
 
-/** Elements of one screen whose label sends, and those whose label is a search button. */
-private class Buttons(
-    val sends: List<UiElement>,
-    val searches: List<UiElement>,
-)
+/**
+ * Which fields search rather than send when submitted (policy-rules.md §2): the field says so
+ * ([Fields.saysSearch]) or a search button sits on its row, and no control on its row may send or
+ * pay. A control on the row whose label is too long to read whole ([Lexicon.whole]) may: what is
+ * not read cannot show that nothing on the row sends (§0).
+ */
+internal class Searches(
+    private val lexicon: Lexicon,
+    private val fields: Fields,
+    private val risks: Risks,
+) {
+    /** Enter in [field] searches. */
+    fun isSearch(
+        field: UiElement,
+        screen: ScreenSnapshot,
+    ): Boolean {
+        val row = screen.elements.filter { it.ref != field.ref && Geometry.sameRow(it.bounds, field.bounds) }
+        return row.none { mayReach(it, screen) } &&
+            (fields.saysSearch(field) || row.any { fields.searchButton(it, screen) })
+    }
+
+    /**
+     * [element]'s label is not read whole, or activating it sends or pays, as a tap by ref sees it
+     * ([Risks.activation]).
+     */
+    private fun mayReach(
+        element: UiElement,
+        screen: ScreenSnapshot,
+    ): Boolean = !lexicon.whole(Elements.label(element, screen)) || risks.activation(element, screen).kind in REACHES
+}
+
+/** What a control on a field's row does that makes the field no search field. */
+private val REACHES = setOf(IntentKind.OUTWARD, IntentKind.SPEND)

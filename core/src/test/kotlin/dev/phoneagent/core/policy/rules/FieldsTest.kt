@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test
 class FieldsTest {
     private val plain = screen()
     private val fields = Reading(PolicyTuning()).fields
+    private val searches = Reading(PolicyTuning()).searches
 
     private fun edits(
         element: UiElement,
@@ -56,21 +57,21 @@ class FieldsTest {
     @Test
     fun `search fields are recognized unless something on their row sends`() {
         val byHint = field("f1", hint = "搜索联系人")
-        assertTrue(fields.isSearch(byHint, screen(byHint)))
+        assertTrue(searches.isSearch(byHint, screen(byHint)))
         val byEnglish = field("f1").copy(name = "Search")
-        assertTrue(fields.isSearch(byEnglish, screen(byEnglish)))
+        assertTrue(searches.isSearch(byEnglish, screen(byEnglish)))
         val byId = field("f1").copy(resourceId = "com.x:id/searchBox")
-        assertTrue(fields.isSearch(byId, screen(byId)))
+        assertTrue(searches.isSearch(byId, screen(byId)))
         val bare = field("f1", bounds = box(0, 100, 800, 160))
         val searchButton = el("b1", "搜索", bounds = box(820, 100, 999, 160))
-        assertTrue(fields.isSearch(bare, screen(bare, searchButton)))
+        assertTrue(searches.isSearch(bare, screen(bare, searchButton)))
         val otherRow = el("b2", "搜索", bounds = box(820, 500, 999, 560))
-        assertFalse(fields.isSearch(bare, screen(bare, otherRow)))
+        assertFalse(searches.isSearch(bare, screen(bare, otherRow)))
         // "搜索或提问" with a send button on the row is a chat box.
         val chat = field("f1", hint = "搜索或提问", bounds = box(0, 900, 800, 960))
         val send = el("b3", "发送", bounds = box(820, 900, 999, 960))
-        assertFalse(fields.isSearch(chat, screen(chat, send)))
-        assertFalse(fields.isSearch(field("f2", hint = "说点什么"), plain))
+        assertFalse(searches.isSearch(chat, screen(chat, send)))
+        assertFalse(searches.isSearch(field("f2", hint = "说点什么"), plain))
     }
 
     @Test

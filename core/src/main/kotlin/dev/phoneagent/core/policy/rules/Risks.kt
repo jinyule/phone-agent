@@ -190,15 +190,16 @@ internal class Controls(
         screen: ScreenSnapshot,
     ): ElementRisk? {
         val clearing = if (Elements.editable(element)) null else fields.clearing(element, texts, screen)
+        val veto = clearing?.veto
         return when {
-            Elements.editable(element) || (clearing != null && clearing.veto == null) -> {
+            Elements.editable(element) || (clearing != null && veto == null) -> {
                 null
             }
 
             else -> {
                 val found =
                     settingsEntry(texts, screen) ?: labelled(element, texts, screen) ?: settingsControl(element, screen)
-                listOfNotNull(found, clearing?.veto?.let { ElementRisk(it.kind, it.matched) }).maxWithOrNull(byRisk)
+                listOfNotNull(found, veto?.let { ElementRisk(it.kind, it.matched) }).maxWithOrNull(byRisk)
             }
         }
     }
@@ -217,7 +218,7 @@ internal class Controls(
     ): ElementRisk? = settings.sensitiveEntry(texts, screen)?.let { ElementRisk(IntentKind.SETTINGS, "settings:$it") }
 
     /**
-     * The riskiest word among the control's own label, its label as a whole ([Lexicon.read]) and
+     * The riskiest word among the control's own label, its label as a whole ([Lexicon.ofLabel]) and
      * each text; an icon's resource id when there is no text; a generic button by its dialog. A
      * strong word counts at any length in the control's own label: its name, or the one text it
      * shows, or on a payment page any text on it. A control that shows several texts elsewhere (a
@@ -229,14 +230,14 @@ internal class Controls(
         screen: ScreenSnapshot,
     ): ElementRisk? {
         val label = Elements.label(element, screen)
-        val read = lexicon.read(label)
         val own = listOfNotNull(element.name?.takeIf(String::isNotBlank) ?: texts.singleOrNull())
         val whole = if (pages.isPayment(screen)) texts else own
         val hits =
             whole.mapNotNull { lexicon.ofControl(it, screen) } +
-                listOfNotNull(lexicon.classify(read, screen), lexicon.leading(read), icon(element, texts)) +
+                listOfNotNull(lexicon.ofLabel(label, screen), icon(element, texts)) +
                 texts.mapNotNull { lexicon.classify(it, screen) }
-        return best(hits) ?: if (lexicon.isGeneric(label)) generic(element, screen, read) else unlabeled(texts, screen)
+        return best(hits)
+            ?: if (lexicon.isGeneric(label)) generic(element, screen, lexicon.read(label)) else unlabeled(texts, screen)
     }
 
     private fun best(hits: List<Hit>): ElementRisk? =

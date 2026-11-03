@@ -181,11 +181,13 @@ class LimitsTest {
         val s = screen(input, clear)
         assertFalse(fields.editsField(clear, listOf("清空      "), s))
         assertTrue(Reading(PolicyTuning()).fields.editsField(clear, listOf("清空      "), s))
-        // Nor is a search button.
+        // Nor is a search button, and a field next to it is no search field.
         val bare = field("f2", bounds = box(0, 300, 800, 360))
         val search = el("b2", "搜索      ", bounds = box(820, 300, 999, 360))
-        assertFalse(fields.isSearch(bare, screen(bare, search)))
-        assertTrue(Reading(PolicyTuning()).fields.isSearch(bare, screen(bare, search)))
+        assertFalse(fields.searchButton(search, screen(bare, search)))
+        assertTrue(Reading(PolicyTuning()).fields.searchButton(search, screen(bare, search)))
+        assertFalse(Reading(PolicyTuning(labelRead = 6)).searches.isSearch(bare, screen(bare, search)))
+        assertTrue(Reading(PolicyTuning()).searches.isSearch(bare, screen(bare, search)))
     }
 
     @Test
@@ -264,10 +266,10 @@ class LimitsTest {
     fun `a send button on another row does not make a search field send`() {
         val field = field("f1", hint = "搜索", bounds = box(0, 100, 800, 160))
         val send = el("b1", "发送", bounds = box(820, 500, 999, 560))
-        assertTrue(Reading(PolicyTuning()).fields.isSearch(field, screen(field, send)))
+        assertTrue(Reading(PolicyTuning()).searches.isSearch(field, screen(field, send)))
         // Nor does the field's own name.
         val named = field.copy(name = "发送")
-        assertTrue(Reading(PolicyTuning()).fields.isSearch(named, screen(named)))
+        assertTrue(Reading(PolicyTuning()).searches.isSearch(named, screen(named)))
     }
 
     @Test
