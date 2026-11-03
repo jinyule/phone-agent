@@ -204,13 +204,35 @@ class PhaseOneToolsTest {
     }
 
     @Test
-    fun `every tool's card states follow whether it is read-only`() {
-        for (tool in tools) {
-            val states = statesOf(tool, call(tool.def.name, "{}"))
-            val unsure = setOf(ToolStatus.TIMEOUT, ToolStatus.CANCELLED, ToolStatus.OUTCOME_UNKNOWN)
-            val expected = if (tool.risk == RiskClass.READ) StepState.FAILED else StepState.UNKNOWN
-            assertEquals(unsure.associateWith { expected }, states.filterKeys { it in unsure }, tool.def.name)
-        }
+    fun `hand_to_user shows stopped, timed out and unknown as unknown, though it only reads`() {
+        // It moves the app between the screens, and a stopped hand-off is not taken back: the app
+        // may already be with the user, so "failed" would state as certain what is not.
+        val handOff = tools.single { it.def.name == "hand_to_user" }
+        assertEquals(RiskClass.READ, handOff.risk)
+        assertEquals(
+            READ_STATES +
+                mapOf(
+                    ToolStatus.TIMEOUT to StepState.UNKNOWN,
+                    ToolStatus.CANCELLED to StepState.UNKNOWN,
+                    ToolStatus.OUTCOME_UNKNOWN to StepState.UNKNOWN,
+                ),
+            statesOf(handOff, call("hand_to_user", """{"kind":"login"}""")),
+        )
+    }
+
+    @Test
+    fun `every tool's card states follow whether it may change the phone`() {
+        val unsure = setOf(ToolStatus.TIMEOUT, ToolStatus.CANCELLED, ToolStatus.OUTCOME_UNKNOWN)
+        val failing =
+            tools
+                .filter { tool ->
+                    val states = statesOf(tool, call(tool.def.name, "{}")).filterKeys { it in unsure }.values.toSet()
+                    assertEquals(1, states.size, tool.def.name)
+                    states.single() == StepState.FAILED
+                }.map { it.def.name }
+        // Only these neither change the phone nor move the app; request_confirmation changes
+        // nothing either but is WRITE, and shows UNKNOWN: the safe side.
+        assertEquals(listOf("phone_observe", "phone_apps", "phone_wait", "ask_user", "end_not_done"), failing)
     }
 
     private fun statesOf(

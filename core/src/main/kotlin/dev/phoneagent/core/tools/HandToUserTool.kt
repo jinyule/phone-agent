@@ -31,6 +31,9 @@ internal class HandToUserTool(
     override val risk: RiskClass = RiskClass.READ
     override val concurrencySafe: Boolean = false
 
+    // It moves the app to the user's screen, and a stopped hand-off is not taken back.
+    override val mayChangePhone: Boolean = true
+
     override suspend fun execute(
         call: ToolCall,
         ctx: ToolContext,

@@ -79,11 +79,21 @@ internal abstract class PhaseOneTool(
         }
 
     /**
-     * The card state of a result. A call that can change the phone and was stopped
+     * Whether a call may change the phone, its screens or where an app is shown, whatever its
+     * arguments: then one that was stopped, timed out or left without a result may have taken
+     * effect. By default every tool that is not [RiskClass.READ]; hand_to_user only reads but moves
+     * the app between the screens, so it says `true`. A tool that changes nothing but is not READ
+     * (request_confirmation) keeps `true` too: the safe side.
+     */
+    internal open val mayChangePhone: Boolean
+        get() = risk != RiskClass.READ
+
+    /**
+     * The card state of a result. A call that [mayChangePhone] and was stopped
      * ([ToolStatus.CANCELLED]) or timed out while it may already have acted shows as
      * [StepState.UNKNOWN], like [ToolStatus.OUTCOME_UNKNOWN], so the user is not told it failed and
-     * does it again. A read-only tool ([risk] is [RiskClass.READ], whatever the arguments) cannot
-     * have changed the phone, so for it these three fail. [ToolStatus.NOT_STARTED] never ran and fails.
+     * does it again. For a call that cannot have changed the phone these three fail.
+     * [ToolStatus.NOT_STARTED] never ran and fails.
      */
     private fun stateOf(status: ToolStatus): StepState =
         when (status) {
@@ -94,7 +104,7 @@ internal abstract class PhaseOneTool(
             ToolStatus.OUTCOME_UNKNOWN,
             ToolStatus.TIMEOUT,
             ToolStatus.CANCELLED,
-            -> if (risk == RiskClass.READ) StepState.FAILED else StepState.UNKNOWN
+            -> if (mayChangePhone) StepState.UNKNOWN else StepState.FAILED
 
             ToolStatus.ERROR,
             ToolStatus.INVALID_ARGS,

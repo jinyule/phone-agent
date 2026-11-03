@@ -42,9 +42,11 @@ public enum class StepState {
     SUCCEEDED,
 
     /**
-     * Finished with a failure status that leaves no doubt it did not take effect as asked:
-     * ERROR, INVALID_ARGS, SKIPPED, NOT_STARTED (it never ran). For a read-only tool
-     * ([RiskClass.READ]) also OUTCOME_UNKNOWN, CANCELLED and TIMEOUT: it cannot have changed the phone.
+     * Finished with a failure status. INVALID_ARGS, SKIPPED and NOT_STARTED never ran. ERROR
+     * usually did not take effect, but its text may say it might have (the tool acted and an
+     * extension failed after it, or the screen was lost during an action); the card shows FAILED
+     * all the same. OUTCOME_UNKNOWN, CANCELLED and TIMEOUT of a call that cannot change the phone
+     * (it only reads and moves no app between the screens) show so too.
      */
     FAILED,
 
@@ -52,10 +54,10 @@ public enum class StepState {
     REFUSED,
 
     /**
-     * The outcome is uncertain and a call that can change the phone (not [RiskClass.READ]) may have
-     * taken effect: OUTCOME_UNKNOWN, and such a call stopped (CANCELLED) or timed out (TIMEOUT).
-     * A call cancelled before it ran is shown so too, the safe side for a user who might otherwise
-     * do it again.
+     * The outcome is uncertain and the call may have taken effect: OUTCOME_UNKNOWN, CANCELLED or
+     * TIMEOUT of a call that can change the phone, its screens or where an app is shown (every tool
+     * that is not [RiskClass.READ], and hand_to_user). A call cancelled before it ran is shown so
+     * too, the safe side for a user who might otherwise do it again.
      */
     UNKNOWN,
 }

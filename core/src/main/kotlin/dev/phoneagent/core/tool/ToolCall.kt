@@ -103,7 +103,8 @@ public enum class ToolStatus {
 
     /**
      * The tool did not finish within its timeout. It may have taken effect: its card shows
-     * `StepState.UNKNOWN`.
+     * `StepState.UNKNOWN`, or `StepState.FAILED` for a tool that cannot change the phone (it only
+     * reads and moves no app between the screens; hand_to_user moves one, so it shows UNKNOWN).
      */
     TIMEOUT,
 
@@ -119,6 +120,7 @@ public enum class ToolStatus {
      * | a `tool/result` already | that result | no second result |
      *
      * The card of a CANCELLED call shows `StepState.UNKNOWN` in both rows: it may have taken effect.
+     * A tool that cannot change the phone (see [TIMEOUT]) shows `StepState.FAILED`.
      */
     CANCELLED,
 
