@@ -117,10 +117,15 @@ internal object Identities {
      *   reading order, each ending after a child that takes clicks or checks (rule 2). A list in
      *   a row adds its own label only.
      *
+     * A control's own label is what a node that takes clicks or checks is labelled with when all
+     * labels of its subtree are of that one text: it counts once, and is of the control, however
+     * many of the control's nodes repeat it (fix list r4 B1; a button "Like" holding a text "Like"
+     * is one label, the button's).
+     *
      * Not reliable (no ref is carried or matched by it):
      * - the walk left out a node with no list in between: in no list, the whole window; else the
      *   row it is in; a list that lost children, its last row if that row is still open (rule 3);
-     * - a row the list's edge cut whose labels are all of its controls (rule 4): what told it
+     * - a row the list's edge cut whose labels are all its controls' own (rule 4): what told it
      *   apart may be gone. Rows not cut and elements in no list are not held to this.
      */
     fun of(nodes: List<Facts>): List<ElementIdentity?> = Contexts(nodes).identities()
@@ -142,13 +147,18 @@ internal object Identities {
         private val children = nodes.indices.groupBy { nodes[it].parent }
         private val end = IntArray(nodes.size) { it + 1 }
 
-        // Labels in each subtree (a list below counting its own only), whether it holds a list, and
-        // whether a node in it takes clicks or checks.
+        // What tells each subtree apart (a list below counting its own label only): the labels, a
+        // control's own label once however often its nodes repeat it; the one text its labels have,
+        // and whether they have more than one.
         private val labels = IntArray(nodes.size)
+        private val oneText = arrayOfNulls<String>(nodes.size)
+        private val texts = BooleanArray(nodes.size)
+
+        // Whether each subtree holds a list, and whether a node in it takes clicks or checks.
         private val holdsList = BooleanArray(nodes.size)
         private val clickable = BooleanArray(nodes.size)
 
-        // Labels inside a control that holds that one label only, within the row.
+        // Labels of a control's own: inside a control whose labels are all of one text, within the row.
         private val ofControl = BooleanArray(nodes.size)
         private val rowOf = arrayOfNulls<Owner>(nodes.size)
         private val keyed = HashMap<Owner, IdentityContext>()
@@ -157,13 +167,16 @@ internal object Identities {
 
         init {
             for (i in nodes.indices.reversed()) {
-                val own = if (nodes[i].label != null) 1 else 0
-                labels[i] += own
+                val label = nodes[i].label
+                val own = if (label != null) 1 else 0
+                label?.let { addText(i, it) }
+                labels[i] = if (isControl(i)) 1 else labels[i] + own
                 clickable[i] = clickable[i] || nodes[i].shape.interactive
                 nodes[i].parent?.let { parent ->
                     val list = nodes[i].shape.list
                     end[parent] = maxOf(end[parent], end[i])
                     labels[parent] += if (list) own else labels[i]
+                    if (list) label?.let { addText(parent, it) } else addTexts(parent, i)
                     holdsList[parent] = holdsList[parent] || list || holdsList[i]
                     clickable[parent] = clickable[parent] || clickable[i]
                 }
@@ -171,9 +184,35 @@ internal object Identities {
             for (i in nodes.indices) {
                 val parent = nodes[i].parent
                 val inControl = parent != null && !nodes[parent].shape.list && ofControl[parent]
-                ofControl[i] = inControl || (nodes[i].shape.interactive && labels[i] == 1)
+                ofControl[i] = inControl || isControl(i)
             }
             nodes.indices.filter { nodes[it].shape.list }.forEach(::findRows)
+        }
+
+        /**
+         * Whether [i] is a control told apart by its own label only: it takes clicks or checks, and
+         * the labels of its subtree are all of one text (a button "Like" holding a text "Like").
+         */
+        private fun isControl(i: Int): Boolean = nodes[i].shape.interactive && oneText[i] != null && !texts[i]
+
+        private fun addText(
+            i: Int,
+            text: String,
+        ) {
+            val one = oneText[i]
+            if (one == null) {
+                oneText[i] = text
+            } else if (one != text) {
+                texts[i] = true
+            }
+        }
+
+        private fun addTexts(
+            parent: Int,
+            child: Int,
+        ) {
+            oneText[child]?.let { addText(parent, it) }
+            texts[parent] = texts[parent] || texts[child]
         }
 
         fun identities(): List<ElementIdentity?> {
@@ -195,7 +234,8 @@ internal object Identities {
         private fun findRows(list: Int) {
             var open: Owner? = null
             for (child in children[list].orEmpty()) {
-                // A container: more than one label, a list in it, or nodes none of which takes clicks.
+                // A container: more than one label (a control's own once), a list in it, or nodes none
+                // of which takes clicks.
                 val container =
                     labels[child] > 1 || holdsList[child] || !(children[child].isNullOrEmpty() || clickable[child])
                 if (nodes[child].shape.list || container) {
