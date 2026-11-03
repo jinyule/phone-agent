@@ -15,7 +15,7 @@ class ElementIdentityTest {
 
     /**
      * How a node of [add] is: [shown] `false` for one the read leaves out (out of view); [cut] and
-     * [clipped] as [Identities.Facts] has them.
+     * [clipped] as [Identities.Loss] has them.
      */
     private class Kind(
         val list: Boolean = false,
@@ -41,8 +41,7 @@ class ElementIdentityTest {
                 label = label,
                 shape = Identities.Shape(kind.list, kind.interactive),
                 parent = parent,
-                cut = kind.cut,
-                clipped = kind.clipped,
+                loss = Identities.Loss(cut = kind.cut, clipped = kind.clipped),
             )
         return nodes.lastIndex
     }

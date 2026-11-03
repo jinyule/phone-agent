@@ -273,7 +273,7 @@ internal object ScreenReader {
 
         /**
          * A walked node, kept or not (children out of view still tell rows apart); [kept] indexes
-         * [Walker.kept]; [clipped] as [Identities.Facts.clipped]; [viewport] for a list.
+         * [Walker.kept]; [clipped] as [Identities.Loss.clipped]; [viewport] for a list.
          */
         private class Walked(
             val label: String?,
@@ -284,6 +284,9 @@ internal object ScreenReader {
             val viewport: Viewport?,
         ) {
             var cut = false
+
+            /** For a child of a list, as [Identities.Loss.besideGap]. */
+            var besideGap = false
 
             /** For a list, how many of its children were walked so far. */
             var children = 0
@@ -326,7 +329,7 @@ internal object ScreenReader {
             walked += Walked(NodeText.identityLabel(node), shape, above, index, clipped, viewport)
             list?.let {
                 it.children++
-                walked[me].cut = it.gap
+                walked[me].besideGap = it.gap
                 it.gap = false
                 it.last = me
             }
@@ -358,12 +361,13 @@ internal object ScreenReader {
         /**
          * A child of the node being visited could not be read (`getChild` answered `null`): as
          * [markCut] for a node that is not a list; a list keeps its rows but for those of its
-         * children walked right before and right after the one it lost, which it may belong with.
+         * children walked right before and right after the one it lost, which it may belong with:
+         * those children are [Walked.besideGap], whether they are lists or not.
          */
         private fun markUnread() {
             val node = walked[path.last()]
             if (!node.shape.list) return markCut()
-            node.last?.let { walked[it].cut = true }
+            node.last?.let { walked[it].besideGap = true }
             node.gap = true
         }
 
@@ -373,7 +377,13 @@ internal object ScreenReader {
                 Identities.of(
                     walked.map {
                         val base = it.kept?.let { k -> kept[k].base }
-                        Identities.Facts(base, it.label, it.shape, it.parent, it.cut, it.clipped)
+                        Identities.Facts(
+                            base,
+                            it.label,
+                            it.shape,
+                            it.parent,
+                            Identities.Loss(it.cut, it.clipped, it.besideGap),
+                        )
                     },
                 )
             val ofKept = arrayOfNulls<ElementIdentity>(kept.size)

@@ -90,20 +90,29 @@ internal object Identities {
     )
 
     /**
+     * What the walk may have lost of a node: [cut], it left out a node below it with no list in
+     * between (for a list: one of its children); [clipped], a child of a list that the list's edge
+     * may have cut; [besideGap], a child of a list, a list too, right before or after a child of
+     * that list that could not be read, so its row may be missing a part (fix list r4 C6).
+     */
+    class Loss(
+        val cut: Boolean = false,
+        val clipped: Boolean = false,
+        val besideGap: Boolean = false,
+    )
+
+    /**
      * What identities are made of, per node of the tree walked, in pre-order, whether the node is
      * visible or not: [base] is the identity without its context (`null` for a node the read
      * leaves out), [label] the node's whole text or description, [parent] the index of the node
-     * above. [cut]: the walk left out a node below it with no list in between (for a list: one of
-     * its children), or, for a child of a list, a child of the list beside it could not be read.
-     * [clipped]: a child of a list that the list's edge may have cut.
+     * above, [loss] what the walk may have lost of it.
      */
     class Facts(
         val base: ElementIdentity?,
         val label: String?,
         val shape: Shape,
         val parent: Int?,
-        val cut: Boolean,
-        val clipped: Boolean = false,
+        val loss: Loss = Loss(),
     )
 
     /**
@@ -127,7 +136,7 @@ internal object Identities {
      * - the walk left out a node with no list in between, by its budgets or because the node
      *   could not be read: in no list, the whole window; else the row it is in; a list that lost
      *   children to the budgets, its last row if that row is still open; a list that could not
-     *   read a child, the rows of the children beside it (rule 3);
+     *   read a child, the rows of the children beside it, nested lists included (rule 3);
      * - a row the list's edge cut whose labels are all its controls' own (rule 4): what told it
      *   apart may be gone. Rows not cut and elements in no list are not held to this.
      */
@@ -251,7 +260,7 @@ internal object Identities {
                     open = row.takeUnless { clickable[child] }
                 }
             }
-            if (nodes[list].cut) open?.incomplete = true
+            if (nodes[list].loss.cut) open?.incomplete = true
         }
 
         private fun contextOf(owner: Owner): IdentityContext =
@@ -263,14 +272,15 @@ internal object Identities {
 
         private fun reliableOf(owner: Owner): Boolean =
             reliable.getOrPut(owner) {
-                val whole = !owner.incomplete && owner.members.none(::cutBelow)
+                val whole = !owner.incomplete && owner.members.none { cutBelow(it) || nodes[it].loss.besideGap }
                 val cutToControls =
-                    owner.members.any { nodes[it].clipped } && owner.members.flatMap(::labelsOf).all { ofControl[it] }
+                    owner.members.any { nodes[it].loss.clipped } &&
+                        owner.members.flatMap(::labelsOf).all { ofControl[it] }
                 whole && !cutToControls
             }
 
         /** Whether the walk left out a node of [i]'s own labels; a list's lost children are its rows'. */
-        private fun cutBelow(i: Int): Boolean = nodes[i].cut && !nodes[i].shape.list
+        private fun cutBelow(i: Int): Boolean = nodes[i].loss.cut && !nodes[i].shape.list
 
         /** Indices of the labelled nodes of [owner]'s subtree in reading order, skipping into lists. */
         private fun labelsOf(owner: Int): List<Int> {
