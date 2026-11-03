@@ -49,8 +49,9 @@ public interface SurfaceManager {
      * A handoff its call cuts off (its budget, a cancellation inside the tool) is taken back at
      * once, waiting at most `LoopConfig.takeBackTimeoutMs`; it is closed with `prompt/withdrawn`,
      * not `handoff/end`. On a stop or a shutdown the app stays with the user. Cancelling this
-     * call may leave the move unfinished; the runtime counts a cancelled take-back as failed and
-     * does not call it again for the same ticket.
+     * call may leave the move unfinished. Only a return takes the app back: the runtime counts any
+     * other end (an exception, a cancellation, the port's own timeout, an Error) as a failed
+     * take-back and does not call it again for the same ticket.
      */
     public suspend fun takeBack(ticket: HandoffTicket): SurfaceRef
 }

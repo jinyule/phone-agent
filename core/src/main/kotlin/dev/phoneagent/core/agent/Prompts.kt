@@ -11,6 +11,7 @@ import dev.phoneagent.core.ports.HandoffTicket
 import dev.phoneagent.core.ports.Question
 import dev.phoneagent.core.ports.ScreenUnavailableException
 import dev.phoneagent.core.ports.SurfaceManager
+import dev.phoneagent.core.ports.SurfaceRef
 import dev.phoneagent.core.ports.UserInteraction
 import dev.phoneagent.core.session.ApprovalAsked
 import dev.phoneagent.core.session.ApprovalDecided
@@ -43,8 +44,9 @@ import kotlin.coroutines.resume
  *    its answer or end, else `prompt/withdrawn`, whatever ended it (an answer, a cut by the call's
  *    budget or inside the tool, a failure).
  * 2. A handoff that ended without its end (a cut, a failure) is taken back first, or the call
- *    ends with a failed take-back: a take-back that fails, takes too long or began and was cut
- *    off, or a hand-over that did not settle, makes handOff throw [ScreenUnavailableException]
+ *    ends with a failed take-back: a take-back that ends any way but returning (an exception, a
+ *    cancellation of the port's own, its own timeout), takes too long or began and was cut off,
+ *    or a hand-over that did not settle, makes handOff throw [ScreenUnavailableException]
  *    (the move and the exception's class only) in place of the cancellation or failure. A
  *    hand-over settles only with a ticket or a [ScreenUnavailableException] from the port (the
  *    one failure it promises moved nothing, `SurfaceManager.handToUser`); any other end (another
@@ -56,7 +58,7 @@ import kotlin.coroutines.resume
  *    [LoopTexts.screenUnknown]. Tools must let it propagate, not go on acting. It is thrown
  *    whatever cut the call off: the call's own cut then ends as ERROR, its budget's as TIMEOUT
  *    (still with [LoopTexts.mayHaveTakenEffect] and [LoopTexts.screenUnknown]). An Error is never
- *    replaced: it propagates with what closing threw suppressed.
+ *    replaced: it propagates with the failed take-back (or what else closing threw) suppressed.
  * 3. The only exceptions: a stopping task leaves the prompt to the repair and a handed-over app
  *    with the user; a failed log stops the task with ERROR.
  */
@@ -223,10 +225,10 @@ internal class Prompts(
             /**
              * Takes the task back after the call cut its handoff off, unless the app is not with
              * the user (never handed over). A hand-over that did not settle (cut off or not), a
-             * take-back that already began and was cut off, or a take-back that fails or takes
-             * longer than [LoopConfig.takeBackTimeoutMs], throws [ScreenUnavailableException]
-             * naming the move only, in place of the cancellation or failure: the call must not go
-             * on as if the app were back.
+             * take-back that already began and was cut off, or a take-back that ends any way but
+             * returning ([backWithin]) or takes longer than [LoopConfig.takeBackTimeoutMs], throws
+             * [ScreenUnavailableException] naming the move only, in place of the cancellation or
+             * failure: the call must not go on as if the app were back.
              */
             override suspend fun giveBack() {
                 val unfinished =
@@ -237,12 +239,36 @@ internal class Prompts(
                     }
                 unfinished?.let { throw ScreenUnavailableException("take back failed: $it") }
                 val ticket = held ?: return
-                val back =
-                    withTimeoutOrNull(loop.config.takeBackTimeoutMs) {
-                        moving("take back") { surfaces.takeBack(ticket) }
-                    } ?: throw ScreenUnavailableException("take back failed: timed out")
-                back.getOrThrow()
+                backWithin(ticket) ?: throw ScreenUnavailableException("take back failed: timed out")
             }
+
+            /**
+             * Takes [ticket] back within [LoopConfig.takeBackTimeoutMs]: its display, or `null`
+             * when that passed. It runs under NonCancellable ([closeIfOpen]), so a cancellation
+             * coming out of the port is the port's own: that, its own timeout and any other
+             * exception are a failed take-back ([ScreenUnavailableException] with the class only, as
+             * [moving]: the port's message and cause may quote the screen). An Error propagates as
+             * it is, the failed take-back suppressed on it.
+             */
+            @Suppress("TooGenericExceptionCaught", "SwallowedException") // Any end but a return; class only.
+            private suspend fun backWithin(ticket: HandoffTicket): SurfaceRef? =
+                try {
+                    withTimeoutOrNull(loop.config.takeBackTimeoutMs) { takeBack(ticket) }
+                } catch (failure: Exception) {
+                    // Not this call's cancellation (NonCancellable): the port's own, a failed take-back like any other.
+                    if (failure is CancellationException) currentCoroutineContext().ensureActive()
+                    throw ScreenUnavailableException("take back failed: ${failure.javaClass.name}")
+                }
+
+            /** The port's take-back; an Error from it gets the failed take-back suppressed on its own instance. */
+            @Suppress("TooGenericExceptionCaught") // Only to attach the failed take-back to an Error.
+            private suspend fun takeBack(ticket: HandoffTicket): SurfaceRef =
+                try {
+                    surfaces.takeBack(ticket)
+                } catch (bug: Error) {
+                    bug.addSuppressed(ScreenUnavailableException("take back failed: ${bug.javaClass.name}"))
+                    throw bug
+                }
         }
 
         private suspend fun <T> moving(

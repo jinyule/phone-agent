@@ -24,9 +24,9 @@ import kotlinx.serialization.Serializable
  * waiting does not count against `Tool.timeoutMs`. At most one prompt per task is pending; a
  * second call waits for the first. A failure to record the prompt throws the session log's
  * `IOException`. When the task cannot be taken back (the call cut its own handoff off or it
- * failed, and the take-back failed; or the hand-over did not settle), [handOff] throws
- * [ScreenUnavailableException] (the move only) in place of the cancellation or failure; tools
- * must let it propagate and not go on acting. An Error propagates as it is.
+ * failed, and the take-back ended any way but returning; or the hand-over did not settle),
+ * [handOff] throws [ScreenUnavailableException] (the move only) in place of the cancellation or
+ * failure; tools must let it propagate and not go on acting. An Error propagates as it is.
  */
 public interface UserInteraction : ToolInteraction {
     /**
@@ -53,7 +53,8 @@ public interface ToolInteraction {
      *
      * A handoff that ends without its `handoff/end` (the call cuts it off: its budget, a
      * cancellation inside the tool; or an unexpected failure) is taken back at once. When that
-     * cannot be done (the take-back fails, takes too long, or was itself cut off), this throws
+     * cannot be done (the take-back ends any way but returning: an exception, a cancellation of
+     * the port's own, its own timeout; or it takes too long, or was itself cut off), this throws
      * [ScreenUnavailableException] naming the move only, in place of the cancellation or failure:
      * the task may still be with the user, so tools must let it propagate and not go on acting.
      * So does a hand-over that did not settle, cut off or not: it settles only when
