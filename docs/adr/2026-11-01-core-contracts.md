@@ -72,7 +72,7 @@ M1/M2 的主循环、OpenAI 系适配器、Anthropic 适配器、PolicyEngine、
 - **格式版本**：
   - 第一行文件头 `{"format":"phoneagent.session","version":N,…}`；
   - `SessionMigration(fromVersion)` 在原始 envelope JSON 上把版本 v 迁到 v+1；迁移链必须连续到当前版本；
-  - **v1 格式的发布点（冻结点）是第一个 M1 PR。** 在那之前，`core/src/test/resources/session-format/v1/session.jsonl` 允许重新生成，只用下一条的生成任务；从那之后永不改写。WP01 内的几次重新生成记在第 9、11、12、13 节。WP01 合入前没有任何代码在测试之外写过 v1 日志。
+  - **v1 格式的发布点（冻结点）是第一个 M1 PR。** 在那之前，`core/src/test/resources/session-format/v1/session.jsonl` 允许重新生成，只用下一条的生成任务；从那之后永不改写。WP01 内的几次重新生成：第 9 节的补充要求一次，第 11、12、13 节各一次。WP01 合入前没有任何代码在测试之外写过 v1 日志。
   - fixture 只由 `./gradlew :core:generateSessionFormatFixture` 生成（约定插件 `phoneagent.session-format`），它拒绝写入已经存在的版本目录；测试只读 fixture，没有写回开关。
 - **代码里写 `serializer<X>()`，不写 `X.serializer()`**：detekt 做类型解析时不跑 serialization 插件，后者在它看来是未解析的引用。
 - 不可序列化的类型（运行时对象，不进日志）：`Delta`、`Frame`、`agent` 包的类型、`PolicyContext`、`ElementRisk`。
