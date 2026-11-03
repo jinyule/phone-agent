@@ -57,7 +57,8 @@ class BoundsTest {
     fun `a label of many joined English actions is normalized in proportion to its length`() {
         val policy = Fx.rules()
         val tap = Fx.tap("e1")
-        // Per character of the label, for 50 and for 500 parts: within a bound that does not grow with them.
+        // Per character of the label, for 50 and for 500 parts: within a bound that does not grow with them,
+        // and at least once, as the label is read whole: a count that stays 0 measures nothing.
         val perCharacter =
             listOf("send", "delete").associateWith { word ->
                 listOf(50, 500).map { n ->
@@ -69,7 +70,7 @@ class BoundsTest {
                     Work.characters.sum() / label.length
                 }
             }
-        assertTrue(perCharacter.values.flatten().all { it <= NORMALIZED_PER_CHARACTER }, "$perCharacter")
+        assertTrue(perCharacter.values.flatten().all { it in 1..NORMALIZED_PER_CHARACTER }, "$perCharacter")
     }
 
     @ParameterizedTest(name = "{0}")
