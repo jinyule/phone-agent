@@ -17,7 +17,11 @@ import java.math.BigInteger
 import java.security.KeyFactory
 import java.security.KeyPairGenerator
 import java.security.MessageDigest
+import java.security.interfaces.RSAPrivateCrtKey
 import java.security.interfaces.RSAPublicKey
+import java.security.spec.RSAKeyGenParameterSpec
+import java.security.spec.RSAKeyGenParameterSpec.F4
+import java.security.spec.RSAPrivateCrtKeySpec
 import java.security.spec.RSAPublicKeySpec
 import java.util.Base64
 
@@ -122,6 +126,47 @@ class AdbIdentityTest {
         }
 
     @Test
+    fun `loadOrCreate replaces keys that parse but cannot be used`() =
+        runTest {
+            val io = StandardTestDispatcher(testScheduler)
+            // Never derived from the shared test keys: the JDK caches RSA blinding values per modulus,
+            // and a broken key with the same modulus would spoil them for the good one.
+            val generator = KeyPairGenerator.getInstance("RSA").apply { initialize(RSAKeyGenParameterSpec(2048, F4)) }
+            val key = generator.generateKeyPair().private as RSAPrivateCrtKey
+            val blobs =
+                mapOf(
+                    "public exponent 2: the public key cannot be rebuilt" to crt(key, exponent = BigInteger.TWO),
+                    "public exponent 3: an RSA key, but not one we create" to
+                        crt(
+                            key,
+                            exponent = BigInteger.valueOf(3),
+                        ),
+                    "CRT values that do not belong together: it cannot sign" to
+                        crt(key, primeExponentP = key.primeExponentP + BigInteger.TWO),
+                )
+            for ((what, blob) in blobs) {
+                val store = MemoryStore(blob)
+                val load = AdbIdentity.loadOrCreate(store, "x", io)
+                assertEquals(IdentityLoad.Origin.REPLACED, load.origin, what)
+                assertArrayEquals(load.identity.privateKey.encoded, store.bytes, what)
+            }
+        }
+
+    @Test
+    fun `a name too long for the device's key line fails when loading`() =
+        runTest {
+            val io = StandardTestDispatcher(testScheduler)
+            val store = MemoryStore(identity.privateKey.encoded)
+            val longest = AdbIdentity.loadOrCreate(store, "x".repeat(7_489), io).identity
+            assertEquals(8_190, longest.adbPublicKey.toByteArray().size, "one byte below PeerInfo's 8191 for the NUL")
+            for (name in listOf("x".repeat(7_490), "\u00e9".repeat(3_745), "x".repeat(8_000))) {
+                assertThrows<IllegalArgumentException> { AdbIdentity.loadOrCreate(store, name, io) }
+                assertThrows<IllegalArgumentException> { AdbIdentity.generate(name) }
+                assertThrows<IllegalArgumentException> { AdbIdentity.fromPkcs8(identity.privateKey.encoded, name) }
+            }
+        }
+
+    @Test
     fun `loadOrCreate needs a name and lets store failures through`() =
         runTest {
             val io = StandardTestDispatcher(testScheduler)
@@ -141,6 +186,26 @@ class AdbIdentityTest {
         assertEquals(identity.fingerprint, copy?.fingerprint)
         assertNull(AdbIdentity.fromPkcs8(ByteArray(0), "x"))
         assertTrue(AdbIdentity.generate("a").fingerprint != AdbIdentity.generate("a").fingerprint)
+    }
+
+    /** [key] re-encoded as PKCS#8 with one of its values replaced. */
+    private fun crt(
+        key: RSAPrivateCrtKey,
+        exponent: BigInteger = key.publicExponent,
+        primeExponentP: BigInteger = key.primeExponentP,
+    ): ByteArray {
+        val spec =
+            RSAPrivateCrtKeySpec(
+                key.modulus,
+                exponent,
+                key.privateExponent,
+                key.primeP,
+                key.primeQ,
+                primeExponentP,
+                key.primeExponentQ,
+                key.crtCoefficient,
+            )
+        return KeyFactory.getInstance("RSA").generatePrivate(spec).encoded
     }
 
     private class MemoryStore(

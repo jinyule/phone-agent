@@ -3,7 +3,8 @@
  * Origin: Mika commit 9cef375, core/src/main/kotlin/com/wangzan101/mika/core/adb/AdbIdentity.kt.
  * Modified by PhoneAgent contributors: English documentation; the key pair is private and never
  * printed; storage is a port without file paths (the host encrypts); loading reports whether the
- * key was stored, created or replaced; key names are sanitized; certificate subject PhoneAgent.
+ * key was stored, created or replaced; a stored key that parses but cannot sign is replaced too;
+ * key names are sanitized and their length checked on load; certificate subject PhoneAgent.
  */
 package dev.phoneagent.core.adb
 
@@ -27,6 +28,7 @@ import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
 import java.security.interfaces.RSAPrivateCrtKey
 import java.security.interfaces.RSAPublicKey
+import java.security.spec.InvalidKeySpecException
 import java.security.spec.PKCS8EncodedKeySpec
 import java.security.spec.RSAKeyGenParameterSpec
 import java.security.spec.RSAPublicKeySpec
@@ -62,7 +64,11 @@ public class AdbIdentity private constructor(
      * The key's label in the device's list of paired devices: the requested name with every
      * whitespace character replaced by `_` (adbd and Settings split the key line on whitespace).
      */
-    public val name: String = WHITESPACE.replace(name, "_")
+    public val name: String = sanitize(name)
+
+    init {
+        requireNameFits(this.name)
+    }
 
     internal val privateKey: PrivateKey get() = keyPair.private
 
@@ -87,13 +93,23 @@ public class AdbIdentity private constructor(
     public companion object {
         private const val KEY_BITS = 2048
         private const val FINGERPRINT_SHOWN = 16
+        private const val PROBE_ALGORITHM = "SHA256withRSA"
         private val WHITESPACE = Regex("\\s")
 
         /**
+         * The longest [name], in UTF-8 bytes after sanitizing: pairing sends [adbPublicKey] (700
+         * base64 bytes, a space, the name) NUL-terminated in the 8191 data bytes of a PeerInfo.
+         */
+        public const val MAX_NAME_BYTES: Int =
+            AdbPairing.PEER_INFO_SIZE - 2 - (AdbPublicKey.SIZE + 2) / 3 * 4 - 1
+
+        /**
          * The identity stored in [store], or a new one written to it when nothing is stored or the
-         * stored bytes are not an RSA-2048 PKCS#8 key ([IdentityLoad.Origin] says which; after a
-         * replacement the device must be paired again). [name] must not be blank. Runs on [io];
-         * store failures propagate as [IOException].
+         * stored bytes are not a usable RSA-2048 key ([IdentityLoad.Origin] says which; after a
+         * replacement the device must be paired again). Usable means PKCS#8 that parses, exponent
+         * 65537, and a key pair that signs and verifies. [name] must not be blank and must fit
+         * [MAX_NAME_BYTES]; both are checked before the store is read. Runs on [io]; store
+         * failures propagate as [IOException].
          */
         public suspend fun loadOrCreate(
             store: AdbKeyStore,
@@ -101,6 +117,7 @@ public class AdbIdentity private constructor(
             io: CoroutineDispatcher = Dispatchers.IO,
         ): IdentityLoad {
             require(name.isNotBlank()) { "adb key name must not be blank" }
+            requireNameFits(sanitize(name))
             return withContext(io) {
                 val stored = store.read()
                 val loaded = stored?.let { fromPkcs8(it, name) }
@@ -125,15 +142,58 @@ public class AdbIdentity private constructor(
             return AdbIdentity(generator.generateKeyPair(), name)
         }
 
-        /** The identity in [pkcs8], or `null` when it is not an RSA-2048 PKCS#8 private key. */
+        /** The identity in [pkcs8], or `null` when it is not a usable RSA-2048 PKCS#8 private key. */
         internal fun fromPkcs8(
             pkcs8: ByteArray,
             name: String,
         ): AdbIdentity? {
             val factory = KeyFactory.getInstance("RSA")
-            val private = privateKey(factory, pkcs8)?.takeIf { it.modulus.bitLength() == KEY_BITS } ?: return null
-            val public = factory.generatePublic(RSAPublicKeySpec(private.modulus, private.publicExponent))
-            return AdbIdentity(KeyPair(public, private), name)
+            // We only create F4 keys, and adb's key structure has room for a 32-bit exponent only.
+            val private =
+                privateKey(factory, pkcs8)?.takeIf {
+                    it.modulus.bitLength() == KEY_BITS && it.publicExponent == RSAKeyGenParameterSpec.F4
+                }
+            val pair = private?.let { key -> publicKey(factory, key)?.let { KeyPair(it, key) } }
+            return pair?.takeIf(::signs)?.let { AdbIdentity(it, name) }
+        }
+
+        private fun sanitize(name: String): String = WHITESPACE.replace(name, "_")
+
+        private fun requireNameFits(name: String) {
+            val size = name.toByteArray(Charsets.UTF_8).size
+            require(size <= MAX_NAME_BYTES) { "adb key name has $size UTF-8 bytes, at most $MAX_NAME_BYTES fit" }
+        }
+
+        private fun publicKey(
+            factory: KeyFactory,
+            private: RSAPrivateCrtKey,
+        ): RSAPublicKey? =
+            try {
+                factory.generatePublic(RSAPublicKeySpec(private.modulus, private.publicExponent)) as? RSAPublicKey
+            } catch (ignoredUnusable: InvalidKeySpecException) {
+                // The stored bytes are not to be trusted: they parse, but hold numbers no usable key has.
+                null
+            }
+
+        /** Whether [pair] signs and verifies: parameters that parse may still disagree (a wrong CRT exponent). */
+        private fun signs(pair: KeyPair): Boolean =
+            try {
+                roundTrip(pair)
+            } catch (ignoredUnusable: GeneralSecurityException) {
+                // The stored bytes are not to be trusted: the key they hold cannot sign.
+                false
+            }
+
+        private fun roundTrip(pair: KeyPair): Boolean {
+            val data = PROBE_ALGORITHM.toByteArray(Charsets.US_ASCII)
+            val signer = Signature.getInstance(PROBE_ALGORITHM)
+            signer.initSign(pair.private)
+            signer.update(data)
+            val signature = signer.sign()
+            val verifier = Signature.getInstance(PROBE_ALGORITHM)
+            verifier.initVerify(pair.public)
+            verifier.update(data)
+            return verifier.verify(signature)
         }
 
         private fun privateKey(
