@@ -76,9 +76,9 @@ internal class MessageFacts(
 
     /**
      * `providerMetadata`: identity, the model asked for and the one that served, stop details,
-     * server-side edits and any fallback. A field holding a member name or a string that masking
-     * would change (a request secret or a credential shape, as in an error body) is left out whole,
-     * never half masked.
+     * server-side edits and any fallback. A field holding a member name or a value (string, number
+     * or boolean) that masking would change (a request secret or a credential shape, as in an error
+     * body) is left out whole, never half masked.
      */
     fun metadata(
         reason: String,

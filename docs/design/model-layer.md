@@ -133,7 +133,7 @@ fun interface BlobSource {              // 读当前会话 BlobStore 里 Part.Im
     - 窗口按"块 + 字段"分开。如果一个密钥被拆在两个字段里（比如 thinking 文字一半、signature 一半），或者拆在两个块里，就检测不到。只有每一半都另外凑成某个密钥时，才会被拦下。
     - 正文不做宽松解码：text、thinking 这类字面文字，下游不会把它们当 JSON 解码，字面的反斜杠写法不是密钥。所以正文里用转义、空格、编码等方式改写过的密钥不检测。检测只认三种形式：原样的，标准 JSON 转义的，以及调用参数宽松解码以后的。
   - 拒绝用固定文字，带"已流出内容不保留"的标记：runtime 不把这次 attempt 已经流出的前缀记成 interrupted 的消息，界面上已经显示的片段由 UI 清掉。WP01 的 `discardsStreamed` 合入之前，适配器用 `CredentialEcho.discardsStreamed` 占位。
-  - 服务端写的诊断照旧打码成 `***`，并按形状兜底：错误体、流内 error 事件、拒答的 `category`。`providerMetadata` 里打码会改动的字段整项省略，不写半截打码的值；字段里的成员名也算，打码会改动某个成员名，整个字段同样省略。
+  - 服务端写的诊断照旧打码成 `***`，并按形状兜底：错误体、流内 error 事件、拒答的 `category`。`providerMetadata` 里打码会改动的字段整项省略，不写半截打码的值；字段里的成员名也算，数字和布尔值也算（按 JSON 里写出的样子比较，`123456`、`true` 这样的密钥同样命中），打码会改动其中任何一个，整个字段同样省略。
 
 **线路快照**（`core.model.WireProfile`，随 `ChatRequest.wire` 传给适配器，冻结在 `request/header` 和 `side/request` 里）：
 
