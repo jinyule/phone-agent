@@ -19,6 +19,7 @@ import dev.phoneagent.core.model.openai.Kit.next
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import mockwebserver3.RecordedRequest
 import mockwebserver3.junit5.StartStop
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -68,15 +69,21 @@ class WireSnapshotTest {
         reasoning: ReasoningLevel? = null,
     ): ChatRequest = Kit.request(maxOutputTokens = 64).copy(wire = wire, reasoning = reasoning)
 
-    /** The body [model] sends for [request]. */
+    /** The HTTP request [model] sends for [request]. */
     private suspend fun sent(
         model: ChatModel,
         request: ChatRequest,
         reply: String = chatReply,
-    ): JsonObject {
+    ): RecordedRequest {
         server.enqueueSse(reply)
         model.complete(request)
-        return server.next().json()
+        return server.next()
+    }
+
+    /** Fails unless [sent] carries the snapshot's header and not the one the model was built with. */
+    private fun assertLoggedHeaders(sent: RecordedRequest) {
+        assertEquals("then", sent.headers["X-Logged"], "the snapshot's header")
+        assertNull(sent.headers["X-Team"], "the header the model was built with")
     }
 
     @Test
@@ -171,7 +178,9 @@ class WireSnapshotTest {
                     disableParallelToolCalls = false,
                     streamOptions = false,
                 )
-            val body = sent(model, request(logged, ReasoningLevel.LOW))
+            val sent = sent(model, request(logged, ReasoningLevel.LOW))
+            assertLoggedHeaders(sent)
+            val body = sent.json()
             assertEquals(JsonObject(mapOf("effort" to JsonPrimitive("high"))), body["reasoning"])
             assertEquals(JsonPrimitive(64), body["max_completion_tokens"])
             assertFalse("max_tokens" in body || "parallel_tool_calls" in body || "stream_options" in body)
@@ -183,12 +192,15 @@ class WireSnapshotTest {
             val model = model(ModelProtocol.OPENAI_RESPONSES)
             val logged =
                 model.prepare(ReasoningLevel.LOW).wire.copy(
+                    headers = mapOf("X-Logged" to "then"),
                     reasoningEffort = null,
                     maxTokensField = null,
                     disableParallelToolCalls = false,
                     includeEncryptedReasoning = false,
                 )
-            val body = sent(model, request(logged, ReasoningLevel.LOW), responsesReply)
+            val sent = sent(model, request(logged, ReasoningLevel.LOW), responsesReply)
+            assertLoggedHeaders(sent)
+            val body = sent.json()
             assertFalse("reasoning" in body || "max_output_tokens" in body)
             assertFalse("parallel_tool_calls" in body || "include" in body)
         }
