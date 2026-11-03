@@ -5,6 +5,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.phoneagent.core.ports.ActionOutcome
+import dev.phoneagent.core.ports.ElementState
 import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.ports.SnapshotDetail
 import dev.phoneagent.core.ports.SnapshotOptions
@@ -469,6 +470,44 @@ class RefContextTest {
                 s2.elements.first { it.name == "Like" }.ref in s1.refs(),
             )
             assertNothingTouched()
+        }
+
+    /**
+     * A list that can scroll back whose first child, so maybe cut by its edge, is a clickable card
+     * with its two texts one layout further down, as View lists often have it; returns the card.
+     */
+    private fun showCard(): AccessibilityNodeInfo {
+        val card =
+            make("android.view.ViewGroup", Rect(0, LIST_TOP, 1000, LIST_TOP + 200)) { isClickable = true }.with(
+                layout(Rect(0, LIST_TOP, 1000, LIST_TOP + 200)).with(
+                    text("Bob", Rect(0, LIST_TOP, 700, LIST_TOP + 200)),
+                    text("2h", Rect(700, LIST_TOP, 1000, LIST_TOP + 200)),
+                ),
+            )
+        host.show(
+            make("androidx.recyclerview.widget.RecyclerView", Rect(0, LIST_TOP, 1000, LIST_BOTTOM)) {
+                isScrollable = true
+                addAction(AccessibilityAction.ACTION_SCROLL_BACKWARD)
+            }.with(card),
+        )
+        return card
+    }
+
+    @Test
+    fun aCutCardWhoseTextsSitALayoutDownIsTappedByRef() =
+        runTest {
+            // Fix list r4 C5 (Claude r5 S-2): the card's texts are two, if a layout down, so it is not
+            // a control told apart by one label of its own, and rule 4 leaves it alone.
+            showCard()
+            val port = mainPort(host)
+            val s1 = port.snapshot()
+            val card = showCard()
+            val ref = s1.elements.single { ElementState.CLICKABLE in it.states }.ref
+
+            val outcome = port.act(UiAction.Tap(Target.Ref(ref)), s1.id)
+
+            assertEquals(ActionOutcome.Status.Ok, outcome.status)
+            assertTrue(card.clicked)
         }
 
     // Controls: what must keep its ref.
