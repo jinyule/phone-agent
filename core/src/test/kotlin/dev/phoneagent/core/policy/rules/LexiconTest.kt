@@ -145,6 +145,8 @@ class LexiconTest {
                 "看看这个 https://example.com/send/abc",
             )
         addresses.forEach { assertNull(lexicon.ofControl(it), it) }
+        // Nor at the end of a word: "C++" is a name, so the title names no delete.
+        assertNull(lexicon.ofControl("C++ delete operator"))
         // A sign joins alone between spaces, not at the edge of a word: an address wrapped after its slash.
         val wrapped = listOf("https://www.example.com/\ncheckout/cart", "example.com/ remove-background-tips")
         wrapped.forEach { assertNull(lexicon.ofControl(it), it) }

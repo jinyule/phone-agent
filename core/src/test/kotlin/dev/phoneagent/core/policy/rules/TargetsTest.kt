@@ -424,8 +424,8 @@ class TargetsTest {
                 .plus(listOf("example.com/buy", "example.com/remove-background-tips"))
                 // Nor at the edge of a word with a space on one side: an address wrapped after its slash.
                 .plus(listOf("https://www.example.com/\ncheckout/cart", "example.com/ remove-background-tips"))
-                // Nor at the edge of one: numbers read as spaces leave "&pay" at the end of this address.
-                .plus("https://a.com/?x=1&pay=2")
+                // Nor at either end of one: numbers read as spaces leave "&pay" of this address; "C++" a name.
+                .plus(listOf("https://a.com/?x=1&pay=2", "C++ delete operator"))
         assertAll(asked(ConfirmReason.DELETE, deletes) + asked(ConfirmReason.SPEND, spends) + asked(null, names))
         names.forEach { assertEquals(Verdict.Allow, verdict(it), it) }
     }
