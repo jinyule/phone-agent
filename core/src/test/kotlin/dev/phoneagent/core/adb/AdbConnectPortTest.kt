@@ -1,13 +1,18 @@
 package dev.phoneagent.core.adb
 
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.net.Socket
+import java.util.Collections
+import java.util.concurrent.Executors
 
 class AdbConnectPortTest {
     private val handshake =
@@ -101,8 +106,104 @@ class AdbConnectPortTest {
             result as PortSearchResult.Failed
             assertEquals(ConnectFailure.UNAUTHORIZED, result.lastFailure?.reason)
             assertEquals(listOf(AdbEndpoint("127.0.0.1", 40_001)), result.tried)
+            assertEquals(listOf(40_001, 40_001), tried, "tried once more before giving up")
             assertNull(result.scan)
             assertNull(cache.port)
+        }
+
+    @Test
+    fun `UNAUTHORIZED once is tried again on the same endpoint`() =
+        runTest {
+            cache.port = 40_001
+            var refusals = 1
+            val connector: suspend (AdbEndpoint) -> ConnectResult = { endpoint ->
+                tried += endpoint.port
+                when {
+                    refusals-- > 0 -> ConnectResult.Failed(ConnectFailure.UNAUTHORIZED, "hung up")
+                    else -> ConnectResult.Connected(session)
+                }
+            }
+            val finder = AdbServiceFinder { _, _ -> error("mDNS is not needed") }
+            val result = AdbConnectPort(connector, cache, finder, null, PortSearchConfig()).connect()
+            result as PortSearchResult.Connected
+            assertEquals(PortSource.CACHE, result.source)
+            assertEquals(listOf(40_001, 40_001), tried)
+        }
+
+    @Test
+    fun `a port that failed on one address is still scanned on another`() =
+        runTest {
+            cache.port = 40_001
+            val finder = AdbServiceFinder { _, _ -> listOf(40_001) }
+            val wifi = AdbEndpoint("10.0.0.2", 40_001)
+            val probe =
+                PortProbe { host, port ->
+                    when (AdbEndpoint(host, port)) {
+                        wifi -> PortState.ADB
+                        else -> PortState.CLOSED
+                    }
+                }
+            val scan = LocalPortScan({ listOf("127.0.0.1", "10.0.0.2") }, 40_000..40_002, PortScanConfig(), probe)
+            val attempts = mutableListOf<AdbEndpoint>()
+            val connector: suspend (AdbEndpoint) -> ConnectResult = { endpoint ->
+                attempts += endpoint
+                when (endpoint) {
+                    wifi -> ConnectResult.Connected(session)
+                    else -> ConnectResult.Failed(ConnectFailure.UNREACHABLE, "")
+                }
+            }
+            val result = AdbConnectPort(connector, cache, finder, scan, PortSearchConfig()).connect()
+            assertEquals(PortSource.SCAN, (result as? PortSearchResult.Connected)?.source, "$result")
+            assertEquals(listOf(AdbEndpoint("127.0.0.1", 40_001), wifi), attempts)
+        }
+
+    @Test
+    fun `a cache that cannot save closes the session instead of losing it`() {
+        val failing =
+            object : PortCache {
+                override fun load(): Int = 40_001
+
+                override fun save(port: Int) = error("storage full")
+            }
+        val finder = AdbServiceFinder { _, _ -> error("mDNS is not needed") }
+        val port = AdbConnectPort(connector(live = 40_001), failing, finder, null, PortSearchConfig())
+        val thrown = assertThrows<IllegalStateException> { inRealTime { port.connect() } }
+        assertEquals("storage full", thrown.message)
+        assertFalse(session.isOpen)
+    }
+
+    @Test
+    fun `the cache is read and written on the client's IO dispatcher`() =
+        runTest {
+            val threads = Collections.synchronizedList(mutableListOf<String>())
+            val executor =
+                Executors.newSingleThreadExecutor { task ->
+                    Thread(task, "cache-io").apply { isDaemon = true }
+                }
+            try {
+                val io = executor.asCoroutineDispatcher()
+                var stored: Int? = 40_001
+                val recording =
+                    object : PortCache {
+                        override fun load(): Int? {
+                            threads += "load on ${Thread.currentThread().name}"
+                            return stored
+                        }
+
+                        override fun save(port: Int) {
+                            threads += "save on ${Thread.currentThread().name}"
+                        }
+                    }
+                val finder = AdbServiceFinder { _, _ -> emptyList() }
+                AdbConnectPort(connector(live = 40_001), recording, finder, null, PortSearchConfig(), io).connect()
+                val client = AdbClient(TestTls.client, TestTls.exporter, AdbConfig(), io)
+                stored = null
+                // The public constructor takes the client's dispatcher; with nothing cached, only load runs.
+                AdbConnectPort(client, recording, finder, null).connect()
+                assertEquals(listOf("load on cache-io", "save on cache-io", "load on cache-io"), threads)
+            } finally {
+                executor.shutdownNow()
+            }
         }
 
     @Test

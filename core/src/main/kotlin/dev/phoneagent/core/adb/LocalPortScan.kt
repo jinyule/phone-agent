@@ -4,7 +4,7 @@
  * Modified by PhoneAgent contributors: English documentation; limits are a validated config;
  * one probe per port (TCP connect, then CNXN must be answered by STLS) on coroutines with bounded
  * parallelism instead of an NIO selector; the budget is coroutine time; own ports come from the
- * caller instead of a global registry.
+ * caller instead of a global registry; ports already tried are skipped per address.
  */
 package dev.phoneagent.core.adb
 
@@ -89,24 +89,28 @@ internal fun interface PortProbe {
 /**
  * The last way to find the wireless-debugging port (phase1 §7.1, after the cached port and mDNS):
  * scan this device's own addresses. adbd listens on a port the system picks from the ephemeral
- * range. Hosts are scanned in order (`127.0.0.1` first, then the device's Wi-Fi addresses, as
- * adbd may bind only one of them); once a host has an adbd, later hosts are skipped. A port
- * counts as adbd when it answers our CNXN with STLS, which other services, and a socket that
- * happens to connect to itself, never do. Only local addresses belong in [hosts].
+ * range, on every address of the device (AOSP `adb_wifi.cpp` serves on INADDR_ANY), so loopback
+ * alone finds it: hosts should pass just `127.0.0.1`, which keeps the probes off the network.
+ * Hosts are scanned in order; once a host has an adbd, later hosts are skipped. A port counts as
+ * adbd when it answers our CNXN with STLS, which other services, and a socket that happens to
+ * connect to itself, never do. Only local addresses belong in [hosts]; the ports of [ownPorts]
+ * (listeners of this app) are skipped on every host.
  */
 public class LocalPortScan internal constructor(
     private val hosts: () -> List<String>,
     private val range: IntRange,
     private val config: PortScanConfig,
     private val probe: PortProbe,
+    private val ownPorts: () -> Set<Int> = { emptySet() },
 ) {
-    /** A scan of [range] on [hosts] (called once per scan) with real sockets on [io]. */
+    /** A scan of [range] on [hosts] and without [ownPorts] (both called once per scan) with real sockets on [io]. */
     public constructor(
         hosts: () -> List<String>,
         range: IntRange = FALLBACK_RANGE,
         config: PortScanConfig = PortScanConfig(),
         io: CoroutineDispatcher = Dispatchers.IO,
-    ) : this(hosts, range, config, SocketPortProbe(config, io))
+        ownPorts: () -> Set<Int> = { emptySet() },
+    ) : this(hosts, range, config, SocketPortProbe(config, io), ownPorts)
 
     init {
         require(!range.isEmpty() && range.first >= 1 && range.last <= MAX_PORT) {
@@ -115,14 +119,15 @@ public class LocalPortScan internal constructor(
     }
 
     /**
-     * Scans every port of the range except [skip] (ports already tried, our own listeners). When
-     * [PortScanConfig.budgetMs] runs out, returns what was found so far.
+     * Scans every port of the range on each host except the endpoints of [skip] (already tried)
+     * and the [ownPorts]. When [PortScanConfig.budgetMs] runs out, returns what was found so far.
      */
-    public suspend fun scan(skip: Set<Int>): ScanResult {
+    public suspend fun scan(skip: Set<AdbEndpoint>): ScanResult {
         val tally = Tally()
         withTimeoutOrNull(config.budgetMs) {
+            val own = ownPorts()
             for (host in hosts().distinct()) {
-                sweep(host, skip, tally)
+                sweep(host, own + skip.filter { it.host == host }.map { it.port }, tally)
                 if (tally.foundAny()) break
             }
         }

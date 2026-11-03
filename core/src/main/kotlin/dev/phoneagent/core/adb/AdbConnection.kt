@@ -21,7 +21,9 @@ import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.SocketTimeoutException
+import java.security.GeneralSecurityException
 import javax.net.ssl.SSLException
+import javax.net.ssl.SSLProtocolException
 
 /** Why connecting to adbd failed. */
 public enum class ConnectFailure {
@@ -31,7 +33,12 @@ public enum class ConnectFailure {
     /** The TLS handshake failed. */
     TLS,
 
-    /** adbd refused our key, in the TLS handshake or right after it: not paired, or revoked; pair again. */
+    /**
+     * adbd probably refused our key (not paired, or revoked): our handshake failed after adbd had
+     * asked for our certificate, or the first read after it ended in an alert or a hang-up. An
+     * adbd that went away at that very moment looks the same, so try once more before asking the
+     * user to pair again ([AdbConnectPort] does).
+     */
     UNAUTHORIZED,
 
     /** The peer is not a wireless-debugging adbd, or broke the protocol. */
@@ -110,7 +117,7 @@ internal class AdbHandshake(
             step(ConnectFailure.UNAUTHORIZED) { readHandshakePacket(input) }
                 ?: fail(
                     ConnectFailure.UNAUTHORIZED,
-                    "adbd closed the connection after TLS: our key is not paired",
+                    "adbd closed the connection after TLS: our key is probably not paired",
                 )
         return accept(PendingHandshake(plain, input, output, cnxn))
     }
@@ -212,28 +219,76 @@ internal class AdbHandshake(
          */
         private val HOST_BANNER = "host::features=${AdbFeatures.SHELL_V2}".toByteArray(Charsets.US_ASCII)
 
-        /** The connection failure that [failure] in a step of [reason] stands for. */
+        /**
+         * The connection failure that [failure] in a step of [reason] stands for. Once adbd has
+         * asked for our certificate (and in the first read after the handshake, the UNAUTHORIZED
+         * step), a failure is taken as adbd refusing our key, unless our TLS stack names it as its
+         * own finding by type ([isTlsFinding]); neither the JDK nor Conscrypt types the alerts a
+         * peer sends, so their text is not looked at.
+         */
         fun classify(
             failure: IOException,
             reason: ConnectFailure,
         ): ConnectError {
             if (failure is ConnectError) return failure
-            val timedOut = failure is SocketTimeoutException || failure.cause is SocketTimeoutException
-            // Once adbd has our certificate, an alert, a reset or a hang-up is adbd refusing the key.
-            val refusedInHandshake = failure is TlsHandshakeException && failure.certificateRequested
-            val refusedAfterwards =
-                reason == ConnectFailure.UNAUTHORIZED && (failure is SSLException || failure is TruncatedFrameException)
+            val inHandshake = failure as? TlsHandshakeException
+            val cause = inHandshake?.cause as? IOException ?: failure
+            val mayBeRefusal = inHandshake?.certificateRequested ?: (reason == ConnectFailure.UNAUTHORIZED)
             val classified =
                 when {
-                    timedOut -> ConnectFailure.TIMEOUT
-                    refusedInHandshake || refusedAfterwards -> ConnectFailure.UNAUTHORIZED
-                    failure is TruncatedFrameException -> reason
-                    failure is AdbProtocolException -> ConnectFailure.PROTOCOL
-                    failure is SSLException -> ConnectFailure.TLS
-                    else -> reason
+                    cause is SocketTimeoutException -> {
+                        ConnectFailure.TIMEOUT
+                    }
+
+                    mayBeRefusal -> {
+                        refusal(cause)
+                    }
+
+                    inHandshake != null -> {
+                        ConnectFailure.TLS
+                    }
+
+                    failure is TruncatedFrameException -> {
+                        reason
+                    }
+
+                    failure is AdbProtocolException -> {
+                        ConnectFailure.PROTOCOL
+                    }
+
+                    failure is SSLException -> {
+                        ConnectFailure.TLS
+                    }
+
+                    else -> {
+                        reason
+                    }
                 }
             return ConnectError(classified, describe(failure), failure)
         }
+
+        /**
+         * The class of [cause] where it may be adbd refusing our key: TLS when our stack names it as
+         * its own finding, PROTOCOL for a broken adb packet, otherwise UNAUTHORIZED.
+         */
+        private fun refusal(cause: IOException): ConnectFailure =
+            when {
+                cause.isTlsFinding() -> ConnectFailure.TLS
+                cause is AdbProtocolException && cause !is TruncatedFrameException -> ConnectFailure.PROTOCOL
+                else -> ConnectFailure.UNAUTHORIZED
+            }
+
+        /**
+         * Whether our own TLS stack found fault with what it received and says so by type: a
+         * protocol error ([SSLProtocolException]) or a cryptographic failure, here or behind it,
+         * such as a record that fails its integrity check (bad_record_mac). Those are not adbd
+         * refusing us; an alert adbd sends arrives as an exception without a cause.
+         */
+        private fun IOException.isTlsFinding(): Boolean =
+            generateSequence<Throwable>(this) { it.cause }.any {
+                it is SSLProtocolException ||
+                    it is GeneralSecurityException
+            }
 
         @Throws(IOException::class)
         fun send(

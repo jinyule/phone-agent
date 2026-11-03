@@ -31,7 +31,7 @@ class LocalPortScanTest {
                 val port = adbd.endpoint.port
                 val scan = LocalPortScan({ listOf("127.0.0.1") }, port..port, PortScanConfig(parallelism = 2))
                 assertEquals(ScanResult(listOf(adbd.endpoint), 1), scan.scan(emptySet()))
-                assertEquals(ScanResult(emptyList(), 0), scan.scan(setOf(port)))
+                assertEquals(ScanResult(emptyList(), 0), scan.scan(setOf(adbd.endpoint)))
             }
         }
 
@@ -98,6 +98,30 @@ class LocalPortScanTest {
     }
 
     @Test
+    fun `endpoints already tried are skipped on their own host, our own ports on every host`() =
+        runTest {
+            val probed = Collections.synchronizedList(mutableListOf<String>())
+            val probe =
+                PortProbe { host, port ->
+                    probed += "$host:$port"
+                    PortState.CLOSED
+                }
+            val scan = LocalPortScan({ listOf("a", "b") }, 1..4, PortScanConfig(), probe) { setOf(3) }
+            scan.scan(setOf(AdbEndpoint("a", 1), AdbEndpoint("b", 2), AdbEndpoint("c", 4)))
+            assertEquals(listOf("a:2", "a:4", "b:1", "b:4"), probed.sorted())
+        }
+
+    @Test
+    fun `our own listeners are never probed, with real sockets`() =
+        realTime {
+            FakeAdbd({ emptyList() }).use { adbd ->
+                val port = adbd.endpoint.port
+                val scan = LocalPortScan({ listOf("127.0.0.1") }, port..port, PortScanConfig(), testIo) { setOf(port) }
+                assertEquals(ScanResult(emptyList(), 0), scan.scan(emptySet()))
+            }
+        }
+
+    @Test
     fun `scans hosts in order and stops after the first host with adbd`() =
         runTest {
             val probed = Collections.synchronizedList(mutableListOf<String>())
@@ -113,7 +137,7 @@ class LocalPortScanTest {
                 }
             val hosts = listOf("10.0.0.1", "10.0.0.2", "10.0.0.1", "10.0.0.3")
             val scan = LocalPortScan({ hosts }, 40_000..40_003, PortScanConfig(parallelism = 3), probe)
-            val result = scan.scan(skip = setOf(40_000))
+            val result = scan.scan(skip = setOf(AdbEndpoint("10.0.0.1", 40_000), AdbEndpoint("10.0.0.2", 40_000)))
             assertEquals(listOf(AdbEndpoint("10.0.0.2", 40_001), AdbEndpoint("10.0.0.2", 40_002)), result.found)
             assertEquals(4, result.openPorts)
             assertEquals(6, probed.size, "two hosts of three ports each")

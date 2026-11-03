@@ -32,7 +32,10 @@ import java.net.SocketTimeoutException
 import java.time.Duration
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import javax.crypto.AEADBadTagException
+import javax.crypto.BadPaddingException
 import javax.net.ssl.SSLException
+import javax.net.ssl.SSLProtocolException
 import kotlin.time.Duration.Companion.seconds
 
 class AdbConnectionTest {
@@ -232,6 +235,7 @@ class AdbConnectionTest {
         "OKAY_FIRST, PROTOCOL",
         "NOT_TLS_AFTER_STLS, TLS",
         "HANG_UP_AFTER_TLS, UNAUTHORIZED",
+        "CORRUPT_RECORD_AFTER_TLS, TLS",
         "OKAY_INSTEAD_OF_CNXN, PROTOCOL",
         "ZERO_MAX_PAYLOAD, PROTOCOL",
         "ANCIENT_VERSION, PROTOCOL",
@@ -317,6 +321,31 @@ class AdbConnectionTest {
         assertEquals(CommandFailure.CLOSED, classify(TruncatedFrameException("eof")))
         assertEquals(CommandFailure.PROTOCOL, classify(AdbProtocolException("bad magic")))
         assertEquals(CommandFailure.CLOSED, classify(SocketException("Socket closed")))
+    }
+
+    @Test
+    fun `what our TLS stack names by type is TLS, even where a refusal could be`() {
+        fun classify(
+            failure: IOException,
+            step: ConnectFailure,
+        ) = AdbHandshake.classify(failure, step).reason
+        val badMac = SSLException("(bad_record_mac) Insufficient buffer", BadPaddingException("tag"))
+        val nested = SSLException("record", IOException("wrapped", AEADBadTagException("tag")))
+        val decode = SSLProtocolException("(unexpected_message) Unexpected handshake message")
+        val wrapped = SSLException("(decode_error) Invalid record", SSLProtocolException("short record"))
+        for (failure in listOf(badMac, nested, decode, wrapped)) {
+            assertEquals(ConnectFailure.TLS, classify(failure, ConnectFailure.UNAUTHORIZED), "$failure")
+            assertEquals(ConnectFailure.TLS, classify(TlsHandshakeException(true, failure), ConnectFailure.TLS))
+        }
+        // An alert adbd sends carries no type or cause: it may be a refusal, so it stays one.
+        assertEquals(
+            ConnectFailure.UNAUTHORIZED,
+            classify(SSLException("certificate_required"), ConnectFailure.UNAUTHORIZED),
+        )
+        assertEquals(
+            ConnectFailure.UNAUTHORIZED,
+            classify(SSLException("alert", IOException("no crypto")), ConnectFailure.UNAUTHORIZED),
+        )
     }
 
     @Test

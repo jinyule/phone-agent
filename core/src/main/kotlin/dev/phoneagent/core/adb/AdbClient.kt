@@ -84,7 +84,8 @@ public class AdbClient(
     private val identity: AdbIdentity,
     exporter: TlsKeyExporter,
     private val config: AdbConfig = AdbConfig(),
-    private val io: CoroutineDispatcher = Dispatchers.IO,
+    /** Where blocking socket and storage I/O runs. */
+    internal val io: CoroutineDispatcher = Dispatchers.IO,
 ) {
     private val tls = AdbTls(identity, exporter)
     private val pairing = AdbPairing(tls, identity)
