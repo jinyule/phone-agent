@@ -467,6 +467,28 @@ class TargetsTest {
         )
     }
 
+    @Test
+    fun `one English action in quotes counts on a control and in a dialog`() {
+        // Claude r8 S-2: paying asks at every level, deleting at 谨慎 too.
+        val asks = { s: ScreenSnapshot, ref: String, level: SecurityLevel ->
+            (decide(tap(ref), on(s, level)) as? Verdict.Confirm)?.card?.reason
+        }
+        val controls =
+            listOf(
+                Triple("“Pay now”", SecurityLevel.AUTONOMOUS, ConfirmReason.SPEND),
+                Triple("'Pay now'", SecurityLevel.AUTONOMOUS, ConfirmReason.SPEND),
+                Triple("\"Delete\"", SecurityLevel.CAUTIOUS, ConfirmReason.DELETE),
+            )
+        val said = "“Delete” this chat?"
+        val dialog = screen(el("b1", "OK").copy(window = 1), text("t3", said, window = 1))
+        assertAll(
+            controls.map { (label, level, kind) ->
+                Executable { assertEquals(kind, asks(screen(el("e1", label)), "e1", level), "$level $label") }
+            } +
+                Executable { assertEquals(ConfirmReason.DELETE, asks(dialog, "b1", SecurityLevel.STANDARD), said) },
+        )
+    }
+
     /** A chat with 张三 as its title and 明天见 as the draft, with [extra] on it. */
     private fun chat(vararg extra: UiElement): ScreenSnapshot =
         screen(

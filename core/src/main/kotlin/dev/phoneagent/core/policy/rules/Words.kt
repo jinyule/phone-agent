@@ -161,7 +161,8 @@ internal object Words {
      * Quotes and brackets around an English word ([Text.phrase] form), left out at its start and at
      * its end before an [ENGLISH_SIGNS] sign is looked for between its letters ("\"send&delete\"",
      * "«send&delete»", "`send&delete`", "send+pay)"; a pair of the brackets [Text] reads as a note
-     * is gone by then): quotes, then brackets. Only these marks: any other at the start of a word
+     * is gone by then): quotes, then brackets. Also left out at the start of an English text read
+     * whole ([Phrases.english]: "“pay now”"). Only these marks: any other at the start of a word
      * keeps it whole, a path, a hashtag, a mention ("/checkout/cart", "#buy&sell", "@post/reply").
      */
     val ENGLISH_WORD_WRAPPERS: Set<Char> =

@@ -287,8 +287,10 @@ internal object Phrases {
      * read by the phrase it starts with, the most severe deciding, and it sends when any part does;
      * an exact phrase is only ever the whole label ("Invite and earn" invites no one). The label is
      * split only where every part is at most [partMax] long ([length]; `null`: any length), else
-     * read whole by its start: a long sentence is not split. A [label] that is not [complete] is
-     * never vetoed; a vetoed one is vetoed whole.
+     * read whole by its start: a long sentence is not split. A part is read without the punctuation
+     * around it; a label read whole only without the [Words.ENGLISH_WORD_WRAPPERS] it starts with
+     * ("“pay now”", "[delete"), so a path names nothing ("/delete"). A [label] that is not
+     * [complete] is never vetoed; a vetoed one is vetoed whole.
      */
     fun english(
         label: String,
@@ -304,7 +306,7 @@ internal object Phrases {
             (if (pauses) joined.flatMap { it.split(Words.ENGLISH_PAUSES) } else joined)
                 .map { trimmed(it).replace(Words.ENGLISH_FILLERS, "") }
         val split = pieces.size > 1 && (partMax == null || pieces.all { length(it) <= partMax })
-        val read = if (split) pieces else listOf(text)
+        val read = if (split) pieces else listOf(text.trimStart { it in Words.ENGLISH_WORD_WRAPPERS })
         val vetoes = Vetoes(label)
         return read
             .map { part ->

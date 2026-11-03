@@ -290,6 +290,43 @@ class LexiconTest {
     }
 
     @Test
+    fun `one English action in quotes or after half a bracket reads as without them, and a path stays one`() {
+        // Claude r8 S-2: a text read whole is read without the quotes and brackets it starts with.
+        val actions =
+            listOf(
+                "\"Send\"" to IntentKind.OUTWARD,
+                "“Send”" to IntentKind.OUTWARD,
+                "'Send'" to IntentKind.OUTWARD,
+                "‘Send’" to IntentKind.OUTWARD,
+                "\"Delete\"" to IntentKind.DELETE,
+                "“Delete”" to IntentKind.DELETE,
+                "\"Delete chat\"" to IntentKind.DELETE,
+                "“Delete chat history”" to IntentKind.DELETE,
+                "'Remove'" to IntentKind.DELETE,
+                "\"Uninstall\"" to IntentKind.DELETE,
+                "'Pay now'" to IntentKind.SPEND,
+                "“Pay now”" to IntentKind.SPEND,
+                "\"Transfer\"" to IntentKind.SPEND,
+                "\"Pay\"!" to IntentKind.SPEND,
+                "\"Pay\"." to IntentKind.SPEND,
+                "«Pay now»" to IntentKind.SPEND,
+                "[Delete" to IntentKind.DELETE,
+                "（Delete" to IntentKind.DELETE,
+            )
+        // Only quotes and brackets come off: a path, a hashtag or a mention stays one, in quotes too.
+        val marked = listOf("/delete", "#pay", "@send", "\"/delete\"", "“#pay”", "'@send'", "(/delete", "[#pay")
+        assertAll(
+            actions.map { (label, kind) ->
+                Executable { assertEquals(List(4) { kind }, readings(label).map { it?.kind }, label) }
+            } +
+                marked.map { label ->
+                    Executable { assertEquals(listOf<Hit?>(null, null, null, null), readings(label), label) }
+                } +
+                Executable { assertEquals(Hit(IntentKind.DELETE, "delete"), lexicon.inContext("“Delete” this chat?")) },
+        )
+    }
+
+    @Test
     fun `a word of one other mark written several times keeps its length`() {
         // Claude r7 S-2: only a sign written several times reads as one sign. Seven dots keep
         // "Send.......it" longer than labelMax, so the text is read whole; six do not.
