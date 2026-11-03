@@ -185,7 +185,7 @@ class RedactionTest {
         }
 
     @Test
-    fun `a protocol violation that quotes the key`() =
+    fun `a protocol violation that would quote the key names only its length`() =
         runTest {
             val stream =
                 Kit.sse(
@@ -197,7 +197,12 @@ class RedactionTest {
                     "message_stop" to """{"type":"message_stop"}""",
                 )
             server.enqueueSse(stream)
-            assertClean(assertThrows<ModelError.BadResponse> { model().complete(Kit.request()) })
+            val error = assertThrows<ModelError.BadResponse> { model().complete(Kit.request()) }
+            assertFalse(error.stackTraceToString().contains(key), "the key leaked: $error")
+            assertEquals(
+                "bad response: block 0 has an unsupported type: a string of ${key.length} characters",
+                error.message,
+            )
         }
 
     private companion object {

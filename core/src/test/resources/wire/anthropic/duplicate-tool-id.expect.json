@@ -3,7 +3,7 @@
   "expect": {
     "error": {
       "kind": "BAD_RESPONSE",
-      "message": "bad response: block 1 repeats tool id toolu_01Twice"
+      "message": "bad response: block 1 repeats the tool id of an earlier block"
     },
     "deltas": [
       "started: toolu_01Twice get_weather",

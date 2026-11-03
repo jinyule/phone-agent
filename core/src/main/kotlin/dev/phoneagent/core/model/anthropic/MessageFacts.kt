@@ -62,9 +62,12 @@ internal class MessageFacts(
         val input = count("input_tokens")
         val read = count("cache_read_input_tokens")
         val written = count("cache_creation_input_tokens")
-        val thinking = (usage["output_tokens_details"] as? JsonObject)?.let { count(it["thinking_tokens"]) }
+        val thinking =
+            (usage["output_tokens_details"] as? JsonObject)?.let {
+                count("output_tokens_details.thinking_tokens", it["thinking_tokens"])
+            }
         val total = input.toLong() + read + written
-        if (total > Int.MAX_VALUE) protocol.bad("input token total $total is out of range")
+        if (total > Int.MAX_VALUE) protocol.bad("the input token total is out of range")
         return Usage(
             inputTokens = total.toInt(),
             outputTokens = count("output_tokens"),
@@ -130,14 +133,18 @@ internal class MessageFacts(
         update.forEach { (key, value) -> if (value !is JsonNull) usage[key] = value }
     }
 
-    private fun count(key: String): Int = count(usage[key]) ?: 0
+    private fun count(key: String): Int = count(key, usage[key]) ?: 0
 
-    private fun count(value: JsonElement?): Int? {
+    /** The count [value] of usage field [name]; errors name the field and the kind of value, never the value. */
+    private fun count(
+        name: String,
+        value: JsonElement?,
+    ): Int? {
         if (value == null || value is JsonNull) return null
         val long =
             (value as? JsonPrimitive)?.takeUnless { it.isString }?.longOrNull
-                ?: protocol.bad("usage value $value is not a count")
-        if (long !in 0..Int.MAX_VALUE) protocol.bad("usage value $long is out of range")
+                ?: protocol.bad("usage $name is not a count: ${Unquoted.shape(value)}")
+        if (long !in 0..Int.MAX_VALUE) protocol.bad("usage $name is out of range")
         return long.toInt()
     }
 }

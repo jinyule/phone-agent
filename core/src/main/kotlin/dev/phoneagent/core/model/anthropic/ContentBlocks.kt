@@ -107,7 +107,7 @@ internal class ContentBlocks(
         val start = event.obj("content_block") ?: protocol.bad("block $index without content_block")
         start.forEach { (key, value) -> if (key != TYPE) screen(index, key, value) }
         val block = Block.of(index, start, protocol)
-        block.toolId?.let { if (!toolIds.add(it)) protocol.bad("block $index repeats tool id $it") }
+        block.toolId?.let { if (!toolIds.add(it)) protocol.bad("block $index repeats the tool id of an earlier block") }
         blocks += block
         if (block is Block.Fallback) shown.newAttempt()
         block.started(shown)
@@ -123,7 +123,15 @@ internal class ContentBlocks(
         if (type == INPUT_JSON_DELTA) {
             delta.str(PARTIAL_JSON)?.let { arguments.getOrPut(block.index, ::StringBuilder).append(it) }
         }
-        if (!block.apply(type, delta, shown, protocol)) protocol.bad("unexpected $type for a ${block.type} block")
+        if (!block.apply(type, delta, shown, protocol)) {
+            val what =
+                when (type) {
+                    null -> "a delta without a type"
+                    in DELTA_TYPES -> "unexpected $type"
+                    else -> "a delta of an unknown type (${Unquoted.named(type, DELTA_TYPES)})"
+                }
+            protocol.bad("$what for a ${Unquoted.named(block.type, Block.TYPES)} block")
+        }
     }
 
     /** `content_block_stop`. */
@@ -287,6 +295,10 @@ private const val TYPE = "type"
 
 /** The delta type that streams call arguments, and its member carrying them. */
 private const val INPUT_JSON_DELTA = "input_json_delta"
+
+/** The delta types of the blocks this adapter reads: named in errors, any other only by its length. */
+private val DELTA_TYPES =
+    setOf("text_delta", "thinking_delta", "signature_delta", "compaction_delta", INPUT_JSON_DELTA, "citations_delta")
 private const val PARTIAL_JSON = "partial_json"
 
 /** Where a kotlinx.serialization parse error starts quoting its input. */

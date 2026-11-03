@@ -272,7 +272,7 @@ class StreamProtocolTest {
                 case("block 0 starts after block 1", START, blockStart(1, TEXT), blockStop(1), TEXT0),
                 case("block 1 starts while block 0 is open", START, TEXT0, blockStart(1, TEXT)),
                 case(
-                    "block 1 repeats tool id toolu_1",
+                    "block 1 repeats the tool id of an earlier block",
                     START,
                     blockStart(0, """{"type":"server_tool_use","id":"toolu_1","name":"web_search","input":{}}"""),
                     STOP0,
@@ -296,7 +296,7 @@ class StreamProtocolTest {
                     STOP,
                 ),
                 case(
-                    "block 0 has unsupported type 'mystery'",
+                    "block 0 has an unsupported type: a string of 7 characters",
                     START,
                     blockStart(0, """{"type":"mystery"}"""),
                     STOP0,

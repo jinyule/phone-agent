@@ -287,10 +287,14 @@ internal sealed class Block(
         override fun part(
             bind: Bind,
             protocol: Protocol,
-        ): Part = protocol.bad("block $index has unsupported type '$type'")
+        ): Part = protocol.bad("block $index has an unsupported type: ${Unquoted.named(type, TYPES)}")
     }
 
     companion object {
+        /** The block types this adapter knows by name; errors show any other only by its length. */
+        val TYPES: Set<String> =
+            setOf("text", "thinking", "redacted_thinking", "compaction", "tool_use", "fallback", "server_tool_use")
+
         /** The block a `content_block_start` opens. */
         fun of(
             index: Int,
