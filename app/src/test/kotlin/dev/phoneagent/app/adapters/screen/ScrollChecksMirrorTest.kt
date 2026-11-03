@@ -67,9 +67,10 @@ class ScrollChecksMirrorTest {
         }
 
     /**
-     * The Settings home page as the device shows it: a page (a ScrollView, so a list) holding an
-     * app bar and the scrolling content, four full-size wrappers with view ids, then a list whose
-     * rows are a clickable container with a title and a summary; [titles] from the top down.
+     * The Settings home page as the device shows it: a page (a ScrollView, which holds all of its
+     * content and so is not a list: what it holds is outside lists) holding an app bar and the
+     * scrolling content, four full-size wrappers with view ids, then a list whose rows are a
+     * clickable container with a title and a summary; [titles] from the top down.
      */
     private fun page(titles: List<String>): AccessibilityNodeInfo {
         val content = Rect(0, Feed.LIST_TOP, 1000, Feed.LIST_BOTTOM)
