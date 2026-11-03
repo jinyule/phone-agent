@@ -657,7 +657,7 @@ screen s12 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · 坐标 0–
   - 对同一个端点先重试一次（`AdbConnectPort` 已经这样做）；
   - 仍然是 UNAUTHORIZED，才请用户重新配对。
 
-  我们自己的 TLS 栈按类型认出的错误（例如 bad_record_mac）算 TLS，不算 UNAUTHORIZED。
+  我们自己的 TLS 栈按类型认出的错误（例如 bad_record_mac）算 TLS，不算 UNAUTHORIZED。对端发来的 alert 不在此列：Android 上 Conscrypt 把 adbd 的 alert 也报成 `SSLProtocolException`（实测未配对的 key 收到 `SSLV3_ALERT_CERTIFICATE_UNKNOWN`），只能靠消息里 BoringSSL 的原因名（`SSLV3_ALERT_*` / `TLSV1_ALERT_*`）认出来。
 
 ### 7.2 一步执行
 
