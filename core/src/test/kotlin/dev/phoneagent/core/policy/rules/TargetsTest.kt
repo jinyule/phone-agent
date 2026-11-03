@@ -427,6 +427,20 @@ class TargetsTest {
     }
 
     @Test
+    fun `a row of several texts splits an English one where each part is within the length limit`() {
+        val row = el("e1", bounds = box(0, 300, 999, 400))
+        val name = text("t1", "Alice", parent = "e1")
+        val said = text("t2", "Send and delete", box(0, 350, 500, 390), parent = "e1")
+        val sent = { s: ScreenSnapshot ->
+            Fx.ctx(SecurityLevel.STANDARD, s, operated = setOfNotNull(s.pkg), outwardConfirmed = setOfNotNull(s.pkg))
+        }
+        assertEquals(ConfirmReason.DELETE, reason(decide(tap("e1"), sent(screen(row, name, said)))))
+        // A long sentence is still read only by its start: a part past the limit keeps it whole.
+        val long = text("t2", "Send me the files and delete the old ones", box(0, 350, 500, 390), parent = "e1")
+        assertEquals(ConfirmReason.OUTWARD, reason(decide(tap("e1"), on(screen(row, name, long)))))
+    }
+
+    @Test
     fun `commas join actions in a control's own label and in a dialog, not in the texts of a row`() {
         val s = screen(el("e1", "Yes, delete"))
         assertEquals(ConfirmReason.DELETE, reason(decide(tap("e1"), on(s))))

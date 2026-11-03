@@ -134,6 +134,8 @@ class LexiconTest {
             listOf("example.com/buy", "https://www.example.com/checkout/cart", "example.com/remove-background-tips")
         links.forEach { assertNull(lexicon.ofControl(it), it) }
         assertEquals(Hit(IntentKind.OUTWARD, "send"), lexicon.ofControl("Send&好的"))
+        // Other text is split where each part is within the length limit, however long the whole.
+        assertEquals(sendDelete, lexicon.classify("Send and delete"))
         assertEquals(sendDelete, lexicon.inContext("Send and then delete this?"))
         assertEquals(Hit(IntentKind.SPEND, "pay", sends = true), lexicon.ofControl("Reply and pay"))
         // A part that names nothing adds nothing; a single part reads as before.

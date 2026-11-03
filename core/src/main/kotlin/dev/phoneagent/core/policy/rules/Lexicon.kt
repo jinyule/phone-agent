@@ -47,7 +47,7 @@ internal class Lexicon(
     fun ofControl(label: String): Hit? =
         firstMax(
             classify(label) ?: Phrases.strong(label, complete = true),
-            Phrases.english(label, true, parts = true, pauses = true),
+            Phrases.english(label, true, partMax = null, pauses = true),
         )
 
     /**
@@ -141,9 +141,9 @@ private fun latinAt(
 ): Boolean = at < text.length && Character.UnicodeScript.of(text[at].code) == Character.UnicodeScript.LATIN
 
 /**
- * What [text] names under the length limit [max]: strong words, and the parts of English joined
- * actions, count only in a text that short, English [pauses] joining too when told; exemptions
- * only when [text] is [complete].
+ * What [text] names under the length limit [max]: strong words count only in a text that short,
+ * English joined actions split only where each part is ([Phrases.english]), at [pauses] too
+ * when told; exemptions only when [text] is [complete].
  */
 private fun match(
     text: String,
@@ -153,7 +153,7 @@ private fun match(
 ): Hit? {
     val short = Phrases.length(text) <= max
     return Phrases.exact(text) ?: (if (short) Phrases.strong(text, complete) else null)
-        ?: Phrases.english(text, complete, parts = short, pauses = pauses)
+        ?: Phrases.english(text, complete, partMax = max, pauses = pauses)
 }
 
 /**
@@ -250,26 +250,30 @@ internal object Phrases {
     /**
      * English ([Text.phrase] form): the label starts with an [Words.ENGLISH_PREFIX] phrase at a
      * word boundary (any non-Latin letter ends a word: "Send消息"), or is an [Words.ENGLISH_EXACT]
-     * phrase. Letters written apart ("s e n d") are read together. With [parts], each part the
-     * label joins with [Words.ENGLISH_JOINERS] ("Delete and send"), without a word left over from
-     * the joiner ([Words.ENGLISH_FILLERS]: "and also delete"), is read by the phrase it starts
-     * with, the most severe deciding, and it sends when any part does; an exact phrase is only ever
-     * the whole label ("Invite and earn" invites no one). With [pauses], [Words.ENGLISH_PAUSES]
-     * join too. A [label] that is not [complete] is never vetoed; a vetoed one is vetoed whole.
+     * phrase. Letters written apart ("s e n d") are read together. Each part the label joins with
+     * [Words.ENGLISH_JOINERS] ("Delete and send"), and with [pauses] [Words.ENGLISH_PAUSES] too,
+     * without a word left over from the joiner ([Words.ENGLISH_FILLERS]: "and also delete"), is
+     * read by the phrase it starts with, the most severe deciding, and it sends when any part does;
+     * an exact phrase is only ever the whole label ("Invite and earn" invites no one). The label is
+     * split only where every part is at most [partMax] long ([length]; `null`: any length), else
+     * read whole by its start: a long sentence is not split. A [label] that is not [complete] is
+     * never vetoed; a vetoed one is vetoed whole.
      */
     fun english(
         label: String,
         complete: Boolean,
-        parts: Boolean,
+        partMax: Int?,
         pauses: Boolean,
     ): Hit? {
         val spaced = Text.phrase(label).trimEnd { !it.isLetterOrDigit() }
         val letters = spaced.split(' ')
         val text = if (letters.size > 1 && letters.all { it.length == 1 }) letters.joinToString("") else spaced
-        val joined = if (parts) spacedSigns(text).split(Words.ENGLISH_JOINERS) else listOf(text)
-        val pieces = if (pauses) joined.flatMap { it.split(Words.ENGLISH_PAUSES) } else joined
-        val read =
-            if (pieces.size > 1) pieces.map { trimmed(it).replace(Words.ENGLISH_FILLERS, "") } else listOf(text)
+        val joined = spacedSigns(text).split(Words.ENGLISH_JOINERS)
+        val pieces =
+            (if (pauses) joined.flatMap { it.split(Words.ENGLISH_PAUSES) } else joined)
+                .map { trimmed(it).replace(Words.ENGLISH_FILLERS, "") }
+        val split = pieces.size > 1 && (partMax == null || pieces.all { length(it) <= partMax })
+        val read = if (split) pieces else listOf(text)
         val vetoes = Vetoes(label)
         return read
             .map { part ->

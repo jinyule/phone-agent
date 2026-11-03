@@ -131,10 +131,10 @@ internal object Words {
      * "then" as whole words, at word boundaries, so joiners in a row ("and then", "& then") each
      * split and so do hyphenated ones ("Send-and-delete"); an [ENGLISH_SIGNS] sign with a space on
      * either side. The spaces and commas around a joiner stay with the parts, which are read
-     * without them. A control's own label and a dialog also split at [ENGLISH_PAUSES]. Each part is read
-     * by the [ENGLISH_PREFIX] phrase it starts with, never as an [ENGLISH_EXACT] one, where strong
-     * words count: in a control's own label at any length ([Lexicon.ofControl]), elsewhere within
-     * the length limit ([PolicyTuning.labelMax], [PolicyTuning.contextMax] in dialogs).
+     * without them. A control's own label and a dialog also split at [ENGLISH_PAUSES]. Each part is
+     * read by the [ENGLISH_PREFIX] phrase it starts with, never as an [ENGLISH_EXACT] one, and only
+     * where every part is within the length limit of the text ([PolicyTuning.labelMax],
+     * [PolicyTuning.contextMax] in dialogs; any length in a control's own label, [Lexicon.ofControl]).
      */
     val ENGLISH_JOINERS: Regex = Regex("\\b(?:and|then)\\b|(?<=\\s)[&+/]|[&+/](?=\\s)")
 
