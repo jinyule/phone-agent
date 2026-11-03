@@ -10,10 +10,12 @@
 package dev.phoneagent.core.adb
 
 import java.io.ByteArrayOutputStream
+import java.io.DataInputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.nio.ByteBuffer
@@ -31,8 +33,8 @@ import kotlin.concurrent.thread
  * flow control. Packets are framed by [Aosp], with `data_check` as `send_packet` fills it at the
  * negotiated version (min of the client's CNXN version and adbd's own: A_VERSION, A_VERSION_MIN
  * with [Behavior.OLD_VERSION]); received checksums are never checked, as adbd does not. [behavior]
- * breaks the handshake, [reply] scripts each command, [cnxnBytes] replaces the CNXN after TLS byte
- * for byte. Serves connections one after another.
+ * breaks the handshake (or shrinks the receive buffer), [reply] scripts each command, [cnxnBytes]
+ * replaces the CNXN after TLS byte for byte. Serves connections one after another.
  */
 class FakeAdbd(
     authorized: () -> Collection<ByteArray>,
@@ -60,6 +62,12 @@ class FakeAdbd(
 
         /** A working adbd from before A_VERSION_SKIP_CHECKSUM: every packet carries its checksum. */
         OLD_VERSION,
+
+        /**
+         * A working adbd whose connections buffer 4 KB, so that a big write of the client stays in
+         * progress while the fake does not read ([Reply.StallOnStdin]).
+         */
+        SMALL_RECEIVE_BUFFER,
     }
 
     /** How the device answers one command. */
@@ -81,6 +89,12 @@ class FakeAdbd(
 
         /** Before its OKAY, the stream is closed with a CLSE that carries a remote id (adbd refuses with 0). */
         data object CloseBeforeOkayWithId : Reply
+
+        /**
+         * After the OKAY, reads the header of the client's first stdin WRTE, completes [stalled], and
+         * reads nothing more until [resume]; then counts what arrives into [stalledBytes].
+         */
+        data object StallOnStdin : Reply
 
         data object CloseWithoutExit : Reply
 
@@ -129,7 +143,12 @@ class FakeAdbd(
         ) : Reply
     }
 
-    private val server = ServerSocket(0, 4, InetAddress.getLoopbackAddress())
+    private val server =
+        ServerSocket().apply {
+            // Before bind: accepted connections then advertise the small window from their first packet.
+            if (behavior == Behavior.SMALL_RECEIVE_BUFFER) receiveBufferSize = SMALL_BUFFER_BYTES
+            bind(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 4)
+        }
     val endpoint: AdbEndpoint get() = AdbEndpoint("127.0.0.1", server.localPort)
 
     /** Services opened, in order (`shell,v2,raw:…` or `exec:…`). */
@@ -157,6 +176,15 @@ class FakeAdbd(
 
     /** Completes when a client closed its connection. */
     val clientClosed = CompletableFuture<Unit>()
+
+    /** [Reply.StallOnStdin]: the header of the first stdin WRTE arrived, and the fake stopped reading. */
+    val stalled = CompletableFuture<Unit>()
+
+    /** [Reply.StallOnStdin]: completed by the test (or [close]) to read again. */
+    val resume = CompletableFuture<Unit>()
+
+    /** [Reply.StallOnStdin]: the bytes of the stream that arrived in all, from the WRTE header to the end. */
+    val stalledBytes = CompletableFuture<Long>()
 
     private val failure = CompletableFuture<Throwable?>()
     private val tls =
@@ -358,6 +386,7 @@ class FakeAdbd(
             previous: Stream?,
         ): Boolean {
             send(Aosp.A_OKAY)
+            if (reply == Reply.StallOnStdin) return stall()
             if (shell) collectStdin(wrongAck = reply == Reply.AckWithWrongId) else startExecStdin(reply)
             return when {
                 reply is Reply.Exit -> {
@@ -404,6 +433,31 @@ class FakeAdbd(
                 }
             }
         }
+
+        /** [Reply.StallOnStdin]; the connection ends after it. */
+        private fun stall(): Boolean {
+            val header = ByteArray(PACKET_HEADER_SIZE)
+            DataInputStream(input).readFully(header)
+            stalled.complete(Unit)
+            resume.get(1, TimeUnit.MINUTES)
+            val buffer = ByteArray(8192)
+            var count = header.size.toLong()
+            var n = readOrEnd(buffer)
+            while (n >= 0) {
+                count += n
+                n = readOrEnd(buffer)
+            }
+            stalledBytes.complete(count)
+            return false
+        }
+
+        /** Like [InputStream.read], with a failure (a reset, a TLS record cut short) as the end. */
+        private fun readOrEnd(buffer: ByteArray): Int =
+            try {
+                input.read(buffer)
+            } catch (expectedEnd: IOException) {
+                -1
+            }
 
         /** Late packets of this (finished) stream: output, an acknowledgement and its close. */
         fun strays() {
@@ -611,12 +665,16 @@ class FakeAdbd(
     override fun close() {
         server.close()
         current?.close()
+        resume.complete(Unit)
         worker.join(TimeUnit.SECONDS.toMillis(10))
     }
 
     private companion object {
         /** "JUNK": no adb command has this value. */
         const val UNKNOWN_COMMAND = 0x4b4e554a
+
+        const val SMALL_BUFFER_BYTES = 4096
+        const val PACKET_HEADER_SIZE = 24
 
         val BEFORE_TLS =
             setOf(Behavior.SILENT, Behavior.AUTH, Behavior.PLAIN_CNXN, Behavior.BAD_MAGIC, Behavior.OKAY_FIRST)

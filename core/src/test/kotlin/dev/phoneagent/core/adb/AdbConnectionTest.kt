@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.RepeatedTest
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -24,18 +25,23 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
 import org.junit.jupiter.params.provider.ValueSource
 import java.io.IOException
+import java.io.InputStream
+import java.io.OutputStream
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
 import java.net.SocketTimeoutException
 import java.time.Duration
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import javax.crypto.AEADBadTagException
 import javax.crypto.BadPaddingException
 import javax.net.ssl.SSLException
 import javax.net.ssl.SSLProtocolException
+import javax.net.ssl.SSLSocket
+import kotlin.concurrent.thread
 import kotlin.time.Duration.Companion.seconds
 
 class AdbConnectionTest {
@@ -539,6 +545,73 @@ class AdbConnectionTest {
     }
 
     @Test
+    fun `closing a session closes the TCP socket under TLS and leaves the TLS streams alone`() {
+        ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { server ->
+            Socket(server.inetAddress, server.localPort).use { plain ->
+                val tlsInput =
+                    object : InputStream() {
+                        override fun read(): Int = -1
+
+                        override fun close(): Unit = error("closing the TLS input may wait for a writer")
+                    }
+                val tlsOutput =
+                    object : OutputStream() {
+                        override fun write(b: Int): Unit = error("closing writes nothing")
+
+                        override fun close(): Unit = error("closing the TLS output may wait for a writer")
+                    }
+                val handshake = Handshake(plain, tlsInput, tlsOutput, "device::", AdbMessage.VERSION, 4096)
+                val session = AdbSession(handshake, AdbConfig(), testIo)
+                session.close()
+                assertTrue(plain.isClosed)
+                assertFalse(session.isOpen)
+            }
+        }
+    }
+
+    @Test
+    fun `a connected session holds the TCP socket under TLS`() =
+        realTime {
+            FakeAdbd(paired).use { adbd ->
+                val session = connect(adbd)
+                val plain = session.handshake.plain
+                assertFalse(plain is SSLSocket, "the socket closed to end the connection is the TCP one")
+                session.close()
+                assertTrue(plain.isClosed)
+            }
+        }
+
+    /**
+     * Closing and cancelling run on the caller's thread (for a timeout, often the one timer thread of
+     * all coroutines), so they must never wait. Closing the TLS socket would wait for a writer that
+     * holds its record lock while adbd does not read; here adbd stops reading inside a 1 MiB WRTE.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = ["close", "cancel"])
+    fun `stopping a command never waits for a write that adbd does not read`(how: String) =
+        realTime {
+            FakeAdbd(paired, Behavior.SMALL_RECEIVE_BUFFER, reply = { Reply.StallOnStdin }).use { adbd ->
+                val session = connect(adbd)
+                // Outside this scope, so that a stuck command fails the test instead of hanging it.
+                val run =
+                    CoroutineScope(
+                        Job(),
+                    ).async { session.run(AdbCommand("cat"), ByteArray(2 * Aosp.MAX_PAYLOAD)) }
+                adbd.stalled.awaitBarrier()
+                val returned = stopsInTime { if (how == "close") session.close() else run.cancel() }
+                adbd.resume.complete(Unit)
+                val received = adbd.stalledBytes.awaitBarrier()
+                assertTrue(returned) { "$how waited for a write in progress" }
+                assumeTrue(
+                    received < FIRST_STDIN_WRITE,
+                ) { "the loopback took all $received bytes: no write was in progress" }
+                assertTrue(withTimeoutOrNull(10.seconds) { run.join() } != null, "the command ended")
+                if (how == "close") assertFailure(CommandFailure.CLOSED, run.await()) else assertTrue(run.isCancelled)
+                assertFalse(session.isOpen)
+            }
+        }
+
+    @Test
     fun `every socket has a read timeout of twice its operation's timeout`() =
         realTime {
             FakeAdbd(paired).use { adbd ->
@@ -598,6 +671,16 @@ class AdbConnectionTest {
         assertTrue(result is ConnectResult.Failed && result.reason == expected) { "expected $expected, got $result" }
     }
 
+    /** Runs [stop] on a thread of its own; whether it returned within 5 s (only to tell stuck from not). */
+    private fun stopsInTime(stop: () -> Unit): Boolean {
+        val done = CountDownLatch(1)
+        thread(isDaemon = true, name = "stopper") {
+            stop()
+            done.countDown()
+        }
+        return done.await(5, TimeUnit.SECONDS)
+    }
+
     /** Runs [block] with an IO dispatcher of a single thread, of the given [kind]. */
     private fun withOneIoThread(
         kind: String,
@@ -625,6 +708,9 @@ class AdbConnectionTest {
     }
 
     private companion object {
+        /** The bytes of the first stdin WRTE: its header and adbd's max payload. */
+        const val FIRST_STDIN_WRITE = 24L + Aosp.MAX_PAYLOAD
+
         val replies =
             mapOf(
                 "CloseWithoutExit" to Reply.CloseWithoutExit,
