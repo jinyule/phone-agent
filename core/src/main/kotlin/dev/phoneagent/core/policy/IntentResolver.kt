@@ -14,7 +14,9 @@ import dev.phoneagent.core.tool.ToolCall
  */
 public fun interface IntentResolver {
     /**
-     * The intent of [call] on [screen] (the snapshot the call was planned on, or `null`).
+     * The intent of [call] on [screen]: `PolicyContext.screen` of the same evaluation (S′ during the
+     * re-check after approval), or `null` (see that KDoc for when). It may be newer than the
+     * snapshot the call names.
      *
      * [risk] is a floor: a tool declared [RiskClass.SPEND] always resolves to [IntentKind.SPEND].
      * When a writing tool's arguments cannot be resolved, or the tool name is unknown and [risk]

@@ -96,6 +96,10 @@
 
 `resolve(call, risk, screen)`：先按工具名和参数（§7）把调用解码成一个"步骤"，再结合 `screen` 得出 `ActionIntent`，然后套上 `risk` 的下限，最后在 kind 定下来之后取金额（§4）。所以不论从哪条路得到 SPEND（点击、回车、滑动、`request_confirmation`、工具声明的下限），intent 都带着金额。
 
+`screen` 就是同一次判定的 `ctx.screen`（复核时是 S'），按 `PolicyContext.screen` 的 KDoc 从日志推导，不一定是调用参数里写的那一屏：
+- 它可能比模型看到的新（例如复核时记下的 S'，那次调用最后没有执行）。带 ref 的调用这时由快照核对拒绝（§6.1 第 1 步，`call.stale_screen`），不会在一屏上查另一屏的 ref；
+- 没有读过屏、读屏失败，或者最后一屏之后有作废边界时为 null。边界是 `handoff/start`、`handoff/end`、`session/resumed`、非 READ 调用的 `tool/started`（按它开始时依据的那次判定的 intent 算）、`screen/action`、`screen/launch`（后两者自己的 after 屏算在边界之后）。屏幕动作这时由 §6.1 第 1 步拒绝（`call.no_screen`），提示先 `phone_observe`。
+
 | 工具 | kind | pkg | 其他 |
 |---|---|---|---|
 | `phone_observe`、`phone_wait` | READ | 当前屏 | |
@@ -348,7 +352,7 @@ policy 只判定，下面这些由 runtime（WP02）做，WP09 的集成测试�
 - **每个调用**（包括 READ 的工具）都先 `resolve` 再 `evaluate`；`resolve` 用的 `screen` 必须就是 `ctx.screen`（复核时是 S'）。
 - **再问上限**：复核返回新的 Confirm 时再问用户，默认最多再问 1 次，可配置；超过上限这次调用不执行，并告诉模型原因（policy 不计次数，不保存状态）。
 - **动作后的新屏**：返回给模型的每张新快照，先合成一次 `phone_observe` 交给 PolicyEngine 判定；被拒绝时不给模型看任何内容（这一条兜住 https App Link 打开的金融 App，§2）。policy 保证对名单 App、本 App、敏感设置页和超过读取上限的屏（§8），读屏一定拒绝。
-- `operatedPackages` 只从已经执行的非 READ 调用推导（最终放行并有 `tool/started`；被拒绝、转交、确认被拒、没有执行的都不算，null 不算），`outwardConfirmedPackages` 只取结果为 APPROVED、原因为 OUTWARD 的卡的 `pkg`；两者都按 `PolicyContext` 的 KDoc 从日志推导（§6.1 末尾）。WP09 的集成测试要覆盖"拒绝启动确认后再进入同一个 App"这个序列。
+- `operatedPackages` 只从已经执行的非 READ 调用推导（最终放行并有 `tool/started`；被拒绝、转交、确认被拒、没有执行的都不算，null 不算），`outwardConfirmedPackages` 只认执行实际依据的那次批准：调用已经开始、`tool/executed` 为 OK，它开始时依据的那条 Allow 之前、这个调用最后一张 APPROVED 的卡原因是 OUTWARD，并且 pkg 等于那条 Allow 的 `intent.pkg`，才计入这个 pkg（phase1 §3.6"外发免确认资格"）；两者都按 `PolicyContext` 的 KDoc 从日志推导（§6.1 末尾）。WP09 的集成测试要覆盖"拒绝启动确认后再进入同一个 App"这个序列。
 
 ---
 
