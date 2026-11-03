@@ -42,10 +42,10 @@
    - 时间过了还没连上（NotConnected 或 NeedsLaunch），才拉起；
    - 启动时已经是 NeedsLaunch（过期助手在监听者挂上之前就被拒了），就立即拉起，不等。
 6. **拉起命令和 `scripts/start-helper.sh` 同形**：`read n; (echo "$n" | CLASSPATH=… setsid app_process … &); sleep 1`。stdin 是口令加 `\n`；`exec:` 下 stdin 不会关闭，`read` 要靠这个 `\n` 才能返回。口令在发命令之前才申请（`issueLaunchNonce`），所以不会出现在命令行和日志里。
-7. **在 Conscrypt 上靠 BoringSSL 的原因名认出对端 alert**（core 改动）：
+7. **在 Conscrypt 上靠 BoringSSL 的原因认出对端 alert**（core 改动）：
    - 实测未配对的 key 收到的是 `SSLProtocolException`，消息里带着 `SSLV3_ALERT_CERTIFICATE_UNKNOWN`，而 A 段只看类型，会把它误判成 TLS；
-   - 现在，消息里带 `SSLV3_ALERT_*` 或 `TLSV1_ALERT_*` 的 `SSLProtocolException` 不再算我们自己的错误，在可能是拒绝的阶段归为 UNAUTHORIZED；
-   - BoringSSL 把收到的 alert 记成原因码 1000 + alert 编号，名字只有这两种前缀；它自己发现的错误（例如 `DECRYPTION_FAILED_OR_BAD_RECORD_MAC`、`BAD_ALERT`）没有这两种前缀，仍然算 TLS。
+   - 现在，消息里报的是对端 alert 的 `SSLProtocolException`，不再算我们自己的错误，在可能是拒绝的阶段归为 UNAUTHORIZED。JDK 收到的 alert 也按同一规则认，具体写法见 phase1 §7.1；
+   - BoringSSL 把收到的 alert 记成原因码 1000 + alert 编号：有名字的写成 `SSLV3_ALERT_*` / `TLSV1_ALERT_*`，没有名字的写成 `reason(1NNN)`。它自己发现的错误都有自己的名字（例如 `DECRYPTION_FAILED_OR_BAD_RECORD_MAC`、`BAD_ALERT`），仍然算 TLS。不按原因码的数值判断，因为它自己的原因也有 1000 以上的（1122 `PAKE_AND_KEY_SHARE_NOT_ALLOWED`）。
 8. **扫描范围**：App 读不到 `/proc/sys/net/ipv4/ip_local_port_range`（Android 16 上是 EACCES），就退回 `LocalPortScan.FALLBACK_RANGE`（30000..65535），覆盖 Linux 默认的 32768..60999。`ownPorts` 现在为空：App 还没监听任何端口；ToolServer（phase1 §8）落地时要把自己的端口加进去。
 9. **架构检查**：`CoreAdbBoundaryTest` 扫 `app/src/{main,debug,release}`，只允许 `dev.phoneagent.app.adb` 和 `dev.phoneagent.app.debug`（以及它们的子包）引用 `dev.phoneagent.core.adb`。检查覆盖 import、通配、别名，以及跨行的全限定名，并带反例。
 
@@ -81,5 +81,5 @@
   - 进程下次运行时才收到通知并拉起。
 
   任务进行期间有 TaskService 前台服务，不受影响；空闲时助手死了，要等用户下次打开 App 或下一个任务。
-- 对端 alert 的识别依赖 BoringSSL 的原因名。要重新评估这一条的情况：Conscrypt 换了 TLS 实现，或者开始把对端 alert 报成单独的异常类型。到时以设备上的 `unpaired` 自检结果为准。
+- 对端 alert 的识别依赖 BoringSSL 写进消息的原因。要重新评估这一条的情况：Conscrypt 换了 TLS 实现，或者开始把对端 alert 报成单独的异常类型。到时以设备上的 `unpaired` 自检结果为准。
 - `ownPorts` 要随 ToolServer 一起补上；否则扫描可能探测到自己的端口（不会误连：探测要求对端回 STLS）。
