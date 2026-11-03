@@ -29,9 +29,10 @@ public interface SurfaceManager {
      * [HandoffResult.FAILED] and a detail naming the move and the exception's class only.
      *
      * Cancelling it may leave the move half done: the app may have moved, and no ticket came back
-     * to take it back with. The runtime counts a cancelled hand-over as a failed take-back (the
-     * call ends with [ScreenUnavailableException], see `ToolInteraction.handOff`) and never calls
-     * [takeBack] for it.
+     * to take it back with. Any other exception, an Error, or a cancellation leaves it unknown
+     * whether the app moved; the runtime treats that as a failed take-back (the call ends with
+     * [ScreenUnavailableException], see `ToolInteraction.handOff`) and never calls [takeBack] for
+     * it.
      */
     public suspend fun handToUser(
         task: TaskId,

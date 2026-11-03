@@ -23,9 +23,10 @@ import kotlinx.serialization.Serializable
  * The prompt and its result are in the session log before a method returns, and the time spent
  * waiting does not count against `Tool.timeoutMs`. At most one prompt per task is pending; a
  * second call waits for the first. A failure to record the prompt throws the session log's
- * `IOException`. When the call cut its own handoff off (or it failed) and the task cannot be
- * taken back, [handOff] throws [ScreenUnavailableException] (the move and the exception's class
- * only) in place of the cancellation or failure; tools must let it propagate and not go on acting.
+ * `IOException`. When the task cannot be taken back (the call cut its own handoff off or it
+ * failed, and the take-back failed; or the hand-over did not settle), [handOff] throws
+ * [ScreenUnavailableException] (the move only) in place of the cancellation or failure; tools
+ * must let it propagate and not go on acting. An Error propagates as it is.
  */
 public interface UserInteraction : ToolInteraction {
     /**
@@ -52,11 +53,15 @@ public interface ToolInteraction {
      *
      * A handoff that ends without its `handoff/end` (the call cuts it off: its budget, a
      * cancellation inside the tool; or an unexpected failure) is taken back at once. When that
-     * cannot be done (the take-back fails, takes too long, or a move was itself cut off), this
-     * throws [ScreenUnavailableException] naming the move and the exception's class only, in place
-     * of the cancellation or failure: the task may still be with the user, so tools must let it
-     * propagate and not go on acting. A stopping task leaves the app with the user and throws the
-     * cancellation.
+     * cannot be done (the take-back fails, takes too long, or was itself cut off), this throws
+     * [ScreenUnavailableException] naming the move only, in place of the cancellation or failure:
+     * the task may still be with the user, so tools must let it propagate and not go on acting.
+     * So does a hand-over that did not settle, cut off or not: it settles only when
+     * `SurfaceManager.handToUser` returns a ticket or throws [ScreenUnavailableException] (nothing
+     * moved: the handoff then ends FAILED and this returns it); any other end of it leaves the
+     * app's place unknown, so it ends as a failed take-back after `handoff/end` FAILED, if that
+     * was written. An Error propagates as it is, with the failed take-back suppressed on it. A
+     * stopping task leaves the app with the user and throws the cancellation.
      */
     public suspend fun handOff(
         kind: HandoffKind,
