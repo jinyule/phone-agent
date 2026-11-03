@@ -21,8 +21,9 @@ import org.junit.jupiter.params.provider.EnumSource
  * (model-layer §2 rule 4, fix-list r9 S2): in a message field, an error object without one, an
  * error page that is not JSON, a redirect target. The Bearer rule needs no word boundary before
  * the word, so the letter that ends the escape does not keep the token from being masked; the
- * words before it stay. The price, pinned here: a word that ends in `bearer` masks the word after
- * it too. The token is a placeholder this request did not send.
+ * words before it stay. Words ending in `bearer` in a row before the token are masked with it
+ * (fix-list r10 S1), so no `Bearer` passes for the token. The price, pinned here: a word that ends
+ * in `bearer` masks the word after it too. The token is a placeholder this request did not send.
  */
 class BearerAfterEscapeTest {
     @StartStop
@@ -81,15 +82,39 @@ class BearerAfterEscapeTest {
             )
             val masked = cell.place.prefix + escape + "Bearer ***"
             // An error object without a message is shown written back: its backslash escaped again.
-            val shown =
-                if (cell.place ==
-                    Place.NO_MESSAGE
-                ) {
-                    JsonPrimitive(masked).toString().removeSurrounding("\"")
-                } else {
-                    masked
-                }
+            val writtenBack = cell.place == Place.NO_MESSAGE
+            val shown = if (writtenBack) JsonPrimitive(masked).toString().removeSurrounding("\"") else masked
             assertTrue(error.message.orEmpty().contains(shown), "$cell: ${error.message}")
+        }
+
+    /** Words ending in `bearer` in a row before the token; the message starts with [kept] and ends with [after]. */
+    enum class Run(
+        val before: String,
+        val kept: String,
+        val after: String,
+    ) {
+        /** A word that ends in `bearer`, then `Bearer`: shown since the word boundary went (r9). */
+        FORBEARER_BEARER("the forbearer Bearer ", "the forbearer ", " applies"),
+
+        /** A key sent with the scheme already in it, echoed back: shown before r9 too. */
+        BEARER_BEARER("rejected Bearer Bearer ", "rejected Bearer", ""),
+    }
+
+    @ParameterizedTest
+    @EnumSource(Run::class)
+    fun `a token after a run of bearer words is masked`(run: Run) =
+        runTest {
+            val error = failure(Place.MESSAGE, run.before + TOKEN + run.after)
+            val printed = "${error.message}\n${error.stackTraceToString()}"
+            assertFalse(
+                TOKEN in printed || TOKEN in JsonEscapes.lenientDecode(printed),
+                "$run: the error shows the token",
+            )
+            val message = error.message.orEmpty()
+            assertTrue(
+                message.startsWith("server error 500: " + run.kept) && message.endsWith(run.after),
+                "$run: $message",
+            )
         }
 
     /** The price of no word boundary before `Bearer`. */
