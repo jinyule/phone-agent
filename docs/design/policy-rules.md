@@ -197,7 +197,7 @@ ref 和坐标两条路用的是同一份证据和同一套判定；屏幕格式�
 | "Q&A""R&D""AT&T""Terms&Conditions""Photos/Videos" | 不算 | 由拉丁字母和一个符号组成的词会在符号处切开，但切出来的每一段（"r""d"）都不以动作短语开头 |
 | "example.com/buy""https://www.example.com/checkout/cart""https://a.com/?x=1&pay=2"，以及在"/"后面折行的"example.com/ remove-background-tips" | 不算 | 不带空格的符号只在夹在拉丁字母中间、整个词由拉丁字母和这个符号组成时才切，网址里有"."":"，整个读，不以动作短语开头；数字按空格读，"?x=1&pay=2"剩下的"&pay"以符号开头，也不切；只有一侧有空格的符号也算在那个词里 |
 | "Ok, send it""Sure, send it over"（行里的文字） | 不算 | ", "和"; "只在控件自己的标签和对话框正文里切：行里的文字是聊天预览，点这一行只是打开会话 |
-| "Add/Remove""Thanks, pay you back later"（控件自己的标签，例如可点击的消息气泡） | 算（DELETE、SPEND） | 和"Add & remove widgets"同一个口径。代价：入口和气泡点进去还没有删除或花钱，要多确认一次 |
+| "Add/Remove""Thanks, pay you back later""Ok, send it"（控件自己的标签，例如可点击的消息气泡） | 算（DELETE、SPEND、OUTWARD） | 和"Add & remove widgets"同一个口径。代价：入口和气泡点进去还没有删除、花钱或发出东西，要多确认一次 |
 | "Invite and earn""Like and comment" | 不算 | 英文整词要等于整个标签，和中文整词一样（"邀请好友"不算）；切开以后的一段不按整词读 |
 | "Scan & pay""Recharge & Pay Bills""Add & remove widgets" | 算（SPEND、SPEND、DELETE） | 切开以后有一段以动作短语开头，和中文强词同一个口径（"扫码支付""充值缴费""移除"今天就算）。代价：这些入口点进去还没有花钱或删除，要多确认一次 |
 | 去掉金额、计数、括号说明后超过 `labelMax` 个字的文字 | 不算按钮 | 当作正文；但控件自己的标签（名字、它显示的唯一一段文字）里有强词时照样算，不论位置和长度（"我已阅读并同意服务协议现在支付并完成本次交易"）；对话框正文另按第 5 步处理 |
