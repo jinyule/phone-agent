@@ -156,6 +156,35 @@ class TargetsTest {
         assertEquals(Verdict.Allow, decide(tap("e1"), on(plain)))
     }
 
+    @Test
+    fun `the risk that vetoes a clear button decides the tap, however long its text`() {
+        val drawn =
+            mapOf(
+                "我已阅读并同意服务协议现在支付并完成本次交易" to ConfirmReason.SPEND,
+                "我已经看完了这些内容现在就发送给张三吧好的" to ConfirmReason.OUTWARD,
+                "这条消息里面的内容我想要删除聊天记录全部" to ConfirmReason.DELETE,
+            )
+        for ((text, expected) in drawn) {
+            // No PAYMENT flag: only the text on the button says what it does.
+            val s =
+                screen(
+                    field("e2", bounds = box(0, 900, 999, 960)).copy(value = "abc"),
+                    el("e1", "×", bounds = box(900, 910, 990, 950)).copy(resourceId = "com.x:id/clear"),
+                    ocr = listOf(ocr(text, box(905, 915, 985, 945))),
+                )
+            assertEquals(expected, reason(decide(tap("e1"), on(s))), text)
+            assertEquals(expected, reason(decide(point(945, 930), on(s))), text)
+            assertEquals(
+                expected.name,
+                policy.lexicon
+                    .activationRisk(s.elements[1], s)
+                    ?.kind
+                    ?.name,
+                text,
+            )
+        }
+    }
+
     @ParameterizedTest
     @EnumSource(SecurityLevel::class)
     fun `leaving a hand-off page needs every control under the point to leave`(level: SecurityLevel) {

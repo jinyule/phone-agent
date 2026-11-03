@@ -180,17 +180,30 @@ internal class Controls(
 ) {
     private val byHit: Comparator<Hit> = compareBy { severity(it.kind) }
 
-    /** The risk of activating [element], whose visible text is [texts]; inputs and clear buttons only edit. */
+    /**
+     * The risk of activating [element], whose visible text is [texts]; inputs and clear buttons only
+     * edit. A risk that keeps a would-be clear button from being one ([Fields.clearing]) counts too.
+     */
     fun risk(
         element: UiElement,
         texts: List<String>,
         screen: ScreenSnapshot,
-    ): ElementRisk? =
-        if (Elements.editable(element) || fields.editsField(element, texts, screen)) {
-            null
-        } else {
-            settingsEntry(texts, screen) ?: labelled(element, texts, screen) ?: settingsControl(element, screen)
+    ): ElementRisk? {
+        val clearing = if (Elements.editable(element)) null else fields.clearing(element, texts, screen)
+        return when {
+            Elements.editable(element) || (clearing != null && clearing.veto == null) -> {
+                null
+            }
+
+            else -> {
+                val found =
+                    settingsEntry(texts, screen) ?: labelled(element, texts, screen) ?: settingsControl(element, screen)
+                listOfNotNull(found, clearing?.veto?.let { ElementRisk(it.kind, it.matched) }).maxWithOrNull(byRisk)
+            }
         }
+    }
+
+    private val byRisk: Comparator<ElementRisk> = compareBy { severity(it.kind) }
 
     /** The risk of touching where there is no element and only [texts] (OCR) are drawn. */
     fun ofText(

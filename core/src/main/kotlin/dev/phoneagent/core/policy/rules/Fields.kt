@@ -82,7 +82,18 @@ internal class Fields(
         element: UiElement,
         texts: List<String>,
         screen: ScreenSnapshot,
-    ): Boolean {
+    ): Boolean = clearing(element, texts, screen)?.let { it.veto == null } ?: false
+
+    /**
+     * [element] as a would-be clear button ([editsField]): `null` when it is none; else the most
+     * severe risk a text on it names besides clearing (its [Clearing.veto]), read at any length,
+     * which then decides the tap (policy-rules.md §0: a risk once found is never dropped).
+     */
+    fun clearing(
+        element: UiElement,
+        texts: List<String>,
+        screen: ScreenSnapshot,
+    ): Clearing? {
         val label = Elements.label(element, screen)
         val clears = clearWord(label) || "clear" in element.resourceId?.let(Text::idWords).orEmpty()
         val icon = label.isBlank() && element.resourceId == null
@@ -94,14 +105,18 @@ internal class Fields(
                 val iconClears = icon && inside && (drawnClear || (texts.isEmpty() && !field.value.isNullOrEmpty()))
                 iconClears || (clears && (inside || next(element, field)))
             }
-        return near && texts.none { namesRisk(it, screen) }
+        return if (near) Clearing(vetoOf(texts, screen)) else null
     }
 
-    /** [text] on a would-be clear button names a risk other than clearing the field. */
-    private fun namesRisk(
-        text: String,
+    /** The most severe risk among [texts] other than clearing the field, the first among equals. */
+    private fun vetoOf(
+        texts: List<String>,
         screen: ScreenSnapshot,
-    ): Boolean = !clearWord(text) && lexicon.ofControl(text, screen) != null
+    ): Hit? =
+        texts
+            .filterNot(::clearWord)
+            .mapNotNull { lexicon.ofControl(it, screen) }
+            .maxWithOrNull(compareBy { severity(it.kind) })
 
     /**
      * A [Words.FIELD_CLEAR] entry: a word ([Text.bare] form) or a symbol such as "×" ([Text.compact]
@@ -163,6 +178,11 @@ private val CLASSES: List<Triple<FieldClass, List<String>, Set<String>>> =
     )
 
 private val SEARCH = setOf("搜索", "search")
+
+/** A would-be clear button ([Fields.clearing]); [veto] is the risk named on it besides clearing, if any. */
+internal class Clearing(
+    val veto: Hit?,
+)
 
 /** Elements of one screen whose label sends, and those whose label is a search button. */
 private class Buttons(
