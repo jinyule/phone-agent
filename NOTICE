@@ -69,6 +69,8 @@ Mika
       -> core/src/main/kotlin/dev/phoneagent/core/adb/LocalPortScan.kt
     core/src/main/kotlin/com/wangzan101/mika/core/adb/AdbConnectPort.kt
       -> core/src/main/kotlin/dev/phoneagent/core/adb/AdbConnectPort.kt
+    app/src/main/java/com/wangzan101/mika/cap/phone/shell/adb/NsdAdbServiceFinder.kt
+      -> app/src/main/kotlin/dev/phoneagent/app/adb/NsdAdbServiceFinder.kt
     core/src/test/kotlin/com/wangzan101/mika/core/adb/TestTls.kt
       -> core/src/test/kotlin/dev/phoneagent/core/adb/TestTls.kt (TestTls)
       -> core/src/test/kotlin/dev/phoneagent/core/adb/FakePairingServer.kt (FakePairingServer)
