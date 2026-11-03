@@ -67,10 +67,12 @@ internal class ElementLines(
         }
 
     /**
-     * [text] as shown inside quotes: masked while its line breaks are still there (so a span across
-     * lines gets the neutral label), then one line, no ASCII quotes, clipped at `brief`.
+     * [text] as shown inside quotes: each space run folded to one character ([foldSpaces]), so the
+     * card-word windows count it as one, as on the one-line text; masked while the folded line breaks
+     * are still there (so a span across lines gets the neutral label); then one line, no ASCII
+     * quotes, clipped at `brief`.
      */
-    fun clean(text: String): String = clip(oneLine(SensitiveNumbers.mask(text)).replace('"', '＂'), labelMax)
+    fun clean(text: String): String = clip(oneLine(SensitiveNumbers.mask(foldSpaces(text))).replace('"', '＂'), labelMax)
 
     private fun label(
         element: UiElement,

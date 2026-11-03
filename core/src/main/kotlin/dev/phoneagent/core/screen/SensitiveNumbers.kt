@@ -39,7 +39,12 @@ import java.time.YearMonth
  * - **Order-number exception**: a card-shaped number directly after an order, tracking, serial or
  *   invoice label (only spaces, colons or `#` in between, e.g. `订单号：…`, `运单号 …`,
  *   `Order No. …`) is left alone, unless a card word (银行卡, 卡号, 储蓄卡, 信用卡, 借记卡, 账号,
- *   card, …) is near the number: card words always win.
+ *   card, …) is near the number: card words always win. Near is within 32 characters before the
+ *   number or 12 after it, counted on the text as given. Screen text is folded first, every space
+ *   run to one character (`ElementLines.clean`), so there a long run or blank lines do not push a
+ *   card word away. Known gap: the other exits (device reasons, exception messages, card
+ *   summaries) count every character of a space run, so a card word far enough behind a long run
+ *   no longer cancels the exception there.
  *
  * A masked span is replaced as a whole, in place; everything around it is kept as it was. Its
  * label is a guess from the number's shape, and says so:
@@ -262,9 +267,6 @@ public object SensitiveNumbers {
 
     /** The label of a span that joins several numbers or crosses a line: no kind, no tail. */
     private const val NEUTRAL = "「已隐藏的号码」"
-
-    /** Line breaks among the separators: a span across one is labelled [NEUTRAL]. */
-    private const val LINE_BREAKS = "\n\u000B\u000C\r\u0085\u2028\u2029"
 
     /** What may stand between an order label and its number (on the plain copy: any space is ` `). */
     private const val LABEL_SEPARATORS = " :：#"

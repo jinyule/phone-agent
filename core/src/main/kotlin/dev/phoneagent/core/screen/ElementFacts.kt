@@ -47,11 +47,25 @@ internal const val UNICODE_SPACES: String =
         "\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A" +
         "\u2028\u2029\u202F\u205F\u3000"
 
+/**
+ * The line breaks among [UNICODE_SPACES]: U+000A–U+000D, U+0085, U+2028 and U+2029. A masked span
+ * across one gets the neutral label ([SensitiveNumbers]); [foldSpaces] keeps a run holding one.
+ */
+internal const val LINE_BREAKS: String = "\n\u000B\u000C\r\u0085\u2028\u2029"
+
 /** Whether this is one of [UNICODE_SPACES]. */
 internal fun Char.isUnicodeSpace(): Boolean = this in UNICODE_SPACES
 
 /** [text] on one line: runs of [UNICODE_SPACES] (line breaks included) collapsed to one space, trimmed. */
 internal fun oneLine(text: String): String = SPACE_RUN.replace(text, " ").trim(Char::isUnicodeSpace)
+
+/**
+ * [text] with every run of [UNICODE_SPACES] folded to one character: a line break when the run
+ * holds one of [LINE_BREAKS], else a space. Masking this instead of [text] measures the card-word
+ * windows of [SensitiveNumbers] as on the one-line text, while a span across lines still shows.
+ */
+internal fun foldSpaces(text: String): String =
+    SPACE_RUN.replace(text) { run -> if (run.value.any { it in LINE_BREAKS }) "\n" else " " }
 
 /** [text] cut to at most [max] characters, ending in `…` when cut. */
 internal fun clip(

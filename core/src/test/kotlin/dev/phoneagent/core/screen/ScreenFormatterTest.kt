@@ -209,6 +209,26 @@ class ScreenFormatterTest {
         }
 
         @Test
+        fun `a card word across a long space run still wins over an order label`() {
+            // The card-word window around a number counts a run of spaces as one character, as on
+            // the one-line text the model sees: long spaces or blank lines do not push the word out.
+            val lines =
+                body(
+                    el("e1", ElementRole.TEXT, "银行卡" + " ".repeat(28) + "订单号：6222021234567894"),
+                    el("e2", ElementRole.TEXT, "订单号：6222021234567894\n" + " ".repeat(10) + "储蓄卡"),
+                    el("e3", ElementRole.TEXT, "订单号：6222021234567894\n\n\n\n" + " ".repeat(20) + "（银行卡支付）"),
+                    el("e4", ElementRole.TEXT, "支付方式：储蓄卡" + "\n".repeat(30) + "订单号：6222021234567894"),
+                    el("e5", ElementRole.TEXT, "订单号：\n\n" + " ".repeat(40) + "6222021234567894"),
+                )
+            assertEquals("@e1 \"银行卡 订单号：「疑似银行卡 尾号7894」\"", lines[0])
+            assertEquals("@e2 \"订单号：「疑似银行卡 尾号7894」 储蓄卡\"", lines[1])
+            assertEquals("@e3 \"订单号：「疑似银行卡 尾号7894」 （银行卡支付）\"", lines[2])
+            assertEquals("@e4 \"支付方式：储蓄卡 订单号：「疑似银行卡 尾号7894」\"", lines[3])
+            // No card word: the order number stays, however far it is from its label.
+            assertEquals("@e5 \"订单号： 6222021234567894\"", lines[4])
+        }
+
+        @Test
         fun `every Unicode White_Space character, U+0085 included, folds into one space`() {
             val spaces = (0..0xFFFF).map(Int::toChar).filter { WHITE_SPACE.matches("$it") }
             assertEquals(25, spaces.size)
