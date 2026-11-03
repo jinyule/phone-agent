@@ -12,12 +12,13 @@ import android.view.accessibility.AccessibilityNodeInfo
  * differs from before, entry stops, so text is never entered twice. The own keyboard (no-UI IME)
  * level arrives in M3.
  *
- * The read-back decides the result: the field shows the request ([Result.Entered], ignoring the
- * spaces, dashes and parentheses formatting fields insert; other rewrites such as "1,000" for
- * "1000" are a mismatch), shows something else ([Result.Mismatch]), or was replaced before it could
- * be read ([Result.Unconfirmed]). A field that already shows the request is left alone
- * ([Result.AlreadyShown]): exactly, or up to that formatting in a phone number, number or date
- * field ([formats]), where the app formats what it is given. Only a match is submitted; after a
+ * The read-back decides the result: the field shows the request ([Result.Entered], up to the
+ * [Formatting] its app inserts: spaces only in a number field, whose minus sign is the number's, else
+ * spaces, dashes and parentheses; other rewrites such as "1,000" for "1000" are a mismatch), shows
+ * something else ([Result.Mismatch]), or was replaced before it could be read ([Result.Unconfirmed]).
+ * A field that already shows the request is left alone ([Result.AlreadyShown]): exactly, or up to
+ * that formatting in a phone number, number or date field ([formattingOf]), where the app formats
+ * what it is given. Only a match is submitted; after a
  * mismatch the model sees what the field shows and decides whether to press ENTER. Password fields
  * cannot be read back: the first level that delivered, or that changed the mask, is trusted, and
  * text is added to a password only where the editor confirms its end.
@@ -57,14 +58,14 @@ internal object TextEntry {
      * @property text what the model asked to enter.
      * @property append keep the field's content and add [text] at the end.
      * @property before what the field showed before.
-     * @property formatted the field formats its text ([formats]), so [before] may show the
-     *   request formatted.
+     * @property formatting how the field formats its text ([formattingOf]), so [before] may show
+     *   the request formatted; `null` for a field that formats nothing.
      */
     class Request(
         val text: String,
         val append: Boolean,
         val before: String?,
-        val formatted: Boolean = false,
+        val formatting: Formatting? = null,
     ) {
         /** What the field should show afterwards. */
         val expected: String get() = if (append) before.orEmpty() + text else text
@@ -135,19 +136,33 @@ internal object TextEntry {
 
     private fun notSubmitted(submitRequested: Boolean): String = if (submitRequested) "; it was not submitted" else ""
 
-    // Formatting fields insert while typing (phone numbers, card groups) does not count as a mismatch.
-    private val FORMATTING = Regex("[\\s\\-()]")
+    /**
+     * What an app may insert into a field's text as it formats it (phone numbers, card groups); a
+     * request matches what a field shows when the two are equal once it is taken out of both.
+     */
+    enum class Formatting(
+        private val inserted: Regex,
+    ) {
+        /** Spaces, dashes and parentheses: phone numbers, dates and times, and text read back. */
+        SEPARATORS(Regex("[\\s\\-()]")),
 
-    // Input classes whose fields format what is typed: phone numbers, numbers, dates and times.
-    private val FORMATTING_CLASSES =
-        setOf(InputType.TYPE_CLASS_PHONE, InputType.TYPE_CLASS_NUMBER, InputType.TYPE_CLASS_DATETIME)
+        /** Spaces only: numbers, whose minus sign is the number's (fix list r4 C2). */
+        SPACES(Regex("\\s")),
+        ;
+
+        /** Whether [shown] is [expected] up to this formatting. */
+        fun matches(
+            shown: String?,
+            expected: String,
+        ): Boolean = shown != null && inserted.replace(shown, "") == inserted.replace(expected, "")
+    }
 
     /**
      * Runs [levels] in order until the field changes. [read] reads the field back; with
      * `settle = true` it first waits for the app to update the field. A field that is not a
      * password and already shows the request runs no level: exactly the request, or for a field
-     * that formats its text ([Request.formatted]), the request up to formatting. Before typing, an
-     * app has formatted nothing, so in any other field a space or dash more or less is a change.
+     * that formats its text ([Request.formatting]), the request up to that formatting. Before typing,
+     * an app has formatted nothing, so in any other field a space or dash more or less is a change.
      */
     suspend fun enter(
         request: Request,
@@ -216,17 +231,18 @@ internal object TextEntry {
     }
 
     private fun shows(request: Request): Boolean =
-        request.before == request.expected || (request.formatted && matches(request.before, request.expected))
+        request.before == request.expected || request.formatting?.matches(request.before, request.expected) == true
 
-    /** Whether [field] formats its text: a phone number, number or date and time field, by its input type. */
-    fun formats(field: AccessibilityNodeInfo): Boolean =
-        (field.inputType and InputType.TYPE_MASK_CLASS) in FORMATTING_CLASSES
-
-    /** Whether [shown] matches [expected], ignoring formatting characters. */
-    fun matches(
-        shown: String?,
-        expected: String,
-    ): Boolean = shown != null && FORMATTING.replace(shown, "") == FORMATTING.replace(expected, "")
+    /**
+     * How [field] formats its text, by its input type: a phone number or a date and time field
+     * [Formatting.SEPARATORS], a number field [Formatting.SPACES]; `null` for any other field.
+     */
+    fun formattingOf(field: AccessibilityNodeInfo): Formatting? =
+        when (field.inputType and InputType.TYPE_MASK_CLASS) {
+            InputType.TYPE_CLASS_PHONE, InputType.TYPE_CLASS_DATETIME -> Formatting.SEPARATORS
+            InputType.TYPE_CLASS_NUMBER -> Formatting.SPACES
+            else -> null
+        }
 
     /** What [shown] says about [level]'s attempt; `null` when the field did not change (try the next level). */
     private fun judge(
@@ -246,11 +262,14 @@ internal object TextEntry {
                 when {
                     shown.text == request.before -> null
                     secret -> Result.Entered(level, confirmed = false)
-                    matches(shown.text, request.expected) -> Result.Entered(level, confirmed = true)
+                    readBack(request).matches(shown.text, request.expected) -> Result.Entered(level, confirmed = true)
                     else -> Result.Mismatch(level, shown.text.orEmpty())
                 }
             }
         }
+
+    /** The formatting a read-back after typing allows: the field's own, any other field's app may insert separators. */
+    private fun readBack(request: Request): Formatting = request.formatting ?: Formatting.SEPARATORS
 
     /** What [field] shows now, refreshing it first; a password field's mask, empty while it shows its hint. */
     fun read(field: AccessibilityNodeInfo): Shown {

@@ -159,6 +159,63 @@ class TypingOutcomeTest {
         }
 
     @Test
+    fun aFieldIsTakenAsFormattingByItsInputClass() {
+        fun of(type: Int) = TextEntry.formattingOf(field { inputType = type })
+        assertEquals(TextEntry.Formatting.SEPARATORS, of(InputType.TYPE_CLASS_PHONE))
+        assertEquals(TextEntry.Formatting.SEPARATORS, of(InputType.TYPE_CLASS_DATETIME))
+        assertEquals(TextEntry.Formatting.SPACES, of(InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_SIGNED))
+        assertEquals(null, of(InputType.TYPE_CLASS_TEXT))
+    }
+
+    @Test
+    fun aMinusSignInANumberFieldIsTheNumbersNotFormatting() =
+        runTest {
+            // Fix list r4 C2 (Claude r4 S-2): in a signed number field showing the request with its sign
+            // flipped, the request is typed (g1); an unsigned one whose app drops the minus sign has not
+            // taken "-5" (g2). The field ends up showing the request, or nothing is submitted.
+            val signed = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_SIGNED
+            val table =
+                listOf(
+                    Triple("-5", "5", signed),
+                    Triple("5", "-5", signed),
+                    Triple("", "-5", InputType.TYPE_CLASS_NUMBER),
+                )
+            for ((shows, typed, type) in table) {
+                val field =
+                    field {
+                        text = shows
+                        inputType = type
+                    }
+                val dropsTheSign = type and InputType.TYPE_NUMBER_FLAG_SIGNED == 0
+                field.log.answer = { action, args ->
+                    if (action == AccessibilityNodeInfo.ACTION_SET_TEXT) {
+                        val text =
+                            args!!
+                                .getCharSequence(
+                                    AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
+                                ).toString()
+                        field.text = if (dropsTheSign) text.replace("-", "") else text
+                    }
+                    true
+                }
+
+                val outcome = typeInto(field, UiAction.Type(Target.Point(500, 125), typed, submit = true))
+
+                val submitted = AccessibilityAction.ACTION_IME_ENTER.id in field.log.ids
+                val shown = field.text?.toString()
+                assertTrue(
+                    "'$shows' for '$typed': shows '$shown', ${outcome.status}, submitted $submitted",
+                    if (shown == typed) outcome.status == ActionOutcome.Status.Ok else !submitted,
+                )
+                assertEquals(
+                    "'$shows' for '$typed': Ok only as shown",
+                    shown == typed,
+                    outcome.status == ActionOutcome.Status.Ok,
+                )
+            }
+        }
+
+    @Test
     fun aFieldThatShowsOtherTextFailsWithWhatItShowsAndIsNotSubmitted() =
         runTest {
             // Codex r1 B6 / Claude x3c: the field takes four digits only.

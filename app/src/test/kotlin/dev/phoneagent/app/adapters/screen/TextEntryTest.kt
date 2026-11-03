@@ -41,8 +41,8 @@ class TextEntryTest {
         text: String,
         before: String? = "",
         append: Boolean = false,
-        formatted: Boolean = false,
-    ) = TextEntry.Request(text, append, before, formatted)
+        formatting: TextEntry.Formatting? = null,
+    ) = TextEntry.Request(text, append, before, formatting)
 
     @Test
     fun stopsAtTheFirstLevelThatChangesTheField() =
@@ -67,7 +67,8 @@ class TextEntryTest {
             // Fix list r2 B2: typing it again would only fall through every level and fail.
             for ((before, request) in listOf(
                 "hello" to request("hello", before = "hello"),
-                "555-1234" to request("5551234", before = "555-1234", formatted = true),
+                "555-1234" to request("5551234", before = "555-1234", formatting = TextEntry.Formatting.SEPARATORS),
+                "1 000" to request("1000", before = "1 000", formatting = TextEntry.Formatting.SPACES),
                 "" to request("", before = ""),
                 "Hi" to request("", before = "Hi", append = true),
             )) {
@@ -233,9 +234,17 @@ class TextEntryTest {
 
     @Test
     fun formattingInsertedByTheFieldDoesNotCountAsAMismatch() {
-        assertTrue(TextEntry.matches("+1 (555) 010-9999", "+15550109999"))
-        assertFalse(TextEntry.matches("+1 (555) 010-9998", "+15550109999"))
-        assertFalse(TextEntry.matches(null, ""))
+        val separators = TextEntry.Formatting.SEPARATORS
+        assertTrue(separators.matches("+1 (555) 010-9999", "+15550109999"))
+        assertFalse(separators.matches("+1 (555) 010-9998", "+15550109999"))
+        assertFalse(separators.matches(null, ""))
+        // Fix list r4 C2: in a number, a minus sign is not formatting; spaces are.
+        val spaces = TextEntry.Formatting.SPACES
+        assertTrue(spaces.matches("1 000 000", "1000000"))
+        assertFalse(spaces.matches("-5", "5"))
+        assertFalse(spaces.matches("5", "-5"))
+        assertFalse(spaces.matches("(5)", "5"))
+        assertFalse(spaces.matches(null, ""))
     }
 
     @Test
@@ -280,7 +289,8 @@ class TextEntryTest {
             Result.Unconfirmed(Level.PASTE).explain(submitRequested = true),
         )
         assertEquals("nope", Result.NotEntered("nope").explain(submitRequested = true))
-        assertFalse(TextEntry.matches("1,000", "1000"))
+        assertFalse(TextEntry.Formatting.SEPARATORS.matches("1,000", "1000"))
+        assertFalse(TextEntry.Formatting.SPACES.matches("1,000", "1000"))
     }
 
     @Test

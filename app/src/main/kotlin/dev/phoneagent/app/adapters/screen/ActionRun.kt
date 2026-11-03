@@ -196,7 +196,13 @@ internal class ActionRun(
         action: UiAction.Type,
         watch: ChangeWatch,
     ): ActionOutcome {
-        val request = TextEntry.Request(action.text, action.append, shown.text, formatted = TextEntry.formats(field))
+        val request =
+            TextEntry.Request(
+                action.text,
+                action.append,
+                shown.text,
+                formatting = TextEntry.formattingOf(field),
+            )
         val clipboard = RestoreTracking(parts.system.clipboard)
         val entered =
             TextEntry.enter(request, field.isPassword, levels(field, watch, shown, clipboard)) { settle ->
