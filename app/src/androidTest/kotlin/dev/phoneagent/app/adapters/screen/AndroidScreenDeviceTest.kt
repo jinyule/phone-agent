@@ -129,7 +129,9 @@ class AndroidScreenDeviceTest {
             val back = screen.act(UiAction.Key(SystemKey.BACK), on = null)
             log("back: ${back.describe()}")
             assertEquals(ActionOutcome.Status.Ok, back.status)
-            val again = screen.snapshot()
+            // Planned like the model would, on the page at rest: right after BACK the homepage may still
+            // be sliding in, a tree whose ancestors differ from the settled one's.
+            val again = restingSnapshot()
             val rowAgain = again.find { it.name?.startsWith("Network & internet") == true }
 
             // A short drag moves the rows without paging them all away (Scroll pages a whole screen).
@@ -230,6 +232,24 @@ class AndroidScreenDeviceTest {
             assertTrue("ENTER submitted the search and hid the keyboard", keyboardGoesAway(entered.after!!))
             screen.act(UiAction.Key(SystemKey.BACK), on = null)
         }
+
+    /**
+     * A snapshot once two reads in a row show every element where it was, reading again after each
+     * change or [REST_MS] without one; the last read when that takes [CHANGE_TIMEOUT_MS].
+     */
+    private suspend fun restingSnapshot(): ScreenSnapshot {
+        var last = screen.snapshot()
+        val deadline = System.nanoTime() + CHANGE_TIMEOUT_MS * NANOS_PER_MS
+        while (System.nanoTime() < deadline) {
+            screen.awaitChange(REST_MS)
+            val next = screen.snapshot()
+            val moved = next.elements.map { it.bounds } != last.elements.map { it.bounds }
+            log("  waiting for the page to rest: ${describe(next)} moved=$moved")
+            if (!moved) return next
+            last = next
+        }
+        return last
+    }
 
     /**
      * Whether the keyboard is gone from [after] or goes within [CHANGE_TIMEOUT_MS], reading again
@@ -499,6 +519,9 @@ class AndroidScreenDeviceTest {
         private const val LOGGED_ELEMENTS = 40
         private const val QUIET_PROBE_MS = 1_000L
         private const val CHANGE_TIMEOUT_MS = 5_000L
+
+        /** How long a page shows no change before [restingSnapshot] reads it again. */
+        private const val REST_MS = 300L
         private const val NANOS_PER_MS = 1_000_000
         private const val CONNECT_TIMEOUT_MS = 20_000L
         private const val DRAG_MS = 1_000L
