@@ -1,0 +1,175 @@
+package dev.phoneagent.app.adb
+
+import android.content.Context
+import android.net.nsd.NsdManager
+import android.os.Build
+import android.provider.Settings
+import android.util.Log
+import androidx.annotation.RequiresApi
+import dev.phoneagent.core.adb.AdbClient
+import dev.phoneagent.core.adb.AdbCommand
+import dev.phoneagent.core.adb.AdbConnectPort
+import dev.phoneagent.core.adb.AdbEndpoint
+import dev.phoneagent.core.adb.AdbIdentity
+import dev.phoneagent.core.adb.AdbKeyStore
+import dev.phoneagent.core.adb.AdbService
+import dev.phoneagent.core.adb.AdbServiceFinder
+import dev.phoneagent.core.adb.AdbSession
+import dev.phoneagent.core.adb.CommandResult
+import dev.phoneagent.core.adb.IdentityLoad
+import dev.phoneagent.core.adb.LocalPortScan
+import dev.phoneagent.core.adb.PairingCode
+import dev.phoneagent.core.adb.PairingResult
+import dev.phoneagent.core.adb.PortSearchConfig
+import dev.phoneagent.core.adb.PortSearchResult
+import dev.phoneagent.core.adb.PortSource
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.io.File
+import java.io.IOException
+import java.util.concurrent.Executors
+
+/**
+ * This app's built-in wireless adb client (phase1 §7.1 step ④), wired for Android: the identity
+ * sealed in app-private storage, the pairing record and the port cache in [record], mDNS through
+ * [finder], and the local scan on loopback only (the trust model, ADR 2026-11-03-adb-trust-model).
+ * [search] uses `AdbConnectPort`, which already tries an UNAUTHORIZED endpoint a second time; one
+ * that is still UNAUTHORIZED drops the pairing record, so nothing launches again until the user
+ * pairs anew. Needs Android 12, for [ConscryptKeyExporter].
+ */
+@RequiresApi(Build.VERSION_CODES.S)
+internal class BuiltinAdb(
+    private val store: AdbKeyStore,
+    private val record: AdbPairingRecord,
+    private val finder: AdbServiceFinder,
+    private val identityName: String,
+    /** The last resort of [search]: a scan of loopback only. */
+    private val scan: () -> LocalPortScan,
+    private val wirelessDebugging: () -> Boolean?,
+) : HelperLauncher.Adb {
+    private val identityLock = Mutex()
+    private var identity: AdbIdentity? = null
+
+    override val isPaired: Boolean get() = record.isPaired
+
+    /** Whether wireless debugging is on; null when this app cannot read the setting. */
+    override fun wirelessDebuggingOn(): Boolean? = wirelessDebugging()
+
+    /**
+     * The identity, loaded (or created) once per process. A new identity drops the pairing record:
+     * the device does not know its key.
+     */
+    suspend fun identity(): IdentityLoad =
+        identityLock.withLock {
+            identity?.let { return@withLock IdentityLoad(it, IdentityLoad.Origin.STORED) }
+            val load = AdbIdentity.loadOrCreate(store, identityName)
+            record.identityLoaded(load.origin)
+            identity = load.identity
+            load
+        }
+
+    /** A client for [identity]. */
+    suspend fun client(): AdbClient = AdbClient(identity().identity, ConscryptKeyExporter)
+
+    /** The port of Settings' open "Pair device with pairing code" dialog, by mDNS; null when none is announced. */
+    suspend fun findPairingPort(): Int? =
+        finder.findPorts(AdbService.PAIRING, PortSearchConfig.DEFAULT_MDNS_TIMEOUT_MS).firstOrNull()
+
+    /** Pairs with the dialog at [port] on this device; success records the pairing. */
+    suspend fun pair(
+        port: Int,
+        code: PairingCode,
+    ): PairingResult = client().pair(AdbEndpoint(PortSearchConfig.LOOPBACK, port), code).also(record::pairingEnded)
+
+    /** Connects to this device's adbd: cached port, mDNS, then the loopback scan. */
+    suspend fun search(): PortSearchResult =
+        AdbConnectPort(client(), record, finder, scan()).connect().also(record::searchEnded)
+
+    override suspend fun connect(): HelperLauncher.Connection =
+        when (val search = search()) {
+            is PortSearchResult.Connected -> OpenSession(search.session, search.source)
+            is PortSearchResult.Failed -> HelperLauncher.Connection.Failed(search)
+        }
+
+    private class OpenSession(
+        private val session: AdbSession,
+        override val source: PortSource,
+    ) : HelperLauncher.Connection.Open {
+        override suspend fun run(
+            command: AdbCommand,
+            stdin: ByteArray,
+        ): CommandResult = session.run(command, stdin)
+
+        override fun close() = session.close()
+    }
+
+    companion object {
+        private const val TAG = "PhoneAgentBuiltinAdb"
+        private const val PREFS = "builtin_adb"
+        private const val PORT_RANGE_FILE = "/proc/sys/net/ipv4/ip_local_port_range"
+
+        /** Settings.Global.ADB_WIFI_ENABLED, which is not public. */
+        private const val ADB_WIFI_ENABLED = "adb_wifi_enabled"
+
+        @Volatile
+        private var instance: BuiltinAdb? = null
+
+        /** The process-wide client. */
+        fun of(context: Context): BuiltinAdb =
+            instance ?: synchronized(this) {
+                instance ?: create(context.applicationContext).also { instance = it }
+            }
+
+        private fun create(app: Context): BuiltinAdb {
+            val ephemeral = lazy { ephemeralPorts() }
+            return BuiltinAdb(
+                store = SealedFileKeyStore(File(app.noBackupFilesDir, "adb/adbkey.sealed"), KeystoreKeyWrap()),
+                record = AdbPairingRecord(app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)),
+                finder =
+                    NsdAdbServiceFinder(
+                        lazy {
+                            app.getSystemService(NsdManager::class.java)
+                        },
+                        Executors.newSingleThreadExecutor(),
+                    ),
+                identityName = "phoneagent@${Build.MODEL}",
+                // ownPorts: the app listens on no port yet; ToolServer (phase1 §8) adds its own.
+                scan = {
+                    LocalPortScan(
+                        { listOf(PortSearchConfig.LOOPBACK) },
+                        ephemeral.value,
+                        ownPorts = { emptySet() },
+                    )
+                },
+                wirelessDebugging = { wirelessDebugging(app) },
+            )
+        }
+
+        /**
+         * The kernel's ephemeral port range, where adbd's port comes from. Apps may not read it
+         * (EACCES on Android 16); the scan then covers [LocalPortScan.FALLBACK_RANGE], which holds
+         * Linux's default range.
+         */
+        private fun ephemeralPorts(): IntRange =
+            LocalPortScan.parseRange(
+                try {
+                    File(PORT_RANGE_FILE).readText()
+                } catch (unreadable: IOException) {
+                    Log.i(TAG, "cannot read $PORT_RANGE_FILE ($unreadable); scanning ${LocalPortScan.FALLBACK_RANGE}")
+                    null
+                },
+            )
+
+        private fun wirelessDebugging(app: Context): Boolean? =
+            try {
+                Settings.Global
+                    .getInt(app.contentResolver, ADB_WIFI_ENABLED, -1)
+                    .takeIf { it >= 0 }
+                    ?.let { it == 1 }
+            } catch (notReadable: SecurityException) {
+                // Apps cannot read every global setting on every release; then try anyway.
+                Log.i(TAG, "cannot read $ADB_WIFI_ENABLED", notReadable)
+                null
+            }
+    }
+}

@@ -24,7 +24,9 @@
         android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
 
-    <!-- Model providers ("test and save", and tasks from B on). -->
+    <!-- Model providers ("test and save", and tasks from B on). The built-in adb client
+         (phase1-architecture §7.1 ④) also needs it: it talks to this device's adbd over loopback
+         and finds its port by mDNS, and sockets need INTERNET even for loopback. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
     <!-- Session logs, screenshots and credentials never leave the device (phase1-architecture §3.9). -->
