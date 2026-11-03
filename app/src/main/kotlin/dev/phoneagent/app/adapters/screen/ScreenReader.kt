@@ -280,6 +280,12 @@ internal object ScreenReader {
 
             /** For a list, how many of its children were walked so far. */
             var children = 0
+
+            /** For a list, the index in [walked] of its child walked last. */
+            var last: Int? = null
+
+            /** For a list, the child after [last] could not be read: the next one walked is beside it. */
+            var gap = false
         }
 
         private val kept = ArrayList<Kept>()
@@ -309,15 +315,21 @@ internal object ScreenReader {
             val list = above?.let(walked::get)?.takeIf { it.shape.list }
             val clipped =
                 list?.viewport?.clips(Rect().also(node::getBoundsInScreen), first = list.children == 0) == true
-            list?.let { it.children++ }
             val viewport = if (shape.list) NodeFacts.viewportOf(node) else null
             walked += Walked(NodeText.identityLabel(node), shape, above, index, clipped, viewport)
+            list?.let {
+                it.children++
+                walked[me].cut = it.gap
+                it.gap = false
+                it.last = me
+            }
             val childPlace =
                 if (index == null) place else NodePlace(place.windowId, place.windowPackage, index, place.depth + 1)
             path += me
             treeDepth++
             for (i in 0 until node.childCount) {
-                node.getChild(i)?.let { visit(it, childPlace, me) }
+                val child = node.getChild(i)
+                if (child == null) markUnread() else visit(child, childPlace, me)
             }
             treeDepth--
             path.removeAt(path.lastIndex)
@@ -334,6 +346,18 @@ internal object ScreenReader {
                 if (!list || i == path.lastIndex) node.cut = true
                 if (list) return
             }
+        }
+
+        /**
+         * A child of the node being visited could not be read (`getChild` answered `null`): as
+         * [markCut] for a node that is not a list; a list keeps its rows but for those of its
+         * children walked right before and right after the one it lost, which it may belong with.
+         */
+        private fun markUnread() {
+            val node = walked[path.last()]
+            if (!node.shape.list) return markCut()
+            node.last?.let { walked[it].cut = true }
+            node.gap = true
         }
 
         /** The kept nodes with their identities. */

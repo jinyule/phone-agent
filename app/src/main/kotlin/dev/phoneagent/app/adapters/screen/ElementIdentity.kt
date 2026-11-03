@@ -94,7 +94,7 @@ internal object Identities {
      * visible or not: [base] is the identity without its context (`null` for a node the read
      * leaves out), [label] the node's whole text or description, [parent] the index of the node
      * above. [cut]: the walk left out a node below it with no list in between (for a list: one of
-     * its children). [clipped]: a child of a list that the list's edge may have cut.
+     * its children), or, for a child of a list, a child of the list beside it could not be read. [clipped]: a child of a list that the list's edge may have cut.
      */
     class Facts(
         val base: ElementIdentity?,
@@ -123,8 +123,10 @@ internal object Identities {
      * is one label, the button's).
      *
      * Not reliable (no ref is carried or matched by it):
-     * - the walk left out a node with no list in between: in no list, the whole window; else the
-     *   row it is in; a list that lost children, its last row if that row is still open (rule 3);
+     * - the walk left out a node with no list in between, by its budgets or because the node
+     *   could not be read: in no list, the whole window; else the row it is in; a list that lost
+     *   children to the budgets, its last row if that row is still open; a list that could not
+     *   read a child, the rows of the children beside it (rule 3);
      * - a row the list's edge cut whose labels are all its controls' own (rule 4): what told it
      *   apart may be gone. Rows not cut and elements in no list are not held to this.
      */
