@@ -142,7 +142,7 @@ private fun spacedSign(word: String): String {
 private fun joiningSign(core: String): Char? {
     val sign = core.firstOrNull { it in Words.ENGLISH_SIGNS }
     val between = isLatinLetter(core.first()) && isLatinLetter(core.last())
-    return sign?.takeIf { between && core.all { c -> c == sign || isLatinLetter(c) } }
+    return sign?.takeIf { found -> between && core.all { c -> c == found || isLatinLetter(c) } }
 }
 
 /** A word that is one [Words.ENGLISH_SIGNS] sign written several times ("&&") is that sign once; any other stays. */
