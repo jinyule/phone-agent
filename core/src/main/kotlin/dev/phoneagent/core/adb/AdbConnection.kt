@@ -294,11 +294,12 @@ internal class AdbHandshake(
         /**
          * Whether [this] reports an alert the peer sent, by what each TLS stack writes for it:
          * - BoringSSL (behind Conscrypt) records reason 1000 + the alert number, written as the
-         *   alert's name after `SSLV3_ALERT_` or `TLSV1_ALERT_`, such as
-         *   `SSLV3_ALERT_CERTIFICATE_UNKNOWN`, which adbd sends for a key it does not know, or as
-         *   `reason(1NNN)` where its table has no name (missing_extension, unassigned numbers).
-         *   Its own findings all have names, such as `DECRYPTION_FAILED_OR_BAD_RECORD_MAC`, some
-         *   above 1000 too (`PAKE_AND_KEY_SHARE_NOT_ALLOWED`, 1122), so the code is not looked at.
+         *   alert's name after `SSLV3_` or `TLSV1_`, such as `SSLV3_ALERT_CERTIFICATE_UNKNOWN`,
+         *   which adbd sends for a key it does not know (Android 11's table names 1110–1116
+         *   without `ALERT_`, such as `TLSV1_CERTIFICATE_REQUIRED`), or as `reason(1NNN)` where its
+         *   table has no name (missing_extension, unassigned numbers). Its own findings all have
+         *   names, none starting with those prefixes, such as `DECRYPTION_FAILED_OR_BAD_RECORD_MAC`,
+         *   some above 1000 too (`PAKE_AND_KEY_SHARE_NOT_ALLOWED`, 1122), so the code is not looked at.
          * - The JDK writes `Received fatal alert: ` and, for a number it does not know,
          *   `Unknown alert description (`.
          */
@@ -317,11 +318,11 @@ internal class AdbHandshake(
 }
 
 /**
- * BoringSSL's reason for a received alert, named (`…:OPENSSL_internal:SSLV3_ALERT_CERTIFICATE_UNKNOWN`)
- * or not (`…:SSL routines:OPENSSL_internal:reason(1109)`).
+ * BoringSSL's reason for a received alert, named (`…:OPENSSL_internal:SSLV3_ALERT_CERTIFICATE_UNKNOWN`,
+ * on Android 11 also `…:TLSV1_CERTIFICATE_REQUIRED`) or not (`…:SSL routines:OPENSSL_internal:reason(1109)`).
  */
 private val BORINGSSL_PEER_ALERT =
-    Regex("""\b(?:SSLV3|TLSV1)_ALERT_[A-Z_]+|SSL routines:OPENSSL_internal:reason\(1\d{3}\)""")
+    Regex("""\b(?:SSLV3|TLSV1)_[A-Z_]+|SSL routines:OPENSSL_internal:reason\(1\d{3}\)""")
 
 /** The JDK's diagnostic for a received fatal alert (sun.security.ssl.Alert). */
 private val JDK_PEER_ALERT = Regex("""Received fatal alert: |Unknown alert description \(""")

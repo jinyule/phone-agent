@@ -128,10 +128,12 @@ class AdbFailureClassTest {
                 SSLHandshakeException("(missing_extension) Received fatal alert: missing_extension"),
                 SSLProtocolException("(unexpected_message) Unknown alert description (200)"),
             )
-        // BoringSSL writes reason(N) for a code its table has no name for, as for these alerts.
+        // BoringSSL writes reason(N) for a code its table has no name for, as for these alerts;
+        // Android 11's table names 1110-1116 without ALERT_.
         val conscrypt =
             listOf(
                 "error:100003f2:SSL routines:OPENSSL_internal:SSLV3_ALERT_UNEXPECTED_MESSAGE",
+                "error:1000045c:SSL routines:OPENSSL_internal:TLSV1_CERTIFICATE_REQUIRED",
                 "error:10000455:SSL routines:OPENSSL_internal:reason(1109)",
                 "error:100004b0:SSL routines:OPENSSL_internal:reason(1200)",
             ).map(::conscryptError)
