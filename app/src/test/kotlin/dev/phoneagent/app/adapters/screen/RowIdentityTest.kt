@@ -4,7 +4,6 @@ import android.graphics.Rect
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import dev.phoneagent.core.ports.ActionOutcome
 import dev.phoneagent.core.ports.ElementRef
 import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.ports.SnapshotDetail
@@ -84,7 +83,7 @@ class RowIdentityTest {
 
             val outcome = port.act(UiAction.Tap(Target.Ref(s1.addOf("Kettle").ref)), s1.id)
 
-            assertEquals(ActionOutcome.Status.StaleRef, outcome.status)
+            assertStale(outcome.status)
             assertFalse(adds.getValue("Lamp").clicked)
             assertTrue(host.gestures.isEmpty())
         }
@@ -103,7 +102,7 @@ class RowIdentityTest {
             val outcome = port.act(UiAction.Tap(Target.Ref(s1.addOf("Kettle").ref)), s1.id)
 
             assertFalse("Lamp's button is new", s2.addOf("Lamp").ref in s1.refs())
-            assertEquals(ActionOutcome.Status.StaleRef, outcome.status)
+            assertStale(outcome.status)
             assertFalse(adds.getValue("Lamp").clicked)
             assertTrue(host.gestures.isEmpty())
         }
@@ -149,7 +148,7 @@ class RowIdentityTest {
 
             val outcome = port.act(UiAction.Tap(Target.Ref(s1.elements.single { it.name == "Pause" }.ref)), s1.id)
 
-            assertEquals(ActionOutcome.Status.StaleRef, outcome.status)
+            assertStale(outcome.status)
             assertFalse(pause.clicked)
             assertTrue(host.gestures.isEmpty())
         }
@@ -164,7 +163,7 @@ class RowIdentityTest {
 
             val outcome = port.act(UiAction.Tap(Target.Ref(s1.elements.single { it.name == "Pause" }.ref)), s1.id)
 
-            assertEquals(ActionOutcome.Status.StaleRef, outcome.status)
+            assertStale(outcome.status)
             assertTrue(host.gestures.isEmpty())
         }
 
@@ -179,7 +178,7 @@ class RowIdentityTest {
 
             val outcome = port.act(UiAction.Tap(Target.Ref(s1.addOf("Toaster").ref)), s1.id)
 
-            assertEquals(ActionOutcome.Status.StaleRef, outcome.status)
+            assertStale(outcome.status)
             assertTrue(adds.values.none { it.clicked })
             assertTrue(host.gestures.isEmpty())
         }
@@ -215,7 +214,7 @@ class RowIdentityTest {
 
             val outcome = port.act(UiAction.Tap(Target.Ref(s1.likeOf("${prefix}Bob").ref)), s1.id)
 
-            assertEquals(ActionOutcome.Status.StaleRef, outcome.status)
+            assertStale(outcome.status)
             assertFalse(feed.likes.getValue("${prefix}Ada").clicked)
         }
 
@@ -237,7 +236,7 @@ class RowIdentityTest {
 
             val outcome = port.act(UiAction.Tap(Target.Ref(s1.likeOf("Bob").ref)), s1.id)
 
-            assertEquals(ActionOutcome.Status.StaleRef, outcome.status)
+            assertStale(outcome.status)
             assertFalse(adasLike.clicked)
         }
 
@@ -266,7 +265,7 @@ class RowIdentityTest {
             val outcome = port.act(UiAction.Tap(Target.Ref(bobsLike)), s1.id)
             val s2 = port.snapshot()
 
-            assertEquals(ActionOutcome.Status.StaleRef, outcome.status)
+            assertStale(outcome.status)
             assertFalse(adasLike.clicked)
             assertNotEquals(
                 "the next screen does not hand the ref on",
@@ -287,7 +286,7 @@ class RowIdentityTest {
 
             val outcome = port.act(UiAction.Tap(Target.Ref(s1.likeOf("Bob").ref)), s1.id)
 
-            assertEquals(ActionOutcome.Status.StaleRef, outcome.status)
+            assertStale(outcome.status)
             assertFalse(feed.likes.getValue("Ada").clicked)
         }
 

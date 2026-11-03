@@ -1,6 +1,7 @@
 package dev.phoneagent.app.adapters.screen
 
 import dev.phoneagent.core.ids.SnapshotId
+import dev.phoneagent.core.ports.ActionOutcome.StaleReason
 import dev.phoneagent.core.ports.ElementRef
 import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.ports.SnapshotDetail
@@ -83,33 +84,6 @@ internal object RefMatcher {
             else -> Match.Stale(StaleReason.MOVED)
         }
     }
-}
-
-/**
- * Why a planned element was not found again, for tests and the log. The model is told only
- * `StaleRef` so far: carrying the reason there is a change of WP01's contract.
- */
-internal enum class StaleReason {
-    /** The screen the action was planned on is no longer remembered. */
-    FORGOTTEN,
-
-    /** The element, or the one alike in the fresh read, was read only in part or is a row cut down to its controls. */
-    UNRELIABLE,
-
-    /** A label of its window outside lists changed, or the window is gone. */
-    WINDOW_CHANGED,
-
-    /** A label of its row changed, or the row is gone. */
-    ROW_CHANGED,
-
-    /** It is there, but not where the model saw it. */
-    MOVED,
-
-    /** Several elements are alike and none could be told for it. */
-    AMBIGUOUS,
-
-    /** Nothing in the fresh read is it. */
-    NOT_FOUND,
 }
 
 /** Explains why [RefCarrier.pair] paired a planned element with nothing; it decides nothing itself. */

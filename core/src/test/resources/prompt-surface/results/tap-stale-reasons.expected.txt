@@ -1,0 +1,32 @@
+FORGOTTEN
+编号过期了（the screen it was planned on is too old to check against），这一步没有执行。先 phone_observe 读最新一屏，再用新的 screen 和编号。
+
+=====
+
+WINDOW_CHANGED
+编号过期了（the screen around it changed since it was planned），这一步没有执行。先 phone_observe 读最新一屏，再用新的 screen 和编号。
+
+=====
+
+ROW_CHANGED
+编号过期了（its row changed since it was planned; if that row's text keeps changing, use its position instead），这一步没有执行。先 phone_observe 读最新一屏，再用新的 screen 和编号。
+
+=====
+
+UNRELIABLE
+编号过期了（it cannot be told apart reliably, because the screen was read only in part or its row is cut off; scroll it into view or use its position instead），这一步没有执行。先 phone_observe 读最新一屏，再用新的 screen 和编号。
+
+=====
+
+MOVED
+编号过期了（it moved since it was planned），这一步没有执行。先 phone_observe 读最新一屏，再用新的 screen 和编号。
+
+=====
+
+AMBIGUOUS
+编号过期了（several elements now match it），这一步没有执行。先 phone_observe 读最新一屏，再用新的 screen 和编号。
+
+=====
+
+NOT_FOUND
+编号过期了（it is no longer on the screen），这一步没有执行。先 phone_observe 读最新一屏，再用新的 screen 和编号。

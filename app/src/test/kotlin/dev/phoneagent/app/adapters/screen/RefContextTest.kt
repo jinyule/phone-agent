@@ -91,7 +91,7 @@ class RefContextTest {
 
             val outcome = port.act(UiAction.Tap(Target.Ref(s1.named("Like").ref)), s1.id)
 
-            assertEquals(ActionOutcome.Status.StaleRef, outcome.status)
+            assertStale(outcome.status)
             assertFalse("Ada's Like is new", s2.named("Like").ref in s1.refs())
             assertNothingTouched()
         }
@@ -132,7 +132,7 @@ class RefContextTest {
 
             val outcome = port.act(UiAction.Tap(Target.Ref(s1.named("Buy now").ref)), s1.id)
 
-            assertEquals(ActionOutcome.Status.StaleRef, outcome.status)
+            assertStale(outcome.status)
             assertFalse("the Lamp's Buy now is new", s2.named("Buy now").ref in s1.refs())
             assertNothingTouched()
         }
@@ -166,7 +166,7 @@ class RefContextTest {
 
             val outcome = port.act(UiAction.Tap(Target.Ref(s1.named("Buy now").ref)), s1.id)
 
-            assertEquals(ActionOutcome.Status.StaleRef, outcome.status)
+            assertStale(outcome.status)
             assertFalse("the bar's buttons are new", s2.named("Buy now").ref in s1.refs())
             assertNothingTouched()
         }
@@ -218,7 +218,7 @@ class RefContextTest {
 
             val outcome = port.act(UiAction.Tap(Target.Ref(s1.named("Like").ref)), s1.id)
 
-            assertEquals(ActionOutcome.Status.StaleRef, outcome.status)
+            assertStale(outcome.status)
             assertFalse("Ada's Like is new", s2.named("Like").ref in s1.refs())
             assertNothingTouched()
         }
@@ -258,7 +258,7 @@ class RefContextTest {
 
             val outcome = port.act(UiAction.Tap(Target.Ref(s1.addAfter("Kettle").ref)), s1.id)
 
-            assertEquals(ActionOutcome.Status.StaleRef, outcome.status)
+            assertStale(outcome.status)
             assertNothingTouched()
         }
 
@@ -272,7 +272,7 @@ class RefContextTest {
 
             val outcome = port.act(UiAction.Tap(Target.Ref(s1.addAfter("Kettle").ref)), s1.id)
 
-            assertEquals(ActionOutcome.Status.StaleRef, outcome.status)
+            assertStale(outcome.status)
             assertNothingTouched()
         }
 
@@ -286,7 +286,7 @@ class RefContextTest {
 
             val outcome = port.act(UiAction.Tap(Target.Ref(s1.addAfter("Toaster").ref)), s1.id)
 
-            assertEquals(ActionOutcome.Status.StaleRef, outcome.status)
+            assertStale(outcome.status)
             assertNothingTouched()
         }
 
@@ -384,7 +384,7 @@ class RefContextTest {
 
             val stale = port.act(UiAction.Tap(Target.Ref(adds.last().ref)), s1.id)
 
-            assertEquals(ActionOutcome.Status.StaleRef, stale.status)
+            assertStale(stale.status)
             assertNothingTouched()
             assertEquals(ActionOutcome.Status.Ok, port.act(UiAction.Tap(Target.Ref(adds.first().ref)), s1.id).status)
             assertEquals(
@@ -432,7 +432,7 @@ class RefContextTest {
 
             val outcome = port.act(UiAction.Tap(Target.Ref(cut.ref)), s1.id)
 
-            assertEquals(ActionOutcome.Status.StaleRef, outcome.status)
+            assertStale(outcome.status)
             assertFalse(
                 "the residue on the next screen is new",
                 s2.elements.first { it.name == "Like" }.ref in s1.refs(),

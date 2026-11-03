@@ -313,7 +313,7 @@ class AndroidScreenTest {
 
             val outcome = screen.act(UiAction.Tap(planned.ref("OK")), planned.id)
 
-            assertEquals(ActionOutcome.Status.StaleRef, outcome.status)
+            assertStale(outcome.status)
             assertTrue(allNodes.all { it.log.actions.isEmpty() })
             assertTrue(host.gestures.isEmpty())
             assertEquals(0, analyzer.diffs)
@@ -328,7 +328,7 @@ class AndroidScreenTest {
             val planned = screen.snapshot()
 
             val forgotten = screen.act(UiAction.Tap(planned.ref("OK")), SnapshotId("s99"))
-            assertEquals(ActionOutcome.Status.StaleRef, forgotten.status)
+            assertStale(forgotten.status)
             assertEquals(
                 ActionOutcome.Status.Failed("element @${planned.ref("OK").ref.value} needs the screen id it came from"),
                 screen.act(UiAction.Tap(planned.ref("OK")), on = null).status,
@@ -347,7 +347,7 @@ class AndroidScreenTest {
             val old = screen.snapshot()
             repeat(ScreenTimings().snapshotsKept) { screen.snapshot() }
 
-            assertEquals(ActionOutcome.Status.StaleRef, screen.act(UiAction.Tap(old.ref("OK")), old.id).status)
+            assertStale(screen.act(UiAction.Tap(old.ref("OK")), old.id).status)
         }
 
     @Test

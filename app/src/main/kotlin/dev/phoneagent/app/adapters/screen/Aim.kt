@@ -4,6 +4,7 @@ import android.graphics.Rect
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import dev.phoneagent.core.ids.SnapshotId
+import dev.phoneagent.core.ports.ActionOutcome.StaleReason
 import dev.phoneagent.core.ports.ElementRole
 import dev.phoneagent.core.ports.Target
 

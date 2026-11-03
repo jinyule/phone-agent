@@ -25,7 +25,8 @@ public interface ScreenPort {
     /**
      * Performs [action]. When [on] is given, element refs are resolved against that snapshot and
      * re-matched against a fresh tree first; a target that no longer matches yields
-     * [ActionOutcome.Status.StaleRef] without touching the device.
+     * [ActionOutcome.Status.StaleRef] with its [ActionOutcome.StaleReason] without touching the
+     * device.
      */
     public suspend fun act(
         action: UiAction,

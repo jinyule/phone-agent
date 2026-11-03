@@ -119,7 +119,7 @@ class RefIdentityTest {
 
             val outcome = port.act(UiAction.Tap(Target.Ref(s1.likeOf("Bob").ref)), s1.id)
 
-            assertEquals(ActionOutcome.Status.StaleRef, outcome.status)
+            assertStale(outcome.status)
             assertTrue(feed.likes.values.none { it.clicked })
             assertTrue(host.gestures.isEmpty())
         }
@@ -136,7 +136,7 @@ class RefIdentityTest {
 
             val outcome = port.act(UiAction.Tap(s1.ref("OK")), s1.id)
 
-            assertEquals(ActionOutcome.Status.StaleRef, outcome.status)
+            assertStale(outcome.status)
             assertFalse(delete.clicked)
         }
 
@@ -151,7 +151,7 @@ class RefIdentityTest {
 
             val outcome = port.act(UiAction.Tap(Target.Ref(s1.likeOf("Bob").ref)), s1.id)
 
-            assertEquals(ActionOutcome.Status.StaleRef, outcome.status)
+            assertStale(outcome.status)
             assertFalse(feed.likes.getValue("Ada").clicked)
         }
 

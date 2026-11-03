@@ -89,7 +89,7 @@ class RepeatedLabelTest {
 
             val outcome = port.act(UiAction.Tap(Target.Ref(s1.likes().first().ref)), s1.id)
 
-            assertEquals(ActionOutcome.Status.StaleRef, outcome.status)
+            assertStale(outcome.status)
             assertFalse("the residue on the next screen is new", s2.likes().first().ref in s1.refs())
             assertNothingTouched()
         }
@@ -135,7 +135,7 @@ class RepeatedLabelTest {
 
             val outcome = port.act(UiAction.Tap(Target.Ref(add(s1).ref)), s1.id)
 
-            assertEquals(ActionOutcome.Status.StaleRef, outcome.status)
+            assertStale(outcome.status)
             assertFalse("the Lamp's Add is new", add(s2).ref in s1.refs())
             assertNothingTouched()
         }
@@ -159,7 +159,7 @@ class RepeatedLabelTest {
 
             val outcome = port.act(UiAction.Tap(Target.Ref(s1.likes().single().ref)), s1.id)
 
-            assertEquals(ActionOutcome.Status.StaleRef, outcome.status)
+            assertStale(outcome.status)
             assertFalse("Ada's Like is new", s2.likes().single().ref in s1.refs())
             assertNothingTouched()
         }

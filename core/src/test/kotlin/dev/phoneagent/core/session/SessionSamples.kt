@@ -303,7 +303,10 @@ object SessionSamples {
                 call,
                 null,
                 UiAction.Scroll(null, Direction.DOWN),
-                ActionOutcome(ActionOutcome.Status.StaleRef, ActionOutcome.Effect.UNKNOWN),
+                ActionOutcome(
+                    ActionOutcome.Status.StaleRef(ActionOutcome.StaleReason.ROW_CHANGED),
+                    ActionOutcome.Effect.UNKNOWN,
+                ),
             ),
             ScreenActed(
                 call,

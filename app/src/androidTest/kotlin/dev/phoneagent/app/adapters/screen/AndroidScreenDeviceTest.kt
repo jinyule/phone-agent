@@ -175,7 +175,7 @@ class AndroidScreenDeviceTest {
             // The row planned on the screen before scrolling has moved: refused without touching the device.
             val stale = screen.act(UiAction.Tap(Target.Ref(rowAgain.ref)), again.id)
             log("tap @${rowAgain.ref} planned on ${again.id} after scrolling: ${stale.describe()}")
-            assertEquals(ActionOutcome.Status.StaleRef, stale.status)
+            assertTrue("stale: ${stale.status}", stale.status is ActionOutcome.Status.StaleRef)
         }
 
     @Test

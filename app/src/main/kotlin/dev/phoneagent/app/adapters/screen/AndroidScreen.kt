@@ -28,8 +28,8 @@ import java.util.concurrent.atomic.AtomicLong
  *   refs are carried from screen to screen ([RefCarrier]), quality and fingerprint come from the
  *   [SnapshotAnalyzer];
  * - actions re-read the tree first and find ref targets again with the same identity ([RefMatcher]);
- *   a target that no longer matches yields `StaleRef` without touching the device (why, a
- *   [StaleReason], goes to the log only);
+ *   a target that no longer matches yields `StaleRef` with its [ActionOutcome.StaleReason]
+ *   without touching the device (the log gets the reason, the ref and the screen id only);
  * - after an action the display settles on accessibility events ([ChangeWatch]) and is read back
  *   at the detail of the screen the action was based on;
  * - nothing here touches this app's own windows (`Refused`);
@@ -114,7 +114,7 @@ internal class AndroidScreen(
                     is Resolution.Stale -> {
                         // Only the ref, the screen id and the reason: nothing of what the screen shows.
                         Log.i(TAG, "${targetOf(action)?.let(::refOf)} planned on $on is stale: ${resolved.reason}")
-                        Outcomes.STALE
+                        Outcomes.stale(resolved.reason)
                     }
 
                     is Resolution.Invalid -> {

@@ -2,6 +2,7 @@ package dev.phoneagent.app.adapters.screen
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.phoneagent.core.ids.SnapshotId
+import dev.phoneagent.core.ports.ActionOutcome.StaleReason
 import dev.phoneagent.core.ports.ElementRef
 import dev.phoneagent.core.ports.ElementRole
 import dev.phoneagent.core.ports.ScreenSnapshot

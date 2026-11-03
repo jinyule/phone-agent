@@ -119,8 +119,9 @@ internal object Outcomes {
             ActionOutcome.Effect.UNKNOWN,
         )
 
-    /** The planned element is gone. */
-    val STALE: ActionOutcome = ActionOutcome(ActionOutcome.Status.StaleRef, ActionOutcome.Effect.UNKNOWN)
+    /** The planned element was not found again, for [reason]; nothing was done. */
+    fun stale(reason: ActionOutcome.StaleReason): ActionOutcome =
+        ActionOutcome(ActionOutcome.Status.StaleRef(reason), ActionOutcome.Effect.UNKNOWN)
 
     /** Not attempted, or attempted without effect, for [reason] (English, for the model). */
     fun failed(reason: String): ActionOutcome =

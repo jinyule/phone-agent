@@ -102,7 +102,7 @@ class UnreadableChildTest {
 
             val outcome = port.act(UiAction.Tap(Target.Ref(s1.buttons("Like").single().ref)), s1.id)
 
-            assertEquals(ActionOutcome.Status.StaleRef, outcome.status)
+            assertStale(outcome.status)
             assertFalse("the Like on Ada's card is new", s2.buttons("Like").single().ref in s1.refs())
             assertNothingTouched()
         }
@@ -144,7 +144,7 @@ class UnreadableChildTest {
 
             val outcome = port.act(UiAction.Tap(Target.Ref(bobs.ref)), s1.id)
 
-            assertEquals(ActionOutcome.Status.StaleRef, outcome.status)
+            assertStale(outcome.status)
             assertNothingTouched()
             // The other row, read in full, and the toolbar outside the list keep their refs.
             assertEquals("Cy's Like", cys.ref, s2.buttons("Like")[1].ref)
@@ -201,7 +201,7 @@ class UnreadableChildTest {
 
             val outcome = port.act(UiAction.Tap(Target.Ref(kettles.ref)), s1.id)
 
-            assertEquals(ActionOutcome.Status.StaleRef, outcome.status)
+            assertStale(outcome.status)
             assertNothingTouched()
             assertEquals("Toaster's Add, away from the gap", toasters.ref, s2.buttons("Add")[1].ref)
         }

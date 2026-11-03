@@ -120,6 +120,27 @@ class PortTypesTest {
     }
 
     @Test
+    fun `a stale ref carries its reason, and every reason has an English hint of its own`() {
+        val stale =
+            ActionOutcome(
+                ActionOutcome.Status.StaleRef(ActionOutcome.StaleReason.ROW_CHANGED),
+                ActionOutcome.Effect.UNKNOWN,
+            )
+        val json = Json.encodeToString(stale)
+        assertEquals("""{"status":{"type":"stale_ref","reason":"ROW_CHANGED"},"effect":"UNKNOWN"}""", json)
+        assertEquals(stale, Json.decodeFromString<ActionOutcome>(json))
+        assertThrows<IllegalArgumentException>("a stale ref without its reason") {
+            Json.decodeFromString<ActionOutcome>("""{"status":{"type":"stale_ref"},"effect":"UNKNOWN"}""")
+        }
+        val hints = ActionOutcome.StaleReason.entries.map { it.hint }
+        assertEquals(hints.size, hints.toSet().size, "one hint per reason")
+        hints.forEach { hint ->
+            assertTrue(hint.isNotBlank() && hint == hint.trim() && hint.all { it.code < 128 }, hint)
+            assertTrue(hint.first().isLowerCase() && !hint.endsWith("."), "set inside a sentence: $hint")
+        }
+    }
+
+    @Test
     fun `surface types serialize with stable discriminators`() {
         assertEquals(
             """{"type":"available","concurrentTasks":true}""",

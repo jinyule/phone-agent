@@ -4,6 +4,7 @@ import android.graphics.Rect
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.phoneagent.core.ports.ActionOutcome
+import dev.phoneagent.core.ports.ActionOutcome.StaleReason
 import dev.phoneagent.core.ports.ElementRef
 import dev.phoneagent.core.ports.ElementRole
 import dev.phoneagent.core.ports.ScreenSnapshot
@@ -18,8 +19,9 @@ import org.junit.runner.RunWith
 import org.robolectric.shadows.ShadowLog
 
 /**
- * Why an action's ref went stale (fix list r3 B1 "StaleRef 的原因"): told in the log only, with
- * nothing of the screen but the ref and the screen id; the model still sees `StaleRef`.
+ * Why an action's ref went stale (fix list r3 B1 "StaleRef 的原因"): the outcome carries the reason
+ * to the model (fix list r4, rebase follow-up 1), and the log says the same with nothing of the
+ * screen but the ref and the screen id.
  */
 @RunWith(AndroidJUnit4::class)
 class StaleReasonTest {
@@ -28,7 +30,7 @@ class StaleReasonTest {
 
     private fun ScreenSnapshot.named(name: String) = elements.single { it.name == name }
 
-    /** Taps [ref] of [planned], which must go stale; the reason logged. */
+    /** Taps [ref] of [planned], which must go stale; the reason, the same in the outcome and the log. */
     private suspend fun TestScope.staleTap(
         port: AndroidScreen,
         planned: ScreenSnapshot,
@@ -36,11 +38,12 @@ class StaleReasonTest {
     ): StaleReason {
         ShadowLog.clear()
         val outcome = port.act(UiAction.Tap(Target.Ref(ElementRef(ref))), planned.id)
-        assertEquals(ActionOutcome.Status.StaleRef, outcome.status)
+        val reason = (outcome.status as ActionOutcome.Status.StaleRef).reason
+        assertEquals(ActionOutcome.Effect.UNKNOWN, outcome.effect)
         assertTrue("nothing touched", host.gestures.isEmpty())
         val logged = ShadowLog.getLogsForTag(AndroidScreen.TAG).single().msg
-        assertEquals("@$ref planned on ${planned.id} is stale: ", logged.substringBeforeLast(": ") + ": ")
-        return StaleReason.valueOf(logged.substringAfterLast(": "))
+        assertEquals("@$ref planned on ${planned.id} is stale: $reason", logged)
+        return reason
     }
 
     private fun inbox(

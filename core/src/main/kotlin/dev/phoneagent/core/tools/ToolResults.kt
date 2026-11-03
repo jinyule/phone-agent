@@ -55,6 +55,9 @@ internal object ToolResults {
      * every status, refusals included) and `details.screen` names it; without one the text tells
      * the model to observe and `details` has no `screen`. So `details.screen` is always a screen
      * the model has seen.
+     *
+     * A stale ref's text gives its [ActionOutcome.StaleReason.hint] (fixed text, not masked) and
+     * says that nothing was done; `details.staleReason` names the reason.
      */
     fun outcome(
         done: String,
@@ -79,12 +82,13 @@ internal object ToolResults {
                         "手机拒绝了这个动作：${presenter.mask(result.reason)}。不要重试同一个动作，换个办法，或者 end_not_done。\n$screen"
                 }
 
-                ActionOutcome.Status.StaleRef -> {
+                is ActionOutcome.Status.StaleRef -> {
+                    val stale = "编号过期了（${result.reason.hint}），这一步没有执行。"
                     ToolStatus.ERROR to
                         if (after == null) {
-                            STALE + "先 phone_observe 读最新一屏，再用新的 screen 和编号。"
+                            stale + "先 phone_observe 读最新一屏，再用新的 screen 和编号。"
                         } else {
-                            STALE + "下面是最新一屏，请用它的 screen 和编号：\n" + presenter.page(after, SnapshotDetail.BRIEF)
+                            stale + "下面是最新一屏，请用它的 screen 和编号：\n" + presenter.page(after, SnapshotDetail.BRIEF)
                         }
                 }
             }
@@ -150,14 +154,13 @@ internal object ToolResults {
                     ActionOutcome.Status.Ok -> "ok"
                     is ActionOutcome.Status.Failed -> "failed"
                     is ActionOutcome.Status.Refused -> "refused"
-                    ActionOutcome.Status.StaleRef -> "stale_ref"
+                    is ActionOutcome.Status.StaleRef -> "stale_ref"
                 },
             )
+            (outcome.status as? ActionOutcome.Status.StaleRef)?.let { put("staleReason", it.reason.name) }
             put("effect", outcome.effect.name)
             outcome.after?.let { put("screen", it.id.value) }
         }
-
-    private const val STALE = "目标已经不在画面上了（画面变了，编号过期），这一步没有执行。"
 }
 
 /** Result of calling the screen port: its value, or the surface was unusable. */

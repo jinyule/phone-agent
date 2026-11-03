@@ -6,6 +6,7 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction
 import android.view.accessibility.AccessibilityWindowInfo
+import dev.phoneagent.core.ports.ActionOutcome
 import dev.phoneagent.core.ports.ElementRef
 import dev.phoneagent.core.ports.OcrLine
 import dev.phoneagent.core.ports.ScreenDiff
@@ -18,6 +19,12 @@ import dev.phoneagent.core.ports.TreeQuality
 import dev.phoneagent.core.ports.UiElement
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
+import org.junit.Assert.assertTrue
+
+/** Asserts that [status] is a stale ref, whatever its reason ([StaleReasonTest] pins the reasons). */
+internal fun assertStale(status: ActionOutcome.Status) {
+    assertTrue("expected a stale ref, got $status", status is ActionOutcome.Status.StaleRef)
+}
 
 /** Device services without a device; the clipboard cannot be read (as in the background). */
 internal class TestSystem : ScreenSystem {
