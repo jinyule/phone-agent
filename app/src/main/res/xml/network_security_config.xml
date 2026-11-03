@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Plain http is not limited here but where addresses are accepted: ProviderProfile takes http
+     only for local servers (loopback, private and link-local literals, localhost, *.local), the
+     address Ollama and LM Studio on the user's computer are reached at. Android's policy cannot
+     express "private addresses", so without this every local server fails with CLEARTEXT. -->
+<network-security-config xmlns:tools="http://schemas.android.com/tools">
+    <base-config
+        cleartextTrafficPermitted="true"
+        tools:ignore="InsecureBaseConfiguration" />
+</network-security-config>
