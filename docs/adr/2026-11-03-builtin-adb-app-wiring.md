@@ -45,7 +45,7 @@
 7. **在 Conscrypt 上靠 BoringSSL 的原因认出对端 alert**（core 改动）：
    - 实测未配对的 key 收到的是 `SSLProtocolException`，消息里带着 `SSLV3_ALERT_CERTIFICATE_UNKNOWN`，而 A 段只看类型，会把它误判成 TLS；
    - 现在，消息里报的是对端 alert 的 `SSLProtocolException`，不再算我们自己的错误，在可能是拒绝的阶段归为 UNAUTHORIZED。JDK 收到的 alert 也按同一规则认，具体写法见 phase1 §7.1；
-   - BoringSSL 把收到的 alert 记成原因码 1000 + alert 编号：有名字的写成 `SSLV3_ALERT_*` / `TLSV1_ALERT_*`，没有名字的写成 `reason(1NNN)`。它自己发现的错误都有自己的名字（例如 `DECRYPTION_FAILED_OR_BAD_RECORD_MAC`、`BAD_ALERT`），仍然算 TLS。不按原因码的数值判断，因为它自己的原因也有 1000 以上的（1122 `PAKE_AND_KEY_SHARE_NOT_ALLOWED`）。
+   - BoringSSL 把收到的 alert 记成原因码 1000 + alert 编号：有名字的写成 `SSLV3_*` / `TLSV1_*`（Android 12 起都带 `ALERT_`；Android 11 的表里 1110–1116 没有 `ALERT_`，例如 `TLSV1_CERTIFICATE_REQUIRED`），没有名字的写成 `reason(1NNN)`。它自己发现的错误都有自己的名字，没有以这两个前缀开头的（例如 `DECRYPTION_FAILED_OR_BAD_RECORD_MAC`、`BAD_ALERT`），仍然算 TLS。不按原因码的数值判断，因为它自己的原因也有 1000 以上的（1122 `PAKE_AND_KEY_SHARE_NOT_ALLOWED`）。
 8. **扫描范围**：App 读不到 `/proc/sys/net/ipv4/ip_local_port_range`（Android 16 上是 EACCES），就退回 `LocalPortScan.FALLBACK_RANGE`（30000..65535），覆盖 Linux 默认的 32768..60999。`ownPorts` 现在为空：App 还没监听任何端口；ToolServer（phase1 §8）落地时要把自己的端口加进去。
 9. **架构检查**：`CoreAdbBoundaryTest` 扫 `app/src/{main,debug,release}`，只允许 `dev.phoneagent.app.adb` 和 `dev.phoneagent.app.debug`（以及它们的子包）引用 `dev.phoneagent.core.adb`。检查覆盖 import、通配、别名，以及跨行的全限定名，并带反例。
 
@@ -67,7 +67,7 @@
   - 设置开关的监听属于断线恢复流程（phase1 §7.1），交给 WP15 的向导和 TaskService；
   - 这里先只记日志。
 - **给 core 加一个平台钩子，由宿主判断异常是不是对端 alert**：
-  - 判断依据还是 BoringSSL 的原因名，放到宿主里也一样要匹配文本；
+  - 判断依据还是 BoringSSL 的原因，放到宿主里也一样要匹配文本；
   - 在 JVM 上又测不到 Conscrypt；
   - 写在 core 里，至少能用实测的原文做单测。
   - 所以不选。
