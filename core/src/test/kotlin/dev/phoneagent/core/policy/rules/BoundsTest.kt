@@ -17,8 +17,8 @@ import java.util.concurrent.TimeUnit
  * before calling a case hung: at least thirty times what any case takes on a developer machine,
  * JVM start included, so a slow machine does not fail it. On the rules before the first bounds
  * (81d14af) eight of the first nine cases did not finish within it; on 41f46f5 the cases of
- * touches over candidates and of drawn text over everything read the OCR lines 4.1 and 8.2
- * billion times, against bounds of about 10 and 20 million.
+ * touches over candidates and of drawn text over everything read OCR lines 4.1 and 8.2 billion
+ * times, against a bound of about 10 million (`M·(2·E + 2)`).
  */
 class BoundsTest {
     @Test
