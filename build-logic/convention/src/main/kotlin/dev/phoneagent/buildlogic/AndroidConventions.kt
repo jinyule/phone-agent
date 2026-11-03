@@ -3,6 +3,8 @@ package dev.phoneagent.buildlogic
 import com.android.build.api.dsl.ApplicationExtension
 import com.android.build.api.dsl.CommonExtension
 import com.android.build.api.dsl.LibraryExtension
+import com.android.build.api.variant.ApplicationAndroidComponentsExtension
+import com.android.build.api.variant.HostTestBuilder
 import dev.detekt.gradle.Detekt
 import org.gradle.api.JavaVersion
 import org.gradle.api.Plugin
@@ -15,7 +17,11 @@ import org.gradle.kotlin.dsl.withType
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
-/** Android application (`:app`): Compose, version from gradle.properties, strict lint. */
+/**
+ * Android application (`:app`): Compose, version from gradle.properties, strict lint, and unit
+ * tests for every build type: AGP only creates them for the tested one (debug) by default, and
+ * the release ones check that no debug-only entry point ships (`src/testRelease`).
+ */
 class AndroidApplicationConventionPlugin : Plugin<Project> {
     override fun apply(target: Project): Unit =
         with(target) {
@@ -36,6 +42,11 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
                 }
                 testOptions {
                     unitTests.isIncludeAndroidResources = true
+                }
+            }
+            extensions.configure<ApplicationAndroidComponentsExtension> {
+                beforeVariants { variant ->
+                    variant.hostTests[HostTestBuilder.UNIT_TEST_TYPE]?.enable = true
                 }
             }
             configureKotlinAndroid(explicitApi = false)
