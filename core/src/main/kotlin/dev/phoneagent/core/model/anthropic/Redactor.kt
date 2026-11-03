@@ -74,12 +74,9 @@ internal class Redactor(
      */
     fun quote(raw: String): String {
         val decoded = JsonEscapes.lenientDecode(raw)
-        return if (decoded != raw && holdsCredential(decoded)) WITHHELD else text(raw)
+        val hidden = decoded != raw && (exact(decoded) != decoded || SHAPES.any { it.containsMatchIn(decoded) })
+        return if (hidden) WITHHELD else text(raw)
     }
-
-    /** Whether [decoded] text holds a form of this request's secrets or a credential shape; `Bearer` is left out. */
-    private fun holdsCredential(decoded: String): Boolean =
-        exact(decoded) != decoded || SHAPES.any { it.containsMatchIn(decoded) }
 
     /**
      * A field the provider wrote, read decoded from JSON (an error's message, a refusal's category):
