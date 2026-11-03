@@ -232,22 +232,28 @@ class TypingOutcomeTest {
 
     /**
      * An editor behind the input connection that holds the real [content], which accessibility does
-     * not show for a password, and moves its [cursor] honestly (out-of-range moves are ignored, as
-     * `BaseInputConnection` does).
+     * not show for a password, and moves its selection ([anchor]..[cursor]) honestly (out-of-range
+     * moves are ignored, as `BaseInputConnection` does); unless [selectsAll], it ignores select-all,
+     * as some editors do. Committed text replaces the selection.
      */
     private class Editor(
         var content: String,
         var cursor: Int,
+        private val selectsAll: Boolean = true,
     ) : ImeConnection {
+        var anchor = cursor
+
         override val editorPackage: String = APP
 
         override fun commit(
             text: String,
             replace: Boolean,
         ): Boolean {
-            if (replace) content = "".also { cursor = 0 }
-            content = content.substring(0, cursor) + text + content.substring(cursor)
-            cursor += text.length
+            if (replace) selectAll()
+            val (start, end) = minOf(anchor, cursor) to maxOf(anchor, cursor)
+            content = content.substring(0, start) + text + content.substring(end)
+            cursor = start + text.length
+            anchor = cursor
             return true
         }
 
@@ -257,14 +263,72 @@ class TypingOutcomeTest {
             start: Int,
             end: Int,
         ): Boolean {
-            if (start in 0..content.length && start == end) cursor = start
+            if (start in 0..content.length && start == end) {
+                cursor = start
+                anchor = start
+            }
             return true
         }
 
-        override fun selection(): Pair<Int, Int> = cursor to cursor
+        override fun selection(): Pair<Int, Int> = anchor to cursor
 
-        override fun cursorAtEnd(): Boolean = cursor == content.length
+        override fun cursorAtEnd(): Boolean = anchor == cursor && cursor == content.length
+
+        override fun selectAll(): Boolean {
+            if (selectsAll) {
+                anchor = 0
+                cursor = content.length
+            }
+            return anchor == 0 && cursor == content.length
+        }
     }
+
+    @Test
+    fun aPasswordReplacedThroughTheInputConnectionIsTypedOnlyOverAllOfIt() =
+        runTest {
+            // Fix list r3 S2 (Claude r3 S2): the password is "oldpw"; the field refuses SET_TEXT, and
+            // the editor ignores select-all, so a commit would land beside the old password.
+            val field =
+                field {
+                    isPassword = true
+                    text = null
+                }
+            field.log.answer = { action, _ -> action != AccessibilityNodeInfo.ACTION_SET_TEXT }
+            val editor = Editor("oldpw", cursor = 5, selectsAll = false)
+            host.ime = editor
+
+            val outcome = typeInto(field, UiAction.Type(Target.Point(500, 125), "newpw", submit = true))
+
+            assertEquals("oldpw", editor.content)
+            assertTrue(outcome.status is ActionOutcome.Status.Failed)
+            assertFalse("not submitted", AccessibilityAction.ACTION_IME_ENTER.id in field.log.ids)
+
+            // An editor that selects all of it is typed over.
+            val selecting = Editor("oldpw", cursor = 5)
+            host.ime = selecting
+            typeInto(field, UiAction.Type(Target.Point(500, 125), "newpw"))
+            assertEquals("newpw", selecting.content)
+        }
+
+    @Test
+    fun aPasswordThatCannotBeReadIsNotPastedBesideItself() =
+        runTest {
+            // Fix list r3 S2 (Claude r3 S2): no input connection, SET_TEXT refused, the clipboard readable.
+            val field =
+                field {
+                    isPassword = true
+                    text = null
+                }
+            field.log.answer = { action, _ -> action != AccessibilityNodeInfo.ACTION_SET_TEXT }
+            val clipboard = WatchedClipboard()
+            val system = TestSystem().apply { this.clipboard = clipboard }
+
+            val outcome = typeInto(field, UiAction.Type(Target.Point(500, 125), "newpw", submit = true), system)
+
+            assertTrue(outcome.status is ActionOutcome.Status.Failed)
+            assertFalse("not pasted", AccessibilityNodeInfo.ACTION_PASTE in field.log.ids)
+            assertFalse("not submitted", AccessibilityAction.ACTION_IME_ENTER.id in field.log.ids)
+        }
 
     @Test
     fun appendingToAPasswordGoesOnlyAtTheEndTheEditorConfirms() =

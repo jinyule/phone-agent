@@ -315,6 +315,8 @@ class ActuatorTest {
                     override fun selection(): Pair<Int, Int>? = null
 
                     override fun cursorAtEnd(): Boolean? = null
+
+                    override fun selectAll(): Boolean? = null
                 }
 
             assertEquals(Actuator.Result.Done(Actuator.Via.NODE), actuator().enter(field))

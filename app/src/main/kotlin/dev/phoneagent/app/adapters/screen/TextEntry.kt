@@ -278,7 +278,9 @@ internal object EntryLevels {
 
     /**
      * Commits through the service's input connection. Applies only while [field] holds input focus
-     * and the connection is bound to its app; [focus] focuses the field and waits for the app.
+     * and the connection is bound to its app; [focus] focuses the field and waits for the app. A
+     * password, which cannot be read back, is replaced only once the editor confirms all of it
+     * selected ([ImeConnection.selectAll]); else the level is skipped.
      */
     fun imeConnection(
         field: AccessibilityNodeInfo,
@@ -311,9 +313,21 @@ internal object EntryLevels {
                 }
 
                 else -> {
-                    sentIf(ime.commit(request.expected, replace = true))
+                    replaceAll(field, ime, request.expected)
                 }
             }
+        }
+
+    // Committing over a selection that is not all of a password would leave part of it beside the text.
+    private fun replaceAll(
+        field: AccessibilityNodeInfo,
+        ime: ImeConnection,
+        text: String,
+    ): TextEntry.Sent =
+        when {
+            !field.isPassword -> sentIf(ime.commit(text, replace = true))
+            ime.selectAll() == true -> sentIf(ime.commit(text, replace = false))
+            else -> TextEntry.Sent.Skipped(NO_CURSOR)
         }
 
     /**
@@ -350,7 +364,9 @@ internal object EntryLevels {
     /**
      * Selects what the paste replaces (the old text, or the end for append), then holds the text
      * on the clipboard and pastes. Nothing is put on the clipboard unless the field, read again,
-     * reports that selection.
+     * reports that selection. A password is pasted into only when it shows empty: what it shows
+     * otherwise (nothing, or a mask, which need not be as long as the password) does not tell how
+     * much to select.
      */
     private suspend fun pasteHeld(
         field: AccessibilityNodeInfo,
@@ -361,6 +377,7 @@ internal object EntryLevels {
         val length = request.before?.length ?: 0
         val placed =
             when {
+                field.isPassword && request.before != "" -> false
                 request.append -> select(field, length, length) && nodeSelection(field) == (length to length)
                 length > 0 -> select(field, 0, length) && nodeSelection(field) == (0 to length)
                 else -> true

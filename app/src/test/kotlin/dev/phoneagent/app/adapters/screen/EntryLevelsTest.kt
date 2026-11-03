@@ -99,6 +99,8 @@ class EntryLevelsTest {
         override fun selection(): Pair<Int, Int>? = cursor
 
         override fun cursorAtEnd(): Boolean? = null
+
+        override fun selectAll(): Boolean? = null
     }
 
     private fun selection(index: Int): Pair<Int, Int> {
@@ -207,9 +209,10 @@ class EntryLevelsTest {
     fun passwordsAreMarkedSensitiveOnTheClipboard() =
         runTest {
             field.isPassword = true
+            field.text = ""
             val clipboard = FakeClipboard(SavedClip(null))
 
-            EntryLevels.paste(field, clipboard) {}.send(request("1234"))
+            EntryLevels.paste(field, clipboard) {}.send(TextEntry.Request("1234", append = false, before = ""))
 
             assertTrue("put:1234:true" in clipboard.log)
         }

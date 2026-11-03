@@ -179,4 +179,11 @@ internal interface ImeConnection {
      * the text looked at is not kept.
      */
     fun cursorAtEnd(): Boolean?
+
+    /**
+     * Selects all of the editor's text and reports whether the editor confirms that nothing is left
+     * before or after the selection, or `null` when that cannot be read. Works for password fields;
+     * the text looked at is not kept.
+     */
+    fun selectAll(): Boolean?
 }
