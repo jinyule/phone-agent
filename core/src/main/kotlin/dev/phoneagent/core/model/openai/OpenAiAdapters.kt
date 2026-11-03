@@ -74,31 +74,41 @@ public class OpenAiAdapters internal constructor(
         wire: WireOptions,
     ): ChatModel = model(profile, ModelInfo(profile.id, model, profile.protocol, capabilities), blobs, wire, env)
 
-    /** The model [info] describes, on [env] (the probe's is [AdapterEnv.recording]). */
+    /**
+     * The model [info] describes, on [env] (the probe's is [AdapterEnv.recording]). It keeps its
+     * own copy of the capabilities' collections, so a later change of the caller's reaches
+     * neither its [ChatModel.info] nor what it prepares.
+     */
     internal fun model(
         profile: ProviderProfile,
         info: ModelInfo,
         blobs: BlobSource,
         wire: WireOptions,
         env: AdapterEnv,
-    ): ChatModel =
-        when (profile.protocol) {
+    ): ChatModel {
+        val own = info.copy(capabilities = info.capabilities.copied())
+        return when (profile.protocol) {
             ModelProtocol.OPENAI_CHAT_COMPLETIONS -> {
-                ChatCompletionsModel(profile, info, wire, blobs, env)
+                ChatCompletionsModel(profile, own, wire, blobs, env)
             }
 
             ModelProtocol.OPENAI_RESPONSES -> {
-                ResponsesModel(profile, info, wire, blobs, env)
+                ResponsesModel(profile, own, wire, blobs, env)
             }
 
             ModelProtocol.ANTHROPIC_MESSAGES -> {
                 throw IllegalArgumentException("Provider ${profile.id}: Anthropic Messages is not an OpenAI protocol")
             }
         }
+    }
 
     /** "Test and save" for profiles of these protocols (model-layer §4.1). */
     public fun probe(): ProviderProbe = ProviderProbe(this)
 }
+
+/** These capabilities with copies of their collections, which the caller may still change. */
+private fun ModelCapabilities.copied(): ModelCapabilities =
+    copy(reasoningLevels = reasoningLevels?.toList(), verified = verified.toSet())
 
 /**
  * HTTP timeouts of the adapters, in milliseconds, and how long an idle connection is kept.

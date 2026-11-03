@@ -9,6 +9,7 @@ import dev.phoneagent.core.model.ModelCapabilities
 import dev.phoneagent.core.model.ModelError
 import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.ReasoningLevel
+import dev.phoneagent.core.model.VerifiedCapability
 import dev.phoneagent.core.model.WireProfile
 import dev.phoneagent.core.model.WireSetting
 import dev.phoneagent.core.model.openai.Kit.base
@@ -237,6 +238,25 @@ class WireSnapshotTest {
             }
             assertEquals(0, server.requestCount, "nothing was sent")
         }
+
+    @Test
+    fun `the capabilities a model was created with are its own copy`() {
+        for (protocol in listOf(ModelProtocol.OPENAI_CHAT_COMPLETIONS, ModelProtocol.OPENAI_RESPONSES)) {
+            val levels = mutableListOf(ReasoningLevel.LOW, ReasoningLevel.HIGH)
+            val verified = mutableSetOf(VerifiedCapability.TOOL_CALL)
+            val given = Kit.capabilities(levels = levels).copy(verified = verified)
+            val model = model(protocol, capabilities = given)
+            val prepared = model.prepare(ReasoningLevel.HIGH)
+            val info =
+                model.info.copy(
+                    capabilities = given.copy(reasoningLevels = levels.toList(), verified = verified.toSet()),
+                )
+            levels.remove(ReasoningLevel.HIGH)
+            verified.clear()
+            assertEquals(prepared, model.prepare(ReasoningLevel.HIGH), "$protocol: prepare after the caller's change")
+            assertEquals(info, model.info, "$protocol: info after the caller's change")
+        }
+    }
 
     @Test
     fun `a request still carrying the unprepared snapshot is refused`() =
