@@ -92,7 +92,11 @@ internal data class ProviderError(
         /**
          * All of [root], JSON the server wrote that has no message field to read: not shown at all
          * when [Redactor.quote] would not show a string in it (a name or a value, decoded), else
-         * written back whole and masked.
+         * written back with each string masked while it is decoded text ([masked]), then masked
+         * whole once more for what no string holds (a secret written as a number). Strings are
+         * masked before they are written back: writing back turns a control character into an
+         * escape that ends in a letter (`\n`, `\t`), and a credential shape right after it would
+         * lose the word boundary it starts with.
          */
         private fun whole(
             root: JsonElement,
@@ -101,7 +105,19 @@ internal data class ProviderError(
             if (root.strings().any { redactor.quote(it) == Redactor.WITHHELD }) {
                 Redactor.WITHHELD
             } else {
-                redactor.text(root.toString())
+                redactor.text(root.masked(redactor).toString())
+            }
+
+        /**
+         * This element with each string in it (member names and string values, at any depth) masked
+         * as [Redactor.text] masks decoded text. Members whose names mask alike are kept as one, the
+         * later value: it only shows less.
+         */
+        private fun JsonElement.masked(redactor: Redactor): JsonElement =
+            when (this) {
+                is JsonPrimitive -> if (isString) JsonPrimitive(redactor.text(content)) else this
+                is JsonObject -> JsonObject(entries.associate { redactor.text(it.key) to it.value.masked(redactor) })
+                is JsonArray -> JsonArray(map { it.masked(redactor) })
             }
 
         /** Every string in this element: member names and string values, at any depth. */
