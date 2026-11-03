@@ -260,11 +260,13 @@ internal object NodeActions {
      *
      * Ancestors are those of the snapshot [detail] shows of [read] ([TreeRead.project]: each
      * [UiElement.parent] up), not the accessibility tree's: the rule the policy applies to the
-     * planned snapshot, and the action's read is at that snapshot's detail. When the screen changed
-     * since, so that the two give the press to different elements, [press] does not make it. A
-     * node the read leaves out (invisible, too small, or alike to the nearest kept one above) or
-     * [detail] does not show gets no node action and is not counted: the limit counts elements of
-     * the snapshot, however many accessibility parents lie between, and is the 8 the policy takes.
+     * planned snapshot (on the re-check after an approval, it judges the screen S′ read for that
+     * instead; phase1 §3.3), and the action's read is at that snapshot's detail. When the screen
+     * changed since, so that the two give the press to different elements, [press] does not make
+     * it. A node the read leaves out (invisible, too small, or alike to the nearest kept one
+     * above) or [detail] does not show gets no node action and is not counted: the limit counts
+     * elements of the snapshot, however many accessibility parents lie between, and is the 8 the
+     * policy takes.
      * Taking the press and covering the center are judged as the snapshot shows them:
      * [UiElement.states] and the 0–999 [UiElement.bounds], edges included, around the center
      * `((left + right) / 2, (top + bottom) / 2)`.
