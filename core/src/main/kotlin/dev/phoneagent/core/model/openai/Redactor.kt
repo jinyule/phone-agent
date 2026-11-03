@@ -10,10 +10,12 @@ import java.util.IdentityHashMap
  * occurrence of the secrets a request used becomes [MASK], each as sent and in its standard JSON
  * string escaping (`"` → `\"`, `\` → `\\`: [forms]); then text shaped like a credential
  * (`Bearer …`, `sk-…`, JWTs) is masked whether or not this request used it. Error codes and
- * parameter names never match these shapes, so the diagnosis survives. Provider text that was
- * not read as JSON fields can escape a secret in other ways (`\/`, a `u` escape): it is not
- * quoted at all when its escapes hide a credential ([quote]). Reply content is never quoted
- * ([Unquoted]).
+ * parameter names never match these shapes, so the diagnosis survives. A reader of raw provider
+ * text masks only the exact forms ([exact]) and leaves the shapes until the text is parsed and
+ * decoded: a shape matched on raw text stops at the first escape and leaves the rest of a key to
+ * read once decoded. A field the server wrote is shown as [field] shows it; text that was not
+ * read as JSON fields can escape a secret in other ways (`\/`, a `u` escape) and is not quoted at
+ * all when its escapes hide a credential ([quote]). Reply content is never quoted ([Unquoted]).
  *
  * Every secret is matched exactly, however short: a length threshold would let a short real
  * credential through, and the shapes do not recognize values such as `test`. A local service that
