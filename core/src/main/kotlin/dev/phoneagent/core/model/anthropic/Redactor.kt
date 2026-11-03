@@ -64,6 +64,15 @@ internal class Redactor(
     }
 
     /**
+     * A field the provider wrote, read decoded from JSON (an error's message, a refusal's category):
+     * masked, or [WITHHELD] when its own text writes a credential with escapes the JSON decoding
+     * left (`\u0073k-…` inside the string), which masking it as decoded misses. It is masked
+     * before [quote] decodes it, so a secret written plainly is masked rather than withheld, and
+     * the field still says what went wrong.
+     */
+    fun field(decoded: String): String = quote(text(decoded))
+
+    /**
      * The length of the end of [masked] (what [text] returned for text a read limit cut off) that
      * may be the start of a credential that went on: the longest end that begins a [forms] entry, or a
      * `sk-` key or JWT the cut left too short for its shape. The reader drops it.

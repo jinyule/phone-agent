@@ -51,8 +51,9 @@ internal data class AnthropicError(
         /**
          * Reads `{"error": {"type", "message"}}`, also the flat `{"type", "message"}` and the
          * `{"error": "text"}` some gateways send. The message field is masked once decoded (JSON
-         * escapes can hide a secret from a scan of the raw text); a body without one is its own
-         * message, as [Redactor.quote] shows provider text.
+         * escapes can hide a secret from a scan of the raw text), or withheld when its own text hides
+         * one behind further escapes ([Redactor.field]); a body without one is its own message, as
+         * [Redactor.quote] shows provider text.
          */
         fun of(
             root: JsonObject,
@@ -61,7 +62,7 @@ internal data class AnthropicError(
             val inner = root["error"] as? JsonObject ?: root
             val field = inner.text("message") ?: (root["error"] as? JsonPrimitive)?.contentOrNull
             val type = inner.text("type")?.takeIf { it != "error" }
-            return AnthropicError(type, field?.let(redactor::text) ?: redactor.quote(root.toString()))
+            return AnthropicError(type, field?.let(redactor::field) ?: redactor.quote(root.toString()))
         }
 
         private fun JsonObject.text(key: String): String? =

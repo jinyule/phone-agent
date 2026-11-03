@@ -71,6 +71,22 @@ class RedactorTest {
     }
 
     @Test
+    fun `a decoded field is masked, or withheld when its own escapes hide a credential`() {
+        val slashed = "placeholder/with-slash-00001"
+        val redactor = Redactor(listOf(slashed))
+        val backslash = Char(92)
+        assertEquals("invalid x-api-key", redactor.field("invalid x-api-key"), "a field that holds nothing is kept")
+        assertEquals("invalid x-api-key: ***", redactor.field("invalid x-api-key: $slashed"), "a plain key is masked")
+        for (escape in listOf("$backslash/", "${backslash}u002F")) {
+            val layered = "invalid x-api-key: placeholder${escape}with-slash-00001"
+            assertEquals(Redactor.WITHHELD, redactor.field(layered), "a key behind the field's own escapes")
+        }
+        // Assembled at run time so secret scanners do not take the placeholder for a real key.
+        val shaped = "s${backslash}u006b-" + "abcdefghijkl"
+        assertEquals(Redactor.WITHHELD, Redactor.SHAPES_ONLY.field("Invalid API key: $shaped"), "a credential shape")
+    }
+
+    @Test
     fun `clean causes are kept as they are`() {
         val error = IOException("connection reset", IllegalStateException("inner"))
         assertSame(error, Redactor(listOf(secret)).cause(error))
