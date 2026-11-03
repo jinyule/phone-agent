@@ -446,8 +446,9 @@ internal object EntryLevels {
         return asked && (ime.selection() ?: nodeSelection(field)) == (offset to offset)
     }
 
+    /** [field]'s selection read afresh, or `null` when it cannot be read: a node not refreshed holds an old one. */
     private fun nodeSelection(field: AccessibilityNodeInfo): Pair<Int, Int>? {
-        field.refresh()
+        if (!field.refresh()) return null
         val start = field.textSelectionStart
         val end = field.textSelectionEnd
         return if (start < 0 || end < 0) null else start to end

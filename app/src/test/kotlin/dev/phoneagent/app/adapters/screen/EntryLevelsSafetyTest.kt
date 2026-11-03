@@ -9,6 +9,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Shadows.shadowOf
 
 /**
  * The text-entry levels do not damage a field when they cannot place the cursor (fix list r1 B6).
@@ -121,6 +122,24 @@ class EntryLevelsSafetyTest {
                 assertFalse(request.text, AccessibilityNodeInfo.ACTION_PASTE in field.log.ids)
                 assertTrue(request.text, clipboard.log.none { it.startsWith("put") })
             }
+        }
+
+    @Test
+    fun pasteDoesNotTrustASelectionItCouldNotReadAgain() =
+        runTest {
+            // Fix list r3 S3 (Codex r3 S2): SET_SELECTION says yes, then the node cannot be refreshed;
+            // the selection it still holds is from before.
+            field.setTextSelection(0, 5)
+            shadowOf(field).setRefreshReturnValue(false)
+            val clipboard = Clipboard()
+
+            val request = TextEntry.Request("Bye", append = false, before = "Hello")
+
+            val sent = EntryLevels.paste(field, clipboard) {}.send(request)
+
+            assertEquals(TextEntry.Sent.Skipped("cannot place the cursor"), sent)
+            assertFalse(AccessibilityNodeInfo.ACTION_PASTE in field.log.ids)
+            assertTrue(clipboard.log.none { it.startsWith("put") })
         }
 
     @Test
