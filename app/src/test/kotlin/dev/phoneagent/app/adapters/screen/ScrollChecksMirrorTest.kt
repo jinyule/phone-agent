@@ -10,6 +10,7 @@ import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.ports.UiElement
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -126,12 +127,91 @@ class ScrollChecksMirrorTest {
             moved.forEach { (was, now) -> assertEquals("ref of '${was.name}'", was.ref, now.ref) }
         }
 
+    /**
+     * A list of Settings rows from [top] down, as a RecyclerView reports them: each row is a
+     * clickable container with a title and a summary in its upper part and padding below; a row
+     * scrolled wholly out is gone, one scrolled partly out has bounds cut at the list's edge, and
+     * its children out of view are not visible to the user.
+     */
+    private fun settingsList(
+        titles: List<String>,
+        top: Int,
+    ): AccessibilityNodeInfo {
+        val list =
+            node("androidx.recyclerview.widget.RecyclerView", Rect(0, Feed.LIST_TOP, 1000, Feed.LIST_BOTTOM)) {
+                isScrollable = true
+            }
+        titles.forEachIndexed { index, title ->
+            val y = top + index * ROW_PX
+            if (y + ROW_PX > Feed.LIST_TOP) {
+                val part = { label: String, from: Int, to: Int ->
+                    node("android.widget.TextView", Rect(200, y + from, 800, y + to)) {
+                        text = label
+                        isVisibleToUser = y + to > Feed.LIST_TOP
+                    }
+                }
+                list.with(
+                    node("android.widget.LinearLayout", Rect(0, maxOf(y, Feed.LIST_TOP), 1000, y + ROW_PX)) {
+                        isClickable = true
+                    }.with(part(title, 0, LABELS_PX / 2), part("$title, details", LABELS_PX / 2, LABELS_PX)),
+                )
+            }
+        }
+        return list
+    }
+
+    @Test
+    fun aRowWhoseBorrowedNameScrolledAwayKeepsItsRefAndPassesTheDeviceCheck() =
+        runTest {
+            // Fix list r3 S5: the device's Battery row; its title and summary scrolled out of view,
+            // only its padding is left, so the name it borrows from them is gone.
+            val port = mainPort(host)
+            host.show(settingsList(PEOPLE.take(ROWS), top = Feed.LIST_TOP))
+            val before = port.snapshot()
+            host.show(settingsList(PEOPLE.take(ROWS), top = Feed.LIST_TOP - ROW_PX - SCROLLED_INTO_PADDING))
+
+            val after = port.snapshot()
+
+            val vanished = vanishedRefs(before, after)
+            val reused = reusedRefs(before, after, vanished)
+            assertEquals(1, reused.size)
+            val (was, now) = reused.single()
+            assertEquals("Person B Person B, details", was.name)
+            assertTrue("passes the device check: $reused", passesTheDeviceCheck(reused, after))
+            assertEquals(null, now.name)
+        }
+
+    @Test
+    fun anotherRowCutDownTheSameWayDoesNotTakeTheRefOfARowScrolledAway() =
+        runTest {
+            // The negative: Person B scrolls away wholly, Person C is cut down to its padding at the
+            // same place; the device check alone would let C reuse B's ref.
+            val port = mainPort(host)
+            host.show(settingsList(PEOPLE.take(ROWS), top = Feed.LIST_TOP - SCROLLED_INTO_PADDING))
+            val before = port.snapshot()
+            host.show(settingsList(PEOPLE.take(ROWS), top = Feed.LIST_TOP - 2 * ROW_PX - SCROLLED_INTO_PADDING))
+
+            val after = port.snapshot()
+
+            val bob = before.elements.single { it.name == "Person B Person B, details" }
+            val cy = after.elements.single { it.role == bob.role && it.parent == bob.parent && it.name == null }
+            val cyBefore = before.elements.single { it.name == "Person C Person C, details" }
+            assertTrue(
+                "the device check alone would let C take B's ref",
+                passesTheDeviceCheck(listOf(bob to cy), after),
+            )
+            assertNotEquals("C does not take B's ref", bob.ref, cy.ref)
+            assertEquals("C keeps its own", cyBefore.ref, cy.ref)
+        }
+
     private companion object {
         const val WRAPPERS = 4
         const val SYSTEM_UI = "com.android.systemui"
         const val STATUS_BAR = 50
         const val ROWS = 16
         const val SCROLLED = 3
+        const val LABELS_PX = 80
+        const val SCROLLED_INTO_PADDING = 90
         val PEOPLE = ('A'..'Z').map { "Person $it" }
 
         /**
@@ -158,6 +238,33 @@ class ScrollChecksMirrorTest {
                         was to it
                     }
             }
+        }
+
+        /** The elements of [after] that took a ref of [vanished], with the element of [before] it was. */
+        fun reusedRefs(
+            before: ScreenSnapshot,
+            after: ScreenSnapshot,
+            vanished: Set<ElementRef>,
+        ): List<Pair<UiElement, UiElement>> =
+            after.elements.filter { it.ref in vanished }.map { now ->
+                before.elements.single { it.ref == now.ref } to now
+            }
+
+        /**
+         * The device test's check on [reused] refs of [after]: at most one, a row cut at the top of
+         * its list (same role and parent, no name left, lower than before).
+         */
+        fun passesTheDeviceCheck(
+            reused: List<Pair<UiElement, UiElement>>,
+            after: ScreenSnapshot,
+        ): Boolean {
+            val height = { element: UiElement -> element.bounds.bottom - element.bounds.top }
+            return reused.size <= 1 &&
+                reused.all { (was, now) ->
+                    val list = after.elements.singleOrNull { it.ref == now.parent }
+                    now.role == was.role && now.parent == was.parent && now.name == null &&
+                        height(now) < height(was) && list != null && now.bounds.top <= list.bounds.top
+                }
         }
 
         /** Refs of the named elements of [before] whose name is nowhere on [after]. */

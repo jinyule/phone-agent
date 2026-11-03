@@ -164,17 +164,11 @@ class AndroidScreenDeviceTest {
             assertTrue("some named row scrolled away", vanished.isNotEmpty())
             // A row still partly in view keeps its ref (its identity holds its clipped labels), though
             // the name it borrows from visible text is gone; any other ref of a vanished name is void.
-            val reused =
-                scrolled.after!!.elements.filter { it.ref in vanished }.map { now ->
-                    dragged.after!!.elements.single { it.ref == now.ref } to now
-                }
+            val reused = reusedRefs(dragged.after!!, scrolled.after!!, vanished)
             log("refs kept by rows still partly in view: ${reused.map { (was, now) -> "$was -> $now" }}")
-            val height = { element: UiElement -> element.bounds.bottom - element.bounds.top }
             assertTrue(
                 "no ref of a row scrolled away is reused: $reused",
-                reused.all { (was, now) ->
-                    now.role == was.role && now.parent == was.parent && now.name == null && height(now) < height(was)
-                },
+                keptOnlyByARowCutAtTheTop(reused, scrolled.after!!),
             )
             assertTrue("the bars are not part of the screen", scrolled.after!!.elements.none { it.window in bars })
 
@@ -341,6 +335,32 @@ class AndroidScreenDeviceTest {
                         it.bounds.bottom - it.bounds.top == was.bounds.bottom - was.bounds.top
                 }?.let { was to it }
         }
+    }
+
+    /** The elements of [after] that took a ref of [vanished], with the element of [before] it was. */
+    private fun reusedRefs(
+        before: ScreenSnapshot,
+        after: ScreenSnapshot,
+        vanished: Set<ElementRef>,
+    ): List<Pair<UiElement, UiElement>> =
+        after.elements.filter { it.ref in vanished }.map { now -> before.elements.single { it.ref == now.ref } to now }
+
+    /**
+     * Whether [reused] refs of [after] are at most one, a row cut at the top of its list: same role
+     * and parent, no name left, lower than before (fix list r3 S5; mirrored on the JVM by
+     * ScrollChecksMirrorTest, which also shows a row cut the same way that must not pass).
+     */
+    private fun keptOnlyByARowCutAtTheTop(
+        reused: List<Pair<UiElement, UiElement>>,
+        after: ScreenSnapshot,
+    ): Boolean {
+        val height = { element: UiElement -> element.bounds.bottom - element.bounds.top }
+        return reused.size <= 1 &&
+            reused.all { (was, now) ->
+                val list = after.elements.singleOrNull { it.ref == now.parent }
+                now.role == was.role && now.parent == was.parent && now.name == null &&
+                    height(now) < height(was) && list != null && now.bounds.top <= list.bounds.top
+            }
     }
 
     /** Refs of the named elements of [before] whose name is nowhere on [after]. */
