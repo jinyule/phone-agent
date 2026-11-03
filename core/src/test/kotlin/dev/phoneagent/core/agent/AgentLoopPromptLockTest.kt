@@ -334,8 +334,8 @@ class AgentLoopPromptLockTest {
                         it.interaction.handOff(HandoffKind.LOGIN, "请登录")
                     } catch (cancelled: CancellationException) {
                         throw cancelled
-                    } catch (expected: IllegalStateException) {
-                        // The tool goes on after the surface's bug, and asks again.
+                    } catch (expected: ScreenUnavailableException) {
+                        // The surface's bug ended in a failed take-back; the tool does not act, it asks again.
                     }
                 }
             val loop = harness.start()

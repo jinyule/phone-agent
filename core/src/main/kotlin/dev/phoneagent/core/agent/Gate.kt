@@ -32,9 +32,10 @@ import kotlinx.coroutines.withTimeoutOrNull
  * `PolicyContext.approved`, on S', or on no screen when there is no screen port or the read failed
  * or took longer than [LoopConfig.recheckScreenTimeoutMs]. Whether a call may run
  * without a screen is the policy's decision, never the runtime's. Allow runs it; Refuse and
- * HandOff end as such; a new Confirm (the screen changed under the approval) is shown again, at
- * most [LoopConfig.maxReconfirmations] times per call, after which the call is refused and the
- * model told to observe and try again.
+ * HandOff end as such (a hand-off whose take-back failed as ERROR, the turn going on); a new
+ * Confirm (the screen changed under the approval) is shown again, at most
+ * [LoopConfig.maxReconfirmations] times per call, after which the call is refused and the model
+ * told to observe and try again.
  */
 internal class Gate(
     private val loop: LoopContext,
@@ -72,7 +73,7 @@ internal class Gate(
             }
 
             is Verdict.HandOff -> {
-                Ruling.Answered(handedOff(interaction.handOff(verdict.kind, verdict.hint)))
+                Ruling.Answered(handedOff(verdict, interaction))
             }
 
             is Verdict.Confirm -> {
@@ -132,6 +133,23 @@ internal class Gate(
         val verdict: Verdict,
         val seq: Long,
     )
+
+    /**
+     * Hands [verdict]'s call off; it never runs. A failed take-back ([ScreenUnavailableException]
+     * from handOff: where the app is is unknown, `Prompts`) answers the call as ERROR, and the turn
+     * goes on: no screen was read after the handoff, so the result gets [LoopTexts.screenUnknown]
+     * and the model observes first.
+     */
+    private suspend fun handedOff(
+        verdict: Verdict.HandOff,
+        interaction: UserInteraction,
+    ): ToolResult =
+        try {
+            handedOff(interaction.handOff(verdict.kind, verdict.hint))
+        } catch (expected: ScreenUnavailableException) {
+            // A failed take-back, not a refusal: the app may be with the user; the screen note follows from the log.
+            ToolResult.failure(ToolStatus.ERROR, loop.texts.handoffFailed)
+        }
 
     private fun handedOff(result: HandoffResult): ToolResult =
         when (result) {

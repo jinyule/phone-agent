@@ -220,19 +220,23 @@ class AgentLoopHandoffScreenTest {
         }
 
     @Test
-    fun `a handoff cut by an unexpected failure fails the turn with the note, and the next call sees no screen`() =
+    fun `an unexpected hand-over failure ends as a failed take-back, and the next call sees no screen`() =
         runTest {
             val policy = ScriptedPolicy(Verdict.Allow, handOff)
             val surfaces = Surfaces(handFailure = IllegalStateException("surface bug"))
-            val model = FakeChatModel().calls(call("c0", "look")).calls(call("c1", "send"))
-            val harness = harness(FakeTool("send", RiskClass.OUTWARD), policy, model, Options(surfaces = surfaces))
+            val harness =
+                harness(FakeTool("send", RiskClass.OUTWARD), policy, sameTurn("send"), Options(surfaces = surfaces))
             val loop = harness.start()
             loop.followup(text("登录以后点一下"))
             advanceUntilIdle()
-            assertEquals(Phase.Idle, loop.phase.value, "the turn failed")
 
-            assertEquals("${texts.notStarted}\n${texts.screenUnknown}", harness.resultOf(c1).text())
-            tapAfter(loop, policy, model)
+            assertEquals(
+                ToolResult.failure(ToolStatus.ERROR, "${texts.handoffFailed}\n${texts.screenUnknown}"),
+                harness.resultOf(c1),
+                "the app may be with the user: not refused as if nothing moved",
+            )
+            assertEquals(Phase.Done, loop.phase.value, "the turn goes on")
+            assertTappedOnNoScreen(policy)
         }
 
     @Test

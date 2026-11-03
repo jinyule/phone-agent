@@ -19,10 +19,11 @@ import dev.phoneagent.core.session.HandoffStarted
 import dev.phoneagent.core.session.PromptWithdrawn
 import dev.phoneagent.core.session.QuestionAnswered
 import dev.phoneagent.core.session.QuestionAsked
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -43,11 +44,16 @@ import kotlin.coroutines.resume
  *    budget or inside the tool, a failure).
  * 2. A handoff that ended without its end (a cut, a failure) is taken back first, or the call
  *    ends with a failed take-back: a take-back that fails, takes too long or began and was cut
- *    off, or a hand-over cut off (it may have moved the app, with no ticket to take it back),
- *    makes handOff throw [ScreenUnavailableException] (the move and the exception's class only)
- *    in place of the cancellation or failure. Tools must let it propagate, not go on acting.
- *    It is thrown whatever cut the call off: the call's own cut then ends as ERROR, its budget's
- *    as TIMEOUT (still with [LoopTexts.mayHaveTakenEffect] and [LoopTexts.screenUnknown]).
+ *    off, or a hand-over that did not settle, makes handOff throw [ScreenUnavailableException]
+ *    (the move and the exception's class only) in place of the cancellation or failure. A
+ *    hand-over settles only with a ticket or a [ScreenUnavailableException] from the port (the
+ *    one failure it promises moved nothing, `SurfaceManager.handToUser`); any other end (another
+ *    exception, an Error, the port's own timeout, a cancellation, whatever the job's state) may
+ *    have moved the app and left no ticket, so it is a failed take-back even when the call was not
+ *    cut (its `handoff/end` FAILED, and no fresh look). Tools must let it propagate, not go on
+ *    acting. It is thrown whatever cut the call off: the call's own cut then ends as ERROR, its
+ *    budget's as TIMEOUT (still with [LoopTexts.mayHaveTakenEffect] and [LoopTexts.screenUnknown]).
+ *    An Error is never replaced: it propagates with what closing threw attached (suppressed).
  * 3. The only exceptions: a stopping task leaves the prompt to the repair and a handed-over app
  *    with the user; a failed log stops the task with ERROR.
  */
@@ -128,8 +134,9 @@ internal class Prompts(
                     val (result, detail) =
                         if (loop.unattended) HandoffResult.UNAVAILABLE to null else handOver(id, kind, moves)
                     loop.log.append(HandoffEnded(id, result, detail))
-                    // The user may have changed the screen: look again before the model's next request.
-                    freshScreen(loop, callId)
+                    // The user may have changed the screen: look again before the model's next request,
+                    // unless the app may still be with the user (then closing throws, see [Moves.giveBack]).
+                    if (moves?.unsettled != true) freshScreen(loop, callId)
                     result
                 }
             }
@@ -138,9 +145,10 @@ internal class Prompts(
          * Moves the task to the user and back with [moves] when there is a [SurfaceManager];
          * without one (main-display mode) the user acts where the task already is. Moving failures
          * ([IOException], as the ports report device trouble) end the handoff as FAILED with a
-         * detail naming the move and the exception's class only (its text may quote the screen).
-         * A handoff the call cuts off itself is taken back at once ([Moves.giveBack]); a stop while
-         * handed over leaves the app with the user.
+         * detail naming the move and the exception's class only (its text may quote the screen);
+         * a hand-over that failed with anything but [ScreenUnavailableException] is unsettled, and
+         * handOff then throws ([Moves.giveBack]). A handoff the call cuts off itself is taken back
+         * at once ([Moves.giveBack]); a stop while handed over leaves the app with the user.
          */
         private suspend fun handOver(
             id: PromptId,
@@ -151,8 +159,8 @@ internal class Prompts(
         /**
          * The moves of one handoff over [surfaces]: its ticket is taken back at most once (it is no
          * longer held once the take-back began; [giveBack] runs once, when the prompt is settled).
-         * A move that began and was cut off counts as a failed take-back: a take-back, and a
-         * hand-over too (it may have moved the app, and left no ticket to take it back with).
+         * A take-back that began and was cut off, and a hand-over that began and did not settle
+         * ([unsettled]), count as a failed take-back.
          */
         private inner class Moves(
             private val surfaces: SurfaceManager,
@@ -179,34 +187,50 @@ internal class Prompts(
                 )
 
             /**
-             * Hands the app over; [handing] stays set only when a cancellation ends it, as the app
-             * may have moved. A failure (or a bug) means it did not.
+             * Whether the app may be with the user without a ticket: a hand-over began and did not
+             * settle. Judged by how the port's call ended only, never by the job's state.
+             */
+            val unsettled: Boolean get() = handing
+
+            /**
+             * Hands the app over. A cut that lands before the port's call moves nothing; from just
+             * before it, [handing] is set until the call settles: with a ticket (handed over) or a
+             * [ScreenUnavailableException] (nothing moved, the one failure the port promises that
+             * of). Any other end leaves it set: the app may have moved.
              */
             private suspend fun handToUser(kind: HandoffKind): Result<HandoffTicket> {
-                var returned = false
+                currentCoroutineContext().ensureActive()
                 handing = true
-                try {
-                    return moving("hand over") { surfaces.handToUser(loop.setup.taskId, kind) }
-                        .also { returned = true }
-                } finally {
-                    handing = stillHanding(returned)
+                return moving("hand over") {
+                    val ticket =
+                        try {
+                            surfaces.handToUser(loop.setup.taskId, kind)
+                        } catch (unmoved: ScreenUnavailableException) {
+                            // Settled: the port promises nothing moved (SurfaceManager.handToUser).
+                            handing = false
+                            throw unmoved
+                        }
+                    handing = false
+                    ticket
                 }
             }
 
-            /** Whether a hand-over that did not return was ended by a cancellation. */
-            private suspend fun stillHanding(returned: Boolean): Boolean =
-                !returned && currentCoroutineContext().job.isCancelled
-
             /**
              * Takes the task back after the call cut its handoff off, unless the app is not with
-             * the user (never handed over). A hand-over or a take-back that already began and was
-             * cut off, or a take-back that fails or takes longer than
-             * [LoopConfig.takeBackTimeoutMs], throws [ScreenUnavailableException] naming the move
-             * and the exception's class only, in place of the cancellation: the call must not go on
-             * as if the app were back.
+             * the user (never handed over). A hand-over that did not settle (cut off or not), a
+             * take-back that already began and was cut off, or a take-back that fails or takes
+             * longer than [LoopConfig.takeBackTimeoutMs], throws [ScreenUnavailableException]
+             * naming the move only, in place of the cancellation or failure: the call must not go
+             * on as if the app were back.
              */
             override suspend fun giveBack() {
-                if (backing || handing) throw ScreenUnavailableException("take back failed: cut off")
+                val unfinished =
+                    when {
+                        handing -> "hand over unsettled"
+                        backing -> "cut off"
+                        else -> null
+                    }
+                unfinished?.let { throw ScreenUnavailableException("take back failed: $it") }
                 val ticket = held ?: return
                 val back =
                     withTimeoutOrNull(loop.config.takeBackTimeoutMs) {
@@ -246,31 +270,47 @@ internal class Prompts(
      * tool, a failure), the prompt is closed in the log before the lock is released: when the log
      * still has it open, `prompt/withdrawn`, then [moves]' [GiveBack.giveBack], both under
      * NonCancellable; then what ended it propagates (a cancellation, a failure), or what a failed
-     * take-back throws instead. Judged by the log alone, so a record whose write began before the
-     * cut is never followed by a second.
+     * take-back throws instead; an Error always propagates, what closing threw suppressed on it.
+     * Judged by the log alone, so a record whose write began before the cut is never followed by
+     * a second.
      * When the task is [stopping], the repair withdraws the prompt and a handed-over app stays with
      * the user; when the log has failed, its exception propagates and the task stops with ERROR.
      */
+    @Suppress("TooGenericExceptionCaught") // Only to keep an Error from being replaced by what closing throws.
     private suspend fun <T> settled(
         id: PromptId,
         moves: GiveBack? = null,
         prompt: suspend () -> T,
     ): T {
+        var bug: Error? = null
         try {
             return prompt()
+        } catch (error: Error) {
+            bug = error
+            throw error
         } finally {
-            closeIfOpen(id, moves)
+            closeIfOpen(id, moves, bug)
         }
     }
 
+    /** Closes prompt [id] (see [settled]); with [bug] pending, what closing throws is suppressed on it instead. */
+    @Suppress("TooGenericExceptionCaught") // Whatever closing throws (a failed take-back, the log's failure).
     private suspend fun closeIfOpen(
         id: PromptId,
         moves: GiveBack?,
+        bug: Error?,
     ) {
         if (stopping()) return
-        withContext(NonCancellable) {
-            if (id in openPrompts(loop.log.records())) loop.log.append(PromptWithdrawn(id))
-            moves?.giveBack()
+        try {
+            withContext(NonCancellable) {
+                if (id in openPrompts(loop.log.records())) loop.log.append(PromptWithdrawn(id))
+                moves?.giveBack()
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (closing: Exception) {
+            if (bug == null) throw closing
+            bug.addSuppressed(closing)
         }
     }
 

@@ -25,6 +25,7 @@ import dev.phoneagent.core.ports.HandoffTicket
 import dev.phoneagent.core.ports.Question
 import dev.phoneagent.core.ports.ScreenPort
 import dev.phoneagent.core.ports.ScreenSnapshot
+import dev.phoneagent.core.ports.ScreenUnavailableException
 import dev.phoneagent.core.ports.SnapshotOptions
 import dev.phoneagent.core.ports.SurfaceAllocation
 import dev.phoneagent.core.ports.SurfaceCapability
@@ -223,7 +224,10 @@ class AgentLoopPolicyTest {
             )
         }
 
-    /** Moves tasks; fails the moves named in [failing]. */
+    /**
+     * Moves tasks; fails the moves named in [failing]: handing over with ScreenUnavailableException
+     * (the port's "nothing moved", so a plain hand-off failure), taking back with an IOException.
+     */
     private class FakeSurfaces(
         private val failing: Set<String> = emptySet(),
     ) : SurfaceManager {
@@ -240,7 +244,7 @@ class AgentLoopPolicyTest {
             kind: HandoffKind,
         ): HandoffTicket {
             moves += "hand"
-            if ("hand" in failing) throw IOException("display gone")
+            if ("hand" in failing) throw ScreenUnavailableException("display gone")
             return HandoffTicket(task, kind, SurfaceRef(7, SurfaceKind.AGENT), "t1")
         }
 
@@ -287,8 +291,8 @@ class AgentLoopPolicyTest {
                     .only<HandoffEnded>()
                     .single()
             assertEquals(HandoffResult.FAILED, ended.result)
-            assertEquals("hand over failed: java.io.IOException", ended.detail)
-            assertEquals(LoopTexts().handoffFailed, first.result().text())
+            assertEquals("hand over failed: ${ScreenUnavailableException::class.java.name}", ended.detail)
+            assertEquals(ToolResult.failure(ToolStatus.REFUSED, LoopTexts().handoffFailed), first.result())
 
             val noBack = FakeSurfaces(failing = setOf("back"))
             val second = send(ScriptedPolicy(handOff), surfaces = noBack)
