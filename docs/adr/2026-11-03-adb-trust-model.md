@@ -38,7 +38,7 @@ adb 的 TLS 两端都用自签名证书，各自的检查不一样：
 
    第 1 条是这个信任模型的支点。冒充 adbd 的进程即使拿到了口令，它的 uid 也不是 2000，交接不了。**这一条不能删，也不能放宽。** 改它要先改这份 ADR。
 
-   WP12 还没进 WP13 的 base，B 段 rebase 以后要再核对一次这条依赖。
+   这些名字在集成分支 4289f67 上核对过：`HandoffGate.precheck` 在 `privileged/.../handoff/HandoffGate.kt`，`HandoffReject.NOT_SHELL` 在 `HandoffContract.kt`，`HandoffGateTest.precheckRejectsCallersOtherThanShell` 钉住第 1 条。
 
 4. **缩小暴露面：**
    - 扫描只传回环地址 `127.0.0.1`。adbd 监听所有地址（AOSP `adb_wifi.cpp` 用 INADDR_ANY），回环一定能连上，探测也不会发到局域网上；
