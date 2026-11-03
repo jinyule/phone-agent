@@ -50,6 +50,26 @@ class RedactorTest {
         assertEquals("*** ***", base.with("second-secret").text("first-secret second-secret"))
     }
 
+    /** The OpenAI adapters' cases (WP03), so the two copies of [Redactor.quote] are held to one rule. */
+    @Test
+    fun `provider text is quoted masked, or not at all when an escape hides a credential`() {
+        val slashed = "placeholder/with-slash-00001"
+        val redactor = Redactor(listOf(slashed))
+        val backslash = Char(92)
+        assertEquals("not json {", redactor.quote("not json {"), "text that holds nothing is kept")
+        assertEquals("Bad Gateway", redactor.quote("Bad Gateway"))
+        for (escape in listOf("$backslash/", "${backslash}u002F")) {
+            val cut = """{"token":"pa-1","note":"placeholder${escape}with-slash-00001"""
+            assertEquals(Redactor.WITHHELD, redactor.quote(cut), "a cut text")
+            assertEquals(Redactor.WITHHELD, redactor.quote("$cut\"}}"), "a broken text")
+            assertEquals(Redactor.WITHHELD, redactor.quote("$cut\"}"), "JSON written back")
+        }
+        assertEquals(Redactor.WITHHELD, redactor.quote("not json $slashed {"), "the secret as sent")
+        // Assembled at run time so secret scanners do not take the placeholder for a real key.
+        val shaped = "s${backslash}u006b-" + "abcdefghijkl"
+        assertEquals(Redactor.WITHHELD, Redactor.SHAPES_ONLY.quote("""{"note":"$shaped"""), "a credential shape")
+    }
+
     @Test
     fun `clean causes are kept as they are`() {
         val error = IOException("connection reset", IllegalStateException("inner"))

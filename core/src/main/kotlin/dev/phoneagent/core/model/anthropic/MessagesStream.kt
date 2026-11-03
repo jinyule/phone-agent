@@ -101,7 +101,7 @@ internal class MessagesStream(
         if (!stopped) throw ModelError.Network("stream ended before message_stop")
         blocks.open()?.let { protocol.bad("message_stop with block $it still open") }
         val reason = facts.stopReason ?: protocol.bad("message_stop without a stop_reason")
-        // The category is the server's text; it goes into the error's message, so it is masked.
+        // The category is a field the server wrote, read decoded: masked, as an error's message is.
         if (reason == "refusal") throw ModelError.Refusal(facts.refusalCategory?.let(redactor::text))
         val content = blocks.assemble(bind)
         val metadata = facts.metadata(reason, content, model)

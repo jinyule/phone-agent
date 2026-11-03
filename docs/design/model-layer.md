@@ -117,7 +117,11 @@ fun interface BlobSource {              // 读当前会话 BlobStore 里 Part.Im
   - **`discardsStreamed`**：这次 attempt 已经流出的内容不保留。runtime 不把它记成 interrupted 的 `assistant/message`，只记 `assistant/attempt` 和固定原因；界面上已经显示的片段由 UI 按这个错误撤回或标记作废（WP09）。
   - **预览 delta 不推迟发布**：适配器收到片段就交给 `onDelta`，不为了检测密钥先扣住。delta 只用来显示，从不进日志；出现带 `discardsStreamed` 的错误时，已经流出的片段同样不留在日志里，界面按上一条撤回或标记作废。
   - **匹配方式**：只做精确匹配，同时匹配密钥的 JSON 转义形式，不按形状兜底。不设最短长度，所有密钥都匹配：任何阈值都会让短的真实凭据漏出去。不需要认证的本地服务用 `Credential.None`，不要填占位 key：填了的话，它出现在回复里就会让整条回复被拒；很短的占位 key 会让回复经常被误拒，因为值和成员名都按子串匹配，key 是 `x` 时，任何带成员名 `text` 的回复都会命中，key 是 `a` 时，含字母 a 的回复都会命中。
-  - **服务端写的诊断字段**（错误正文、流内 error 事件、拒答 category、metadata）：本次密钥的原样和标准转义形式改写成 `***`，其余说明保留；宽松解码改动了文字、解码以后才现形的本次密钥或者 `sk-`、JWT 形状，整段换成固定说明（`Redactor.WITHHELD`），不留半截；没有可解码的转义时，形状在原文上打码，`Bearer` 字样只打码后面的 token，都不触发整段替换。OpenAI 适配器的具体顺序见上面"诊断不引用原文"第二类。`providerMetadata` 里打码会改动的字段整项省略，不写半截打码的值；字段里的成员名也算，数字和布尔值也算（按 JSON 里写出的样子比较，`123456`、`true` 这样的密钥同样命中），打码会改动其中任何一个，整个字段同样省略。
+  - **诊断不引用原文**：诊断文字也是出口。错误消息、异常的 message 和 cause 链、日志和诊断字段，都不引用模型或服务端回复的原文，只给固定文字加结构信息：哪个块、哪个字段、认识的取值（比如块类型 `text`、delta 类型 `text_delta`），或者内容的 JSON 种类和长度（`Unquoted`）。原因：解析器没读过的原文里，转义（`\u0070`、`\/`）能把密钥藏过脱敏。分三档（WP03 写的是同一段，后合入的一方合成一段）：
+    - **模型回复里的原文，一律不引用**：不认识的块类型和 delta 类型只说长度，重复的 tool id 只说块编号，usage 里不是计数的值只说 JSON 种类、越界的只说越界；解析失败只保留解析器开始引用输入之前的那段描述，结构残缺只写块编号和字段名。回复里的值违反中性类型的约束时（比如调用 id 含控制字符），错误只说违反了约束和异常类名，`IllegalArgumentException` 的 message 不进错误，cause 只留类名和堆栈。
+    - **服务商的错误说明，打码后保留**：解析成 JSON 以后取出的 message 字段（HTTP 错误体、流内 error 事件、整份 JSON 回复里的 error 都一样）和拒答的 `stop_details.category`，照旧脱敏后引用，并按形状兜底：它们经过了 JSON 解码，转义藏不住密钥。错误体不是 JSON 或不是 JSON 对象、JSON 里没有 message 字段只能整段引用、重定向的目标地址，这些没有按字段读过的文字先宽松解码，解码后需要脱敏，就整段换成固定说明（`Redactor.WITHHELD`），否则照旧脱敏后引用（`Redactor.quote`）。
+    - **传输异常只写类型**：OkHttp 的 `IOException` 的 message 会引用服务端的原始字节（分块长度行、连接复用时被当成状态行的多余字节、读断的行按十六进制写出），所以 `Network` 的说明按异常类型给固定文字（超时、连不上、主机名解析失败、TLS 失败、违反 HTTP 协议、连接提前结束、连接失败），加上类名和所处阶段（发请求、读回复、读错误体），cause 换成只保留类名和堆栈、不带 message 的替身（`Unquoted.io`、`Unquoted.bare`）。
+  - **服务端写的元数据**（`providerMetadata`）：打码会改动的字段整项省略，不写半截打码的值；字段里的成员名也算，数字和布尔值也算（按 JSON 里写出的样子比较，`123456`、`true` 这样的密钥同样命中），打码会改动其中任何一个，整个字段同样省略。
   - **Anthropic 适配器的做法**（`core.model.anthropic.EchoGuard`，拒绝用固定文字 `CredentialEcho.DETAIL`）：
     - 模型产生的内容包括正文、工具调用（id、名字、参数）、thinking 的文字和 `signature`、redacted_thinking、compaction，以及 `server_tool_use` 和其他不认识的块。
     - Anthropic 适配器比最低要求更严：降级前被放弃的尝试里的块也照样检查，整条拒绝的规则不变。这些块不进最终回复、不回传；其中 thinking 和工具调用已经作为 delta 显示过，`server_tool_use` 和其他不认识的块的参数到达不了任何出口，按出口原则可以不查，这里也查。两者不冲突：出口原则是最低要求，多查的部分只会让回复更早失败，不会放过该拒绝的内容。
@@ -245,7 +249,7 @@ data class WireProfile(
   - 快照总是写 `disableParallelToolCalls = true`，写 `false` 的快照在发送前报 `InvalidRequest(param = "wire.disableParallelToolCalls")`；带工具时据此发 `tool_choice.disable_parallel_tool_use:true`（主循环每步只执行一个动作）。
 - **传输**：和 OpenAI 适配器一致。
   - 每次 attempt 只发一个请求：关掉连接失败重试和重定向跟随。默认也不复用空闲连接（§3.1"连接复用"）。
-  - 3xx 报不可重试的 `InvalidRequest(param = null)`，`detail` 里带打码、截断后的目标地址。
+  - 3xx 报不可重试的 `InvalidRequest(param = null)`，`detail` 里带截断后的目标地址：按 §2 的 `Redactor.quote` 引用，宽松解码后含密钥就整段换成固定说明，否则打码。
   - SSE 认 LF、CRLF 和单独的 CR。
   - `Retry-After` 只接受有限、非负的值。
   - 取消时释放响应和连接。

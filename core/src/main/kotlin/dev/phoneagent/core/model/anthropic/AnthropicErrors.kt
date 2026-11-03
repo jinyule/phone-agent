@@ -28,7 +28,9 @@ internal data class AnthropicError(
 
         /**
          * Parses an error body; anything that is not an Anthropic error object becomes its own
-         * message. Credentials in the body are masked with [redactor] before anything is read.
+         * message, masked, or not quoted at all when its lenient decoding holds a credential
+         * ([Redactor.quote]). Credentials in the body are masked with [redactor] before anything is
+         * read from it.
          */
         fun parse(
             body: String,
@@ -40,23 +42,26 @@ internal data class AnthropicError(
                     Json.parseToJsonElement(clean)
                 } catch (notJson: SerializationException) {
                     // HTML pages and plain-text proxies: the text itself is the best message there is.
-                    return AnthropicError(null, clean.trim().ifEmpty { "(empty body: ${notJson::class.simpleName})" })
+                    val text = clean.trim().takeIf { it.isNotEmpty() }?.let(redactor::quote)
+                    return AnthropicError(null, text ?: "(empty body: ${notJson::class.simpleName})")
                 }
-            return (root as? JsonObject)?.let { of(it, redactor) } ?: AnthropicError(null, clean.trim())
+            return (root as? JsonObject)?.let { of(it, redactor) } ?: AnthropicError(null, redactor.quote(clean.trim()))
         }
 
         /**
-         * Reads `{"error": {"type", "message"}}`, also the flat `{"type", "message"}` some gateways
-         * send. The message is masked again: JSON escapes can hide a secret from a scan of the raw text.
+         * Reads `{"error": {"type", "message"}}`, also the flat `{"type", "message"}` and the
+         * `{"error": "text"}` some gateways send. The message field is masked once decoded (JSON
+         * escapes can hide a secret from a scan of the raw text); a body without one is its own
+         * message, as [Redactor.quote] shows provider text.
          */
         fun of(
             root: JsonObject,
             redactor: Redactor,
         ): AnthropicError {
             val inner = root["error"] as? JsonObject ?: root
-            val message = inner.text("message") ?: (root["error"] as? JsonPrimitive)?.contentOrNull ?: root.toString()
+            val field = inner.text("message") ?: (root["error"] as? JsonPrimitive)?.contentOrNull
             val type = inner.text("type")?.takeIf { it != "error" }
-            return AnthropicError(type, redactor.text(message))
+            return AnthropicError(type, field?.let(redactor::text) ?: redactor.quote(root.toString()))
         }
 
         private fun JsonObject.text(key: String): String? =
@@ -73,7 +78,10 @@ internal data class AnthropicError(
  * API error reference and the fixtures under `core/src/test/resources/wire/anthropic/`.
  */
 internal object AnthropicErrors {
-    /** The error for an HTTP failure; [redactor] masks the credentials the body may echo. */
+    /**
+     * The error for an HTTP failure; [redactor] masks the credentials the body and a redirect
+     * target may echo ([AnthropicError.parse], [Redactor.quote]).
+     */
     fun fromHttp(
         status: Int,
         headers: Headers,
@@ -84,7 +92,7 @@ internal object AnthropicErrors {
         if (status in Status.REDIRECTS) {
             // Redirects are not followed (one request per attempt): the same address fails again,
             // so this is a configuration error the user fixes, not something to retry.
-            val target = headers["Location"]?.let(redactor::text)?.take(LOCATION_LIMIT) ?: "an unnamed address"
+            val target = headers["Location"]?.let(redactor::quote)?.take(LOCATION_LIMIT) ?: "an unnamed address"
             return ModelError.InvalidRequest(
                 param = null,
                 detail = "HTTP $status redirect to $target: check the base URL and use the final address",

@@ -52,6 +52,18 @@ internal class Redactor(
     }
 
     /**
+     * [raw] provider text that was not read as JSON fields (an error body that is not JSON or not a
+     * JSON object, the whole of one without a message, a redirect target) masked as [text] masks
+     * it; or not quoted at all ([WITHHELD]) when its lenient decoding ([JsonEscapes.lenientDecode])
+     * needs masking, since masking it as written would miss a secret behind an escape and leave the
+     * rest readable. The OpenAI adapters' rule (WP03).
+     */
+    fun quote(raw: String): String {
+        val decoded = JsonEscapes.lenientDecode(raw)
+        return if (text(decoded) != decoded) WITHHELD else text(raw)
+    }
+
+    /**
      * The length of the end of [masked] (what [text] returned for text a read limit cut off) that
      * may be the start of a credential that went on: the longest end that begins a [forms] entry, or a
      * `sk-` key or JWT the cut left too short for its shape. The reader drops it.
@@ -117,6 +129,9 @@ internal class Redactor(
     companion object {
         /** What a masked credential reads as. */
         const val MASK: String = "***"
+
+        /** What [quote] gives for provider text that hides a credential behind its escapes. */
+        const val WITHHELD: String = "(not shown: it holds a credential)"
 
         private const val MAX_DEPTH = 8
 
