@@ -52,8 +52,8 @@ public class ProviderProbe internal constructor(
 ) {
     /**
      * `GET {baseUrl}/models`. `null` when the provider has no listing endpoint (404/405/501); the
-     * tool call step still checks the address. Throws [ModelError] for every other failure, and
-     * [IllegalArgumentException] for header values that are not valid HTTP.
+     * tool call step still checks the address. Throws [ModelError] for every other failure; the
+     * address and header values were checked when [profile] was built, with the HTTP client's rules.
      */
     public suspend fun listModels(profile: ProviderProfile): List<ListedModel>? =
         listing(profile, adapters.env, adapters.env.secret(profile.credential, rejected = false))?.models

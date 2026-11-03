@@ -146,6 +146,7 @@ class WireProfileTest {
                 { base.copy(headers = mapOf("Authorization" to "Bearer sk-test-not-a-real-key")) },
                 { base.copy(headers = mapOf("X-Goog-Api-Key" to "sk-test-not-a-real-key")) },
                 { base.copy(headers = mapOf("bad header" to "x")) },
+                { base.copy(headers = mapOf("X-Note" to "line\nbreak")) },
                 { base.copy(options = mapOf("Bad Key" to "x")) },
             )
         val accepted = bad.withIndex().filter { (_, make) -> runCatching { make() }.isSuccess }.map { it.index }

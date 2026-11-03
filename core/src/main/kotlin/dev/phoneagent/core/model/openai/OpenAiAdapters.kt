@@ -62,9 +62,8 @@ public class OpenAiAdapters internal constructor(
      * ([ProbeResult.Passed.wire]); a route never probed passes [WireOptions.defaultsFor] explicitly.
      * There is no default, so a saved negotiation cannot be dropped by omission; the model never
      * changes it. Throws [IllegalArgumentException] for
-     * profiles the OpenAI adapters cannot serve: another protocol, or header values that are not
-     * valid HTTP; and for [wire] that recovers leaked calls in a format the route does not allow
-     * ([WireOptions.allowedLeakedCalls]).
+     * profiles the OpenAI adapters cannot serve (another protocol), and for [wire] that recovers
+     * leaked calls in a format the route does not allow ([WireOptions.allowedLeakedCalls]).
      */
     public fun model(
         profile: ProviderProfile,
@@ -299,7 +298,10 @@ internal suspend fun <T> AdapterEnv.exchange(
         }
     }
 
-/** The profile's extra headers; throws [IllegalArgumentException] when a value is not valid HTTP. */
+/**
+ * The profile's extra headers. [ProviderProfile] already refuses values HTTP cannot carry; should
+ * OkHttp still refuse one, the [IllegalArgumentException] names the provider, not the value.
+ */
 internal fun ProviderProfile.httpHeaders(): Headers =
     try {
         headers.toHeaders()

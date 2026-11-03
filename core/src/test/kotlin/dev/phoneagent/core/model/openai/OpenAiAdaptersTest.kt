@@ -63,20 +63,15 @@ class OpenAiAdaptersTest {
                     Kit.blobs(),
                 )
             }
-            val badHeader = Kit.profile(server.base(), headers = mapOf("X-Note" to "line\nbreak"))
+            // A header value the HTTP client refuses cannot reach an adapter or the probe: the
+            // profile refuses it when built (ProviderProfileTest).
             for (protocol in listOf(ModelProtocol.OPENAI_CHAT_COMPLETIONS, ModelProtocol.OPENAI_RESPONSES)) {
                 val error =
                     assertThrows<IllegalArgumentException> {
-                        adapters.unprobed(
-                            badHeader.copy(protocol = protocol),
-                            Kit.MODEL,
-                            Kit.capabilities(),
-                            Kit.blobs(),
-                        )
+                        Kit.profile(server.base(), protocol = protocol, headers = mapOf("X-Note" to "line\nbreak"))
                     }
-                assertTrue(error.message!!.contains("header value"))
+                assertTrue(error.message!!.contains("not valid HTTP"))
             }
-            assertThrows<IllegalArgumentException> { adapters.probe().listModels(badHeader) }
             assertEquals(0, server.requestCount)
         }
 
