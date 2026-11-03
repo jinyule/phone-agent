@@ -181,9 +181,11 @@ private class Place(
 
 /**
  * Which fields search rather than send when submitted (policy-rules.md §2): the field says so
- * ([Fields.saysSearch]) or a search button sits on its row, and no control on its row may send or
- * pay. A control on the row whose label is too long to read whole ([Lexicon.whole]) may: what is
- * not read cannot show that nothing on the row sends (§0).
+ * ([Fields.saysSearch]) or a search button sits on its row, and no control on its row sends or
+ * does something more severe (OUTWARD or above: sending, changing settings, deleting, paying;
+ * whatever else such a control does, it may also send). A control on the row whose label is too
+ * long to read whole ([Lexicon.whole]) counts too: what is not read cannot show that nothing on
+ * the row sends (§0).
  */
 internal class Searches(
     private val lexicon: Lexicon,
