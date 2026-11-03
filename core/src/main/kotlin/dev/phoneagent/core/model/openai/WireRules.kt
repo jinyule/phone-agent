@@ -32,10 +32,12 @@ internal const val LEAKED_CALL_FORMATS: String = "leaked_call_formats"
 
 /**
  * The wire snapshot rules of one model (model-layer §2 "线路快照"): what [prepare] gives and what
- * [accept] takes. Built once, when the model is created, from the profile, its [WireOptions] and
- * the model's capabilities; it keeps copies of them, so a later change of the live settings
- * reaches no snapshot. [prepare] clamps the level with [clampTo] and maps it in the same step;
- * everything else in the snapshot is fixed for the life of the model.
+ * [accept] takes. Built once, when the model is created, from the profile (its headers copied by
+ * [ProviderProfile.wire]), its [WireOptions] and the model's own copy of its
+ * capabilities ([OpenAiAdapters.model]), so a later change of the live settings reaches no
+ * snapshot; nothing writes to what it keeps, and every snapshot it gives shares it. [prepare]
+ * clamps the level with [clampTo] and maps it in the same step; everything else in the snapshot
+ * is fixed for the life of the model.
  *
  * - Chat Completions: the reasoning field and its echo, the profile's headers, images inline only
  *   with vision, the output cap in [ChatQuirks.maxTokensField], the level in the
@@ -58,7 +60,7 @@ internal class WireRules private constructor(
         val effort = level?.let { effortField()?.let { field -> WireSetting(field, it.wireValue) } }
         return RequestSettings(
             level,
-            base.copy(headers = base.headers.toMap(), options = base.options.toMap(), reasoningEffort = effort),
+            base.copy(reasoningEffort = effort),
         )
     }
 
@@ -185,7 +187,7 @@ internal class WireRules private constructor(
             return WireRules(
                 profile.protocol,
                 base,
-                capabilities.reasoningLevels?.toList(),
+                capabilities.reasoningLevels,
                 chat.reasoningEffort,
                 options.allowedLeakedCalls(profile),
             )
