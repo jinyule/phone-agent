@@ -128,15 +128,15 @@ class PressTargetTest {
      * Presses the label by ref on a snapshot at [detail], and checks the press went where that
      * snapshot gives it: the node of that element took the click (and no other node any action),
      * or, with none, one gesture at the label's center, held as a press of its kind is. With
-     * [then], that screen is shown between the snapshot and the press. Returns the element the
-     * snapshot gives the press to.
+     * [then], that screen is shown between the snapshot and the press. The snapshot is taken on
+     * [port]. Returns the element the snapshot gives the press to.
      */
     private suspend fun TestScope.pressGoesWhereTheSnapshotSays(
         detail: SnapshotDetail,
         long: Boolean,
         then: (() -> AccessibilityNodeInfo)? = null,
+        port: AndroidScreen = mainPort(host),
     ): UiElement? {
-        val port = mainPort(host)
         val planned = port.snapshot(SnapshotOptions(detail = detail))
         val target = planned.elements.single { it.resourceId == "label" }
         val expected = planned.pressed(target, long)
@@ -552,6 +552,30 @@ class PressTargetTest {
 
                     assertEquals("${case.name} in $detail", case.from, expected?.resourceId)
                 }
+            }
+        }
+
+    @Test
+    fun aPressIsToldByThePairingNotByTheElementsPlaceInTheRead() =
+        runTest {
+            // A label above the row on the first screen, gone on the second: every element of the
+            // window gets a new ref, so the refs of the planned snapshot are not the places of its
+            // elements in the read. The press still goes to the row.
+            for (detail in SnapshotDetail.entries) {
+                made.clear()
+                host.gestures.clear()
+                val port = mainPort(host)
+                val row = {
+                    val inside = layout("row", rowBox) { isClickable = true }.with(label(textBox))
+                    layout("outer") { isClickable = true }.with(inside)
+                }
+                host.show(button("Back", Rect(0, 100, 1000, 200)), row())
+                port.snapshot(SnapshotOptions(detail = detail))
+                host.show(row())
+
+                val expected = pressGoesWhereTheSnapshotSays(detail, long = false, port = port)
+
+                assertEquals(detail.name, "row", expected?.resourceId)
             }
         }
 }
