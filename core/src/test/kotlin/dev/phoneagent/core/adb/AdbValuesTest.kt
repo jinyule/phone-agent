@@ -94,7 +94,7 @@ class AdbValuesTest {
                 .device.guid
                 .isNotEmpty(),
         )
-        assertEquals(5, CommandFailure.entries.size)
+        assertEquals(6, CommandFailure.entries.size)
         assertEquals(5, ConnectFailure.entries.size)
     }
 }

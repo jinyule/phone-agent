@@ -4,8 +4,9 @@
  * Modified by PhoneAgent contributors: English documentation; failures are a typed result; TLS is
  * required (a plain CNXN or legacy AUTH reply is a protocol failure); no reader thread and no
  * open streams in the API: a session runs one fixed command at a time to completion (see
- * AdbCommand.kt), with the shell protocol for the exit status; handshake checksums follow the
- * sender's version (Mika does not check them).
+ * AdbCommand.kt), with the shell protocol for the exit status, and checks every packet of the
+ * stream against its state and ids; handshake checksums follow the sender's version (Mika does
+ * not check them).
  */
 package dev.phoneagent.core.adb
 
@@ -99,7 +100,10 @@ internal class AdbHandshake(
         val output = step(ConnectFailure.TLS) { socket.outputStream }
         val cnxn =
             step(ConnectFailure.UNAUTHORIZED) { readHandshakePacket(input) }
-                ?: fail(ConnectFailure.UNAUTHORIZED, "adbd closed the connection after TLS: our key is not paired")
+                ?: fail(
+                    ConnectFailure.UNAUTHORIZED,
+                    "adbd closed the connection after TLS: our key is not paired",
+                )
         return accept(PendingHandshake(socket, input, output, cnxn))
     }
 
@@ -194,8 +198,11 @@ internal class AdbHandshake(
     ): Nothing = throw ConnectError(reason, detail)
 
     companion object {
-        /** We are a host; the shell protocol is the only feature we use. */
-        private val HOST_BANNER = "host::features=${AdbFeatures.SHELL_V2}\u0000".toByteArray(Charsets.US_ASCII)
+        /**
+         * We are a host; the shell protocol is the only feature we use. No NUL at the end: adbd
+         * takes the whole payload as the banner (AOSP host's `get_connection_string` sends none).
+         */
+        private val HOST_BANNER = "host::features=${AdbFeatures.SHELL_V2}".toByteArray(Charsets.US_ASCII)
 
         /** The connection failure that [failure] in a step of [reason] stands for. */
         fun classify(
@@ -256,9 +263,10 @@ internal object AdbFeatures {
 
 /**
  * An authorized connection to adbd that runs fixed commands one at a time ([run]); there is no
- * way to open other services or keep a shell open. A failure other than [CommandFailure.REFUSED],
- * a timeout or a cancellation closes the session, since the stream is then in an unknown state.
- * Safe to use from several coroutines (runs are serialized); [close] may be called at any time.
+ * way to open other services or keep a shell open. A failure other than [CommandFailure.REFUSED]
+ * and [CommandFailure.TOO_LONG], a timeout or a cancellation closes the session, since the stream
+ * is then in an unknown state. Safe to use from several coroutines (runs are serialized); [close]
+ * may be called at any time.
  */
 public class AdbSession internal constructor(
     private val handshake: Handshake,
@@ -294,7 +302,7 @@ public class AdbSession internal constructor(
             if (closed) return@withLock CommandResult.Failed(CommandFailure.CLOSED, "the session is closed")
             val localId = nextLocalId++
             val shell = AdbFeatures.SHELL_V2 in features
-            val exchange = CommandExchange(handshake, localId, shell, config.maxOutputBytes)
+            val exchange = CommandExchange(handshake, localId, shell, config)
             val result =
                 try {
                     withTimeoutOrNull(config.commandTimeoutMs) {
@@ -321,23 +329,29 @@ public class AdbSession internal constructor(
     override fun toString(): String = "AdbSession(open=$isOpen, features=$features)"
 }
 
-/** One command on one stream, run on a blocking thread. */
+/**
+ * One command on one stream, run on a blocking thread. The stream goes from opening (our OPEN
+ * sent) to open (adbd's OKAY gave its id) to done; every packet must fit that state and carry both
+ * ids, and an OKAY must answer a WRTE of ours. Late packets of the session's earlier streams are
+ * skipped; anything else (another command, an unknown one, a wrong id) is a protocol failure.
+ */
 internal class CommandExchange(
     private val handshake: Handshake,
     private val localId: Int,
     private val shell: Boolean,
-    outputLimit: Int,
+    config: AdbConfig,
 ) {
-    private val output = if (shell) OutputCollector.Shell(outputLimit) else OutputCollector.Raw(outputLimit)
+    private val output =
+        if (shell) OutputCollector.Shell(config.maxOutputBytes) else OutputCollector.Raw(config.maxOutputBytes)
 
-    /** Whether the session can run another command after this one: only after a clean end or a refusal. */
+    /** Whether the session can run another command after this one: only after a clean end, a refusal or no start. */
     @Volatile var reusable: Boolean = false
         private set
 
     private var input = ByteArray(0)
     private var sent = 0
     private var remoteId = 0
-    private var canWrite = false
+    private var awaitingOkay = false
 
     @Throws(IOException::class)
     fun run(
@@ -345,11 +359,19 @@ internal class CommandExchange(
         stdin: ByteArray,
     ): CommandResult {
         val service = (if (shell) "shell,v2,raw:" else "exec:") + command.text
+        val open = (service + "\u0000").toByteArray(Charsets.UTF_8)
+        if (open.size > handshake.maxPayload) {
+            reusable = true
+            return CommandResult.Failed(
+                CommandFailure.TOO_LONG,
+                "the service name has ${open.size} bytes; adbd takes ${handshake.maxPayload} per packet",
+            )
+        }
         input = if (shell) ShellProtocol.stdinStream(stdin) else stdin
-        send(AdbMessage(AdbMessage.OPEN, localId, 0, (service + "\u0000").toByteArray(Charsets.UTF_8)))
+        send(AdbMessage(AdbMessage.OPEN, localId, 0, open))
         var result: CommandResult? = null
         while (result == null) {
-            result = if (canWrite && sent < input.size) writeNext() else handle(readNext())
+            result = if (remoteId != 0 && !awaitingOkay && sent < input.size) writeNext() else handle(readNext())
         }
         return result
     }
@@ -359,7 +381,7 @@ internal class CommandExchange(
         val n = minOf(handshake.maxPayload, input.size - sent)
         send(AdbMessage(AdbMessage.WRTE, localId, remoteId, input.copyOfRange(sent, sent + n)))
         sent += n
-        canWrite = false
+        awaitingOkay = true
         return null
     }
 
@@ -367,39 +389,54 @@ internal class CommandExchange(
         AdbMessage.read(handshake.input, AdbMessage.MAX_PAYLOAD, handshake.version)
             ?: throw TruncatedFrameException("adbd closed the connection")
 
-    /** The result once [message] ends the command, else `null`. Packets of earlier streams are skipped. */
-    private fun handle(message: AdbMessage): CommandResult? =
+    /** The result once [message] ends the command, else `null`. */
+    private fun handle(message: AdbMessage): CommandResult? {
+        val stream = message.command in STREAM_COMMANDS
+        return when {
+            stream && message.arg1 in 1 until localId -> null
+            !stream || message.arg1 != localId -> protocolError("unexpected $message during the command")
+            remoteId == 0 -> opening(message)
+            message.arg0 != remoteId -> protocolError("$message names stream ${message.arg0}, not $remoteId")
+            else -> open(message)
+        }
+    }
+
+    /** Before adbd's OKAY: it opens the stream (OKAY with its id) or refuses it (CLSE without one). */
+    private fun opening(message: AdbMessage): CommandResult? =
         when {
-            message.arg1 != localId -> {
+            message.command == AdbMessage.OKAY && message.arg0 != 0 -> {
+                remoteId = message.arg0
                 null
             }
 
-            message.command == AdbMessage.OKAY -> {
-                if (remoteId == 0) remoteId = acceptOpen(message)
-                canWrite = true
-                null
+            message.command == AdbMessage.CLSE && message.arg0 == 0 -> {
+                reusable = true
+                CommandResult.Failed(CommandFailure.REFUSED, "adbd refused the service")
             }
 
-            message.command == AdbMessage.WRTE -> {
-                if (remoteId == 0 || message.arg0 != remoteId) protocolError("WRTE on a stream that is not open")
+            else -> {
+                protocolError("$message before the stream opened")
+            }
+        }
+
+    private fun open(message: AdbMessage): CommandResult? =
+        when (message.command) {
+            AdbMessage.WRTE -> {
                 output.feed(message.payload)
                 send(AdbMessage(AdbMessage.OKAY, localId, remoteId))
                 output.exitCode?.let(::finish)
             }
 
-            message.command == AdbMessage.CLSE -> {
-                closedByDevice()
+            AdbMessage.OKAY -> {
+                if (!awaitingOkay) protocolError("$message without a write waiting for it")
+                awaitingOkay = false
+                null
             }
 
             else -> {
-                null
+                closedByDevice()
             }
         }
-
-    private fun acceptOpen(okay: AdbMessage): Int {
-        if (okay.arg0 == 0) protocolError("OKAY without a stream id")
-        return okay.arg0
-    }
 
     private fun finish(exitCode: Int): CommandResult {
         send(AdbMessage(AdbMessage.CLSE, localId, remoteId))
@@ -407,27 +444,19 @@ internal class CommandExchange(
         return CommandResult.Completed(exitCode, output.stdoutText(), output.stderrText())
     }
 
-    private fun closedByDevice(): CommandResult =
-        when {
-            remoteId == 0 -> {
-                reusable = true
-                CommandResult.Failed(CommandFailure.REFUSED, "adbd refused the service")
-            }
-
-            shell -> {
-                throw TruncatedFrameException("the stream closed before the exit status")
-            }
-
-            else -> {
-                reusable = true
-                CommandResult.Completed(null, output.stdoutText(), output.stderrText())
-            }
-        }
+    /** adbd closed the open stream: the end of an `exec:` command, too early for the shell protocol. */
+    private fun closedByDevice(): CommandResult {
+        if (shell) throw TruncatedFrameException("the stream closed before the exit status")
+        reusable = true
+        return CommandResult.Completed(null, output.stdoutText(), output.stderrText())
+    }
 
     @Throws(IOException::class)
     private fun send(message: AdbMessage) = AdbHandshake.send(handshake.output, message)
 
     companion object {
+        private val STREAM_COMMANDS = setOf(AdbMessage.OKAY, AdbMessage.WRTE, AdbMessage.CLSE)
+
         /** The result for a failure of the blocking exchange. */
         fun classify(failure: IOException): CommandResult.Failed =
             when (failure) {

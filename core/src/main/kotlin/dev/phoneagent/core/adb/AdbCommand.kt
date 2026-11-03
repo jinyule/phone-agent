@@ -41,6 +41,12 @@ public enum class CommandFailure {
 
     /** The command did not finish within [AdbConfig.commandTimeoutMs]. */
     TIMEOUT,
+
+    /**
+     * The service name (`shell,v2,raw:` or `exec:`, the command, a NUL) is longer in UTF-8 than
+     * adbd takes in one packet; nothing was sent and the session is still usable.
+     */
+    TOO_LONG,
 }
 
 /** Outcome of [AdbSession.run]. */

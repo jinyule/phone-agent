@@ -123,6 +123,12 @@ class AdbConnectionTest {
         "BadExitLength, PROTOCOL",
         "DataAfterExit, PROTOCOL",
         "Flood, OUTPUT_TOO_LARGE",
+        "CloseWithWrongId, PROTOCOL",
+        "AckWithWrongId, PROTOCOL",
+        "WriteWithWrongId, PROTOCOL",
+        "CnxnInStream, PROTOCOL",
+        "UnknownCommand, PROTOCOL",
+        "UnsolicitedOkay, PROTOCOL",
     )
     fun `a broken stream fails with its class and closes the session`(
         name: String,
@@ -326,6 +332,54 @@ class AdbConnectionTest {
         }
 
     @Test
+    fun `an OKAY with the wrong remote id does not let the next piece of stdin go`() =
+        realTime {
+            FakeAdbd(paired, maxPayload = 17, reply = { Reply.AckWithWrongId }).use { adbd ->
+                withSession(adbd) { session ->
+                    assertFailure(
+                        CommandFailure.PROTOCOL,
+                        session.run(AdbCommand("cat"), ByteArray(20) { 'x'.code.toByte() }),
+                    )
+                    assertFalse(session.isOpen)
+                }
+            }
+        }
+
+    @Test
+    fun `an exec stream closed with the wrong remote id is not complete`() =
+        realTime {
+            FakeAdbd(paired, features = "", reply = { Reply.CloseWithWrongId }).use { adbd ->
+                withSession(adbd) { session ->
+                    assertFailure(CommandFailure.PROTOCOL, session.run(id))
+                    assertFalse(session.isOpen)
+                }
+            }
+        }
+
+    @Test
+    fun `a command longer than adbd's max payload is not sent and the session stays usable`() =
+        realTime {
+            FakeAdbd(paired, features = "", maxPayload = 8, reply = { Reply.Exit(0, "ok") }).use { adbd ->
+                withSession(adbd) { session ->
+                    assertFailure(CommandFailure.TOO_LONG, session.run(AdbCommand("echo a-longer-command")))
+                    assertTrue(session.isOpen)
+                    assertEquals(CommandResult.Completed(null, "ok", ""), session.run(id))
+                }
+                assertEquals(emptyList<Int>(), adbd.oversizedOpens)
+                assertEquals(listOf("exec:id"), adbd.opened)
+            }
+        }
+
+    @Test
+    fun `adbd reads the features of our banner as shell_v2, without a NUL`() =
+        realTime {
+            FakeAdbd(paired).use { adbd ->
+                withSession(adbd) { session -> assertTrue(session.isOpen) }
+                assertEquals("shell_v2", adbd.hostFeatures.get(10, TimeUnit.SECONDS))
+            }
+        }
+
+    @Test
     fun `features come from the banner's features entry`() {
         assertEquals(setOf("shell_v2", "cmd"), AdbFeatures.of("device::ro.product.name=x;features=shell_v2,,cmd"))
         assertEquals(emptySet<String>(), AdbFeatures.of("device::ro.product.name=x"))
@@ -389,6 +443,12 @@ class AdbConnectionTest {
                 "BadExitLength" to Reply.BadExitLength,
                 "DataAfterExit" to Reply.DataAfterExit,
                 "Flood" to Reply.Flood(64 * 1024 + 1),
+                "CloseWithWrongId" to Reply.CloseWithWrongId,
+                "AckWithWrongId" to Reply.AckWithWrongId,
+                "WriteWithWrongId" to Reply.WriteWithWrongId,
+                "CnxnInStream" to Reply.CnxnInStream,
+                "UnknownCommand" to Reply.UnknownCommand,
+                "UnsolicitedOkay" to Reply.UnsolicitedOkay,
             )
     }
 }

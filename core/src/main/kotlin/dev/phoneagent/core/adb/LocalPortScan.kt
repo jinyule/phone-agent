@@ -252,5 +252,5 @@ internal class SocketPortProbe(
     }
 }
 
-/** The CNXN banner of a probe: a host without features. */
-private val PROBE_BANNER = "host::\u0000".toByteArray(Charsets.US_ASCII)
+/** The CNXN banner of a probe: a host without features, without a NUL like AOSP's. */
+private val PROBE_BANNER = "host::".toByteArray(Charsets.US_ASCII)
