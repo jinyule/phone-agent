@@ -1,3 +1,11 @@
+/*
+ * Portions adapted from Mika (https://github.com/wangzan101/Mika, commit 9cef375,
+ * app/src/main/java/com/wangzan101/mika/cap/phone/shell/adb/AndroidAdb.kt).
+ * Copyright 2026 wangzan101. Licensed under the Apache License, Version 2.0.
+ *
+ * Modified by PhoneAgent contributors: English documentation; a no-context export (null); a socket
+ * that is not the platform's fails as SSLException.
+ */
 package dev.phoneagent.app.adb
 
 import android.net.ssl.SSLSockets

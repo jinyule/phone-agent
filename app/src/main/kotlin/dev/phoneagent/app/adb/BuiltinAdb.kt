@@ -1,3 +1,13 @@
+/*
+ * Portions adapted from Mika (https://github.com/wangzan101/Mika, commit 9cef375,
+ * app/src/main/java/com/wangzan101/mika/cap/phone/setup/BuiltinShellManager.kt and
+ * app/src/main/java/com/wangzan101/mika/cap/phone/shell/adb/AndroidAdb.kt).
+ * Copyright 2026 wangzan101. Licensed under the Apache License, Version 2.0.
+ *
+ * Modified by PhoneAgent contributors: English documentation; written against PhoneAgent's core.adb;
+ * the scan covers loopback only; the pairing record is dropped on UNAUTHORIZED; no SystemProperties
+ * port lookup and no manual port.
+ */
 package dev.phoneagent.app.adb
 
 import android.content.Context

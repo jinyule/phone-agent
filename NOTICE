@@ -71,6 +71,15 @@ Mika
       -> core/src/main/kotlin/dev/phoneagent/core/adb/AdbConnectPort.kt
     app/src/main/java/com/wangzan101/mika/cap/phone/shell/adb/NsdAdbServiceFinder.kt
       -> app/src/main/kotlin/dev/phoneagent/app/adb/NsdAdbServiceFinder.kt
+    app/src/main/java/com/wangzan101/mika/cap/phone/shell/adb/AndroidAdb.kt
+      -> app/src/main/kotlin/dev/phoneagent/app/adb/ConscryptKeyExporter.kt
+      -> app/src/main/kotlin/dev/phoneagent/app/adb/SealedFileKeyStore.kt
+      -> app/src/main/kotlin/dev/phoneagent/app/adb/BuiltinAdb.kt
+    core/src/main/kotlin/com/wangzan101/mika/core/adb/AdbIdentity.kt (WrappedKeyFile)
+      -> app/src/main/kotlin/dev/phoneagent/app/adb/SealedFileKeyStore.kt
+    app/src/main/java/com/wangzan101/mika/cap/phone/setup/BuiltinShellManager.kt
+      -> app/src/main/kotlin/dev/phoneagent/app/adb/BuiltinAdb.kt
+      -> app/src/main/kotlin/dev/phoneagent/app/adb/HelperLauncher.kt
     core/src/test/kotlin/com/wangzan101/mika/core/adb/TestTls.kt
       -> core/src/test/kotlin/dev/phoneagent/core/adb/TestTls.kt (TestTls)
       -> core/src/test/kotlin/dev/phoneagent/core/adb/FakePairingServer.kt (FakePairingServer)

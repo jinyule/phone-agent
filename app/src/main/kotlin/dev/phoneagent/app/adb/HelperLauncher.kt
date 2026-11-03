@@ -1,3 +1,12 @@
+/*
+ * Portions adapted from Mika (https://github.com/wangzan101/Mika, commit 9cef375,
+ * app/src/main/java/com/wangzan101/mika/cap/phone/setup/BuiltinShellManager.kt, launchHelper).
+ * Copyright 2026 wangzan101. Licensed under the Apache License, Version 2.0.
+ *
+ * Modified by PhoneAgent contributors: English documentation; typed outcomes; the nonce is issued
+ * after connecting and only when no helper is connected; the command must exit with status 0 (or
+ * none) before the handoff is awaited.
+ */
 package dev.phoneagent.app.adb
 
 import dev.phoneagent.app.helper.HelperState

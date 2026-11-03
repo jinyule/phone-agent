@@ -1,3 +1,13 @@
+/*
+ * Portions adapted from Mika (https://github.com/wangzan101/Mika, commit 9cef375,
+ * app/src/main/java/com/wangzan101/mika/cap/phone/shell/adb/AndroidAdb.kt and the WrappedKeyFile
+ * class in core/src/main/kotlin/com/wangzan101/mika/core/adb/AdbIdentity.kt).
+ * Copyright 2026 wangzan101. Licensed under the Apache License, Version 2.0.
+ *
+ * Modified by PhoneAgent contributors: English documentation; the wrap is an interface so the file
+ * logic is tested without a keystore; a format byte and a fixed 12-byte IV instead of an IV length;
+ * AtomicFile writes; an unopenable key reads as unusable (replaced) instead of absent.
+ */
 package dev.phoneagent.app.adb
 
 import android.security.keystore.KeyGenParameterSpec
