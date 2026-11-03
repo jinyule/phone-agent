@@ -1,3 +1,10 @@
+/*
+ * Adapted from Mika, app/src/main/java/com/wangzan101/mika/cap/phone/a11y/ScreenReader.kt
+ * (https://github.com/wangzan101/Mika, commit 9cef3750addd20b2af9e3214a8f5e56301670174),
+ * Copyright 2026 wangzan101, licensed under the Apache License, Version 2.0 (see NOTICE): the
+ * skipped window types, contentWindows, topPackage and the depth limit.
+ * Modified by PhoneAgent contributors: rewritten in English, merged into PhoneAgent's own classes.
+ */
 package dev.phoneagent.app.adapters.screen
 
 import android.annotation.SuppressLint
