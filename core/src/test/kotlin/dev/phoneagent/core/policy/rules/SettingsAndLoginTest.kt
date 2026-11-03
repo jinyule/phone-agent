@@ -13,6 +13,7 @@ import dev.phoneagent.core.policy.rules.Fx.screen
 import dev.phoneagent.core.policy.rules.Fx.tap
 import dev.phoneagent.core.policy.rules.Fx.text
 import dev.phoneagent.core.ports.ElementRole
+import dev.phoneagent.core.ports.ElementState
 import dev.phoneagent.core.ports.HandoffKind
 import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.ports.UiElement
@@ -289,6 +290,23 @@ class SettingsAndLoginTest {
         assertEquals(
             HandoffKind.LOGIN,
             assertInstanceOf(Verdict.HandOff::class.java, decide(tap("e1"), on(inside, level))).kind,
+        )
+        // A control that takes only a long press is one too, and so is the text inside it.
+        val held = setOf(ElementState.LONG_CLICKABLE)
+        val hold = call("phone_tap", "screen" to "s1", "ref" to "e1", "long" to true)
+        val pressed = screen(el("e1", long, bounds = box(100, 600, 900, 680), states = held))
+        assertEquals(
+            HandoffKind.LOGIN,
+            assertInstanceOf(Verdict.HandOff::class.java, decide(hold, on(pressed, level))).kind,
+        )
+        val heldInside =
+            screen(
+                el("e1", bounds = box(100, 600, 900, 680), states = held),
+                text("t2", long, box(120, 610, 880, 670), parent = "e1"),
+            )
+        assertEquals(
+            HandoffKind.LOGIN,
+            assertInstanceOf(Verdict.HandOff::class.java, decide(hold, on(heldInside, level))).kind,
         )
         // Body text that mentions a login flow is not a login page.
         val article = screen(text("t1", "教程：怎样在设置里关闭本机号码一键登录功能和相关的授权"), el("e1", "返回"))

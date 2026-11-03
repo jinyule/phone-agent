@@ -86,6 +86,26 @@ class ElementsTest {
     }
 
     @Test
+    fun `a control is what takes a click or a long click, and what is inside one`() {
+        val held = setOf(ElementState.LONG_CLICKABLE)
+        val row = el("e1", bounds = box(0, 300, 999, 400), states = held)
+        val layout = el("e2", role = ElementRole.CONTAINER, states = emptySet()).copy(parent = ElementRef("e1"))
+        val name = text("t1", "张三", parent = "e2")
+        val pay = el("e3", "支付")
+        val price = text("t2", "¥20", parent = "e3")
+        val plain = el("e4", role = ElementRole.CONTAINER, states = emptySet())
+        val body = text("t3", "正文", parent = "e4")
+        val s = screen(row, layout, name, pay, price, plain, body)
+        assertEquals(
+            listOf(true, true, true, true, true),
+            listOf(row, layout, name, pay, price).map { Tree.ofControl(it, s) },
+        )
+        assertEquals(listOf(false, false), listOf(plain, body).map { Tree.ofControl(it, s) })
+        val off = row.copy(states = held + ElementState.DISABLED)
+        assertFalse(Tree.ofControl(layout, screen(off, layout)))
+    }
+
+    @Test
     fun `a long press goes to what takes a long press, as the actuator delivers it`() {
         val long = setOf(ElementState.LONG_CLICKABLE)
         val row = el("e1", "消息", bounds = box(0, 300, 999, 400), states = long)

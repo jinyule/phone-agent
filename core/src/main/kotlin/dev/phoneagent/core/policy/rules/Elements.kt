@@ -112,4 +112,17 @@ internal object Tree {
         element: UiElement,
         screen: ScreenSnapshot,
     ): Boolean = ScreenIndex.of(screen).inControl(element)
+
+    /**
+     * [element] takes a click or a long click, or some ancestor does: it is a control or part of
+     * one, whichever press activates it.
+     */
+    fun ofControl(
+        element: UiElement,
+        screen: ScreenSnapshot,
+    ): Boolean {
+        val index = ScreenIndex.of(screen)
+        return Elements.clickable(element) || Elements.longClickable(element) || index.inControl(element) ||
+            index.inHeldControl(element)
+    }
 }

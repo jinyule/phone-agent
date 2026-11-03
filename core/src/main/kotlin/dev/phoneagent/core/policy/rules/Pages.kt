@@ -30,14 +30,14 @@ internal class Pages(
             screen.elements.any { onControl(it, screen, LOGIN_FLOWS) } ||
             (mentions(screen, LOGIN) && screen.elements.any { asks(it, SECRET_HINTS) || asks(it, ACCOUNT_HINTS) })
 
-    /** [element]'s name contains one of [words], and it is a control or part of one. */
+    /** [element]'s name contains one of [words], and it is a control or part of one ([Tree.ofControl]). */
     private fun onControl(
         element: UiElement,
         screen: ScreenSnapshot,
         words: List<String>,
     ): Boolean {
         val name = Text.compact(element.name.orEmpty())
-        return words.any { it in name } && (Elements.clickable(element) || Tree.inControl(element, screen))
+        return words.any { it in name } && Tree.ofControl(element, screen)
     }
 
     /** A password field, or a field whose hint or name contains one of [words]. */

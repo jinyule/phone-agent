@@ -28,8 +28,8 @@ internal class PerScreen<T : Any>(
 
 /**
  * The tree of one snapshot, indexed once (policy-rules.md §8): elements by ref, each one's parent
- * and children, whether some ancestor takes clicks, how deep the tree is and how much text it
- * holds. Built in time and space in proportion to the snapshot; immutable but for the content of
+ * and children, whether some ancestor takes clicks or long clicks, how deep the tree is and how
+ * much text it holds. Built in time and space in proportion to the snapshot; immutable but for the content of
  * elements, read once each ([content]) and only ever set to the one value it has.
  */
 internal class ScreenIndex private constructor(
@@ -40,6 +40,7 @@ internal class ScreenIndex private constructor(
     private val parents = IntArray(elements.size) { position(elements[it].parent) }
     private val children: Map<ElementRef?, List<Int>> = elements.indices.groupBy { elements[it].parent }
     private val controlled = BooleanArray(elements.size)
+    private val held = BooleanArray(elements.size)
     private val contents = AtomicReferenceArray<List<String>>(elements.size)
 
     /** The longest chain of parents (0 when every element is at the top); [Int.MAX_VALUE] when parents form a cycle. */
@@ -65,6 +66,12 @@ internal class ScreenIndex private constructor(
     fun inControl(element: UiElement): Boolean {
         val parent = position(element.parent)
         return parent >= 0 && (Elements.clickable(elements[parent]) || controlled[parent])
+    }
+
+    /** Whether some ancestor of [element] takes long clicks (meaningful when [depth] is finite). */
+    fun inHeldControl(element: UiElement): Boolean {
+        val parent = position(element.parent)
+        return parent >= 0 && (Elements.longClickable(elements[parent]) || held[parent])
     }
 
     /** [element]'s ancestors, nearest first, computed as they are asked for; a cycle ends after every element. */
@@ -141,7 +148,7 @@ internal class ScreenIndex private constructor(
     private fun position(ref: ElementRef?): Int = ref?.let(positions::get) ?: -1
 
     /**
-     * Fills [controlled] from the top down and returns the longest chain of parents, or
+     * Fills [controlled] and [held] from the top down and returns the longest chain of parents, or
      * [Int.MAX_VALUE] as soon as a walk up the parents comes back to itself. Each element is on
      * one walk only.
      */
@@ -161,6 +168,7 @@ internal class ScreenIndex private constructor(
                 val parent = parents[node]
                 depths[node] = if (parent < 0) 0 else depths[parent] + 1
                 controlled[node] = parent >= 0 && (Elements.clickable(elements[parent]) || controlled[parent])
+                held[node] = parent >= 0 && (Elements.longClickable(elements[parent]) || held[parent])
                 deepest = maxOf(deepest, depths[node])
             }
         }
