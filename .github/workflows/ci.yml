@@ -83,8 +83,9 @@ jobs:
           path: ~/.m2/repository/org/robolectric
           key: robolectric-${{ hashFiles('gradle/libs.versions.toml') }}
           restore-keys: robolectric-
-      # Both variants' unit tests: the release ones check that no debug-only entry point ships
-      # (src/testRelease); the local `check` runs both already.
+      # The release unit tests run only the release checks (src/testRelease: no debug-only entry
+      # point ships, see the app convention's filter); every other test runs on debug. The local
+      # `check` runs both already.
       - name: Assemble debug APK + Robolectric unit tests (debug and release)
         run: ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:testReleaseUnitTest --continue
       - name: Upload reports

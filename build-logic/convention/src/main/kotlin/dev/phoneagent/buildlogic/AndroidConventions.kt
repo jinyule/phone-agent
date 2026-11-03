@@ -12,6 +12,7 @@ import org.gradle.api.Project
 import org.gradle.api.tasks.compile.JavaCompile
 import org.gradle.api.tasks.testing.Test
 import org.gradle.kotlin.dsl.configure
+import org.gradle.kotlin.dsl.getByType
 import org.gradle.kotlin.dsl.named
 import org.gradle.kotlin.dsl.withType
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
@@ -19,8 +20,8 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 /**
  * Android application (`:app`): Compose, version from gradle.properties, strict lint, and unit
- * tests for every build type: AGP only creates them for the tested one (debug) by default, and
- * the release ones check that no debug-only entry point ships (`src/testRelease`).
+ * tests for every build type: AGP only creates them for the tested one (debug) by default. The
+ * release ones run only the release checks ([runOnlyReleaseChecksOnRelease]).
  */
 class AndroidApplicationConventionPlugin : Plugin<Project> {
     override fun apply(target: Project): Unit =
@@ -51,9 +52,32 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
             }
             configureKotlinAndroid(explicitApi = false)
             configureRobolectricJvm()
+            runOnlyReleaseChecksOnRelease()
             resolveModuleJavaInDetekt()
         }
 }
+
+/**
+ * Contract: the release variant's unit tests only check how release differs from debug (that no
+ * debug-only entry point ships); every other test runs on debug only, so the Robolectric suite
+ * does not run twice. `testReleaseUnitTest` runs the `<namespace>.release` package
+ * (`src/testRelease`) and nothing else, and fails when that package holds no test.
+ */
+private fun Project.runOnlyReleaseChecksOnRelease() {
+    val android = extensions.getByType<ApplicationExtension>()
+    tasks.withType<Test>().configureEach {
+        if (name == RELEASE_UNIT_TESTS) {
+            // Read when the task is configured: the module's build script has set it by then.
+            val namespace = checkNotNull(android.namespace) { "the app module sets android.namespace" }
+            filter {
+                includeTestsMatching("$namespace.release.*")
+                isFailOnNoMatchingTests = true
+            }
+        }
+    }
+}
+
+private const val RELEASE_UNIT_TESTS = "testReleaseUnitTest"
 
 /** Android library (`:privileged`): explicit API like `:core`, strict lint. */
 class AndroidLibraryConventionPlugin : Plugin<Project> {

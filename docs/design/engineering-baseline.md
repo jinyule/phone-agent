@@ -146,7 +146,7 @@ core/src/test/resources/sessions/<scenario>/
 
 | Workflow | 触发 | Job | 优先级 |
 |---|---|---|---|
-| `ci.yml` | pull_request、push main、手动 | `static`（spotlessCheck、detektMain/detektTest、detekt canary、Android lint、gitleaks 扫全历史）· `core`（test + 会话回放 + `koverVerify` + `koverVerifyCritical` + build-logic 测试）· `app`（assembleDebug + debug、release 两个变体的 Robolectric 单测）· `privileged-build`（构建 dex + 单测，`verifyPrivilegedProtocol` 检查 AIDL 版本常量）· **`all-checks-passed`**（汇总以上 job：failure、cancelled、skipped 都判红；**唯一的必过检查**） | P0 |
+| `ci.yml` | pull_request、push main、手动 | `static`（spotlessCheck、detektMain/detektTest、detekt canary、Android lint、gitleaks 扫全历史）· `core`（test + 会话回放 + `koverVerify` + `koverVerifyCritical` + build-logic 测试）· `app`（assembleDebug + debug 变体的 Robolectric 单测 + release 变体只跑 `src/testRelease` 里 release 与 debug 差异的检查）· `privileged-build`（构建 dex + 单测，`verifyPrivilegedProtocol` 检查 AIDL 版本常量）· **`all-checks-passed`**（汇总以上 job：failure、cancelled、skipped 都判红；**唯一的必过检查**） | P0 |
 | `main.yml` | push main | ci.yml 的全部内容 + 模拟器端口契约测试（API 34/35/36，`reactivecircus/android-emulator-runner`）+ 构建未签名的 release 包 | P1 |
 | `e2e.yml` | 每日定时 + 手动 | 真实模型 API 测试；secret 为空时直接判红 | P1 |
 | `eval.yml` | 每日定时 + 手动 | 自建 runner 接 USB 真机跑保留池，产出 `summary.md` 和 `metrics.json`；成功率下降超过阈值就标红 | P1 |
