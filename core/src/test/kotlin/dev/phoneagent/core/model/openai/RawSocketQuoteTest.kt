@@ -3,6 +3,7 @@ package dev.phoneagent.core.model.openai
 import dev.phoneagent.core.model.ChatModel
 import dev.phoneagent.core.model.ModelError
 import dev.phoneagent.core.model.ModelErrorKind
+import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.openai.Kit.send
 import dev.phoneagent.core.model.openai.UnquotedReplyTest.Spelling
@@ -26,30 +27,51 @@ import kotlin.time.Duration.Companion.minutes
  * OkHttp quotes the server's bytes in the `IOException`s of a broken HTTP exchange, as text or in
  * hex (model-layer §2). WP04's raw socket repro found three ways a reply's content gets there; a
  * loopback server answers with those bytes, the next line carrying the secret in the call
- * arguments, spelled four ways ([Spelling]). The [ModelError.Network] of a call names the failure
- * by its type only, and neither it nor its cause chain holds a piece of the secret, as text or in
- * hex; nor does the [ProbeResult] of a "test and save" whose trial call breaks the same way.
- * Assertions never print the secret.
+ * arguments, spelled four ways ([Spelling]), in each protocol's stream. The [ModelError.Network]
+ * of a call names the failure by its type only, and neither it nor its cause chain holds a piece
+ * of the secret, as text or in hex; nor does the [ProbeResult] of a "test and save" whose trial
+ * call breaks the same way. Assertions never print the secret.
  */
 class RawSocketQuoteTest {
     /** A data line whose call arguments carry [spelling]. */
-    private fun callLine(spelling: Spelling): String =
-        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":" +
-            "{\"name\":\"get_weather\",\"arguments\":\"{\\\"note\\\":\\\"${spelling.text}\\\"}\"}}]}}]}"
+    private fun callLine(
+        protocol: ModelProtocol,
+        spelling: Spelling,
+    ): String {
+        val args = "{\\\"note\\\":\\\"${spelling.text}\\\"}"
+        return if (protocol == ModelProtocol.OPENAI_RESPONSES) {
+            "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc1\",\"output_index\":0," +
+                "\"delta\":\"$args\"}"
+        } else {
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":" +
+                "{\"name\":\"get_weather\",\"arguments\":\"$args\"}}]}}]}"
+        }
+    }
 
     /** A 200 chunked stream whose first chunk is 2 bytes short of the first line, the call line next. */
-    private fun shortChunk(spelling: Spelling): Answer {
+    private fun shortChunk(
+        protocol: ModelProtocol,
+        spelling: Spelling,
+    ): Answer {
         // OkHttp reads the rest of the line as the chunk's end, then takes the next line as the
         // next chunk size: "da" parses as hex and the rest is quoted as its extensions.
-        val first = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hi\"}}]}"
-        return Answer(CHUNKED + "${(first.length - 2).toString(HEX)}\r\n$first\n${callLine(spelling)}\n\n")
+        val first =
+            if (protocol == ModelProtocol.OPENAI_RESPONSES) {
+                "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"m1\",\"output_index\":0,\"delta\":\"Hi\"}"
+            } else {
+                "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hi\"}}]}"
+            }
+        return Answer(CHUNKED + "${(first.length - 2).toString(HEX)}\r\n$first\n${callLine(protocol, spelling)}\n\n")
     }
 
     /** A 200 chunked stream whose chunk stops just before the secret, the rest of its line unended. */
-    private fun cutLine(spelling: Spelling): Answer {
+    private fun cutLine(
+        protocol: ModelProtocol,
+        spelling: Spelling,
+    ): Answer {
         // OkHttp then looks for the end of the chunk's line and finds the end of the stream; its
         // EOFException writes what it read in hex.
-        val line = callLine(spelling)
+        val line = callLine(protocol, spelling)
         return Answer(CHUNKED + "${line.indexOf(spelling.text).toString(HEX)}\r\n$line")
     }
 
@@ -57,80 +79,101 @@ class RawSocketQuoteTest {
     private fun overLength(
         head: String,
         body: String,
-        spelling: Spelling,
-    ): Answer = Answer("$head\r\nContent-Length: ${body.length}\r\n\r\n$body${callLine(spelling)}\r\n", keepOpen = true)
+        line: String,
+    ): Answer = Answer("$head\r\nContent-Length: ${body.length}\r\n\r\n$body$line\r\n", keepOpen = true)
+
+    /** A whole reply answering "ok". */
+    private fun reply(protocol: ModelProtocol): String =
+        if (protocol == ModelProtocol.OPENAI_RESPONSES) {
+            "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":" +
+                "[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n"
+        } else {
+            Kit.sse("""{"choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}""")
+        }
 
     private fun adapters(keepAlive: Duration): OpenAiAdapters =
         Kit.adapters(Keys(ECHOED), HttpTimeouts(readMs = READ_MS, idleConnectionKeepAlive = keepAlive).client())
 
     private fun model(
+        protocol: ModelProtocol,
         base: String,
         keepAlive: Duration = Duration.ZERO,
     ): ChatModel {
-        val profile = Kit.profile(base)
-        return adapters(
-            keepAlive,
-        ).model(profile, Kit.MODEL, Kit.capabilities(), Kit.blobs(), WireOptions.defaultsFor(profile))
+        val profile = Kit.profile(base, protocol)
+        return adapters(keepAlive)
+            .model(profile, Kit.MODEL, Kit.capabilities(), Kit.blobs(), WireOptions.defaultsFor(profile))
     }
 
     /** Checks the next call of [model] fails as a [ModelError.Network] of [exception] that quotes nothing. */
     private suspend fun assertFails(
+        protocol: ModelProtocol,
         model: ChatModel,
         exception: String,
     ) {
         // Any type: a failure message must not print an error before it is checked.
-        val error = assertThrows<Throwable> { model.send(Kit.request()) }
-        assertNoPiece("${error.message} $error ${error.stackTraceToString()}")
-        assertTrue(error is ModelError.Network, "a network failure")
-        assertTrue(error.message.orEmpty().endsWith("($exception)"), "named by its type")
+        val error = assertThrows<Throwable>("$protocol") { model.send(Kit.request()) }
+        assertNoPiece("$protocol", "${error.message} $error ${error.stackTraceToString()}")
+        assertTrue(error is ModelError.Network, "$protocol: a network failure")
+        assertTrue(error.message.orEmpty().endsWith("($exception)"), "$protocol: named by its type")
     }
 
     /** Checks a probe that gets [listing] then [trial] fails at the trial call with [exception], quoting nothing. */
     private suspend fun assertProbeFails(
+        protocol: ModelProtocol,
         exception: String,
         listing: Answer,
         trial: Answer?,
         keepAlive: Duration = Duration.ZERO,
     ) = RawServer(listOfNotNull(listing, trial)).use { server ->
         val result =
-            adapters(keepAlive).probe().testAndSave(Kit.profile(server.base), Kit.MODEL, Kit.capabilities(), TOKEN)
-        assertNoPiece(result.toString())
-        assertTrue(result is ProbeResult.Failed, "the probe failed")
+            adapters(keepAlive)
+                .probe()
+                .testAndSave(Kit.profile(server.base, protocol), Kit.MODEL, Kit.capabilities(), TOKEN)
+        assertNoPiece("$protocol probe", result.toString())
+        assertTrue(result is ProbeResult.Failed, "$protocol: the probe failed")
         val failed = result as ProbeResult.Failed
-        assertEquals(ProbeStep.TOOL_CALL to ModelErrorKind.NETWORK, failed.step to failed.kind)
-        assertTrue(failed.message.endsWith("($exception)"), "named by its type")
+        assertEquals(ProbeStep.TOOL_CALL to ModelErrorKind.NETWORK, failed.step to failed.kind, "$protocol")
+        assertTrue(failed.message.endsWith("($exception)"), "$protocol: named by its type")
     }
 
     @ParameterizedTest(name = "a chunk shorter than its line: {0}")
     @EnumSource(Spelling::class)
     fun `a chunk size that falls short of the line quotes none of the next line`(spelling: Spelling) =
         runTest {
-            RawServer(listOf(shortChunk(spelling))).use { server ->
-                assertFails(model(server.base), "ProtocolException")
+            for (protocol in PROTOCOLS) {
+                RawServer(listOf(shortChunk(protocol, spelling))).use { server ->
+                    assertFails(protocol, model(protocol, server.base), "ProtocolException")
+                }
+                assertProbeFails(protocol, "ProtocolException", NO_LIST, shortChunk(protocol, spelling))
             }
-            assertProbeFails("ProtocolException", NO_LIST, shortChunk(spelling))
         }
 
     @ParameterizedTest(name = "a Content-Length that falls short, then reuse: {0}")
     @EnumSource(Spelling::class)
     fun `bytes left after a short Content-Length are not quoted as the next status line`(spelling: Spelling) =
         runTest {
-            val reply = Kit.sse("""{"choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}""")
-            RawServer(listOf(overLength(SSE_HEAD, reply, spelling))).use { server ->
-                val model = model(server.base, KEEP_ALIVE)
-                assertEquals(Part.Text("ok"), model.send(Kit.request()).parts.single())
-                assertFails(model, "ProtocolException")
+            for (protocol in PROTOCOLS) {
+                val line = callLine(protocol, spelling)
+                RawServer(listOf(overLength(SSE_HEAD, reply(protocol), line))).use { server ->
+                    val model = model(protocol, server.base, KEEP_ALIVE)
+                    assertEquals(Part.Text("ok"), model.send(Kit.request()).parts.single(), "$protocol")
+                    assertFails(protocol, model, "ProtocolException")
+                }
+                // The trial call reuses the connection the model list left the line on.
+                assertProbeFails(protocol, "ProtocolException", overLength(NOT_FOUND, "{}", line), null, KEEP_ALIVE)
             }
-            // The trial call reuses the connection the model list left the line on.
-            assertProbeFails("ProtocolException", overLength(NOT_FOUND, "{}", spelling), null, KEEP_ALIVE)
         }
 
     @ParameterizedTest(name = "a body cut in the middle of a line: {0}")
     @EnumSource(Spelling::class)
     fun `a body cut in the middle of a line shows none of it in hex`(spelling: Spelling) =
         runTest {
-            RawServer(listOf(cutLine(spelling))).use { server -> assertFails(model(server.base), "EOFException") }
-            assertProbeFails("EOFException", NO_LIST, cutLine(spelling))
+            for (protocol in PROTOCOLS) {
+                RawServer(listOf(cutLine(protocol, spelling))).use { server ->
+                    assertFails(protocol, model(protocol, server.base), "EOFException")
+                }
+                assertProbeFails(protocol, "EOFException", NO_LIST, cutLine(protocol, spelling))
+            }
         }
 
     /** One scripted response: [bytes], then the connection closes unless [keepOpen]. */
@@ -196,6 +239,7 @@ class RawSocketQuoteTest {
         const val CHUNKED = "$SSE_HEAD\r\nTransfer-Encoding: chunked\r\n\r\n"
         const val NOT_FOUND = "HTTP/1.1 404 Not Found\r\nContent-Type: application/json"
         val KEEP_ALIVE = 1.minutes
+        val PROTOCOLS = listOf(ModelProtocol.OPENAI_CHAT_COMPLETIONS, ModelProtocol.OPENAI_RESPONSES)
 
         /** A model list the probe goes past: the route lists none. */
         val NO_LIST = Answer("$NOT_FOUND\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}")
@@ -222,11 +266,14 @@ class RawSocketQuoteTest {
         }
 
         /** Fails when [text] holds [MIN_PIECE] or more consecutive characters of [ECHOED], as text or in hex. */
-        fun assertNoPiece(text: String) {
+        fun assertNoPiece(
+            what: String,
+            text: String,
+        ) {
             val pieces = (0..ECHOED.length - MIN_PIECE).map { ECHOED.substring(it, it + MIN_PIECE) }
-            assertFalse(pieces.any { text.contains(it) }, "the error holds a piece of the secret (value not shown)")
+            assertFalse(pieces.any { text.contains(it) }, "$what: holds a piece of the secret (value not shown)")
             val hex = pieces.map { it.encodeUtf8().hex() }
-            assertFalse(hex.any { text.contains(it) }, "the error holds a piece of the secret in hex (value not shown)")
+            assertFalse(hex.any { text.contains(it) }, "$what: holds a piece of the secret in hex (value not shown)")
         }
     }
 }
