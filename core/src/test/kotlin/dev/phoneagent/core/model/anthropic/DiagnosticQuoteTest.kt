@@ -85,11 +85,44 @@ class DiagnosticQuoteTest {
             assertWithout((2L * INT_MAX.toLong()).toString(), printed, "the input token total is out of range")
         }
 
+    /** A neutral type's own check failing: the error and its cause name the exception's class only. */
+    private fun assertInvariant(printed: String) {
+        assertEquals(
+            "bad response: reply violates a model invariant (IllegalArgumentException)",
+            printed.lineSequence().first().substringAfter(": "),
+            printed,
+        )
+        val causes = printed.lineSequence().filter { it.startsWith("Caused by: ") }.toList()
+        assertEquals(listOf("Caused by: java.lang.IllegalArgumentException"), causes, printed)
+    }
+
+    @Test
+    fun `a tool id that breaks the id invariant names the failure's class only`() =
+        runTest {
+            val call = """{"type":"tool_use","id":"toolu_$MARKER$CONTROL","name":"get_weather","input":{}}"""
+            val printed = refused(START, block(0, call), stop(0), *END)
+            assertWithout(MARKER, printed, "reply violates a model invariant (IllegalArgumentException)")
+            assertInvariant(printed)
+        }
+
+    @Test
+    fun `usage that breaks the usage invariant names the failure's class only`() =
+        runTest {
+            val usage = """{"output_tokens":1,"output_tokens_details":{"thinking_tokens":$TOO_LARGE_THINKING}}"""
+            val printed = refused(START, *delta(usage))
+            assertInvariant(printed)
+        }
+
     private companion object {
         /** A value no request secret matches: masking leaves it, so only not quoting it keeps it out. */
         const val MARKER = "zz-marker-value1"
         const val TOO_LARGE = "98765432109"
         const val INT_MAX = "2147483647"
+        const val TOO_LARGE_THINKING = 5
+
+        /** A control character, written as a JSON escape: `u` plus four hex digits, built here. */
+        val CONTROL = Char(BACKSLASH) + "u0001"
+        const val BACKSLASH = 92
 
         val START =
             "message_start" to

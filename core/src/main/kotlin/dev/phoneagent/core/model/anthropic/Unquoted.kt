@@ -87,3 +87,6 @@ internal object Unquoted {
 
     private const val MAX_DEPTH = 8
 }
+
+/** What a reply fails with when a value in it breaks an invariant of the neutral types (the OpenAI adapters' text). */
+internal const val INVARIANT = "reply violates a model invariant (IllegalArgumentException)"

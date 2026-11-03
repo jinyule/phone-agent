@@ -108,11 +108,10 @@ internal class MessagesModel(
             stream.abandon()
             throw e
         } catch (e: IllegalArgumentException) {
-            // Provider values that break neutral-type invariants (ids, counts) are protocol violations.
-            throw ModelError.BadResponse(
-                redactor.text("reply violates a model invariant: ${e.message}"),
-                redactor.cause(e),
-            )
+            stream.abandon()
+            // Provider values that break neutral-type invariants (ids, counts) are protocol violations,
+            // named by the failure's class: its message is not quoted (model-layer §2).
+            throw ModelError.BadResponse(INVARIANT, Unquoted.bare(e))
         }
     }
 
