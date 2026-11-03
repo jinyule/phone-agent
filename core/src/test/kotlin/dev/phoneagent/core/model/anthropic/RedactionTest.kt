@@ -163,6 +163,28 @@ class RedactionTest {
         }
 
     @Test
+    fun `a metadata field with a member named by the key is left out whole`() =
+        runTest {
+            val stream =
+                Kit.sse(
+                    "message_start" to
+                        """{"type":"message_start","message":{"id":"msg_1","model":"m",""" +
+                        """"context_management":{"applied_edits":[{"$key":1}]}}}""",
+                    "content_block_start" to
+                        """{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"ok"}}""",
+                    "content_block_stop" to """{"type":"content_block_stop","index":0}""",
+                    "message_delta" to
+                        """{"type":"message_delta","delta":{"stop_reason":"end_turn",""" +
+                        """"stop_details":{"type":"x","$key":"y"}},"usage":{"output_tokens":1}}""",
+                    "message_stop" to """{"type":"message_stop"}""",
+                )
+            server.enqueueSse(stream)
+            val metadata = model().complete(Kit.request()).providerMetadata!!
+            assertFalse(metadata.toString().contains(key), "the key is in the metadata (not shown)")
+            assertEquals(setOf("id", "requested_model", "served_model", "stop_reason"), metadata.keys)
+        }
+
+    @Test
     fun `a protocol violation that quotes the key`() =
         runTest {
             val stream =

@@ -22,10 +22,10 @@ internal class Protocol(
 ) {
     fun bad(detail: String): Nothing = throw ModelError.BadResponse(redactor.text(detail))
 
-    /** Whether masking would change a string in [value] (keys are protocol names, kept as they are). */
+    /** Whether masking would change a member name or a string anywhere in [value]. */
     fun masks(value: JsonElement): Boolean =
         when (value) {
-            is JsonObject -> value.values.any(::masks)
+            is JsonObject -> value.any { (key, member) -> redactor.text(key) != key || masks(member) }
             is JsonArray -> value.any(::masks)
             is JsonPrimitive -> value.isString && redactor.text(value.content) != value.content
         }
