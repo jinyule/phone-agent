@@ -81,15 +81,23 @@ class WrittenBackNumberTest {
     fun `reasoning holding a number no encoder can write back fails with fixed text`() =
         runTest {
             for (streamed in listOf(true, false)) {
-                enqueue("""{"type":"reasoning","id":"rs_1","summary":[],"score":1e400}""", streamed)
+                // The encoder's own message quotes what it wrote before the number.
+                val item =
+                    """{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"$OPAQUE",""" +
+                        """"score":1e400}"""
+                enqueue(item, streamed)
                 val error = assertThrows<ModelError.BadResponse>("$streamed") { model().send(Kit.request()) }
                 assertEquals("bad response: $UNWRITABLE_NUMBER", error.message)
-                assertFalse(error.stackTraceToString().contains("1e400"), "nothing prints the value")
+                val printed = error.stackTraceToString()
+                assertFalse(printed.contains("1e400") || printed.contains(OPAQUE), "nothing prints the reply")
             }
         }
 
     private companion object {
         /** A short numeric key, such as a placeholder a local service was given. */
         const val NUMERIC = "123456"
+
+        /** Encrypted reasoning that must not be quoted. */
+        const val OPAQUE = "opaque-content-0001"
     }
 }
