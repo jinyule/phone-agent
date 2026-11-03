@@ -30,7 +30,8 @@ import java.util.Base64
  *   `context_management`, `messages`. No sampling parameters, no forced tool choice.
  * - **System**: one `text` block per non-empty prompt block.
  * - **Tools**: `name`, `description`, `input_schema`, then `strict` and `eager_input_streaming`
- *   when the snapshot asks; with tools, `tool_choice: {type: auto, disable_parallel_tool_use: true}`.
+ *   when the snapshot asks; with tools, `tool_choice: {type: auto, disable_parallel_tool_use: true}`
+ *   (`wire.disableParallelToolCalls`, which [WireRules] requires).
  * - **Messages**: USER parts become `text` / `image` blocks (base64, or [IMAGE_OMITTED] for a
  *   model without vision); ASSISTANT parts become `text`, `tool_use` (`input` = the arguments
  *   when they parse as a JSON object, else `{}` by intent: [argumentsObject]) and, only for this

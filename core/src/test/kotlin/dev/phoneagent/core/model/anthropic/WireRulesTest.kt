@@ -46,7 +46,8 @@ class WireRulesTest {
 
     @Test
     fun `a bare snapshot sends only what Messages requires`() {
-        val bare = WireProfile(1, CredentialKind.API_KEY, maxTokensField = "max_tokens")
+        val bare =
+            WireProfile(1, CredentialKind.API_KEY, maxTokensField = "max_tokens", disableParallelToolCalls = true)
         val rules = rules(bare, reasoning = null)
         assertEquals(AnthropicWire.API_VERSION, rules.apiVersion)
         assertFalse(rules.adaptiveThinking || rules.eager || rules.fallbacks || rules.strict || rules.bearer)
@@ -78,13 +79,19 @@ class WireRulesTest {
             listOf(
                 wire.copy(reasoningField = "reasoning_content"),
                 wire.copy(reasoningField = "reasoning_content", echoReasoning = true),
-                wire.copy(parallelToolCalls = true),
                 wire.copy(streamOptions = true),
                 wire.copy(includeEncryptedReasoning = true),
                 wire.copy(recoverLeakedToolCalls = true),
             )
         cases.forEach { assertEquals("wire", refused(it).param, it.toString()) }
         assertTrue(refused(wire.copy(streamOptions = true)).detail.contains("streamOptions"))
+    }
+
+    @Test
+    fun `a snapshot that allows parallel tool calls is refused`() {
+        val parallel = refused(wire.copy(disableParallelToolCalls = false))
+        assertEquals("wire.disableParallelToolCalls", parallel.param)
+        assertTrue(parallel.detail.contains("one tool call per reply"), parallel.detail)
     }
 
     @Test

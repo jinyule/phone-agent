@@ -8,6 +8,10 @@ import dev.phoneagent.core.model.Delta
 import dev.phoneagent.core.model.ModelError
 import dev.phoneagent.core.model.ModelInfo
 import dev.phoneagent.core.model.ProviderProfile
+import dev.phoneagent.core.model.ReasoningLevel
+import dev.phoneagent.core.model.RequestSettings
+import dev.phoneagent.core.model.WireSetting
+import dev.phoneagent.core.model.clampTo
 import dev.phoneagent.core.model.kind
 import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -21,6 +25,12 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
  * API key is not refreshed, so a 401 is [ModelError.Auth]; every failure goes to the caller
  * (`requestError`), including a stale thinking signature ([ModelError.PrefixBindingMismatch]).
  *
+ * [prepare] gives the snapshot of [settings] for [info]'s model behind [profile], frozen when the
+ * model is made: the profile's headers are copied then, so a later edit of the profile changes no
+ * snapshot. Settings that do not fit the endpoint and the model are refused here, on creation
+ * ([AnthropicSettings.requireFits], [ModelError.InvalidRequest] naming the setting), since
+ * [prepare] never throws.
+ *
  * A snapshot whose Claude API betas (server fallback, prefix mismatch behavior) [profile]'s
  * endpoint does not take, because it was made for another one, is refused before anything is
  * sent rather than sent with fields left out: what goes out must follow from the logged snapshot.
@@ -30,10 +40,18 @@ internal class MessagesModel(
     override val info: ModelInfo,
     private val blobs: BlobSource,
     private val env: AnthropicEnv,
+    settings: AnthropicSettings,
 ) : ChatModel {
     private val endpoint = "${profile.baseUrl}/v1/messages".toHttpUrl()
     private val wire = MessagesWire(profile.id, info.model)
     private val official = AnthropicPresets.isOfficial(profile.baseUrl)
+    private val snapshot = AnthropicWire.snapshot(profile, info.model, info.capabilities, null, settings)
+
+    override fun prepare(reasoning: ReasoningLevel?): RequestSettings {
+        val level = reasoning?.clampTo(info.capabilities.reasoningLevels)
+        val effort = level?.let { WireSetting(AnthropicWire.EFFORT_FIELD, AnthropicWire.effortOf(it)) }
+        return RequestSettings(level, snapshot.copy(reasoningEffort = effort))
+    }
 
     override suspend fun complete(
         request: ChatRequest,

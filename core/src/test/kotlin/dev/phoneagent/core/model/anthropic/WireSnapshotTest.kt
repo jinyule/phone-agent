@@ -18,6 +18,7 @@ import kotlinx.serialization.json.put
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 
@@ -84,7 +85,7 @@ class WireSnapshotTest {
     }
 
     @Test
-    fun `every produced snapshot is honored, with parallel calls off by mapping rule 1`() {
+    fun `every produced snapshot is honored, with parallel calls off`() {
         val noParallel =
             buildJsonObject {
                 put("type", "auto")
@@ -95,8 +96,9 @@ class WireSnapshotTest {
             assertEquals(AnthropicWire.MAPPING_VERSION, wire.mappingVersion)
             assertEquals(inputs.profile.credential.kind, wire.credential)
             assertEquals(if (inputs.capabilities.vision) ImageMode.INLINE else ImageMode.PLACEHOLDER, wire.images)
-            // Mapping version 1 always sends disable_parallel_tool_use; the Chat Completions field stays off.
-            assertFalse(wire.parallelToolCalls || wire.streamOptions || wire.includeEncryptedReasoning, "$inputs")
+            // The snapshot asks for one call per reply; it goes out as disable_parallel_tool_use.
+            assertTrue(wire.disableParallelToolCalls, "$inputs")
+            assertFalse(wire.streamOptions || wire.includeEncryptedReasoning, "$inputs")
             val request = Kit.request(reasoning = inputs.level, wire = wire)
             val rules = WireRules.of(request, inputs.profile.credential.kind)
             val body = MessagesWire(inputs.profile.id, inputs.model).body(request, rules, ImageData.NONE)

@@ -18,16 +18,16 @@ import java.util.Locale
 
 /**
  * The wire snapshot ([WireProfile]) of Anthropic Messages requests (model-layer §2, §3.3). Whoever
- * writes `request/header` or `side/request` calls [snapshot] and puts the result in
+ * writes `request/header` or `side/request` takes it from `ChatModel.prepare` and puts it in
  * `ChatRequest.wire`; the adapter reads its settings from there only, so a logged request replays
  * byte for byte while the profile or the settings change.
  *
  * Mapping version [MAPPING_VERSION] reads these fields: `credential`, `headers`, `images`,
- * `reasoningEffort` (`output_config.effort`), `maxTokensField` (always `max_tokens`) and the
- * `anthropic.*` [WireProfile.options] below. The Chat Completions and Responses fields must keep
- * their defaults; anything else is refused with [ModelError.InvalidRequest] before sending.
- * `tool_choice.disable_parallel_tool_use: true` is a rule of mapping version 1 (one action per
- * step), not a snapshot field: `parallelToolCalls` belongs to Chat Completions and stays `false`.
+ * `reasoningEffort` (`output_config.effort`), `maxTokensField` (always `max_tokens`),
+ * `disableParallelToolCalls` (always `true`: one action per step, sent as
+ * `tool_choice.disable_parallel_tool_use: true`) and the `anthropic.*` [WireProfile.options]
+ * below. The Chat Completions and Responses fields must keep their defaults; anything else is
+ * refused with [ModelError.InvalidRequest] before sending.
  */
 public object AnthropicWire {
     /** Version of the mapping rules this adapter implements. */
@@ -53,16 +53,17 @@ public object AnthropicWire {
     internal const val MAX_TOKENS_FIELD = "max_tokens"
 
     /**
-     * The snapshot for a request to [model] behind [profile]. [reasoning] is the level already
-     * clamped to the model (`ReasoningLevel.clampTo`), the same value the request records in
-     * `ChatRequest.reasoning`; `null` sends no effort (the model's default). Images are sent inline
-     * when [capabilities] say the model sees them, else as a fixed text placeholder.
+     * The snapshot for a request to [model] behind [profile] (`ChatModel.prepare` of the adapter's
+     * models). [reasoning] is the level already clamped to the model (`ReasoningLevel.clampTo`),
+     * the same value the request records in `ChatRequest.reasoning`; `null` sends no effort (the
+     * model's default). Images are sent inline when [capabilities] say the model sees them, else as
+     * a fixed text placeholder.
      *
      * [settings] must fit the endpoint and the model ([AnthropicSettings.effectiveFor] makes saved
      * settings fit): settings that do not are a configuration error, [ModelError.InvalidRequest]
      * naming the setting, never dropped on the way. The snapshot records them as sent.
      */
-    public fun snapshot(
+    internal fun snapshot(
         profile: ProviderProfile,
         model: ModelId,
         capabilities: ModelCapabilities,
@@ -77,6 +78,7 @@ public object AnthropicWire {
             images = if (capabilities.vision) ImageMode.INLINE else ImageMode.PLACEHOLDER,
             reasoningEffort = reasoning?.let { WireSetting(EFFORT_FIELD, effortOf(it)) },
             maxTokensField = MAX_TOKENS_FIELD,
+            disableParallelToolCalls = true,
             options = settings.options(),
         )
     }
@@ -93,8 +95,9 @@ public object AnthropicWire {
 }
 
 /**
- * What an Anthropic profile sends besides the conversation; saved with the profile and turned
- * into snapshot options by [AnthropicWire.snapshot]. Validated on construction.
+ * What an Anthropic profile sends besides the conversation; saved with the profile, given to
+ * `AnthropicAdapters.model` and turned into snapshot options by `ChatModel.prepare`. Validated on
+ * construction.
  *
  * @property apiVersion the `anthropic-version` header (`YYYY-MM-DD`).
  * @property auth how the API key is sent.
@@ -133,8 +136,8 @@ public data class AnthropicSettings(
     /**
      * These settings for requests to [model] behind [profile]: what neither can take is turned off
      * (a Claude-API-only beta on another endpoint, a fallback for a model without one). For a
-     * profile serving several models, saved settings go through this per model before [AnthropicWire.snapshot],
-     * which records the result.
+     * profile serving several models, saved settings go through this per model before the model is
+     * made (`AnthropicAdapters.model`), whose snapshots record the result.
      */
     public fun effectiveFor(
         profile: ProviderProfile,
@@ -274,6 +277,12 @@ internal data class WireRules(
             if (wire.maxTokensField != AnthropicWire.MAX_TOKENS_FIELD) {
                 invalid("wire.maxTokensField", "Anthropic Messages needs max_tokens, got ${wire.maxTokensField}")
             }
+            if (!wire.disableParallelToolCalls) {
+                invalid(
+                    "wire.disableParallelToolCalls",
+                    "mapping version ${AnthropicWire.MAPPING_VERSION} asks for one tool call per reply",
+                )
+            }
             val options = Options(wire.options)
             val adaptive = options.flag(AnthropicWire.OPT_THINKING, AnthropicSettings.ADAPTIVE)
             val rules =
@@ -303,7 +312,6 @@ internal data class WireRules(
                 listOfNotNull(
                     "reasoningField".takeIf { wire.reasoningField != null },
                     "echoReasoning".takeIf { wire.echoReasoning },
-                    "parallelToolCalls".takeIf { wire.parallelToolCalls },
                     "streamOptions".takeIf { wire.streamOptions },
                     "includeEncryptedReasoning".takeIf { wire.includeEncryptedReasoning },
                     "recoverLeakedToolCalls".takeIf { wire.recoverLeakedToolCalls },

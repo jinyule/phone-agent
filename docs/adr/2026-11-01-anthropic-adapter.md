@@ -105,9 +105,9 @@
   - `x-api-key` 或 `Authorization: Bearer`；
   - `Accept: text/event-stream`。
 - **映射版本 1**：`AnthropicWire.MAPPING_VERSION = 1`。
-  - 快照由纯函数 `AnthropicWire.snapshot(profile, model, capabilities, reasoning)` 生成：同样的输入总是得到同样的快照。`complete()` 不生成快照，只读 `request.wire`。
+  - 快照由 `ChatModel.prepare(reasoning)` 生成（WP01 的契约）：模型创建时拿到 profile、能力和用户保存的 `AnthropicSettings` 并冻结，同一档位总是得到同样的快照。`complete()` 不生成快照，只读 `request.wire`。
   - 快照的 `options` 只认 `anthropic.*` 下的八个名字，未知名字、取值不合法、映射版本或凭据类型不符，一律在发送前报 `InvalidRequest`。
-  - 带工具时总是发 `tool_choice:{type:"auto", disable_parallel_tool_use:true}`。这是映射版本 1 的固定规则（主循环每步只执行一个动作），不读快照里的 `parallelToolCalls`；那个字段属于 Chat Completions，在 Anthropic 快照里保持 `false`。要改这条规则，就要升 `MAPPING_VERSION`。
+  - 带工具时总是发 `tool_choice:{type:"auto", disable_parallel_tool_use:true}`（主循环每步只执行一个动作）。快照写 `disableParallelToolCalls = true`，写 `false` 的快照在发送前被拒；要改这条规则，就要升 `MAPPING_VERSION`。
   - `output_config.effort` 走 `reasoningEffort` 字段，按 `request.reasoning` 显式设置，`MINIMAL` 映射为 `low`。
   - body 的字段顺序和合并、缓存规则写在 `MessagesWire` 的 KDoc 里，并由金样 `core/src/test/resources/wire/anthropic/golden/` 固定下来。
 - **推荐设置**（`AnthropicSettings.defaultsFor`）：
@@ -116,8 +116,8 @@
     - `prefix_mismatch_behavior:"drop_block"`；
     - 对 Opus 5.5 和 Sonnet 5.5 开服务端降级 `fallbacks:"default"`。Haiku 5.5 没有降级。
   - 网关不发 Claude API 专有的 beta，因为网关可能拒收。
-  - 端点、模型、设置三者的兼容性在 `snapshot` 统一校验。不兼容就报 `InvalidRequest(param = "settings.…")`，发送阶段不静默删字段。不兼容指两种情况：网关上开了降级或 `prefixMismatch`；没有降级的模型（Haiku 5.5，以及预设不认识的模型）开了降级。
-  - 一份档案服务多个模型时，先用 `AnthropicSettings.effectiveFor(profile, model)` 按模型算出有效设置，快照记下的就是实际发出的设置。
+  - 端点、模型、设置三者的兼容性在创建模型时统一校验（`prepare` 不抛异常）。不兼容就报 `InvalidRequest(param = "settings.…")`，发送阶段不静默删字段。不兼容指两种情况：网关上开了降级或 `prefixMismatch`；没有降级的模型（Haiku 5.5，以及预设不认识的模型）开了降级。
+  - 一份档案服务多个模型时，先用 `AnthropicSettings.effectiveFor(profile, model)` 按模型算出有效设置，再创建模型，快照记下的就是实际发出的设置。
 - **流式解析**（`MessagesStream`）：
   - 内容块原样拼装。块一个接一个来，`index` 必须比之前的都大；同一条回复里 `tool_use` 和 `server_tool_use` 的 id 不能重复。违反就报 `BadResponse`，不靠排序或去重掩盖。
   - 正文增量拼起来和最终正文完全一致。推理、调用通告和参数的预览只在服务端降级时可能和最终回复不一致，这时 `preview_diverged` 记下通道。工具调用在名字完整后只通告一次。

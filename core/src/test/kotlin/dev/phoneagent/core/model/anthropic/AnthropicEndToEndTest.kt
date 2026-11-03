@@ -94,19 +94,21 @@ class AnthropicEndToEndTest {
         }
 
     private fun model(images: Map<BlobRef, ByteArray> = emptyMap()): ChatModel =
-        Kit.adapters(Keys(key), http).model(profile, modelId, capabilities, Kit.blobs(*images.toList().toTypedArray()))
+        Kit
+            .adapters(Keys(key), http)
+            .model(profile, modelId, capabilities, Kit.blobs(*images.toList().toTypedArray()), settings)
 
     private fun request(
         vararg messages: Message,
         tools: Boolean = true,
     ): ChatRequest {
-        val wire = AnthropicWire.snapshot(profile, modelId, capabilities, ReasoningLevel.LOW, settings)
+        val prepared = model().prepare(ReasoningLevel.LOW)
         return Kit.request(
             *messages,
             tools = if (tools) listOf(Kit.WEATHER) else emptyList(),
             system = listOf("你是测试助手。回答尽量简短。"),
-            reasoning = ReasoningLevel.LOW,
-            wire = wire,
+            reasoning = prepared.reasoning,
+            wire = prepared.wire,
             maxOutputTokens = MAX_TOKENS,
         )
     }

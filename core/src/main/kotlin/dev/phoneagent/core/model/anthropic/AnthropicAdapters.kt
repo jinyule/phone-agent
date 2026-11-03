@@ -49,21 +49,29 @@ public class AnthropicAdapters internal constructor(
     internal val env: AnthropicEnv = AnthropicEnv(HttpTransport(http, io), credentials, clock)
 
     /**
-     * The model [model] behind [profile]. [blobs] reads the images of the session it serves.
-     * Requests are shaped by their own `wire` snapshot ([AnthropicWire.snapshot]), never by
-     * [capabilities] or later changes to [profile]. Throws [IllegalArgumentException] for a profile
-     * of another protocol.
+     * The model [model] behind [profile], sending [settings] (the ones saved with the profile;
+     * [AnthropicSettings.effectiveFor] fits them to this model first when one profile serves
+     * several). [blobs] reads the images of the session it serves. [ChatModel.prepare] gives the
+     * snapshot of these inputs as they are now; requests are shaped by their own `wire` snapshot,
+     * never by later changes to [profile].
+     *
+     * Throws [IllegalArgumentException] for a profile of another protocol, and
+     * [ModelError.InvalidRequest] naming the setting for [settings] that do not fit the endpoint
+     * and the model (a Claude API beta on another endpoint, a server fallback for a model without
+     * one): a configuration error, never dropped on the way.
      */
     public fun model(
         profile: ProviderProfile,
         model: ModelId,
         capabilities: ModelCapabilities,
         blobs: BlobSource,
+        settings: AnthropicSettings = AnthropicSettings.defaultsFor(profile, model),
     ): ChatModel {
         require(profile.protocol == ModelProtocol.ANTHROPIC_MESSAGES) {
             "Provider ${profile.id}: ${profile.protocol} is not Anthropic Messages"
         }
-        return MessagesModel(profile, ModelInfo(profile.id, model, profile.protocol, capabilities), blobs, env)
+        val info = ModelInfo(profile.id, model, profile.protocol, capabilities)
+        return MessagesModel(profile, info, blobs, env, settings)
     }
 }
 

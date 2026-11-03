@@ -241,12 +241,12 @@ data class WireProfile(
   - beta 按需拼进 `anthropic-beta`。
   - 推荐设置：所有端点都开 adaptive thinking、`display:"summarized"` 和 `eager_input_streaming`；官方端点（`https://api.anthropic.com`）上再加 `drop_block` 和服务端降级（只对有降级的模型）。网关不发 Claude API 专有的 beta。
   - 官方端点只有一种判定（`AnthropicPresets.isOfficial`），生成快照和发送前的核对都用它：base URL 规范化以后正好是 `https://api.anthropic.com`，也就是 HTTPS、这个主机（大小写不限）、端口 443（写不写都行）、根路径，没有别的。别的端口（如 `:8443`）或带路径（如 `/proxy`）的地址都算另一个端点。
-  - 快照由纯函数 `AnthropicWire.snapshot(profile, model, capabilities, reasoning)` 生成，同样的输入得到同样的快照；`complete()` 不生成快照。
-  - 端点、模型、设置三者的兼容性在生成快照时统一校验，发送阶段不静默删掉记下的字段。不兼容就报 `InvalidRequest(param = "settings.serverFallback")` 或 `settings.prefixMismatch`。不兼容指两种情况：网关上开了 Claude API 专有的降级或 `prefixMismatch`；没有服务端降级的模型（Haiku 5.5，以及预设不认识的模型）开了降级，Haiku 5.5 上 `fallbacks` 本身就是 400。
-  - 一份档案服务多个模型时，保存的设置先经 `AnthropicSettings.effectiveFor(profile, model)` 按模型算出有效设置，再生成快照，记下的就是实际发出的设置。
+  - 快照由 `ChatModel.prepare(reasoning)` 生成（§2"线路快照"）：`AnthropicAdapters.model(profile, model, capabilities, blobs, settings)` 创建模型时就拿到用户保存的 `AnthropicSettings`（不给就用推荐设置），profile 的 headers 在这时复制一份冻结；`prepare` 先钳制档位再映射，同一档位总是得到相同的快照；`complete()` 不生成快照。
+  - 端点、模型、设置三者的兼容性在创建模型时统一校验（`prepare` 按契约不抛异常），发送阶段不静默删掉记下的字段。不兼容就报 `InvalidRequest(param = "settings.serverFallback")` 或 `settings.prefixMismatch`。不兼容指两种情况：网关上开了 Claude API 专有的降级或 `prefixMismatch`；没有服务端降级的模型（Haiku 5.5，以及预设不认识的模型）开了降级，Haiku 5.5 上 `fallbacks` 本身就是 400。
+  - 一份档案服务多个模型时，保存的设置先经 `AnthropicSettings.effectiveFor(profile, model)` 按模型算出有效设置，再创建模型，快照记下的就是实际发出的设置。
   - 发送前再核对一次端点：快照开着 `fallbacks` 或 `prefixMismatch`，而 `profile.baseUrl` 不是官方端点（任务进行中把 base URL 从官方端点改成了网关），就报不可重试的 `InvalidRequest(param = "wire.options")`，写明快照是为另一个端点生成的、需要重新生成。不静默删字段：发出的内容必须能从日志里的快照重建（AGENTS §3 第 1 条）。
   - **WP09 的义务**：档案的端点变了，就生成并记一份新快照（新的 `request/header`），不拿旧快照接着发。
-  - 带工具时固定发 `disable_parallel_tool_use:true`。这是映射版本 1 的规则，不读 `parallelToolCalls`。
+  - 快照总是写 `disableParallelToolCalls = true`，写 `false` 的快照在发送前报 `InvalidRequest(param = "wire.disableParallelToolCalls")`；带工具时据此发 `tool_choice.disable_parallel_tool_use:true`（主循环每步只执行一个动作）。
 - **传输**：和 OpenAI 适配器一致。
   - 每次 attempt 只发一个请求：关掉连接失败重试和重定向跟随。默认也不复用空闲连接（§3.1"连接复用"）。
   - 3xx 报不可重试的 `InvalidRequest(param = null)`，`detail` 里带打码、截断后的目标地址。
