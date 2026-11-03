@@ -393,6 +393,37 @@ class RefContextTest {
             )
         }
 
+    @Test
+    fun aFlatListThatRanOutOfBudgetInARowLeavesOnlyThatRowUnreliable() =
+        runTest {
+            // Fix list r4 C3 (Claude r4 S-3, e1): a lazy list without row nodes whose first child, a
+            // container none of whose nodes takes clicks, takes the node budget all but the next three
+            // nodes: Kettle, its Add, and Toaster; Toaster's Add is not read, so Toaster's row is open.
+            val y = LIST_TOP + ROW_PX
+            val filler = layout(Rect(0, LIST_TOP, 1000, y))
+            // The window's root, the list and the filler come before the filler's children.
+            repeat(ScreenReader.MAX_NODES - 6) {
+                filler.with(node("android.view.View", Rect(0, LIST_TOP, 1000, y)) { isVisibleToUser = false })
+            }
+            val list =
+                make("androidx.recyclerview.widget.RecyclerView", Rect(0, LIST_TOP, 1000, LIST_BOTTOM)).with(
+                    filler,
+                    text("Kettle", Rect(0, y, 600, y + ROW_PX)),
+                    press("Add to cart", Rect(700, y, 1000, y + ROW_PX), id = "add"),
+                    text("Toaster", Rect(0, y + ROW_PX, 600, y + 2 * ROW_PX)),
+                    press("Add to cart", Rect(700, y + ROW_PX, 1000, y + 2 * ROW_PX), id = "add"),
+                )
+            host.show(list)
+
+            val read = ScreenReader.read(host.windowsOn(0), GEOMETRY, OWN).elements
+            val reliable = { name: String -> read.single { it.element.name == name }.identity.reliable }
+
+            assertEquals("Toaster's Add is not read", 1, read.count { it.element.name == "Add to cart" })
+            assertTrue("a row closed before the budget ran out", reliable("Kettle"))
+            assertTrue("its Add", read.single { it.element.name == "Add to cart" }.identity.reliable)
+            assertFalse("the row open when it ran out", reliable("Toaster"))
+        }
+
     // Rule 4: a row the list's edge cut down to its controls.
 
     /**
@@ -558,6 +589,44 @@ class RefContextTest {
             val port = mainPort(host)
             val s1 = port.snapshot()
             val small = showOptions()
+
+            val outcome = port.act(UiAction.Tap(Target.Ref(s1.named("Small").ref)), s1.id)
+
+            assertEquals(ActionOutcome.Status.Ok, outcome.status)
+            assertTrue(small.clicked)
+        }
+
+    /** A lazy list that can scroll both ways, as Compose leaves it, with a row of two sizes in the middle. */
+    private fun showSizes(): AccessibilityNodeInfo {
+        val small = press("Small", Rect(0, LIST_TOP + ROW_PX, 500, LIST_TOP + 2 * ROW_PX))
+        host.show(
+            make("android.view.View", Rect(0, LIST_TOP, 1000, LIST_BOTTOM)) {
+                isScrollable = true
+                collectionInfo = AccessibilityNodeInfo.CollectionInfo(-1, 1, false)
+                addAction(AccessibilityAction.ACTION_SCROLL_BACKWARD)
+                addAction(AccessibilityAction.ACTION_SCROLL_FORWARD)
+            }.with(
+                text("Sizes", Rect(0, LIST_TOP, 1000, LIST_TOP + ROW_PX)),
+                make("android.view.View", Rect(0, LIST_TOP + ROW_PX, 1000, LIST_TOP + 2 * ROW_PX)).with(
+                    small,
+                    press("Large", Rect(500, LIST_TOP + ROW_PX, 1000, LIST_TOP + 2 * ROW_PX)),
+                ),
+                text("More", Rect(0, LIST_BOTTOM - ROW_PX, 1000, LIST_BOTTOM)),
+            ),
+        )
+        return small
+    }
+
+    @Test
+    fun aRowOfButtonsOnlyInTheMiddleOfAListThatScrollsBackIsTappedByRef() =
+        runTest {
+            // Fix list r4 C3 (Claude r4 S-3): only the first child of a list that can scroll back may
+            // have lost what came before it; a row in the middle, not cut by the list's edge, keeps
+            // its ref though it holds only its buttons' labels.
+            showSizes()
+            val port = mainPort(host)
+            val s1 = port.snapshot()
+            val small = showSizes()
 
             val outcome = port.act(UiAction.Tap(Target.Ref(s1.named("Small").ref)), s1.id)
 
