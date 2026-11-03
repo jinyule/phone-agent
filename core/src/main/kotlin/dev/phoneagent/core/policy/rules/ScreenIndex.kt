@@ -101,16 +101,18 @@ internal class ScreenIndex private constructor(
     }
 
     /**
-     * As [Tree.under]: the clickable elements containing ([x], [y]) that contain no other one
-     * there, smallest first; without any, the smallest element there. Marks the ancestors of every
-     * clickable element there once, so it costs time in proportion to the snapshot.
+     * As [Tree.under]: the elements containing ([x], [y]) that take the touch (clickable, or also
+     * long-clickable when [long]) and contain no other one there, smallest first; without any, the
+     * smallest element there. Marks the ancestors of every such element there once, so it costs
+     * time in proportion to the snapshot.
      */
     fun under(
         x: Int,
         y: Int,
+        long: Boolean,
     ): List<UiElement> {
         val hit = elements.indices.filter { Geometry.contains(elements[it].bounds, x, y) }
-        val controls = hit.filter { Elements.clickable(elements[it]) }
+        val controls = hit.filter { Elements.clickable(elements[it]) || (long && Elements.longClickable(elements[it])) }
         val outer = BooleanArray(elements.size)
         for (control in controls) {
             var at = parents[control]

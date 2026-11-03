@@ -235,11 +235,11 @@ class LimitsTest {
         val a = el("e2", "甲", bounds = box(100, 100, 300, 300)).copy(parent = ElementRef("e1"))
         val b = el("e3", "乙", bounds = box(100, 100, 400, 400)).copy(parent = ElementRef("e1"))
         val inA = el("e4", "丙", bounds = box(150, 150, 250, 250)).copy(parent = ElementRef("e2"))
-        assertEquals(listOf(a, b), Tree.under(screen(card, a, b), 120, 120))
-        assertEquals(listOf(inA, b), Tree.under(screen(card, a, b, inA), 160, 160))
+        assertEquals(listOf(a, b), Tree.under(screen(card, a, b), 120, 120, long = false))
+        assertEquals(listOf(inA, b), Tree.under(screen(card, a, b, inA), 160, 160, long = false))
         // Elements that take no click: the smallest there.
         val plain = el("e5", role = ElementRole.IMAGE, bounds = box(0, 600, 100, 700), states = emptySet())
-        assertEquals(listOf(plain), Tree.under(screen(plain), 50, 650))
+        assertEquals(listOf(plain), Tree.under(screen(plain), 50, 650, long = false))
     }
 
     @Test
@@ -282,7 +282,7 @@ class LimitsTest {
         val byLabel = risks.activation(label, s)
         assertEquals(IntentKind.OUTWARD, byLabel.kind)
         assertSame(byLabel, risks.activation(s.elements[2], s))
-        assertSame(risks.at(Aim.Point(650, 930), s), risks.at(Aim.Point(650, 930), s))
+        assertSame(risks.at(Aim.Point(650, 930), long = false, s), risks.at(Aim.Point(650, 930), long = false, s))
         // An OCR line at the point is part of what is read.
         val drawn = s.copy(ocr = listOf(ocr("删除", box(600, 900, 680, 960))))
         assertEquals(IntentKind.OUTWARD, risks.activation(label, drawn).kind)

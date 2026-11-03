@@ -48,21 +48,21 @@ class ElementsTest {
         val button = el("e1", "支付", bounds = box(600, 900, 999, 960))
         val label = text("t2", "¥20", box(700, 910, 800, 950), parent = "e1")
         val s = screen(button, label)
-        assertEquals(button, Tree.clickTarget(button, s))
-        assertEquals(button, Tree.clickTarget(label, s))
+        assertEquals(button, Tree.clickTarget(button, long = false, s))
+        assertEquals(button, Tree.clickTarget(label, long = false, s))
         assertTrue(Tree.inControl(label, s))
         assertFalse(Tree.inControl(button, s))
         // An ancestor that does not cover the element's center does not take the click.
         val away = text("t3", "外面", box(0, 100, 100, 140), parent = "e1")
-        assertNull(Tree.clickTarget(away, screen(button, away)))
+        assertNull(Tree.clickTarget(away, long = false, screen(button, away)))
         // A disabled control takes no click.
         val off = el("e1", "支付", states = Fx.CLICK + ElementState.DISABLED)
-        assertNull(Tree.clickTarget(off, screen(off)))
+        assertNull(Tree.clickTarget(off, long = false, screen(off)))
         // Deeper than the actuator climbs.
         val chain = (1..10).map { i -> el("e$i", states = emptySet()).copy(parent = ElementRef("e${i + 1}")) }
         val top = el("e11")
-        assertEquals(top, Tree.clickTarget(chain[2], screen(*chain.toTypedArray(), top)))
-        assertNull(Tree.clickTarget(chain[0], screen(*chain.toTypedArray(), top)))
+        assertEquals(top, Tree.clickTarget(chain[2], long = false, screen(*chain.toTypedArray(), top)))
+        assertNull(Tree.clickTarget(chain[0], long = false, screen(*chain.toTypedArray(), top)))
     }
 
     @Test
@@ -70,19 +70,39 @@ class ElementsTest {
         val big = el("e1", "卡片", bounds = box(0, 0, 999, 500))
         val small = el("e2", "按钮", bounds = box(100, 100, 200, 200))
         val tinyText = el("e3", "字", ElementRole.TEXT, box(110, 110, 150, 150), emptySet())
-        assertEquals(listOf(small, big), Tree.under(screen(big, small, tinyText), 120, 120))
-        assertEquals(listOf(small, big), Tree.under(screen(small, big), 120, 120))
+        assertEquals(listOf(small, big), Tree.under(screen(big, small, tinyText), 120, 120, long = false))
+        assertEquals(listOf(small, big), Tree.under(screen(small, big), 120, 120, long = false))
         // Inside the card in the tree: the inner one takes the touch.
         val inner = small.copy(parent = ElementRef("e1"))
-        assertEquals(listOf(inner), Tree.under(screen(big, inner), 120, 120))
+        assertEquals(listOf(inner), Tree.under(screen(big, inner), 120, 120, long = false))
         // An overlapping control that is not its ancestor still may take the touch.
         val overlay = el("e6", "浮层", bounds = box(50, 50, 300, 300))
-        assertEquals(listOf(inner, overlay), Tree.under(screen(big, inner, overlay), 120, 120))
+        assertEquals(listOf(inner, overlay), Tree.under(screen(big, inner, overlay), 120, 120, long = false))
         val image = el("e4", role = ElementRole.IMAGE, bounds = box(0, 600, 999, 999), states = emptySet())
         val badge = el("e5", role = ElementRole.IMAGE, bounds = box(0, 600, 100, 700), states = emptySet())
-        assertEquals(listOf(badge), Tree.under(screen(image, badge), 50, 650))
-        assertEquals(listOf(badge), Tree.under(screen(badge, image), 50, 650))
-        assertEquals(emptyList<Any>(), Tree.under(screen(big), 500, 800))
+        assertEquals(listOf(badge), Tree.under(screen(image, badge), 50, 650, long = false))
+        assertEquals(listOf(badge), Tree.under(screen(badge, image), 50, 650, long = false))
+        assertEquals(emptyList<Any>(), Tree.under(screen(big), 500, 800, long = false))
+    }
+
+    @Test
+    fun `a long press goes to what takes a long press, as the actuator delivers it`() {
+        val long = setOf(ElementState.LONG_CLICKABLE)
+        val row = el("e1", "消息", bounds = box(0, 300, 999, 400), states = long)
+        val button = el("e2", "查看", bounds = box(0, 300, 500, 400)).copy(parent = ElementRef("e1"))
+        val s = screen(row, button)
+        // By ref: the nearest one that takes a long click, past one that takes only a click.
+        assertEquals(row, Tree.clickTarget(button, long = true, s))
+        assertEquals(button, Tree.clickTarget(button, long = false, s))
+        val off = row.copy(states = long + ElementState.DISABLED)
+        assertNull(Tree.clickTarget(button, long = true, screen(off, button)))
+        // At a point: the innermost one that takes the touch; held, a clickable one clicks when let go.
+        assertEquals(listOf(button), Tree.under(s, 100, 350, long = true))
+        val alone = el("e3", "图片", bounds = box(600, 300, 999, 400), states = long)
+        val cancel = el("e4", "取消", bounds = box(650, 320, 750, 380))
+        assertEquals(listOf(cancel, alone), Tree.under(screen(alone, cancel), 700, 350, long = true))
+        assertEquals(listOf(cancel), Tree.under(screen(alone, cancel), 700, 350, long = false))
+        assertEquals(listOf(cancel), Tree.under(screen(alone.copy(states = off.states), cancel), 700, 350, long = true))
     }
 
     @Test

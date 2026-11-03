@@ -131,8 +131,8 @@ internal class HardRules(
         screen: ScreenSnapshot,
     ): Assessment? =
         when {
-            step is Step.Tap -> reading.risks.tap(step.aim, screen)
-            step is Step.Swipe -> reading.risks.at(step.from, screen)
+            step is Step.Tap -> reading.risks.tap(step.aim, step.long, screen)
+            step is Step.Swipe -> reading.risks.at(step.from, long = false, screen)
             step is Step.Key -> reading.risks.pressed(screen)
             else -> null
         }
@@ -184,7 +184,7 @@ internal class HardRules(
         screen: ScreenSnapshot,
     ): Boolean {
         if (step !is Step.Tap) return false
-        val touched = reading.risks.tap(step.aim, screen)
+        val touched = reading.risks.tap(step.aim, step.long, screen)
         val labels = touched.candidates.map { Elements.label(it, screen) }
         return labels.isNotEmpty() && (labels + touched.texts).all(reading.lexicon::isEscape)
     }

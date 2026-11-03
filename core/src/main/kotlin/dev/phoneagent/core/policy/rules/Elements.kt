@@ -27,6 +27,10 @@ internal object Elements {
     fun clickable(element: UiElement): Boolean =
         ElementState.CLICKABLE in element.states && ElementState.DISABLED !in element.states
 
+    /** Takes a long click: long-clickable and not disabled. */
+    fun longClickable(element: UiElement): Boolean =
+        ElementState.LONG_CLICKABLE in element.states && ElementState.DISABLED !in element.states
+
     /** What the element says: its name, else the names in its own content ([content]) joined, else "". */
     fun label(
         element: UiElement,
@@ -73,30 +77,35 @@ internal object Tree {
     private const val MAX_ANCESTORS = 8
 
     /**
-     * The control a tap by ref on [element] activates: [element] when it takes the click, else the
-     * nearest of [MAX_ANCESTORS] ancestors that does and covers [element]'s center; `null` when none
-     * does (the tap is then a gesture at the center).
+     * The control a tap by ref on [element] activates: [element] when it takes the click (the long
+     * click when [long]), else the nearest of [MAX_ANCESTORS] ancestors that does and covers
+     * [element]'s center; `null` when none does (the tap is then a gesture at the center).
      */
     fun clickTarget(
         element: UiElement,
+        long: Boolean,
         screen: ScreenSnapshot,
     ): UiElement? {
         val center = Geometry.center(element.bounds)
+        val takes = if (long) Elements::longClickable else Elements::clickable
         return (sequenceOf(element) + ScreenIndex.of(screen).ancestors(element))
             .take(MAX_ANCESTORS + 1)
-            .firstOrNull { Elements.clickable(it) && Geometry.contains(it.bounds, center.x, center.y) }
+            .firstOrNull { takes(it) && Geometry.contains(it.bounds, center.x, center.y) }
     }
 
     /**
-     * What a touch at ([x], [y]) may land on, smallest first: the clickable elements there that
-     * contain no other clickable element there (the innermost takes the touch); which of several
-     * unrelated ones is on top is not known. Without any, the smallest element there.
+     * What a touch at ([x], [y]) may land on, smallest first: the elements there that take it
+     * and contain no other one there that does (the innermost takes the touch); which of several
+     * unrelated ones is on top is not known. Without any, the smallest element there. A short
+     * touch is taken by clickable elements; a held one ([long]) also by long-clickable ones, and a
+     * clickable one that takes it clicks when it is let go.
      */
     fun under(
         screen: ScreenSnapshot,
         x: Int,
         y: Int,
-    ): List<UiElement> = ScreenIndex.of(screen).under(x, y)
+        long: Boolean,
+    ): List<UiElement> = ScreenIndex.of(screen).under(x, y, long)
 
     /** Whether some ancestor of [element] takes clicks: it is part of a control. */
     fun inControl(

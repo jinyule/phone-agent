@@ -15,6 +15,7 @@ import dev.phoneagent.core.policy.rules.Fx.text
 import dev.phoneagent.core.ports.ConfirmReason
 import dev.phoneagent.core.ports.ElementRef
 import dev.phoneagent.core.ports.ElementRole
+import dev.phoneagent.core.ports.ElementState
 import dev.phoneagent.core.ports.HandoffKind
 import dev.phoneagent.core.ports.ScreenFlag
 import dev.phoneagent.core.ports.ScreenSnapshot
@@ -204,9 +205,67 @@ class TargetsTest {
         assertEquals(HandoffKind.LOGIN, handOff(decide(tap("e1"), on(drawn, level))))
     }
 
+    @ParameterizedTest
+    @EnumSource(SecurityLevel::class)
+    fun `a long press reaches what takes a long press`(level: SecurityLevel) {
+        val s =
+            screen(
+                el("e1", "取消", bounds = box(450, 400, 550, 450)).copy(window = 2),
+                el("e2", "本机号码一键登录", bounds = box(0, 300, 999, 600), states = LONG).copy(window = 1),
+                flags = setOf(ScreenFlag.LOGIN),
+            )
+        val long = call("phone_tap", "screen" to "s1", "x" to 500, "y" to 425, "long" to true)
+        assertEquals(HandoffKind.LOGIN, handOff(decide(long, on(s, level))))
+        // By ref: "取消" takes no long press, so the actuator presses its center.
+        val byRef = call("phone_tap", "screen" to "s1", "ref" to "e1", "long" to true)
+        assertEquals(HandoffKind.LOGIN, handOff(decide(byRef, on(s, level))))
+        // A short press reaches only "取消", which leaves.
+        assertEquals(Verdict.Allow, decide(point(500, 425), on(s, level)))
+        assertEquals(Verdict.Allow, decide(tap("e1"), on(s, level)))
+    }
+
+    @Test
+    fun `a long press by ref goes to the nearest ancestor that takes a long press, as the actuator does`() {
+        val s =
+            screen(
+                el("e1", "删除", bounds = box(0, 300, 999, 400), states = LONG),
+                el("e2", "查看", bounds = box(0, 300, 500, 400)).copy(parent = ElementRef("e1")),
+                text("t3", "张三", box(0, 300, 400, 400), parent = "e2"),
+            )
+        assertEquals(Verdict.Allow, decide(tap("t3"), on(s)))
+        val long = call("phone_tap", "screen" to "s1", "ref" to "t3", "long" to true)
+        assertEquals(ConfirmReason.DELETE, reason(decide(long, on(s))))
+        // At a point the innermost control takes the touch, and a held click on it is a click.
+        assertEquals(
+            Verdict.Allow,
+            decide(call("phone_tap", "screen" to "s1", "x" to 200, "y" to 350, "long" to true), on(s)),
+        )
+        val pay = screen(el("e1", "支付", bounds = box(0, 300, 999, 400)))
+        assertEquals(
+            ConfirmReason.SPEND,
+            reason(
+                decide(
+                    call(
+                        "phone_tap",
+                        "screen" to "s1",
+                        "x" to 200,
+                        "y" to 350,
+                        "long" to true,
+                    ),
+                    on(pay),
+                ),
+            ),
+        )
+    }
+
     private fun escape() = el("e3", "取消", bounds = box(450, 680, 550, 720))
 
     private fun handOff(verdict: Verdict): HandoffKind = assertInstanceOf(Verdict.HandOff::class.java, verdict).kind
+
+    private companion object {
+        /** Takes a long press only. */
+        val LONG = setOf(ElementState.LONG_CLICKABLE)
+    }
 
     @Test
     fun `OCR naming a sensitive settings entry refuses it`() {

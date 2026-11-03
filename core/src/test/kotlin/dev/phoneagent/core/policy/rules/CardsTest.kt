@@ -24,7 +24,7 @@ class CardsTest {
     private val cards = Cards(Reading(PolicyTuning()))
     private val title = text("t1", "张三", box(0, 40, 500, 100))
     private val send = el("e1", "发送")
-    private val tapSend = Step.Tap(Aim.Ref(ElementRef("e1"), "s1"))
+    private val tapSend = Step.Tap(Aim.Ref(ElementRef("e1"), "s1"), long = false)
 
     @Test
     fun `an outward tap shows the conversation and the draft it sends`() {

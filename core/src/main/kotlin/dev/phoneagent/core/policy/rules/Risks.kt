@@ -46,51 +46,69 @@ internal class Risks(
     /** Clicks of a control, by the control and the OCR lines at the point; read once per snapshot. */
     private val clicks = PerScreen { ConcurrentHashMap<Pair<UiElement, List<String>>, Assessment>() }
 
-    /** Touches at a point; read once per snapshot. */
-    private val touches = PerScreen { ConcurrentHashMap<Aim.Point, Assessment>() }
+    /** Touches at a point, short and long; read once per snapshot. */
+    private val touches = PerScreen { ConcurrentHashMap<Pair<Aim.Point, Boolean>, Assessment>() }
 
-    /** A tap aimed at [aim]. */
+    /** A tap aimed at [aim]; a long press when [long]. */
     fun tap(
         aim: Aim,
+        long: Boolean,
         screen: ScreenSnapshot,
     ): Assessment =
         when (aim) {
-            is Aim.Ref -> byRef(aim, screen)
-            is Aim.Point -> at(aim, screen)
+            is Aim.Ref -> byRef(aim, long, screen)
+            is Aim.Point -> at(aim, long, screen)
         }
 
     private fun byRef(
         aim: Aim.Ref,
+        long: Boolean,
         screen: ScreenSnapshot,
     ): Assessment {
         val element = Elements.byRef(screen, aim.ref)
-        return if (element == null) assess(emptyList(), null, screen) else activation(element, screen)
+        return if (element == null) assess(emptyList(), null, screen) else press(element, long, screen)
     }
 
-    /**
-     * A tap by ref on [element], as the actuator performs it: the click of the control that takes
-     * it ([Tree.clickTarget]), else a touch at [element]'s center. The click depends on the point
-     * only through the OCR lines there, so every element of one control is read once.
-     */
+    /** A short tap by ref on [element] ([press]). */
     fun activation(
         element: UiElement,
         screen: ScreenSnapshot,
+    ): Assessment = press(element, long = false, screen)
+
+    /**
+     * A tap by ref on [element], as the actuator performs it: the click (the long click when
+     * [long]) of the control that takes it ([Tree.clickTarget]), else a touch of the same kind at
+     * [element]'s center. The click depends on the point only through the OCR lines there, so
+     * every element of one control is read once.
+     */
+    private fun press(
+        element: UiElement,
+        long: Boolean,
+        screen: ScreenSnapshot,
     ): Assessment {
-        val control = Tree.clickTarget(element, screen)
+        val control = Tree.clickTarget(element, long, screen)
         val center = Geometry.center(element.bounds)
         return if (control == null) {
-            at(center, screen)
+            at(center, long, screen)
         } else {
             val key = control to Evidence.drawnAt(center, screen)
             clicks.of(screen).computeIfAbsent(key) { assess(listOf(control), center, screen) }
         }
     }
 
-    /** A touch at [point]: every control that may take it counts ([Tree.under]), and the riskiest decides. */
+    /**
+     * A touch at [point], held when [long]: every control that may take it counts ([Tree.under]),
+     * and the riskiest decides.
+     */
     fun at(
         point: Aim.Point,
+        long: Boolean,
         screen: ScreenSnapshot,
-    ): Assessment = touches.of(screen).computeIfAbsent(point) { assess(Tree.under(screen, it.x, it.y), it, screen) }
+    ): Assessment =
+        touches
+            .of(
+                screen,
+            ).computeIfAbsent(point to long) { assess(Tree.under(screen, point.x, point.y, long), point, screen) }
 
     /**
      * What Enter on [screen] presses: the focused control, as a tap by ref on it ([activation]);

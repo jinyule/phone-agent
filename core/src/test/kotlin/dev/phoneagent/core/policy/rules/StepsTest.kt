@@ -38,12 +38,24 @@ class StepsTest {
 
     @Test
     fun `phone_tap takes a ref or a point, never both`() {
-        assertEquals(Step.Tap(e5), parse("phone_tap", "screen" to "s1", "ref" to "@e5"))
-        assertEquals(Step.Tap(e5), parse("phone_tap", "screen" to " s1 ", "ref" to " e5 "))
-        assertEquals(Step.Tap(Aim.Ref(ElementRef("e5"), null)), parse("phone_tap", "ref" to "e5"))
-        assertEquals(Step.Tap(Aim.Point(0, 999)), parse("phone_tap", "x" to 0, "y" to 999, "long" to true))
+        assertEquals(Step.Tap(e5, long = false), parse("phone_tap", "screen" to "s1", "ref" to "@e5"))
+        assertEquals(Step.Tap(e5, long = false), parse("phone_tap", "screen" to " s1 ", "ref" to " e5 "))
+        assertEquals(Step.Tap(Aim.Ref(ElementRef("e5"), null), long = false), parse("phone_tap", "ref" to "e5"))
+        assertEquals(Step.Tap(Aim.Point(0, 999), long = true), parse("phone_tap", "x" to 0, "y" to 999, "long" to true))
         // Integral numbers in any written form; JSON null is no argument.
-        assertEquals(Step.Tap(Aim.Point(5, 425)), parse("phone_tap", "ref" to null, "x" to 5.0, "y" to "425"))
+        assertEquals(
+            Step.Tap(Aim.Point(5, 425), long = false),
+            parse(
+                "phone_tap",
+                "ref" to null,
+                "x" to 5.0,
+                "y" to "425",
+            ),
+        )
+        assertEquals(Step.Tap(e5, long = true), parse("phone_tap", "screen" to "s1", "ref" to "e5", "long" to "true"))
+        // A long press is a flag: anything else cannot be checked.
+        assertEquals(Step.Malformed, parse("phone_tap", "screen" to "s1", "ref" to "e5", "long" to "yes"))
+        assertEquals(Step.Malformed, parse("phone_tap", "x" to 5, "y" to 5, "long" to 1))
         assertEquals(Step.Malformed, parse("phone_tap", "ref" to "e5", "x" to 5, "y" to 5))
         assertEquals(Step.Malformed, parse("phone_tap", "ref" to "e5", "y" to 5))
         assertEquals(Step.Malformed, parse("phone_tap", "ref" to "e0"))
@@ -234,8 +246,8 @@ class StepsTest {
 
     @Test
     fun `only ref-taking steps name a ref`() {
-        assertEquals(e5, Step.Tap(e5).ref)
-        assertNull(Step.Tap(Aim.Point(1, 1)).ref)
+        assertEquals(e5, Step.Tap(e5, long = false).ref)
+        assertNull(Step.Tap(Aim.Point(1, 1), long = false).ref)
         assertEquals(e5, Step.Type(e5, "x", submit = false, append = false).ref)
         assertEquals(e5, Step.Scroll(e5).ref)
         assertNull(Step.Swipe(Aim.Point(1, 1), Aim.Point(2, 2)).ref)

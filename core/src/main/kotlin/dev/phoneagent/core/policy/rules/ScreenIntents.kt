@@ -25,7 +25,7 @@ internal class ScreenIntents(
         screen: ScreenSnapshot,
     ): ActionIntent =
         when (step) {
-            is Step.Tap -> tap(step.aim, screen)
+            is Step.Tap -> tap(step, screen)
             is Step.Type -> type(step, screen)
             is Step.Scroll -> scroll(step, screen)
             is Step.Swipe -> swipe(step, screen)
@@ -33,10 +33,10 @@ internal class ScreenIntents(
         }
 
     private fun tap(
-        aim: Aim,
+        step: Step.Tap,
         screen: ScreenSnapshot,
     ): ActionIntent {
-        val touched = risks.tap(aim, screen)
+        val touched = risks.tap(step.aim, step.long, screen)
         return ActionIntent(touched.kind, screen.pkg, touched.target)
     }
 
@@ -82,7 +82,7 @@ internal class ScreenIntents(
         step: Step.Swipe,
         screen: ScreenSnapshot,
     ): ActionIntent {
-        val start = risks.at(step.from, screen)
+        val start = risks.at(step.from, long = false, screen)
         val element = start.target
         val dx = abs(step.to.x - step.from.x)
         val sideways = dx >= tuning.rowSwipeMin && dx > abs(step.to.y - step.from.y)

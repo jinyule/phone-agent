@@ -34,8 +34,10 @@ internal sealed interface Step {
     /** Reads the current screen (`phone_observe`, `phone_wait`). */
     data object Observe : Step
 
+    /** `phone_tap`; a long press when [long]. */
     data class Tap(
         val aim: Aim,
+        val long: Boolean,
     ) : ScreenStep {
         override val ref: Aim.Ref? get() = aim as? Aim.Ref
     }
@@ -130,13 +132,17 @@ internal object Steps {
         return if (parser == null) Step.Unknown else parser(call.args) ?: Step.Malformed
     }
 
-    /** A ref, or both coordinates; never both. */
-    private fun tap(args: JsonObject): Step? =
-        when {
-            !Args.has(args, "ref") -> Args.point(args, "x", "y")?.let(Step::Tap)
-            Args.has(args, "x") || Args.has(args, "y") -> null
-            else -> Args.ref(args)?.let(Step::Tap)
-        }
+    /** A ref, or both coordinates; never both. `long` is a flag. */
+    private fun tap(args: JsonObject): Step? {
+        val long = Args.flag(args, "long")
+        val aim =
+            when {
+                !Args.has(args, "ref") -> Args.point(args, "x", "y")
+                Args.has(args, "x") || Args.has(args, "y") -> null
+                else -> Args.ref(args)
+            }
+        return if (aim == null || long == null) null else Step.Tap(aim, long)
+    }
 
     private fun type(args: JsonObject): Step? {
         val text = Args.text(args, "text")
