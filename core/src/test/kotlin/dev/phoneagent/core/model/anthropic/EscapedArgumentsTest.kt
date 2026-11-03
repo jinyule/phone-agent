@@ -131,6 +131,36 @@ class EscapedArgumentsTest {
         }
 
     @Test
+    fun `an error event after escaped arguments refuses the reply instead of failing as overloaded`() =
+        runTest {
+            val args = """{"city":"$U_PLAIN"""
+            val overloaded =
+                Kit.sse(
+                    MESSAGE_START,
+                    start(0, tool("{}")),
+                    delta(0, args(args)),
+                    "error" to """{"type":"error","error":{"type":"overloaded_error","message":"busy"}}""",
+                )
+            rejected(PLAIN, listOf(STARTED, Delta.ToolCallArgs(CALL, args)), overloaded)
+        }
+
+    @Test
+    fun `a message_stop that leaves escaped arguments open refuses the reply`() =
+        runTest {
+            val args = """{"city":"$U_PLAIN"""
+            val open =
+                Kit.sse(
+                    MESSAGE_START,
+                    start(0, tool("{}")),
+                    delta(0, args(args)),
+                    "message_delta" to
+                        """{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":1}}""",
+                    "message_stop" to """{"type":"message_stop"}""",
+                )
+            rejected(PLAIN, listOf(STARTED, Delta.ToolCallArgs(CALL, args)), open)
+        }
+
+    @Test
     fun `the key as a string, or escaped in valid arguments, is refused as before`() =
         runTest {
             val string = listOf(start(0, tool("""{"pin":"$NUMERIC"}""")), stop(0))
