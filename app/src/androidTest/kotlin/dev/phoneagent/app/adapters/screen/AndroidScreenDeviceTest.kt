@@ -246,6 +246,22 @@ class AndroidScreenDeviceTest {
         return ScreenFlag.KEYBOARD !in flags
     }
 
+    /**
+     * Whether the service's input connection edits in [pkg] now or within [CHANGE_TIMEOUT_MS],
+     * checking again on each change.
+     */
+    private suspend fun editorBinds(
+        host: ScreenHost,
+        pkg: CharSequence?,
+    ): Boolean {
+        val deadline = System.nanoTime() + CHANGE_TIMEOUT_MS * NANOS_PER_MS
+        while (host.imeConnection()?.editorPackage != pkg?.toString() && System.nanoTime() < deadline) {
+            val changed = screen.awaitChange(CHANGE_TIMEOUT_MS)
+            log("  waiting for the input connection: changed=$changed editor=${host.imeConnection()?.editorPackage}")
+        }
+        return host.imeConnection()?.editorPackage == pkg?.toString()
+    }
+
     @Test
     fun theInputConnectionLevelTypesWithoutSetText() =
         runBlocking<Unit> {
@@ -255,6 +271,8 @@ class AndroidScreenDeviceTest {
             val field = Aims.focusedEditable(host.windowsOn(Display.DEFAULT_DISPLAY))
             assertNotNull("the search field has input focus", field)
             field!!
+            // The level types only into the app the input connection is bound to, which can lag the tap.
+            assertTrue("the input connection is bound to the field's app", editorBinds(host, field.packageName))
             val request = TextEntry.Request("bluetooth", append = false, before = NodeText.fieldText(field))
 
             val sent = EntryLevels.imeConnection(field, host) { error("already focused") }.send(request)
