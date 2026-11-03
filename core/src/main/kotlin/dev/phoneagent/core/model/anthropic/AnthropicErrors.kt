@@ -29,14 +29,15 @@ internal data class AnthropicError(
         /**
          * Parses an error body; anything that is not an Anthropic error object becomes its own
          * message, masked, or not quoted at all when its lenient decoding holds a credential
-         * ([Redactor.quote]). Credentials in the body are masked with [redactor] before anything is
-         * read from it.
+         * ([Redactor.quote]). Only the request's secrets are masked before the body is parsed
+         * ([Redactor.exact]); credential shapes are masked in what was decoded, since a shape
+         * matched before decoding stops at the first escape inside it.
          */
         fun parse(
             body: String,
             redactor: Redactor,
         ): AnthropicError {
-            val clean = redactor.text(body)
+            val clean = redactor.exact(body)
             val root =
                 try {
                     Json.parseToJsonElement(clean)

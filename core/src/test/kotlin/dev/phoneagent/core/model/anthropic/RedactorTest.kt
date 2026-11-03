@@ -71,6 +71,15 @@ class RedactorTest {
     }
 
     @Test
+    fun `exact masks the request's secrets and leaves credential shapes for after decoding`() {
+        val redactor = Redactor(listOf(secret))
+        // Assembled at run time so secret scanners do not take the placeholder for a real key.
+        val shaped = "s" + "k-abcdefghijklmnop"
+        assertEquals("*** and $shaped and Bearer x", redactor.exact("$secret and $shaped and Bearer x"))
+        assertEquals("*** and *** and Bearer ***", redactor.text("$secret and $shaped and Bearer x"))
+    }
+
+    @Test
     fun `a decoded field is masked, or withheld when its own escapes hide a credential`() {
         val slashed = "placeholder/with-slash-00001"
         val redactor = Redactor(listOf(slashed))

@@ -8,6 +8,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.params.ParameterizedTest
@@ -162,6 +163,38 @@ class ProviderTextQuoteTest {
             assertEquals("authentication failed: $WITHHELD", error.message)
         }
 
+    /**
+     * A key with a provider's shape, written with an escape inside it: masking its shape before the
+     * body is decoded would cover it only up to the escape and leave the rest readable. The body is
+     * parsed first and masked once decoded, so no piece of the key is left, whichever body it is,
+     * whether the request sent that key or the key is only shaped like one.
+     */
+    @ParameterizedTest(name = "{0}, {1}, {2}")
+    @MethodSource("shapedBodies")
+    fun `a shaped key with an escape inside leaves no piece in any error body`(
+        body: String,
+        writing: String,
+        sent: String,
+    ) = runTest {
+        val written =
+            if (writing == SLASH) SHAPED.replace("/", "$BS/") else SHAPED.replaceRange(U_AT, U_AT + 1, U_ESCAPED)
+        val text =
+            when (body) {
+                JSON_MESSAGE -> """{"type":"error","error":{"type":"authentication_error","message":"$written"}}"""
+                NOT_JSON -> "<html>bad key $written</html>"
+                else -> """{"type":"error","error":{"type":"authentication_error","note":"$written"}}"""
+            }
+        server.enqueueError(UNAUTHORIZED, text)
+        val error =
+            assertThrows<ModelError.Auth> {
+                val key = if (sent == SENT) SHAPED else SECRET
+                Kit.model(server, credentials = Keys(key)).complete(Kit.request())
+            }
+        val printed = error.stackTraceToString()
+        val pieces = SHAPED.windowed(PIECE).filter { it in printed }
+        assertTrue(pieces.isEmpty(), "$body, $writing, $sent: ${pieces.size} pieces of the key in the error: $printed")
+    }
+
     /** A header value is raw provider text: a key in it, written any way, withholds the target. */
     @ParameterizedTest
     @MethodSource("forms")
@@ -178,6 +211,14 @@ class ProviderTextQuoteTest {
         const val HTTP_STRING = "HTTP error string"
         const val STREAM_MESSAGE = "stream error message"
         const val REFUSAL = "refusal category"
+        const val JSON_MESSAGE = "JSON message"
+        const val NOT_JSON = "not JSON"
+        const val NO_MESSAGE = "JSON without a message"
+        const val SLASH = "slash escaped"
+        const val U_LETTER = "a letter u-escaped"
+        const val SENT = "the request's key"
+        const val SHAPE_ONLY = "only its shape"
+
         const val UNAUTHORIZED = 401
         const val BAD_GATEWAY = 502
         const val INTERNAL = 500
@@ -192,6 +233,20 @@ class ProviderTextQuoteTest {
         /** Backslash, built here: tool inputs decode escapes written out. */
         val BS = Char(BACKSLASH).toString()
         const val BACKSLASH = 92
+
+        /** The shortest piece of a key that counts as part of it. */
+        const val PIECE = 8
+
+        /**
+         * A key shaped like a provider's, with a slash in it so that `\/` can write it. Assembled at
+         * run time so secret scanners do not take the placeholder for a real key.
+         */
+        val SHAPED = "s" + "k-ant-api03-" + "abcdefghij/klmnopqrstuvwxyz0123456789"
+
+        /** Where the `u` escape goes (a letter in the middle), and the escape itself. */
+        const val U_AT = 16
+        val U_ESCAPED = BS + "u00" + SHAPED[U_AT].code.toString(HEX_RADIX)
+        const val HEX_RADIX = 16
 
         /** A key with a quote and a slash, so that each escaping writes it differently. */
         const val SECRET = "pa\"ss/word-0001"
@@ -214,6 +269,14 @@ class ProviderTextQuoteTest {
 
         @JvmStatic
         fun jsonForms(): List<String> = JSON_FORMS
+
+        @JvmStatic
+        fun shapedBodies(): List<Arguments> =
+            listOf(JSON_MESSAGE, NOT_JSON, NO_MESSAGE).flatMap { body ->
+                listOf(SLASH, U_LETTER).flatMap { writing ->
+                    listOf(SENT, SHAPE_ONLY).map { sent -> Arguments.of(body, writing, sent) }
+                }
+            }
 
         @JvmStatic
         fun layered(): List<Arguments> =

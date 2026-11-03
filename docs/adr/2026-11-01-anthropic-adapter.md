@@ -92,12 +92,12 @@
 - **入口**：`AnthropicAdapters(credentials, timeouts, clock).model(profile, model, capabilities, blobs)`，按 `ModelProtocol.ANTHROPIC_MESSAGES` 创建 `ChatModel`。
 - **HTTP 客户端**：和 OpenAI 系适配器（WP03）的行为一致。
   - 关掉连接失败重试（`retryOnConnectionFailure(false)`）、重定向和 SSL 重定向跟随。
-  - 3xx 映射成**不可重试**的 `InvalidRequest(param = null)`：同一个地址再发还是重定向，这是用户要改的配置。`detail` 里带上 `Location`，先打码、再截断。
+  - 3xx 映射成**不可重试**的 `InvalidRequest(param = null)`：同一个地址再发还是重定向，这是用户要改的配置。`detail` 里带上 `Location`：宽松解码后含凭据就整段换成固定说明，否则打码（`Redactor.quote`），再截断。
   - SSE 的行结尾认 LF、CRLF 和单独的 CR。
   - `Retry-After` 只接受有限、非负的值。
   - 取消时取消 Call，并释放响应和连接。
   - 服务端写的诊断一律用含本次密钥的 redactor 打码：错误体、流内 error 事件、协议违例的描述、拒答 category。成功回复的 `providerMetadata` 里，打码会改动的字段整项省略，不写半截打码的值。
-  - 错误体先脱敏再截断：多读"最长密钥减 1"个字节，正文没读完时去掉末尾可能是密钥开头的部分，再按字符截断。做法和 WP03 的 `maskedText` 相同。
+  - 错误体先脱敏再截断：多读"最长密钥减 1"个字节，读取时只按本次密钥的精确形式打码，正文没读完时去掉末尾可能是密钥开头的部分，再按字符截断，截断以后末尾可能是凭据开头的部分也去掉。凭据形状在解析、解码以后才打码（model-layer §2）。
   - 模型产生的内容不改写，出现本次请求的密钥就整条拒绝（`EchoGuard`，model-layer §2）。
 - **请求**：`POST {baseUrl}/v1/messages`，请求头如下：
   - `anthropic-version`：默认 `2026-10-21`；

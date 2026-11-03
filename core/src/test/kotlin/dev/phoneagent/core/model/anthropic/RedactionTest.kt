@@ -85,6 +85,18 @@ class RedactionTest {
             assertNoPiece(Kit.FAKE_KEY, error.stackTraceToString())
         }
 
+    /**
+     * Shapes are masked once the body is decoded, after the cut: a credential this request did not
+     * send, which crosses the limit too short for its shape, must not leave its start behind.
+     */
+    @Test
+    fun `a credential shape the request did not send, cut at the read limit, leaves no part of it`() =
+        runTest {
+            server.enqueueError(502, " ".repeat(BODY_LIMIT - KEY_HEAD) + Kit.FAKE_KEY)
+            val error = assertThrows<ModelError.Server> { model().complete(Kit.request()) }
+            assertNoPiece(Kit.FAKE_KEY, error.stackTraceToString())
+        }
+
     /** Reading past the limit to see a key whole must not show the start of a key the read cut. */
     @Test
     fun `a multibyte error body whose read ends inside the key leaves no part of it`() =

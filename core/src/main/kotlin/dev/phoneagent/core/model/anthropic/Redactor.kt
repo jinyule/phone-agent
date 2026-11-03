@@ -12,6 +12,10 @@ import java.util.IdentityHashMap
  * is masked whether or not this request used it. Error codes and parameter names never match these
  * shapes, so the diagnosis survives.
  *
+ * Shapes are matched on decoded text only: matched on text not decoded yet, a shape stops at the
+ * first escape inside it (`\u0064`, `\/`) and leaves the rest of the key readable. Text not decoded
+ * yet gets [exact] (whole forms, which no escape splits); [text] and [quote] go on decoded text.
+ *
  * Every cut comes after masking: callers redact the full text, then cut it. A reader that must
  * stop early reads [reach] bytes past its limit and drops the [openEnd] of what it read, so a cut
  * never leaves part of a secret behind.
@@ -43,13 +47,17 @@ internal class Redactor(
     /** A fresh [EchoGuard] (one per reply) for the same secrets. */
     fun guard(): EchoGuard = EchoGuard(forms)
 
-    /** [text] with every credential masked. */
+    /** [text] with every credential masked; on decoded text only (see the class comment). */
     fun text(text: String): String {
-        var masked = text
-        for (form in forms) masked = masked.replace(form, MASK)
-        masked = BEARER.replace(masked, "$1$MASK")
+        val masked = BEARER.replace(exact(text), "$1$MASK")
         return SHAPES.fold(masked) { acc, shape -> shape.replace(acc, MASK) }
     }
+
+    /**
+     * [text] with every form of this request's secrets masked and nothing else: what may be masked
+     * before the text is decoded, since an escape never splits a whole form.
+     */
+    fun exact(text: String): String = forms.fold(text) { acc, form -> acc.replace(form, MASK) }
 
     /**
      * [raw] provider text that was not read as JSON fields (an error body that is not JSON or not a
@@ -65,12 +73,12 @@ internal class Redactor(
 
     /**
      * A field the provider wrote, read decoded from JSON (an error's message, a refusal's category):
-     * masked, or [WITHHELD] when its own text writes a credential with escapes the JSON decoding
-     * left (`\u0073k-…` inside the string), which masking it as decoded misses. It is masked
-     * before [quote] decodes it, so a secret written plainly is masked rather than withheld, and
-     * the field still says what went wrong.
+     * this request's secrets in it masked ([exact]), then [quote]d. So a key the field writes plainly
+     * is masked and the field still says what went wrong; a credential shape, or a secret its own
+     * text writes with escapes the JSON decoding left (`\u0073k-…` inside the string), makes it
+     * [WITHHELD]. No shape is masked before [quote] decodes the field.
      */
-    fun field(decoded: String): String = quote(text(decoded))
+    fun field(decoded: String): String = quote(exact(decoded))
 
     /**
      * The length of the end of [masked] (what [text] returned for text a read limit cut off) that
