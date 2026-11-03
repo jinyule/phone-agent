@@ -241,7 +241,7 @@ class ProviderTextQuoteTest {
          * A key shaped like a provider's, with a slash in it so that `\/` can write it. Assembled at
          * run time so secret scanners do not take the placeholder for a real key.
          */
-        val SHAPED = "s" + "k-ant-api03-" + "abcdefghij/klmnopqrstuvwxyz0123456789"
+        const val SHAPED = "s" + "k-ant-api03-" + "abcdefghij/klmnopqrstuvwxyz0123456789"
 
         /** Where the `u` escape goes (a letter in the middle), and the escape itself. */
         const val U_AT = 16
