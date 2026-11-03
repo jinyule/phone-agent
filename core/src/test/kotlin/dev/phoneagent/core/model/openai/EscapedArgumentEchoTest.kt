@@ -1,6 +1,8 @@
 package dev.phoneagent.core.model.openai
 
+import dev.phoneagent.core.ids.ToolCallId
 import dev.phoneagent.core.model.ChatModel
+import dev.phoneagent.core.model.Delta
 import dev.phoneagent.core.model.ModelError
 import dev.phoneagent.core.model.ModelErrorKind
 import dev.phoneagent.core.model.ModelProtocol
@@ -258,13 +260,11 @@ class EscapedArgumentEchoTest {
         server.enqueueSse(body + failureEvent(failure, chat))
         val deltas = Deltas()
         assertRejected(model(protocol, style.key), style.key, deltas)
+        val id = ToolCallId(if (chat) "call_1" else "c1")
         assertEquals(
-            args,
-            deltas.all.filterIsInstance<dev.phoneagent.core.model.Delta.ToolCallArgs>().joinToString(
-                "",
-            ) {
-                it.fragment
-            },
+            listOf(Delta.ToolCallStarted(id, "get_weather"), Delta.ToolCallArgs(id, args)),
+            deltas.all,
+            "exactly the call and its arguments were shown before the rejection",
         )
     }
 
