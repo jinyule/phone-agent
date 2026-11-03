@@ -140,7 +140,8 @@ internal class AndroidScreen(
             geometry(host)
             val waitMs = options.timings.screenshotWaitMs
             if (parts.observer.secure.probe(host, host.windowsOn(displayId))) return@withContext null
-            // Set-of-Mark boxes arrive with OCR in M3; until then the frame reports som = false.
+            // Set-of-Mark boxes arrive with OCR in M3; until then no box is placed and the frame
+            // says som = false, as ScreenPort.frame has it for boxes that cannot be placed.
             when (val shot = screenshotWithin(waitMs) { host.screenshot(displayId) } ?: TIMED_OUT) {
                 is Screenshot.Captured -> {
                     try {

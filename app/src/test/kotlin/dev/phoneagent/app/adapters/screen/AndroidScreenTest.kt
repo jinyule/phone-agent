@@ -30,6 +30,7 @@ import dev.phoneagent.core.ports.Target
 import dev.phoneagent.core.ports.TreeQuality
 import dev.phoneagent.core.ports.UiAction
 import dev.phoneagent.core.ports.UiElement
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
@@ -37,6 +38,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.currentTime
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -614,6 +616,46 @@ class AndroidScreenTest {
             host.shot = Screenshot.Failed(AccessibilityService.ERROR_TAKE_SCREENSHOT_INVALID_DISPLAY)
             assertEquals(ScreenUnavailableException::class, failureOf { screen.frame() }!!::class)
             assertEquals(IllegalArgumentException::class, failureOf { screen.frame(0) }!!::class)
+        }
+
+    @Test
+    fun aCancelledActionIsPassedOnRatherThanGivenAnOutcome() =
+        runTest {
+            // ScreenPort.act (WP01, fix list r4 rebase follow-up 3): how a cancelled action ended is
+            // the caller's to record (CANCELLED, TIMEOUT, or OUTCOME_UNKNOWN by repair); the port
+            // passes the cancellation on, even after the tap reached the device.
+            val ok = button("OK", Rect(0, 1000, 500, 1100))
+            show(ok)
+            val screen = screen()
+            val planned = screen.snapshot()
+
+            var returned: ActionOutcome? = null
+            var ended: Throwable? = null
+            val acting = launch { returned = screen.act(UiAction.Tap(planned.ref("OK")), planned.id) }
+            acting.invokeOnCompletion { ended = it }
+            runCurrent()
+            assertTrue("the tap reached the device", host.gestures.isNotEmpty() || ok.log.actions.isNotEmpty())
+            assertTrue("waiting for the screen to settle", acting.isActive)
+            acting.cancel()
+            acting.join()
+
+            assertNull("no outcome for a cancelled action", returned)
+            assertTrue("the job ended cancelled: $ended", ended is CancellationException)
+        }
+
+    @Test
+    fun aFrameAskedForWithMarksSaysItHasNone() =
+        runTest {
+            // ScreenPort.frame (WP01, fix list r4 rebase follow-up 3): boxes that cannot be placed are
+            // left out and the frame says som = false. This port draws none before M3.
+            host.shot = Screenshot.Captured(Bitmap.createBitmap(500, 1000, Bitmap.Config.ARGB_8888))
+            val screen = screen()
+            assertEquals("no snapshot yet", false, screen.frame(som = true)!!.som)
+
+            show(button("OK", Rect(0, 1000, 500, 1100)))
+            screen.snapshot()
+            host.shot = Screenshot.Captured(Bitmap.createBitmap(500, 1000, Bitmap.Config.ARGB_8888))
+            assertEquals("after a snapshot", false, screen.frame(som = true)!!.som)
         }
 
     @Test
