@@ -22,10 +22,11 @@ import kotlinx.serialization.json.put
 /**
  * `phone_observe(detail?, image?)` (phase1 §5): reads the screen as one page. A frame, with
  * Set-of-Mark boxes when the port could draw them ([Frame.som]; the text says which), is attached
- * when `image=true`, or when `image` is absent and the tree is not [TreeQuality.GOOD]; never when the main model reads no images ([ScreenPresenter.vision], the
- * same capability the page notes follow) or the page is FLAG_SECURE (the text says why). The
- * description is one text whatever the capability is (tool definitions are part of the cached
- * prompt prefix): it states the condition instead.
+ * when `image=true`, or when `image` is absent and the tree is not [TreeQuality.GOOD]; never when
+ * the main model reads no images ([ScreenPresenter.vision], the same capability the page notes
+ * follow) or the page is FLAG_SECURE (the text says why). The description is one text whatever
+ * the capability is (tool definitions are part of the cached prompt prefix): it states the
+ * condition instead.
  */
 internal class PhoneObserveTool(
     private val presenter: ScreenPresenter,
