@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
+import java.util.Locale
 
 /** The one text normalization every list is matched with, and package names (policy-rules.md §3). */
 class TextTest {
@@ -41,6 +42,21 @@ class TextTest {
     }
 
     @Test
+    fun `invisible characters that are not format characters are dropped too, visible marks stay`() {
+        for (mark in INVISIBLE) {
+            val code = "U+%04X".format(Locale.ROOT, mark)
+            val split = "发" + String(Character.toChars(mark)) + "送"
+            assertEquals("发送", Text.compact(split), code)
+            // Two characters long, as labelRead counts.
+            assertEquals(split.length, Text.prefix(split, 2), code)
+        }
+        // A combining accent shows: it is kept; so is a character outside the basic plane.
+        assertEquals(3, Text.compact("发" + Char(ACUTE) + "送").length)
+        val face = String(Character.toChars(FACE))
+        assertEquals("发${face}送", Text.compact("发${face}送"))
+    }
+
+    @Test
     fun `a note runs to the next closing bracket of any kind, and an opening one without a closing one stays`() {
         assertEquals("ac", Text.words("a(b)c"))
         assertEquals("b", Text.words("(a]b"))
@@ -66,3 +82,18 @@ class TextTest {
         assertEquals(listOf("iv", "clear", "btn"), Text.idWords("com.x:id/ivClear.btn"))
     }
 }
+
+/**
+ * Default-ignorable code points outside the format category: the grapheme joiner, a Khmer and a
+ * Mongolian invisible vowel or selector, Hangul fillers (also the half-width one), variation
+ * selectors (also the supplementary ones), and a tag character, which is a format character
+ * outside the basic plane.
+ */
+private val INVISIBLE =
+    listOf(0x034F, 0x115F, 0x1160, 0x17B4, 0x180B, 0x180F, 0x3164, 0xFE0F, 0xFFA0, 0xE0020, 0xE0100)
+
+/** U+0301 COMBINING ACUTE ACCENT. */
+private const val ACUTE = 0x0301
+
+/** U+1F600 GRINNING FACE, outside the basic plane. */
+private const val FACE = 0x1F600

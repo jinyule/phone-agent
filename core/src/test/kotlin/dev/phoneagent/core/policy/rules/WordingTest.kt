@@ -4,6 +4,7 @@ import dev.phoneagent.core.policy.IntentKind
 import dev.phoneagent.core.policy.rules.Fx.el
 import dev.phoneagent.core.policy.rules.Fx.screen
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
 
@@ -72,4 +73,17 @@ class WordingTest {
     fun `names, statuses and codes to oneself stay harmless`(label: String) {
         assertEquals(null, kind(label), label)
     }
+
+    @Test
+    fun `an invisible mark inside a word does not hide it`() {
+        val joiner = Char(GRAPHEME_JOINER).toString()
+        assertEquals(IntentKind.OUTWARD, kind("发${joiner}送"))
+        assertEquals(IntentKind.DELETE, kind("删${String(Character.toChars(VARIATION_SELECTOR))}除"))
+    }
 }
+
+/** U+034F COMBINING GRAPHEME JOINER: a combining mark that shows nothing. */
+private const val GRAPHEME_JOINER = 0x034F
+
+/** U+E0100 VARIATION SELECTOR-17, outside the basic plane. */
+private const val VARIATION_SELECTOR = 0xE0100

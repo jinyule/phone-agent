@@ -118,15 +118,54 @@ internal object Text {
             .split(ID_SEPARATORS)
             .filter(String::isNotEmpty)
 
+    /**
+     * NFKC, lower case, simplified, and without invisible code points ([invisible]); one pass over
+     * the code points.
+     */
     private fun normalize(raw: String): String {
         val folded = Normalizer.normalize(raw, Normalizer.Form.NFKC).lowercase(Locale.ROOT)
         return buildString(folded.length) {
-            for (c in folded) {
-                if (c.category != CharCategory.FORMAT) append(SIMPLIFIED[c] ?: c)
+            var at = 0
+            while (at < folded.length) {
+                val point = folded.codePointAt(at)
+                val c = folded[at]
+                when {
+                    invisible(point) -> Unit
+                    Character.isBmpCodePoint(point) -> append(SIMPLIFIED[c] ?: c)
+                    else -> appendCodePoint(point)
+                }
+                at += Character.charCount(point)
             }
         }
     }
 }
+
+/**
+ * [point] shows nothing and may sit inside a word: a format character (zero-width ones, also
+ * outside the basic plane) or one of the other default-ignorable code points of Unicode, such
+ * as the grapheme joiner, variation selectors and Hangul fillers ([IGNORABLE]).
+ */
+private fun invisible(point: Int): Boolean =
+    Character.getType(point) == Character.FORMAT.toInt() || IGNORABLE.any { point in it }
+
+/**
+ * The default-ignorable code points of Unicode (DerivedCoreProperties) that are not format
+ * characters: the grapheme joiner, Hangul fillers, Khmer inherent vowels, Mongolian selectors,
+ * variation selectors, and reserved ranges kept invisible.
+ */
+private val IGNORABLE: List<IntRange> =
+    listOf(
+        0x034F..0x034F,
+        0x115F..0x1160,
+        0x17B4..0x17B5,
+        0x180B..0x180F,
+        0x2065..0x2065,
+        0x3164..0x3164,
+        0xFE00..0xFE0F,
+        0xFFA0..0xFFA0,
+        0xFFF0..0xFFF8,
+        0xE0000..0xE0FFF,
+    )
 
 /** ASCII characters are their own normalized form, but for upper case, which lower case does not lengthen. */
 private const val ASCII_END = 128
