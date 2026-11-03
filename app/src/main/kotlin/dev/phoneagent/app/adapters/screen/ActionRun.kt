@@ -2,6 +2,7 @@ package dev.phoneagent.app.adapters.screen
 
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import dev.phoneagent.core.ports.ActionOutcome
 import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.ports.SnapshotAnalyzer
@@ -123,7 +124,9 @@ internal class ActionRun(
                 actuator.tap(
                     aim.element.target,
                     action.long,
-                    WatchProbe(watch, parts.system, timings, aim.element.place.windowId),
+                    WatchProbe(watch, parts.system, timings, ClickedWindow(aim.element, before)) {
+                        host.windowsOn(displayId)
+                    },
                 )
             }
 
@@ -287,22 +290,65 @@ internal class ActionRun(
 }
 
 /**
- * [ClickProbe] over the action's open [watch]: within [ScreenTimings.quietMs], an event of the
- * clicked element's [window], or a window opening, closing or switching (the click may have
- * opened a dialog or another app), counts as the click's change; events of other windows do not.
+ * [ClickProbe] over the action's open [watch]: within [ScreenTimings.quietMs], an event the click
+ * may have caused counts as its change (fix list r3 S4):
+ * - any event of the [clicked] window;
+ * - a window state change of the clicked window's package (a dialog or screen of its own);
+ * - a windows change after which [windows] show the click's mark ([ClickedWindow.changedIn]).
+ *
+ * Other packages' state changes, and windows changes that leave the clicked window's place as
+ * it was, do not count: they come from elsewhere (a toast, a heads-up, another app's window).
  */
 private class WatchProbe(
     private val watch: ChangeWatch,
     private val system: ScreenSystem,
     private val timings: ScreenTimings,
-    private val window: Int,
+    private val clicked: ClickedWindow,
+    private val windows: () -> List<AccessibilityWindowInfo>,
 ) : ClickProbe {
     override fun nowMs(): Long = system.uptimeMs()
 
-    override suspend fun changed(): Boolean =
-        watch.awaitChange(timings.quietMs) { event ->
-            event.windowId == window ||
-                event.type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
-                event.type == AccessibilityEvent.TYPE_WINDOWS_CHANGED
+    override suspend fun changed(): Boolean = watch.awaitChange(timings.quietMs, ::causedByTheClick)
+
+    private fun causedByTheClick(event: A11yEvent): Boolean =
+        when {
+            event.windowId == clicked.id -> true
+            event.type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> clicked.ownPackage(event.packageName)
+            event.type == AccessibilityEvent.TYPE_WINDOWS_CHANGED -> clicked.changedIn(windows())
+            else -> false
         }
+}
+
+/**
+ * The window a click went to, as the read before the click found it: its [id] and package
+ * ([pkg]), whether it was the application window in [front], and the ids of the windows then
+ * ([known]).
+ */
+private class ClickedWindow(
+    val id: Int,
+    val pkg: String?,
+    val front: Boolean,
+    val known: Set<Int>,
+) {
+    /** The window of [element] in the read [before] the click. */
+    constructor(element: ReadElement, before: TreeRead) : this(
+        id = element.place.windowId,
+        pkg = element.windowPackage,
+        front = before.topWindow == element.place.windowId,
+        known = before.windowPackages.keys,
+    )
+
+    /** Whether [packageName] is the clicked window's package, which must be known. */
+    fun ownPackage(packageName: String?): Boolean = pkg != null && packageName == pkg
+
+    /**
+     * Whether [now] shows the windows changed by the click: a window of [pkg] that was not there
+     * (a dialog, a menu), or, for a window that was in [front], another one in front instead (it
+     * closed, or opened another app).
+     */
+    fun changedIn(now: List<AccessibilityWindowInfo>): Boolean {
+        val opened =
+            ScreenReader.contentWindows(now).any { it.id !in known && ownPackage(it.root?.packageName?.toString()) }
+        return opened || (front && ScreenReader.topApp(now)?.first?.id != id)
+    }
 }
