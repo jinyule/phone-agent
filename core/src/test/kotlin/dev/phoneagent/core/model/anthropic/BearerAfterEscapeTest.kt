@@ -136,6 +136,8 @@ class BearerAfterEscapeTest {
     /**
      * An error that fills the read ([ERROR_BODY_LIMIT], less [WRAPPING] for what holds the text)
      * with `Bearer ` and ends in the token: still a [ModelError], the run and the token one `***`.
+     * The token itself lies past the 500 characters a detail keeps, so the message is checked for
+     * the run: masked a word or two at a time, it would read `Bearer *** Bearer …`.
      */
     @ParameterizedTest
     @EnumSource(Place::class)
@@ -149,7 +151,10 @@ class BearerAfterEscapeTest {
                 "$place: the error shows the token",
             )
             val message = error.message.orEmpty()
-            assertTrue("Bearer ***" in message && "Bearer Bearer" !in message, "$place: ${message.take(SHOWN)}")
+            assertTrue(
+                "Bearer ***" in message && "Bearer Bearer" !in message && "*** Bearer" !in message,
+                "$place: ${message.take(SHOWN)}",
+            )
         }
 
     /** The price of no word boundary before `Bearer`. */
