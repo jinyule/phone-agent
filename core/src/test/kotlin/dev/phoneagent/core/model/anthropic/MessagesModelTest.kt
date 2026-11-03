@@ -171,6 +171,37 @@ class MessagesModelTest {
         }
 
     @Test
+    fun `the Claude API host on another port or path is another endpoint`() =
+        runTest {
+            for (baseUrl in listOf("https://api.anthropic.com:8443", "https://api.anthropic.com/proxy")) {
+                server.enqueueSse(Kit.TEXT_REPLY) // would be consumed if the request were sent
+                val keys = Keys()
+                val error =
+                    assertThrows<ModelError.InvalidRequest> {
+                        Kit.rerouted(server, baseUrl, keys).complete(Kit.request(wire = Kit.wire()))
+                    }
+                assertEquals("wire.options", error.param, baseUrl)
+                assertTrue(error.detail.contains("make a new snapshot"), error.detail)
+                assertEquals(emptyList<Any>(), keys.asked, "$baseUrl: no credential was resolved")
+            }
+            assertEquals(0, server.requestCount, "nothing was sent")
+        }
+
+    @Test
+    fun `the Claude API in another letter case or with port 443 written out is the Claude API`() =
+        runTest {
+            for (baseUrl in listOf("https://API.Anthropic.COM", "https://api.anthropic.com:443")) {
+                server.enqueueSse(Kit.TEXT_REPLY)
+                Kit.rerouted(server, baseUrl).complete(Kit.request(wire = Kit.wire()))
+                assertEquals(
+                    "server-side-fallback-2026-07-01,thinking-binding-controls-2026-08-01",
+                    server.next().headers["anthropic-beta"],
+                    baseUrl,
+                )
+            }
+        }
+
+    @Test
     fun `provider values that break neutral invariants are bad responses`() =
         runTest {
             val tooManyThinking =

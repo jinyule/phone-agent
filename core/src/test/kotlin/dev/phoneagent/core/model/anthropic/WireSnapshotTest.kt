@@ -134,6 +134,26 @@ class WireSnapshotTest {
     }
 
     @Test
+    fun `the Claude API host on another port or path gets no Claude API beta in its snapshot`() {
+        for (baseUrl in listOf("https://api.anthropic.com:8443", "https://api.anthropic.com/proxy")) {
+            val other = Kit.profile(baseUrl)
+            val defaults = AnthropicSettings.defaultsFor(other, AnthropicPresets.MAIN_MODEL)
+            assertEquals(AnthropicSettings(), defaults, "$baseUrl: no fallback, no prefix mismatch behavior")
+            val error =
+                assertThrows<ModelError.InvalidRequest> {
+                    AnthropicWire.snapshot(
+                        other,
+                        Kit.MODEL,
+                        Kit.CAPABILITIES,
+                        null,
+                        AnthropicSettings(serverFallback = true),
+                    )
+                }
+            assertEquals("settings.serverFallback", error.param, baseUrl)
+        }
+    }
+
+    @Test
     fun `saved settings made to fit each model are what the snapshot records`() {
         val official = Kit.profile()
         val saved = AnthropicSettings(prefixMismatch = PrefixMismatch.ERROR, serverFallback = true, strictTools = true)

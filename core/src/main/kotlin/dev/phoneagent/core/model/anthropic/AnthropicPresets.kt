@@ -10,6 +10,7 @@ import dev.phoneagent.core.model.PromptCaching
 import dev.phoneagent.core.model.ProviderProfile
 import dev.phoneagent.core.model.ReasoningLevel
 import dev.phoneagent.core.model.ThinkingBinding
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /**
@@ -33,7 +34,7 @@ public object AnthropicPresets {
     /** Default light model (intent and outcome judgments). */
     public val LIGHT_MODEL: ModelId = ModelId("claude-haiku-5-5")
 
-    private const val OFFICIAL_HOST = "api.anthropic.com"
+    private val OFFICIAL_URL = OFFICIAL_BASE_URL.toHttpUrl()
     private const val CONTEXT_TOKENS = 1_000_000
     private const val MAX_OUTPUT_TOKENS = 128_000
 
@@ -89,11 +90,13 @@ public object AnthropicPresets {
             ModelRole.LIGHT -> ReasoningLevel.LOW
         }
 
-    /** Whether [baseUrl] is the Claude API itself (not a gateway or a cloud platform). */
-    public fun isOfficial(baseUrl: String): Boolean {
-        val url = baseUrl.toHttpUrlOrNull() ?: return false
-        return url.isHttps && url.host == OFFICIAL_HOST
-    }
+    /**
+     * Whether [baseUrl] is the Claude API itself: normalized, exactly [OFFICIAL_BASE_URL] (HTTPS,
+     * that host in any letter case, port 443 written out or not, the root path and nothing else),
+     * not a gateway, a proxy path or a cloud platform. Snapshots ([AnthropicSettings.effectiveFor])
+     * and the check before sending use this one definition.
+     */
+    public fun isOfficial(baseUrl: String): Boolean = baseUrl.toHttpUrlOrNull() == OFFICIAL_URL
 
     /** Whether [model] has a server-side refusal fallback on the Claude API. */
     public fun hasServerFallback(model: ModelId): Boolean = model in SERVER_FALLBACK

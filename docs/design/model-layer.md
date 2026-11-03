@@ -240,6 +240,7 @@ data class WireProfile(
   - 未知名字、版本不符、凭据类型不符，都在发送前报 `InvalidRequest`。
   - beta 按需拼进 `anthropic-beta`。
   - 推荐设置：所有端点都开 adaptive thinking、`display:"summarized"` 和 `eager_input_streaming`；官方端点（`https://api.anthropic.com`）上再加 `drop_block` 和服务端降级（只对有降级的模型）。网关不发 Claude API 专有的 beta。
+  - 官方端点只有一种判定（`AnthropicPresets.isOfficial`），生成快照和发送前的核对都用它：base URL 规范化以后正好是 `https://api.anthropic.com`，也就是 HTTPS、这个主机（大小写不限）、端口 443（写不写都行）、根路径，没有别的。别的端口（如 `:8443`）或带路径（如 `/proxy`）的地址都算另一个端点。
   - 快照由纯函数 `AnthropicWire.snapshot(profile, model, capabilities, reasoning)` 生成，同样的输入得到同样的快照；`complete()` 不生成快照。
   - 端点、模型、设置三者的兼容性在生成快照时统一校验，发送阶段不静默删掉记下的字段。不兼容就报 `InvalidRequest(param = "settings.serverFallback")` 或 `settings.prefixMismatch`。不兼容指两种情况：网关上开了 Claude API 专有的降级或 `prefixMismatch`；没有服务端降级的模型（Haiku 5.5，以及预设不认识的模型）开了降级，Haiku 5.5 上 `fallbacks` 本身就是 400。
   - 一份档案服务多个模型时，保存的设置先经 `AnthropicSettings.effectiveFor(profile, model)` 按模型算出有效设置，再生成快照，记下的就是实际发出的设置。
