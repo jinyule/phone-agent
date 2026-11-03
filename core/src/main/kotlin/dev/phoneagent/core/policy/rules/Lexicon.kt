@@ -58,15 +58,15 @@ internal class Lexicon(
     fun isEscape(label: String): Boolean = whole(label) && Text.bare(label) in Words.ESCAPES
 
     /**
-     * What risk checks read of a control's label: its first [PolicyTuning.labelRead] characters.
-     * The label of a control without a name is the text inside it joined ([Elements.label]),
-     * which may hold a whole page; a strong word in any one of those texts still counts, as each
-     * text is read by itself too.
+     * What risk checks read of a control's label: its longest start of at most
+     * [PolicyTuning.labelRead] normalized characters ([Text.length]). The label of a control
+     * without a name is the text inside it joined ([Elements.label]), which may hold a whole page;
+     * a strong word in any one of those texts still counts, as each text is read by itself too.
      */
-    fun read(label: String): String = label.take(tuning.labelRead)
+    fun read(label: String): String = label.substring(0, Text.prefix(label, tuning.labelRead))
 
     /** [label] is read whole ([read]): only such a label can be one word that exempts a control. */
-    fun whole(label: String): Boolean = label.length <= tuning.labelRead
+    fun whole(label: String): Boolean = Text.prefix(label, tuning.labelRead) == label.length
 
     private val classified = TextMemo(::classify)
     private val controls = TextMemo(::ofControl)

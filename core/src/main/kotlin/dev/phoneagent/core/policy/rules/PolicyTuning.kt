@@ -5,18 +5,25 @@ import dev.phoneagent.core.ports.ScreenCoordinates
 /**
  * The heuristic thresholds of [PolicyRules] (policy-rules.md §8). Each one trades missed risks
  * against needless questions, so they are configuration with checked ranges rather than constants
- * spread over the rules. Not shown to users. Lengths count characters of normalized text;
- * distances are normalized screen coordinates (0–999). The limits bound how long reading one
- * screen takes; a screen beyond them is treated as one that cannot be read.
+ * spread over the rules. Not shown to users. Each length says what it counts: the lengths of
+ * labels and texts count normalized characters (NFKC, lower case, simplified, without whitespace
+ * and zero-width characters: [Text.compact]), [maxScreenText] counts characters as given, since it
+ * bounds work; distances are normalized screen coordinates (0–999). The limits bound how long
+ * reading one screen takes; a screen beyond them is treated as one that cannot be read.
  *
  * Construction fails with [IllegalArgumentException] naming the first value out of range.
  *
- * @property labelMax longest label (amounts, counts and bracketed notes left out) in which a risk word counts.
- * @property contextMax longest dialog text whose risk word decides what a generic button ("确定") does.
- * @property shortText longest text read as a heading or a label when recognizing a page.
- * @property totalTextMax longest text that may hold a total label ("合计 ¥88.00").
- * @property labelRead risk checks read this many characters of a control's label; a longer label
- *   is never one word that exempts a control ("关闭", "清空").
+ * @property labelMax longest label in which a risk word counts, in normalized characters without
+ *   its bracketed notes, amounts, counts and names that are no action ("支付宝").
+ * @property contextMax longest dialog text whose risk word decides what a generic button ("确定")
+ *   does, counted as [labelMax].
+ * @property shortText longest text read as a heading or a label when recognizing a page, in
+ *   normalized characters.
+ * @property totalTextMax longest text that may hold a total label ("合计 ¥88.00"), in normalized
+ *   characters.
+ * @property labelRead risk checks read this many normalized characters of a control's label, each
+ *   code point counted as in normalized form ([Text.prefix]); a longer label is never one word
+ *   that exempts a control ("关闭", "清空").
  * @property titleBand page titles sit at or above this line.
  * @property clearNear a clear button may sit this far left or right of its field.
  * @property rowSwipeMin a sideways swipe at least this long on a list row may delete the row.
@@ -25,7 +32,8 @@ import dev.phoneagent.core.ports.ScreenCoordinates
  * @property maxElements a screen with more elements and OCR lines than this is not read: actions on
  *   it and reading it are refused, since checking it would take too long.
  * @property maxScreenText a screen with more characters of text than this (names, values, hints,
- *   resource ids and OCR lines together) is not read.
+ *   resource ids and OCR lines together, as given: UTF-16 code units before any normalization) is
+ *   not read.
  * @property maxDepth a screen whose tree has longer chains of parents than this, or a cycle, is not
  *   read.
  * @property totalsRead at most this many total labels ("合计", "实付" …) are read on a screen, best

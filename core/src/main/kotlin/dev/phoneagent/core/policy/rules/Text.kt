@@ -64,6 +64,34 @@ internal object Text {
     /** NFKC (full-width forms become ASCII, ￥ becomes ¥), lower case, simplified, whitespace and zero-width removed. */
     fun compact(raw: String): String = normalize(raw).filterNot(Char::isWhitespace)
 
+    /**
+     * The end of the longest start of [raw] of at most [max] normalized characters, each code
+     * point counted as the characters it has in [compact] form: whitespace and zero-width ones
+     * none, one that NFKC writes as several ("℡" is "tel") that many. Stops at [max], so it costs
+     * time in proportion to what it reads.
+     */
+    fun prefix(
+        raw: String,
+        max: Int,
+    ): Int {
+        var counted = 0
+        var end = 0
+        while (end < raw.length) {
+            val next = raw.offsetByCodePoints(end, 1)
+            val c = raw[end]
+            val weight =
+                when {
+                    c.isWhitespace() -> 0
+                    c.code < ASCII_END -> 1
+                    else -> compact(raw.substring(end, next)).length
+                }
+            if (counted + weight > max) return end
+            counted += weight
+            end = next
+        }
+        return end
+    }
+
     /** Like [compact], but whitespace runs collapse to one space and the ends are trimmed. */
     fun spaced(raw: String): String = normalize(raw).trim().replace(WHITESPACE, " ")
 
@@ -99,6 +127,9 @@ internal object Text {
         }
     }
 }
+
+/** ASCII characters are their own normalized form, but for upper case, which lower case does not lengthen. */
+private const val ASCII_END = 128
 
 /** Brackets that open a note ("《服务协议》", "（共计¥88）", "(3)") and those that close one, of any kind. */
 private const val OPENERS = "(（[【《〈「『<"

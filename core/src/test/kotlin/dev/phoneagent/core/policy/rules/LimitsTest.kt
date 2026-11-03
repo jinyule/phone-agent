@@ -166,24 +166,32 @@ class LimitsTest {
     }
 
     @Test
-    fun `risk checks read the first labelRead characters of a label, and a longer label is no exempting word`() {
+    fun `risk checks read labelRead normalized characters of a label, and a longer one is no exempting word`() {
         val lexicon = Lexicon(PolicyTuning(labelRead = 6))
         assertEquals("确认支付并同", lexicon.read("确认支付并同意协议"))
-        assertTrue(lexicon.whole("关闭    "))
-        assertFalse(lexicon.whole("关闭     "))
+        // Characters count as in normalized text: whitespace and zero-width ones not at all, one
+        // that NFKC writes as several ("℡" is "tel") as that many.
+        assertTrue(lexicon.whole("关闭" + " ".repeat(5)))
+        assertTrue(lexicon.isEscape("关闭" + " ".repeat(5)))
+        assertTrue(lexicon.whole("关" + ZERO_WIDTH.repeat(10) + "闭"))
+        assertEquals("关闭$TEL", lexicon.read("关闭$TEL$TEL"))
+        assertFalse(lexicon.whole("关闭$TEL$TEL"))
+        assertTrue(lexicon.whole("关闭，，，，"))
+        assertFalse(lexicon.whole("关闭，，，，，"))
         assertTrue(lexicon.isEscape("关闭"))
-        assertFalse(lexicon.isEscape("关闭     "))
-        assertTrue(lexicon.isGeneric("确定     删除"))
+        assertFalse(lexicon.isEscape("关闭，，，，，"))
+        assertTrue(lexicon.isGeneric("确定，，，，，删除"))
+        assertFalse(lexicon.isGeneric("确定     删除"))
         // A clear button whose label is longer than what is read is not one.
         val input = field("f1", bounds = box(0, 100, 800, 160)).copy(value = "abc")
-        val clear = el("b1", "清空      ", bounds = box(700, 110, 790, 150))
+        val clear = el("b1", "清空，，，，，", bounds = box(700, 110, 790, 150))
         val fields = Reading(PolicyTuning(labelRead = 6)).fields
         val s = screen(input, clear)
-        assertFalse(Reading(PolicyTuning(labelRead = 6)).editsField(clear, listOf("清空      "), s))
-        assertTrue(Reading(PolicyTuning()).editsField(clear, listOf("清空      "), s))
+        assertFalse(Reading(PolicyTuning(labelRead = 6)).editsField(clear, listOf("清空，，，，，"), s))
+        assertTrue(Reading(PolicyTuning()).editsField(clear, listOf("清空，，，，，"), s))
         // Nor is a search button, and a field next to it is no search field.
         val bare = field("f2", bounds = box(0, 300, 800, 360))
-        val search = el("b2", "搜索      ", bounds = box(820, 300, 999, 360))
+        val search = el("b2", "搜索，，，，，", bounds = box(820, 300, 999, 360))
         assertFalse(fields.searchButton(search, screen(bare, search)))
         assertTrue(Reading(PolicyTuning()).fields.searchButton(search, screen(bare, search)))
         assertFalse(Reading(PolicyTuning(labelRead = 6)).searches.isSearch(bare, screen(bare, search)))
@@ -289,3 +297,9 @@ class LimitsTest {
         assertEquals(listOf("发送", "删除"), risks.activation(s.elements[2], drawn).texts)
     }
 }
+
+/** U+2121 TELEPHONE SIGN, "tel" in NFKC form. */
+private val TEL = Char(0x2121).toString()
+
+/** U+200B ZERO WIDTH SPACE. */
+private val ZERO_WIDTH = Char(0x200B).toString()

@@ -25,7 +25,7 @@ import org.junit.jupiter.api.Test
 /**
  * The exemptions that lower a risk (policy-rules.md §0): each one holds only on a label read
  * whole, and never over a risk named next to it. A label longer than [PolicyTuning.labelRead] is
- * padded here with "，", which counts as a character however the label is measured.
+ * padded here with "，", which counts as a character in normalized form (policy-rules.md §8).
  */
 class ExemptionsTest {
     private val policy = Fx.rules()
@@ -56,7 +56,9 @@ class ExemptionsTest {
 
     @Test
     fun `a send button cut short is still a send button, so the field does not search`() {
-        for (pad in listOf(" ".repeat(120), PAD)) {
+        // Spaces do not count, so that label is read whole; digits count, but the lexicon leaves
+        // counts out, so what is read of that one is short enough for any word in it to count.
+        for (pad in listOf(" ".repeat(120), PAD, "1".repeat(130))) {
             val s = row("搜索或提问", el("e1", "发送验证码${pad}给张三", bounds = box(720, 900, 999, 960)))
             assertEquals(ConfirmReason.OUTWARD, reason(decide(tap("e1"), s)), pad)
             assertEquals(ConfirmReason.OUTWARD, reason(decide(submit, s)), pad)
