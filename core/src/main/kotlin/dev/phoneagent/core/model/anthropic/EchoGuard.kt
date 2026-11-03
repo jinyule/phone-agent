@@ -29,9 +29,8 @@ import kotlinx.serialization.json.JsonPrimitive
  *
  * Content of a declined attempt is checked as well, though its unknown blocks reach no exit
  * (deltas, reply, log, diagnostics, next request): stricter than the exit rule of model-layer §2,
- * which only asks for what reaches one. Known gaps (same section): a secret split across two
- * members or two blocks, and one written with escapes, spaces or another encoding in text or
- * thinking (literal text, which nothing downstream decodes), are not detected.
+ * which only asks for what reaches one. Its known gaps are listed in model-layer §2 only (under
+ * the Anthropic adapter's rules), not repeated here.
  *
  * The same rule and windows as the OpenAI adapters' guard (WP03), kept in step by hand.
  */
