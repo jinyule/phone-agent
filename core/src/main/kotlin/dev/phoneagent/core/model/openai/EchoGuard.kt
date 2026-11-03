@@ -17,7 +17,7 @@ import kotlinx.serialization.json.Json
  * channel, one character shorter than the longest form, so a secret split over fragments is
  * caught by the fragment that completes it, before that one is shown. [parts] checks what the
  * reply keeps: text, call ids, names and arguments (recovered calls too), reasoning summaries and
- * the opaque reasoning (encrypted content included).
+ * the opaque reasoning (encrypted content included), every member name and value of it.
  *
  * Call arguments are checked whole ([arguments]) in three forms: as sent, written back in the
  * standard escaping when they parse, and leniently decoded ([JsonEscapes.lenientDecode]) whether
@@ -47,7 +47,10 @@ internal class EchoGuard(
         if (holds(text)) throw CredentialEcho.error()
     }
 
-    /** Checks every value of [parts] that is recorded and sent back with the next request. */
+    /**
+     * Checks every value of [parts] that is recorded and sent back with the next request; of the
+     * opaque reasoning, every member name and value.
+     */
     fun parts(parts: List<Part>) {
         for (part in parts) {
             when (part) {
@@ -61,7 +64,8 @@ internal class EchoGuard(
                     arguments(part.argsJson)
                 }
 
-                // Written back in the standard escaping, where every string that holds a secret holds a form of it.
+                // Member names and values alike, written back in the standard escaping, where every string
+                // that holds a secret holds a form of it.
                 is Part.Reasoning -> {
                     part.summary?.let(::check)
                     check(part.opaque.toString())
