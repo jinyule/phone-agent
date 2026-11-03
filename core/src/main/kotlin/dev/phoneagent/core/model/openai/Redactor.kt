@@ -57,7 +57,7 @@ internal class Redactor(
 
     /** [text] with every credential masked: [exact], then `Bearer …` and the credential shapes. */
     fun text(text: String): String {
-        val masked = BEARER.replace(exact(text), "$1$MASK")
+        val masked = maskBearer(exact(text))
         return SHAPES.fold(masked) { acc, shape -> shape.replace(acc, MASK) }
     }
 
@@ -158,15 +158,6 @@ internal class Redactor(
         /** Masks only credential-shaped text (no request secrets known). */
         val SHAPES_ONLY: Redactor = Redactor(emptyList())
 
-        /**
-         * `Bearer <token>`, the token masked together with any words ending in `bearer` in a row
-         * before it, so no `Bearer` passes for the token: `Bearer Bearer x` shows `Bearer ***`,
-         * `forbearer Bearer x` shows `forbearer ***`. No word boundary before the word: an escape a
-         * provider wrote as text right before it (`\nBearer`) ends in a letter and would leave none.
-         * A word that ends in `bearer` (`forbearer x`) masks the word after it too, which only shows
-         * less.
-         */
-        private val BEARER = Regex("""(?i)(bearer\s+)(?:[^\s"',;]*bearer\s+)*[^\s"',;]+""")
         private val SHAPES =
             listOf(
                 // OpenAI-style keys: sk-…, sk-proj-…
@@ -185,3 +176,77 @@ private fun String.endsWithStartOf(
     form: String,
     n: Int,
 ): Boolean = form.length > n && regionMatches(length - n, form, 0, n)
+
+/**
+ * [text] with the token after each `Bearer` masked (model-layer §2 rule 4): the word `bearer` and
+ * the whitespace after it stay, and the token becomes [Redactor.MASK] together with any words
+ * ending in `bearer` in a row before it, so no `Bearer` passes for the token: `Bearer Bearer x`
+ * shows `Bearer ***`, `forbearer Bearer x` shows `forbearer ***`. When nothing follows the run, its
+ * last word is the token. Case does not matter, and there is no word boundary before the word: an
+ * escape a provider wrote as text right before it (`\nBearer`) ends in a letter and would leave
+ * none. A word that ends in `bearer` (`forbearer x`) masks the word after it too, which only shows
+ * less. A word is a run of characters other than whitespace (ASCII: space, tab, line feed, vertical
+ * tab, form feed, carriage return), `"`, `'`, `,` and `;`. One pass, in constant stack depth
+ * however long the run.
+ */
+private fun maskBearer(text: String): String {
+    val masked = StringBuilder(text.length)
+    var kept = 0
+    var at = text.indexOf(SCHEME, ignoreCase = true)
+    while (at >= 0) {
+        val scheme = text.spaceEnd(at + SCHEME.length)
+        val end = if (scheme > at + SCHEME.length) text.tokenEnd(scheme) else NO_TOKEN
+        if (end != NO_TOKEN) {
+            masked.append(text, kept, scheme).append(Redactor.MASK)
+            kept = end
+        }
+        at = text.indexOf(SCHEME, if (end == NO_TOKEN) at + 1 else end, ignoreCase = true)
+    }
+    return masked.append(text, kept, text.length).toString()
+}
+
+/** The end of the token from [from] on, past the words ending in `bearer` before it; [NO_TOKEN] when there is none. */
+private fun String.tokenEnd(from: Int): Int {
+    var start = from
+    var end = wordEnd(start)
+    var lastOfRun = NO_TOKEN
+    while (isRunWord(start, end)) {
+        lastOfRun = end
+        start = spaceEnd(end)
+        end = wordEnd(start)
+    }
+    return if (end > start) end else lastOfRun
+}
+
+/** Whether the word from [start] to [end] ends in `bearer` and whitespace follows it. */
+private fun String.isRunWord(
+    start: Int,
+    end: Int,
+): Boolean =
+    end - start >= SCHEME.length &&
+        spaceEnd(end) > end &&
+        regionMatches(end - SCHEME.length, SCHEME, 0, SCHEME.length, ignoreCase = true)
+
+private fun String.wordEnd(from: Int): Int {
+    var end = from
+    while (end < length && this[end].inWord()) end++
+    return end
+}
+
+private fun String.spaceEnd(from: Int): Int {
+    var end = from
+    while (end < length && this[end].isSpace()) end++
+    return end
+}
+
+private fun Char.isSpace(): Boolean = this == ' ' || this in '\t'..'\r'
+
+private fun Char.inWord(): Boolean = !isSpace() && this !in WORD_ENDS
+
+private const val SCHEME = "bearer"
+
+/** Characters other than whitespace that end a word. */
+private const val WORD_ENDS = "\"',;"
+
+/** No token after `bearer` and its whitespace: nothing to mask there. */
+private const val NO_TOKEN = -1

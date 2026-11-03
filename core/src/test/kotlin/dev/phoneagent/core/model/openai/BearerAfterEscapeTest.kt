@@ -98,6 +98,9 @@ class BearerAfterEscapeTest {
 
         /** A key sent with the scheme already in it, echoed back: shown before r9 too. */
         BEARER_BEARER("rejected Bearer Bearer ", "rejected Bearer", ""),
+
+        /** Three in a row: the run is any length, not one word more. */
+        BEARER_BEARER_BEARER("rejected Bearer Bearer Bearer ", "rejected Bearer", ""),
     }
 
     @ParameterizedTest
@@ -117,6 +120,25 @@ class BearerAfterEscapeTest {
             )
         }
 
+    /**
+     * An error that fills the read ([ERROR_BODY_LIMIT], less [WRAPPING] for what holds the text)
+     * with `Bearer ` and ends in the token: still a [ModelError], the run and the token one `***`.
+     */
+    @ParameterizedTest
+    @EnumSource(Place::class)
+    fun `a run of Bearer words as long as an error body is masked as one`(place: Place) =
+        runTest {
+            val run = "Bearer ".repeat((ERROR_BODY_LIMIT - WRAPPING - TOKEN.length) / "Bearer ".length)
+            val error = failure(place, run + TOKEN)
+            val printed = "${error.message}\n${error.stackTraceToString()}"
+            assertFalse(
+                TOKEN in printed || TOKEN in JsonEscapes.lenientDecode(printed),
+                "$place: the error shows the token",
+            )
+            val message = error.message.orEmpty()
+            assertTrue("Bearer ***" in message && "Bearer Bearer" !in message, "$place: ${message.take(SHOWN)}")
+        }
+
     /** The price of no word boundary before `Bearer`. */
     @Test
     fun `a word that ends in bearer masks the word after it`() =
@@ -132,5 +154,14 @@ class BearerAfterEscapeTest {
 
         /** The token after `Bearer`, of no credential shape. Assembled so scanners do not take it for one. */
         const val TOKEN = "gw-upstream-token-" + "placeholder-0123456789"
+
+        /** What HttpTransport reads of an error body. */
+        const val ERROR_BODY_LIMIT = 64 * 1024
+
+        /** Room for the JSON, the HTML tags or the address around the text. */
+        const val WRAPPING = 128
+
+        /** How much of a message an assertion shows. */
+        const val SHOWN = 200
     }
 }
