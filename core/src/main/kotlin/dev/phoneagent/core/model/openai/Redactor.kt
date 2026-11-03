@@ -13,9 +13,8 @@ import java.util.IdentityHashMap
  * parameter names never match these shapes, so the diagnosis survives. A reader of raw provider
  * text masks only the exact forms ([exact]) and leaves the shapes until the text is parsed and
  * decoded: a shape matched on raw text stops at the first escape and leaves the rest of a key to
- * read once decoded. A field the server wrote is shown as [field] shows it; text that was not
- * read as JSON fields can escape a secret in other ways (`\/`, a `u` escape) and is not quoted at
- * all when its escapes hide a credential ([quote]). Reply content is never quoted ([Unquoted]).
+ * read once decoded. Text the provider wrote is shown as [quote] shows it: masked in place, or not
+ * at all when an escape in it hides a credential. Reply content is never quoted ([Unquoted]).
  *
  * Every secret is matched exactly, however short: a length threshold would let a short real
  * credential through, and the shapes do not recognize values such as `test`. A local service that
@@ -74,22 +73,21 @@ internal class Redactor(
     }
 
     /**
-     * [raw] provider text that was not read as JSON fields (an error body that is not JSON, the
-     * whole of one without a message field, a redirect target) masked as [text] masks it; or not
-     * quoted at all ([WITHHELD]) when its lenient decoding ([JsonEscapes.lenientDecode]) needs
-     * masking, since masking it as written would miss a secret behind an escape and leave the rest
-     * readable.
+     * Text the provider wrote ([raw]: a field of an error body read decoded from JSON, an error
+     * body that is not JSON, a redirect target) as a diagnosis quotes it. A secret written as sent
+     * or in its standard escaping is masked in place ([exact]); when the lenient decoding
+     * ([JsonEscapes.lenientDecode]) of what is left changes it and then shows a credential (a form
+     * of a secret, an `sk-` key or a JWT), the text is not quoted at all ([WITHHELD]), since masking
+     * it as written would miss what the escape hides and leave the rest readable; otherwise it is
+     * masked as [text] masks it, so a credential shape with nothing to decode is masked in place
+     * and `Bearer …` masks only the token after it.
      */
-    fun quote(raw: String): String = if (verbatim(JsonEscapes.lenientDecode(raw)) == null) WITHHELD else text(raw)
-
-    /**
-     * A field the server wrote ([decoded] by JSON) as an error shows it: a secret written as sent
-     * or in its standard escaping is masked in place ([exact]) and the rest kept; when the
-     * lenient decoding of what is left still holds a credential (a secret behind one more escape
-     * the field's own text carries, or a credential shape), the field is not shown at all
-     * ([quote]).
-     */
-    fun field(decoded: String): String = quote(exact(decoded))
+    fun quote(raw: String): String {
+        val masked = exact(raw)
+        val decoded = JsonEscapes.lenientDecode(masked)
+        val hides = decoded != masked && (exact(decoded) != decoded || SHAPES.any { it.containsMatchIn(decoded) })
+        return if (hides) WITHHELD else text(masked)
+    }
 
     /**
      * The length of the end of [masked] (what [text] returned for text a read limit cut off) that
@@ -152,7 +150,7 @@ internal class Redactor(
         /** What a masked credential reads as. */
         const val MASK: String = "***"
 
-        /** What [json] gives for text that is not JSON and hides a credential behind its escapes. */
+        /** What [quote] gives for text that hides a credential behind its escapes. */
         const val WITHHELD: String = "(not shown: it holds a credential)"
 
         private const val MAX_DEPTH = 8

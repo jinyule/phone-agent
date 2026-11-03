@@ -14,10 +14,10 @@ import java.util.Locale
 /**
  * A provider's error report, from an HTTP error body or an error object inside a stream.
  *
- * @property message the provider's own words as an error shows them ([Redactor.field]; truncated in [detail]).
+ * @property message the provider's own words as an error shows them ([Redactor.quote]; truncated in [detail]).
  * @property code `error.code` (string or number), or `null`.
  * @property type `error.type`, or `null`.
- * @property param `error.param` as [Redactor.field] shows it, or `null`.
+ * @property param `error.param` as [Redactor.quote] shows it, or `null`.
  */
 internal data class ProviderError(
     val message: String,
@@ -58,7 +58,7 @@ internal data class ProviderError(
         /**
          * Reads `{"error": {...}}`, `{"error": "text"}` and flat `{"message" | "detail" | "msg", "code"}`
          * bodies. The message, OpenRouter's `metadata.raw` and `param` are read decoded and shown as
-         * [Redactor.field] shows them; a body with no message field is its own message, as [whole]
+         * [Redactor.quote] shows them; a body with no message field is its own message, as [whole]
          * shows it. Codes and types are only matched, kept whole or left out ([Redactor.verbatim]).
          */
         fun of(
@@ -78,27 +78,27 @@ internal data class ProviderError(
             val message =
                 when {
                     field == null -> whole(root, redactor)
-                    raw == null -> redactor.field(field)
-                    else -> "${redactor.field(field)}: ${redactor.field(raw)}"
+                    raw == null -> redactor.quote(field)
+                    else -> "${redactor.quote(field)}: ${redactor.quote(raw)}"
                 }
             return ProviderError(
                 message = message,
                 code = inner.scalar("code")?.let(redactor::verbatim),
                 type = inner.text("type")?.let(redactor::verbatim),
-                param = inner.text("param")?.let(redactor::field),
+                param = inner.text("param")?.let(redactor::quote),
             )
         }
 
         /**
          * All of [root], JSON the server wrote that has no message field to read: not shown at all
-         * when a string in it (a name or a value, decoded) would not be shown as a
-         * [Redactor.field], else written back whole and masked.
+         * when [Redactor.quote] would not show a string in it (a name or a value, decoded), else
+         * written back whole and masked.
          */
         private fun whole(
             root: JsonElement,
             redactor: Redactor,
         ): String =
-            if (root.strings().any { redactor.field(it) == Redactor.WITHHELD }) {
+            if (root.strings().any { redactor.quote(it) == Redactor.WITHHELD }) {
                 Redactor.WITHHELD
             } else {
                 redactor.text(root.toString())

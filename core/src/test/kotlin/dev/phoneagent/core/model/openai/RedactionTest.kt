@@ -19,7 +19,8 @@ import org.junit.jupiter.api.assertThrows
 
 /**
  * Secrets that providers echo back never reach error messages, causes or probe results (model-layer
- * §2): the secrets a request used become `***`; a field holding key-shaped text is not shown.
+ * §2): the secrets a request used and key-shaped text become `***`; text an escape hides one in
+ * is not shown.
  * Assertions only say whether a secret leaked, never print it.
  */
 class RedactionTest {
@@ -145,14 +146,14 @@ class RedactionTest {
         }
 
     @Test
-    fun `a message holding key-shaped text the request did not use is not shown`() =
+    fun `key-shaped text the request did not use is masked in place`() =
         runTest {
             val other = "sk-proj-not-a-real-key-0123456789"
             val token = "test.not-a-real-bearer-token"
             server.enqueueError(403, """{"error":{"message":"key $other / header Bearer $token refused"}}""")
             val error = assertThrows<ModelError> { chat().send(Kit.request()) }
             assertClean(error.stackTraceToString(), other, token)
-            assertTrue(error.message!!.endsWith(Redactor.WITHHELD), "a credential shape withholds the field whole")
+            assertTrue(error.message!!.endsWith("key *** / header Bearer *** refused"), "the words around them stay")
         }
 
     @Test

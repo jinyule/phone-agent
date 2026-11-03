@@ -92,14 +92,14 @@ class RedactorTest {
             assertEquals(Redactor.WITHHELD, redactor.quote("$cut\"}}"), "a broken text")
             assertEquals(Redactor.WITHHELD, redactor.quote("$cut\"}"), "JSON written back")
         }
-        assertEquals(Redactor.WITHHELD, redactor.quote("not json $slashed {"), "the secret as sent")
+        assertEquals("not json *** {", redactor.quote("not json $slashed {"), "the secret as sent is masked in place")
         // Assembled at run time so secret scanners do not take the placeholder for a real key.
         val shaped = "s${backslash}u006b-" + "abcdefghijkl"
         assertEquals(Redactor.WITHHELD, Redactor.SHAPES_ONLY.quote("""{"note":"$shaped"""), "a credential shape")
     }
 
     @Test
-    fun `exact masks only the secrets, and a field is withheld when decoding still shows a credential`() {
+    fun `exact masks only the secrets, and text is withheld only when decoding shows a credential`() {
         val slashed = "placeholder/with-slash-00001"
         val redactor = Redactor(listOf(slashed))
         val backslash = Char(92)
@@ -107,13 +107,33 @@ class RedactorTest {
         val shaped = "sk-" + "abcdefghijkl"
         assertEquals("key *** and $shaped", redactor.exact("key $slashed and $shaped"), "shapes are left to text")
         assertEquals("key *** and ***", redactor.text("key $slashed and $shaped"))
-        assertEquals("bad key ***.", redactor.field("bad key $slashed."), "the secret as sent is masked in place")
-        assertEquals("nothing here", redactor.field("nothing here"))
+        assertEquals("bad key ***.", redactor.quote("bad key $slashed."), "the secret as sent is masked in place")
+        val escaped = "placeholder${backslash}u002Fwith-slash-00001"
+        val decodes = "bad key $slashed, see ${backslash}u2014"
+        assertEquals("bad key ***, see ${backslash}u2014", redactor.quote(decodes), "masked before decoding")
+        assertEquals("nothing here", redactor.quote("nothing here"))
         for (escape in listOf("$backslash/", "${backslash}u002F")) {
             val behind = "bad key placeholder${escape}with-slash-00001"
-            assertEquals(Redactor.WITHHELD, redactor.field(behind), "a secret behind an escape")
+            assertEquals(Redactor.WITHHELD, redactor.quote(behind), "a secret behind an escape")
         }
-        assertEquals(Redactor.WITHHELD, redactor.field("bad key $shaped"), "a credential shape")
+        assertEquals(Redactor.WITHHELD, redactor.quote("Bearer $escaped"), "a bearer secret behind an escape")
+        assertEquals("bad key ***", redactor.quote("bad key $shaped"), "a shape with nothing to decode")
+        val hiddenShape = "bad key s${backslash}u006b-abcdefghijkl"
+        assertEquals(Redactor.WITHHELD, redactor.quote(hiddenShape), "a shape behind an escape")
+    }
+
+    @Test
+    fun `bearer masks only the token after it and never withholds the text`() {
+        val redactor = Redactor(listOf("placeholder/with-slash-00001"))
+        val backslash = Char(92)
+        assertEquals("Invalid bearer ***", redactor.quote("Invalid bearer token"))
+        assertEquals("Authorization: Bearer *** expected", redactor.quote("Authorization: Bearer YOUR_KEY expected"))
+        val decodes = "Invalid bearer token ${backslash}u2014 check the header"
+        assertEquals("Invalid bearer *** ${backslash}u2014 check the header", redactor.quote(decodes), "an escape")
+        assertEquals(
+            "upstream key *** rejected",
+            Redactor.SHAPES_ONLY.quote("upstream key sk-" + "abcdefghijkl rejected"),
+        )
     }
 
     @Test
