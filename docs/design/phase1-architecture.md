@@ -249,7 +249,7 @@ data class ScreenSnapshot(
 )
 
 data class ActionOutcome(
-    val status: Status,                 // OK / FAILED(reason) / REFUSED(policy) / STALE_REF
+    val status: Status,                 // OK / FAILED(reason) / REFUSED(policy) / STALE_REF(reason)
     val effect: Effect,                 // CHANGED / NO_CHANGE / NEW_APP / SPILLED_BACK / RATE_LIMITED / SECURE_PAGE
     val after: ScreenSnapshot?,         // 动作后自动回读
     val diff: ScreenDiff?,              // 与动作前比，+/-/~
@@ -275,7 +275,7 @@ interface AppCatalog { suspend fun apps(): List<AppEntry> }   // AppEntry(packag
   - 下一屏逐层配对，父节点先配：同身份、同父、同边界且两屏各只有一个 → 沿用旧号；否则同身份、同父且两屏各只有一个 → 沿用。父节点换了号，子节点也换号。身份不可靠的元素不参与配对。其余一律发新号（单调递增，旧号作废，不复用）。
   - **"行滚出一半不换号"有前提**：只适用于 View 体系那种把裁出视口的子节点留在树里的界面。Compose 惰性列表可能把它们拿掉，这时行的标签少了就换号；只剩控件时按规则 4 不可靠。
   - **代价（用户接受）**：宁可换号，也不猜。行里或窗口里有持续变化的文字（计数、相对时间、倒计时、轮播）时，按引用的动作会一直过期，模型只能重新观察，或者按坐标点；扁平列表里连在一起的纯文字子节点合成一段，其中一个变了，整段换号。
-- **防过期引用**：动作执行前重新抓一次树，用上面同一个配对函数从计划时那一屏找回目标，并要求边界和模型看到时一致；配不上、有歧义、身份不可靠或边界变了，就返回 `STALE_REF`，不碰设备（思路参考 dsh-Go）。过期的原因（窗口变了、行变了、不可靠、挪了位置、有歧义、找不到、那一屏已经忘了）目前只写进日志，`STALE_REF` 本身不带原因；对外带上原因要改 `ActionOutcome` 的契约，等 WP01 合入以后再做。
+- **防过期引用**：动作执行前重新抓一次树，用上面同一个配对函数从计划时那一屏找回目标，并要求边界和模型看到时一致；配不上、有歧义、身份不可靠或边界变了，就返回 `STALE_REF`，不碰设备（思路参考 dsh-Go）。`STALE_REF` 带上过期的原因 `ActionOutcome.StaleReason`：那一屏已经忘了（FORGOTTEN）、窗口变了（WINDOW_CHANGED）、行变了（ROW_CHANGED）、不可靠（UNRELIABLE）、挪了位置（MOVED）、有歧义（AMBIGUOUS）、找不到（NOT_FOUND）。每种原因带一句给模型的英文提示（`hint`，不引用屏幕内容），工具结果里跟在"编号过期了"后面；日志也记下原因，只带编号和屏幕 id。
   - **已知缺口**：下面这些布局，规则执行了也分不出来，可能沿用错号，或者动作找回别的元素。每一条都是 M3 真机评测的待办（§9），评测任务集要有覆盖它们的任务：
     - 行在原位被替换成标签完全相同的行（没有文字的行、描述相同的图片翻页）；
     - 同一个上下文里的同类元素（角色、视图 id、名字都相同）只能靠位置区分，比如同一行里只隔着空白、没有文字分开的两个"+"：两者换了位置，编号也跟着换；
