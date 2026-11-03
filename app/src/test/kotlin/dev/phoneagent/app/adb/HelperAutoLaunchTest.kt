@@ -47,11 +47,11 @@ class HelperAutoLaunchTest {
         val launch: suspend () -> LaunchOutcome = {
             starts += testScheduler.currentTime
             launchedInListener = launchedInListener || inListener
+            delay(launchMs)
             failNext?.let {
                 failNext = null
                 throw it
             }
-            delay(launchMs)
             LaunchOutcome.NoHandoff(launchMs)
         }
         return HelperAutoLaunch(helper, launch, scope, config) { testScheduler.currentTime }
@@ -168,6 +168,24 @@ class HelperAutoLaunchTest {
             helper.needsLaunch()
             advanceTimeBy(INTERVAL_MS)
             assertEquals(listOf(0L, INTERVAL_MS, 2 * INTERVAL_MS), starts)
+        }
+
+    @Test
+    fun `a launch that throws drops the requests queued behind it`() =
+        runTest {
+            launchMs = 3_000
+            val helper = FakeHelperPort()
+            autoLaunch(helper).start()
+            failNext = IllegalStateException("bug")
+            helper.needsLaunch()
+            advanceTimeBy(1_000)
+            helper.needsLaunch()
+            advanceTimeBy(2 * INTERVAL_MS)
+            assertEquals(listOf(0L), starts)
+            val next = testScheduler.currentTime
+            helper.needsLaunch()
+            advanceTimeBy(2 * INTERVAL_MS)
+            assertEquals(listOf(0L, next), starts)
         }
 
     @Test
