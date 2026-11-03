@@ -35,8 +35,9 @@ internal sealed interface Requested {
  * `request/header` when it changed → `deriveMessages` → flush → `ChatModel.complete`. A steer cancels the
  * attempt in flight (or a retry wait) and the step goes on with a new attempt that includes the
  * steer; what the user already saw is kept as an interrupted `assistant/message`. A failed
- * attempt is recorded (the interrupted prefix if any, then `assistant/attempt`) and handed to the
- * `requestError` chain, which decides on a retry (`request/retry`). A reply that breaks the reply
+ * attempt is recorded (the interrupted prefix if any, unless the error discards what was streamed,
+ * then `assistant/attempt`) and handed to the `requestError` chain, which decides on a retry
+ * (`request/retry`). A reply that breaks the reply
  * contract ([replyProblem]: e.g. a call id already used in this session) is such a failure, a
  * `ModelError.BadResponse`: none of it but the streamed prefix is recorded and nothing of it runs.
  * An attempt ended by a stop or a bug leaves its prefix in [TurnState.streaming] for the turn's
@@ -149,13 +150,17 @@ internal class Requests(
         }
     }
 
-    /** Records the failed attempt: what the user saw as an interrupted prefix, then `assistant/attempt`. */
+    /**
+     * Records the failed attempt: what the user saw as an interrupted prefix, then
+     * `assistant/attempt`. An [error] that [ModelError.discardsStreamed] keeps nothing the attempt
+     * streamed: only the attempt, with the error's fixed message.
+     */
     private suspend fun failed(
         number: Int,
         streaming: Streaming,
         error: ModelError,
     ): Attempted.Failed {
-        streaming.interrupted()?.let { loop.log.append(it) }
+        if (!error.discardsStreamed) streaming.interrupted()?.let { loop.log.append(it) }
         val status = (error as? ModelError.Server)?.status
         loop.log.append(AssistantAttempt(number, error.kind, "${error.message}", status, error.retryAfterMs()))
         return Attempted.Failed(error)

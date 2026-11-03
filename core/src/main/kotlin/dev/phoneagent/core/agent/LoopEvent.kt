@@ -13,7 +13,12 @@ public sealed interface LoopEvent {
         val record: SessionRecord,
     ) : LoopEvent
 
-    /** A streaming fragment of the model reply in [turn], [step], [attempt]. */
+    /**
+     * A streaming fragment of the model reply in [turn], [step], [attempt], passed on as it
+     * arrives. The log keeps the attempt's reply, or the part the user saw as an interrupted
+     * `assistant/message`; when the attempt ends with only its `assistant/attempt` (an error that
+     * `ModelError.discardsStreamed`), none of its fragments was kept and the UI withdraws them.
+     */
     public data class Streamed(
         /** The turn. */
         val turn: Int,
