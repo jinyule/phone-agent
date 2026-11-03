@@ -7,6 +7,7 @@ import dev.phoneagent.core.ports.AppEntry
 import dev.phoneagent.core.ports.ElementRef
 import dev.phoneagent.core.ports.ElementRole
 import dev.phoneagent.core.ports.ElementState
+import dev.phoneagent.core.ports.Frame
 import dev.phoneagent.core.ports.OcrLine
 import dev.phoneagent.core.ports.ScreenFlag
 import dev.phoneagent.core.ports.ScreenSnapshot
@@ -347,9 +348,21 @@ class PromptSurfaceTest {
                     .getValue(
                         "phone_observe",
                     ).execute(call("phone_observe", """{"image":true}"""), FakeContext(FakeScreen(secure)))
+            val unboxed =
+                tools
+                    .getValue(
+                        "phone_observe",
+                    ).execute(
+                        call("phone_observe"),
+                        FakeContext(
+                            FakeScreen(Samples.sparse).apply {
+                                frame = Frame(byteArrayOf(1, 2, 3), "image/jpeg", 720, 1280, som = false)
+                            },
+                        ),
+                    )
             Golden.assertMatches(
                 "results/observe-images.expected.txt",
-                sparse.text() + "\n\n=====\n\n" + refused.text(),
+                sparse.text() + "\n\n=====\n\n" + refused.text() + "\n\n=====\n\n" + unboxed.text(),
             )
         }
 

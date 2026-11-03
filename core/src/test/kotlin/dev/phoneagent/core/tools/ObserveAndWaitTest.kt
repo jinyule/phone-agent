@@ -151,9 +151,24 @@ class ObserveAndWaitTest {
             }
 
         @Test
+        fun `a frame the port drew no boxes on is not called numbered`() =
+            runTest {
+                // No snapshot before it, or boxes that cannot be placed: Frame.som is false.
+                val screen =
+                    FakeScreen(sparse).apply {
+                        frame =
+                            Frame(byteArrayOf(1, 2, 3), "image/jpeg", 720, 1280, som = false)
+                    }
+                val result = observe(screen = screen).first
+                assertEquals(1, result.content.filterIsInstance<Part.Image>().size)
+                assertFalse(result.text().contains("带编号框"), result.text())
+                assertTrue(result.text().contains("附图：这张截图没有编号框，按坐标和上面的元素对照。"), result.text())
+            }
+
+        @Test
         fun `the description offers screenshots only to a model that can read images`() {
             val def = tools().getValue("phone_observe").def
-            assertTrue(def.description.contains("模型能看图时，image=true 附一张带编号框的截图"), def.description)
+            assertTrue(def.description.contains("模型能看图时，image=true 附一张截图，画得上框时带编号框"), def.description)
             assertTrue(def.description.contains("界面元素读不全且模型能看图时会自动附图"), def.description)
             val image =
                 def.parameters["properties"]!!

@@ -20,9 +20,9 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
 /**
- * `phone_observe(detail?, image?)` (phase1 §5): reads the screen as one page. A frame with
- * Set-of-Mark boxes is attached when `image=true`, or when `image` is absent and the tree is not
- * [TreeQuality.GOOD]; never when the main model reads no images ([ScreenPresenter.vision], the
+ * `phone_observe(detail?, image?)` (phase1 §5): reads the screen as one page. A frame, with
+ * Set-of-Mark boxes when the port could draw them ([Frame.som]; the text says which), is attached
+ * when `image=true`, or when `image` is absent and the tree is not [TreeQuality.GOOD]; never when the main model reads no images ([ScreenPresenter.vision], the
  * same capability the page notes follow) or the page is FLAG_SECURE (the text says why). The
  * description is one text whatever the capability is (tool definitions are part of the cached
  * prompt prefix): it states the condition instead.
@@ -34,7 +34,7 @@ internal class PhoneObserveTool(
         name = "phone_observe",
         description =
             "读当前屏幕，返回这一屏的元素列表（格式见系统提示）。detail=full 列出全部元素和完整文字。" +
-                "模型能看图时，image=true 附一张带编号框的截图；界面元素读不全且模型能看图时会自动附图。" +
+                "模型能看图时，image=true 附一张截图，画得上框时带编号框；界面元素读不全且模型能看图时会自动附图。" +
                 "动作类工具的结果里已经带了动作后的画面，通常不用紧接着再读屏。",
         mask = presenter::mask,
         declare = {
@@ -111,7 +111,7 @@ internal class PhoneObserveTool(
         if (frame.mime in Part.IMAGE_MIMES) {
             val blob = ctx.storeBlob(frame.bytes)
             listOf(
-                Part.Text("$page\n附图：带编号框的截图，框上的编号就是元素的 @e 编号。"),
+                Part.Text("$page\n" + if (frame.som) BOXED else UNBOXED),
                 Part.Image(blob, frame.mime, frame.width, frame.height),
             )
         } else {
@@ -123,6 +123,10 @@ internal class PhoneObserveTool(
 
     private companion object {
         const val USAGE = "phone_observe(detail=brief/full?, image?)"
+        const val BOXED = "附图：带编号框的截图，框上的编号就是元素的 @e 编号。"
+
+        // No snapshot before the frame, or boxes that cannot be placed (ScreenPort.frame).
+        const val UNBOXED = "附图：这张截图没有编号框，按坐标和上面的元素对照。"
     }
 }
 
