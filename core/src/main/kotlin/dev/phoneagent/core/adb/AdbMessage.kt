@@ -2,7 +2,8 @@
  * Copyright 2026 wangzan101 (Mika), licensed under the Apache License, Version 2.0.
  * Origin: Mika commit 9cef375, core/src/main/kotlin/com/wangzan101/mika/core/adb/AdbMessage.kt.
  * Modified by PhoneAgent contributors: English documentation; truncation, oversize and length
- * overflow are typed protocol errors; payloads never appear in toString.
+ * overflow are typed protocol errors; payloads never appear in toString; the checksum is checked
+ * by the sender's version as AOSP's send_packet fills it (Mika checks it on request only).
  */
 package dev.phoneagent.core.adb
 
@@ -24,8 +25,9 @@ internal class TruncatedFrameException(
 /**
  * One adb transport packet: a 24-byte little-endian header (command, arg0, arg1, payload length,
  * payload checksum, command XOR 0xffffffff) and the payload. The checksum is the sum of the payload
- * bytes; receivers check it only when the negotiated version is below [VERSION_SKIP_CHECKSUM].
- * [toString] never shows the payload, which may carry a command or its input.
+ * bytes; AOSP's `send_packet` fills it only below [VERSION_SKIP_CHECKSUM] and writes 0 from that
+ * version on, CNXN included ([read] says how it is checked). [toString] never shows the payload,
+ * which may carry a command or its input.
  */
 internal class AdbMessage(
     val command: Int,
@@ -85,15 +87,20 @@ internal class AdbMessage(
 
         /**
          * The next packet from [input], or `null` when the stream ends before a header starts.
-         * Throws [TruncatedFrameException] when it ends inside a packet, [AdbProtocolException]
-         * for a bad magic, a payload over [maxPayload] or a checksum mismatch (when
-         * [verifyChecksum]), and [IOException] when reading fails.
+         * [senderVersion] is the protocol version the peer sends at, `null` before its CNXN told
+         * us. The checksum must match when that version is below [VERSION_SKIP_CHECKSUM] and is
+         * not checked from it on. A CNXN tells the version itself: its sender used the lower of its
+         * own version (the CNXN's arg0) and ours. While the version is unknown, a checksum is
+         * accepted when it is 0 (a current sender) or matches (an old one). Throws
+         * [TruncatedFrameException] when the stream ends inside a packet, [AdbProtocolException]
+         * for a bad magic, a payload over [maxPayload] or a checksum mismatch, and [IOException]
+         * when reading fails.
          */
         @Throws(IOException::class)
         fun read(
             input: InputStream,
             maxPayload: Int,
-            verifyChecksum: Boolean,
+            senderVersion: Int?,
         ): AdbMessage? {
             val header = readFully(input, HEADER_SIZE, "header") ?: return null
             val buffer = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN)
@@ -113,7 +120,14 @@ internal class AdbMessage(
                     readFully(input, length.toInt(), "payload")
                         ?: throw TruncatedFrameException("stream ended before the ${name(command)} payload")
                 }
-            if (verifyChecksum && checksum(payload) != sum) protocolError("bad checksum for ${name(command)}")
+            val version = if (command == CNXN) minOf(arg0, VERSION) else senderVersion
+            val valid =
+                when {
+                    version == null -> sum == 0 || sum == checksum(payload)
+                    version < VERSION_SKIP_CHECKSUM -> sum == checksum(payload)
+                    else -> true
+                }
+            if (!valid) protocolError("bad checksum for ${name(command)}")
             return AdbMessage(command, arg0, arg1, payload)
         }
     }

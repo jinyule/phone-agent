@@ -247,7 +247,7 @@ internal class SocketPortProbe(
         return AdbMessage.read(
             BufferedInputStream(socket.getInputStream()),
             AdbMessage.MAX_PAYLOAD_V1,
-            verifyChecksum = false,
+            senderVersion = null,
         )
     }
 }

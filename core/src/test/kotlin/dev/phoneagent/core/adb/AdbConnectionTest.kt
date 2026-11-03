@@ -48,7 +48,7 @@ class AdbConnectionTest {
     fun `stdin reaches the command in pieces of the device's max payload and output may come in tiny pieces`() =
         realTime {
             val reply = Reply.Exit(7, "got:", "", echo = true, chunk = 3)
-            FakeAdbd(paired, maxPayload = 16, reply = { reply }).use { adbd ->
+            FakeAdbd(paired, maxPayload = 17, reply = { reply }).use { adbd ->
                 withSession(adbd) { session ->
                     val input = "the quick brown fox jumps over the lazy dog".toByteArray()
                     val result = session.run(AdbCommand("cat"), input)
@@ -56,7 +56,7 @@ class AdbConnectionTest {
                         CommandResult.Completed(7, "got:the quick brown fox jumps over the lazy dog", ""),
                         result,
                     )
-                    assertEquals(CommandResult.Completed(7, "got:", ""), session.run(AdbCommand("true")))
+                    assertEquals(CommandResult.Completed(7, "got:", ""), session.run(id))
                 }
                 assertEquals("the quick brown fox jumps over the lazy dog", adbd.stdins.first().decodeToString())
                 assertEquals(emptyList<Int>(), adbd.oversizedWrites)
@@ -142,7 +142,7 @@ class AdbConnectionTest {
     @Test
     fun `checksums are verified only with an old protocol version`() =
         realTime {
-            FakeAdbd(paired, version = AdbMessage.VERSION_MIN, reply = { Reply.BadChecksum }).use { adbd ->
+            FakeAdbd(paired, Behavior.OLD_VERSION, reply = { Reply.BadChecksum }).use { adbd ->
                 withSession(adbd) { session -> assertFailure(CommandFailure.PROTOCOL, session.run(id)) }
             }
             FakeAdbd(paired, reply = { Reply.BadChecksum }).use { adbd ->
@@ -291,6 +291,41 @@ class AdbConnectionTest {
     }
 
     @Test
+    fun `command failures are classified by exception type`() {
+        fun classify(failure: IOException) = CommandExchange.classify(failure).reason
+        assertEquals(CommandFailure.OUTPUT_TOO_LARGE, classify(OutputTooLargeException(10)))
+        assertEquals(CommandFailure.CLOSED, classify(TruncatedFrameException("eof")))
+        assertEquals(CommandFailure.PROTOCOL, classify(AdbProtocolException("bad magic")))
+        assertEquals(CommandFailure.CLOSED, classify(SocketException("Socket closed")))
+    }
+
+    @Test
+    fun `adbd's CNXN has no checksum from the skip-checksum version on, an older one's must match`() =
+        realTime {
+            val banner = "device::ro.product.name=raw;features=shell_v2"
+            val sum = banner.toByteArray().sumOf { it.toInt() and 0xff }
+            val cases =
+                listOf(
+                    Triple(0x01000001, 0, true),
+                    Triple(0x01000000, sum, true),
+                    Triple(0x01000000, sum + 1, false),
+                )
+            for ((version, dataCheck, accepted) in cases) {
+                val bytes = handBuiltCnxn(version, dataCheck, banner)
+                val behavior = if (version < Aosp.A_VERSION_SKIP_CHECKSUM) Behavior.OLD_VERSION else Behavior.NORMAL
+                FakeAdbd(paired, behavior, cnxnBytes = bytes).use { adbd ->
+                    val result = client().connect(adbd.endpoint)
+                    if (accepted) {
+                        assertTrue(result is ConnectResult.Connected) { "version $version: $result" }
+                        (result as ConnectResult.Connected).session.close()
+                    } else {
+                        assertConnectFailure(ConnectFailure.PROTOCOL, result)
+                    }
+                }
+            }
+        }
+
+    @Test
     fun `features come from the banner's features entry`() {
         assertEquals(setOf("shell_v2", "cmd"), AdbFeatures.of("device::ro.product.name=x;features=shell_v2,,cmd"))
         assertEquals(emptySet<String>(), AdbFeatures.of("device::ro.product.name=x"))
@@ -329,6 +364,18 @@ class AdbConnectionTest {
         result: ConnectResult,
     ) {
         assertTrue(result is ConnectResult.Failed && result.reason == expected) { "expected $expected, got $result" }
+    }
+
+    /** adbd's CNXN written by hand as AOSP lays it out (`amessage`, little-endian), not by any encoder. */
+    private fun handBuiltCnxn(
+        version: Int,
+        dataCheck: Int,
+        banner: String,
+    ): ByteArray {
+        fun le(value: Int) = ByteArray(4) { (value ushr (8 * it)).toByte() }
+        val payload = banner.toByteArray()
+        val cnxn = 0x4e584e43
+        return le(cnxn) + le(version) + le(0x00100000) + le(payload.size) + le(dataCheck) + le(cnxn.inv()) + payload
     }
 
     private companion object {

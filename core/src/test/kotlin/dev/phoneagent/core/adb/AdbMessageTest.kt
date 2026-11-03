@@ -80,11 +80,11 @@ class AdbMessageTest {
         messages.forEach { stream.write(it.encode()) }
         for (input in listOf(ByteArrayInputStream(stream.toByteArray()), Trickle(stream.toByteArray()))) {
             for (expected in messages) {
-                val read = checkNotNull(AdbMessage.read(input, AdbMessage.MAX_PAYLOAD_V1, verifyChecksum = true))
+                val read = checkNotNull(AdbMessage.read(input, AdbMessage.MAX_PAYLOAD_V1, AdbMessage.VERSION_MIN))
                 assertEquals(expected.toString(), read.toString())
                 assertArrayEquals(expected.payload, read.payload)
             }
-            assertNull(AdbMessage.read(input, AdbMessage.MAX_PAYLOAD_V1, verifyChecksum = true))
+            assertNull(AdbMessage.read(input, AdbMessage.MAX_PAYLOAD_V1, AdbMessage.VERSION_MIN))
         }
     }
 
@@ -94,7 +94,7 @@ class AdbMessageTest {
         for (cut in listOf(1, 23, 24, 33)) {
             val failure =
                 assertThrows<TruncatedFrameException> {
-                    AdbMessage.read(ByteArrayInputStream(bytes.copyOf(cut)), 100, verifyChecksum = false)
+                    AdbMessage.read(ByteArrayInputStream(bytes.copyOf(cut)), 100, AdbMessage.VERSION)
                 }
             assertFalse(failure.message.orEmpty().isEmpty())
         }
@@ -103,25 +103,73 @@ class AdbMessageTest {
     @Test
     fun `oversized payloads, bad magic and bad checksums are protocol errors`() {
         val big = AdbMessage(AdbMessage.WRTE, 1, 1, ByteArray(101)).encode()
-        assertProtocolError("exceeds 100") { AdbMessage.read(ByteArrayInputStream(big), 100, verifyChecksum = false) }
+        assertProtocolError("exceeds 100") { AdbMessage.read(ByteArrayInputStream(big), 100, AdbMessage.VERSION) }
 
         val huge = AdbMessage(AdbMessage.WRTE, 1, 1).encode()
         ByteBuffer.wrap(huge).order(ByteOrder.LITTLE_ENDIAN).putInt(12, -1)
         assertProtocolError("4294967295 bytes") {
-            AdbMessage.read(ByteArrayInputStream(huge), AdbMessage.MAX_PAYLOAD, verifyChecksum = false)
+            AdbMessage.read(ByteArrayInputStream(huge), AdbMessage.MAX_PAYLOAD, AdbMessage.VERSION)
         }
 
         val magic = AdbMessage(AdbMessage.OKAY, 1, 1).encode()
         magic[20] = 0
         assertProtocolError(
             "bad magic for OKAY",
-        ) { AdbMessage.read(ByteArrayInputStream(magic), 100, verifyChecksum = false) }
+        ) { AdbMessage.read(ByteArrayInputStream(magic), 100, AdbMessage.VERSION) }
+    }
 
-        val sum = AdbMessage(AdbMessage.WRTE, 1, 1, byteArrayOf(5)).encode()
-        sum[16] = 6
-        assertProtocolError("bad checksum") { AdbMessage.read(ByteArrayInputStream(sum), 100, verifyChecksum = true) }
-        val unchecked = AdbMessage.read(ByteArrayInputStream(sum), 100, verifyChecksum = false)
-        assertArrayEquals(byteArrayOf(5), unchecked?.payload)
+    @Test
+    fun `the checksum is checked by the sender's version, as AOSP's send_packet fills it`() {
+        val payload = byteArrayOf(5, 7)
+        val right = Aosp.sum(payload)
+        // Not a CNXN: the version negotiated for the connection decides; unknown takes 0 or the sum.
+        val cases =
+            listOf(
+                Triple(Aosp.A_VERSION_MIN, right, true),
+                Triple(Aosp.A_VERSION_MIN, 0, false),
+                Triple(Aosp.A_VERSION_MIN, right + 1, false),
+                Triple(Aosp.A_VERSION_SKIP_CHECKSUM, 0, true),
+                Triple(Aosp.A_VERSION_SKIP_CHECKSUM, right + 1, true),
+                Triple(null, 0, true),
+                Triple(null, right, true),
+                Triple(null, right + 1, false),
+            )
+        for ((version, dataCheck, accepted) in cases) {
+            val bytes = Aosp.frame(Aosp.A_WRTE, 1, 2, payload, dataCheck)
+            assertEquals(accepted, readsBack(bytes, version), "WRTE with data_check $dataCheck at version $version")
+        }
+    }
+
+    @Test
+    fun `a CNXN is checked by the version it carries, whatever was negotiated before`() {
+        val banner = "device::features=shell_v2".toByteArray()
+        val right = Aosp.sum(banner)
+        val cases =
+            listOf(
+                Triple(Aosp.A_VERSION, 0, true),
+                Triple(Aosp.A_VERSION, right + 1, true),
+                Triple(0x02000000, 0, true),
+                Triple(Aosp.A_VERSION_MIN, right, true),
+                Triple(Aosp.A_VERSION_MIN, 0, false),
+                Triple(Aosp.A_VERSION_MIN, right + 1, false),
+            )
+        for ((cnxnVersion, dataCheck, accepted) in cases) {
+            val bytes = Aosp.frame(Aosp.A_CNXN, cnxnVersion, Aosp.MAX_PAYLOAD, banner, dataCheck)
+            for (sender in listOf(null, Aosp.A_VERSION_MIN, Aosp.A_VERSION)) {
+                assertEquals(accepted, readsBack(bytes, sender), "CNXN $cnxnVersion with $dataCheck after $sender")
+            }
+        }
+    }
+
+    /** Whether [bytes] read back as one packet at [senderVersion]; `false` for a bad checksum. */
+    private fun readsBack(
+        bytes: ByteArray,
+        senderVersion: Int?,
+    ): Boolean {
+        val failure =
+            runCatching { AdbMessage.read(ByteArrayInputStream(bytes), 100, senderVersion) }.exceptionOrNull()
+        if (failure != null) assertEquals("bad checksum", failure.message?.substringBefore(" for "))
+        return failure == null
     }
 
     @Test

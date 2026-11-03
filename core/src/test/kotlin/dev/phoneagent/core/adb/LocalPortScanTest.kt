@@ -35,7 +35,7 @@ class LocalPortScanTest {
             Answering("SSH-2.0-OpenSSH_9.6\r\n".repeat(2).toByteArray()).use {
                 assertEquals(PortState.OPEN, probe.probe("127.0.0.1", it.port))
             }
-            val cnxn = AdbMessage(AdbMessage.CNXN, AdbMessage.VERSION, 4096, "device::\u0000".toByteArray()).encode()
+            val cnxn = Aosp.encode(Aosp.A_CNXN, Aosp.A_VERSION, 4096, "device::".toByteArray(), Aosp.A_VERSION)
             Answering(
                 cnxn,
             ).use { assertEquals(PortState.OPEN, probe.probe("127.0.0.1", it.port), "legacy adbd without TLS") }

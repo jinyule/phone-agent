@@ -4,7 +4,8 @@
  * Modified by PhoneAgent contributors: English documentation; failures are a typed result; TLS is
  * required (a plain CNXN or legacy AUTH reply is a protocol failure); no reader thread and no
  * open streams in the API: a session runs one fixed command at a time to completion (see
- * AdbCommand.kt), with the shell protocol for the exit status.
+ * AdbCommand.kt), with the shell protocol for the exit status; handshake checksums follow the
+ * sender's version (Mika does not check them).
  */
 package dev.phoneagent.core.adb
 
@@ -142,9 +143,12 @@ internal class AdbHandshake(
         }
     }
 
-    /** CNXN and AUTH are limited to adb's v1 payload size, as the peer's limit is not known yet. */
+    /**
+     * CNXN and AUTH are limited to adb's v1 payload size, as the peer's limit is not known yet;
+     * so is its version, which a CNXN brings along.
+     */
     private fun readHandshakePacket(input: InputStream): AdbMessage? =
-        AdbMessage.read(input, AdbMessage.MAX_PAYLOAD_V1, verifyChecksum = true)
+        AdbMessage.read(input, AdbMessage.MAX_PAYLOAD_V1, senderVersion = null)
 
     private fun accept(handshake: PendingHandshake): Handshake {
         val cnxn = handshake.cnxn
@@ -360,7 +364,7 @@ internal class CommandExchange(
     }
 
     private fun readNext(): AdbMessage =
-        AdbMessage.read(handshake.input, AdbMessage.MAX_PAYLOAD, handshake.version < AdbMessage.VERSION_SKIP_CHECKSUM)
+        AdbMessage.read(handshake.input, AdbMessage.MAX_PAYLOAD, handshake.version)
             ?: throw TruncatedFrameException("adbd closed the connection")
 
     /** The result once [message] ends the command, else `null`. Packets of earlier streams are skipped. */
