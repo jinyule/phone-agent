@@ -1,7 +1,5 @@
 package dev.phoneagent.core.model.openai
 
-import kotlinx.serialization.SerializationException
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import java.util.Collections
 import java.util.IdentityHashMap
@@ -12,10 +10,10 @@ import java.util.IdentityHashMap
  * occurrence of the secrets a request used becomes [MASK], each as sent and in its standard JSON
  * string escaping (`"` → `\"`, `\` → `\\`: [forms]); then text shaped like a credential
  * (`Bearer …`, `sk-…`, JWTs) is masked whether or not this request used it. Error codes and
- * parameter names never match these shapes, so the diagnosis survives. JSON that may escape a
- * secret in other ways (`\/`, `\u0073`) is masked after it is written back in the standard
- * escaping, and text meant as JSON that does not parse is not quoted at all when its escapes hide
- * a credential ([json]).
+ * parameter names never match these shapes, so the diagnosis survives. Provider text that was
+ * not read as JSON fields can escape a secret in other ways (`\/`, a `u` escape): it is not
+ * quoted at all when its escapes hide a credential ([quote]). Reply content is never quoted
+ * ([Unquoted]).
  *
  * Every secret is matched exactly, however short: a length threshold would let a short real
  * credential through, and the shapes do not recognize values such as `test`. A local service that
@@ -65,33 +63,13 @@ internal class Redactor(
     }
 
     /**
-     * [json] (text that should be JSON, such as call arguments) with every credential masked as
-     * [text] masks it, after JSON that parses is written back in the standard escaping. Standard
-     * escaping goes character by character, so a string (or key) that holds a secret then holds
-     * its escaped form: masking the strings one by one would mask nothing more. Text that does not
-     * parse (cut or broken) still has escapes: when its lenient decoding
-     * ([JsonEscapes.lenientDecode]) needs masking it is not quoted at all ([WITHHELD]), since
-     * masking it as written would miss a secret behind an escape and leave the rest readable.
+     * [raw] provider text that was not read as JSON fields (an error body that is not JSON, the
+     * whole of one without a message field, a redirect target) masked as [text] masks it; or not
+     * quoted at all ([WITHHELD]) when its lenient decoding ([JsonEscapes.lenientDecode]) needs
+     * masking, since masking it as written would miss a secret behind an escape and leave the rest
+     * readable.
      */
-    fun json(json: String): String {
-        val parsed =
-            try {
-                Json.parseToJsonElement(json)
-            } catch (ignoredNotJson: SerializationException) {
-                // Cut or broken: read leniently below.
-                null
-            }
-        return if (parsed != null) text(parsed.toString()) else unparsed(json)
-    }
-
-    private fun unparsed(json: String): String =
-        if (verbatim(JsonEscapes.lenientDecode(json)) ==
-            null
-        ) {
-            WITHHELD
-        } else {
-            text(json)
-        }
+    fun quote(raw: String): String = if (verbatim(JsonEscapes.lenientDecode(raw)) == null) WITHHELD else text(raw)
 
     /**
      * The length of the end of [masked] (what [text] returned for text a read limit cut off) that

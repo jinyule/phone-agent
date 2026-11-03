@@ -76,7 +76,7 @@ internal class ResponsesStream(
     fun acceptJson(body: String) {
         val root = parse(body)
         root.obj("error")?.let { throw failure(it) }
-        final = ResponsesOutput.terminal(root, event = null, redactor)
+        final = ResponsesOutput.terminal(root, event = null)
     }
 
     /**
@@ -100,7 +100,7 @@ internal class ResponsesStream(
         val hasCalls = parts.any { it is Part.ToolCall }
         ResponsesOutput.checkRefusal(output, parts, incomplete && reason == "content_filter")
         if (incomplete && plan) {
-            val shown = reason?.let { redactor.text(it).take(SNIPPET) } ?: "no reason"
+            val shown = reason?.let { "reason ${Unquoted.named(it, INCOMPLETE_REASONS)}" } ?: "no reason"
             throw ModelError.BadResponse(
                 "ChatGPT plan replies must end with response.completed; this one is incomplete ($shown)",
             )
@@ -148,7 +148,7 @@ internal class ResponsesStream(
             "response.completed", "response.incomplete" -> {
                 val response =
                     root.obj("response") ?: throw ModelError.BadResponse("$type event without a response object")
-                final = ResponsesOutput.terminal(response, type.removePrefix("response."), redactor)
+                final = ResponsesOutput.terminal(response, type.removePrefix("response."))
             }
 
             "response.failed", "error" -> {
@@ -162,8 +162,8 @@ internal class ResponsesStream(
         try {
             Json.parseToJsonElement(data) as? JsonObject ?: throw ModelError.BadResponse("event is not a JSON object")
         } catch (ignoredQuotingParseError: SerializationException) {
-            // Its message quotes the input cut at a fixed width, which can split a secret before it is masked.
-            throw ModelError.BadResponse("event is not JSON: ${redactor.text(data).take(SNIPPET)}")
+            // Neither its message nor the data is quoted: an escape no parser has read can hide a secret.
+            throw ModelError.BadResponse("event is not JSON (${Unquoted.size(data)})")
         }
 
     private fun failure(error: JsonObject): ModelError =
@@ -201,10 +201,6 @@ internal class ResponsesStream(
     ) {
         val callId = itemId?.let(callIdsByItem::get)
         if (callId != null && fragment != null) ledger.args(ToolCallId(callId), fragment)
-    }
-
-    private companion object {
-        const val SNIPPET = 200
     }
 }
 
@@ -310,12 +306,17 @@ internal class OutputItems {
 private const val SUMMARY_DELTA = "response.reasoning_summary_text.delta"
 private const val RAW_REASONING_DELTA = "response.reasoning_text.delta"
 
+/** The `incomplete_details.reason` values a diagnosis names; others are described, not quoted. */
+private val INCOMPLETE_REASONS = setOf("max_output_tokens", "content_filter")
+
 /** Pure readers of a finished Responses `output` and `response` object. */
 internal object ResponsesOutput {
-    private const val SNIPPET = 200
     private const val COMPLETED = "completed"
     private const val INCOMPLETE = "incomplete"
     private const val NOT_ITEMS = "response output is not an array of items"
+
+    /** The `status` values a diagnosis names; others are described, not quoted. */
+    private val STATES = setOf(COMPLETED, INCOMPLETE, "failed", "cancelled", "in_progress", "queued")
 
     /**
      * [response] as a final response, the same rules for a stream's terminal event and a whole
@@ -323,23 +324,22 @@ internal object ResponsesOutput {
      * for a whole reply ([event] `null`) its own `status`, which must be one of the two; a
      * `status` that says otherwise than the event is a contradiction (absent or `null` is not).
      * `output`, unless absent or `null`, must be an array of items, objects with a string `type`.
-     * Anything else is [ModelError.BadResponse].
+     * Anything else is [ModelError.BadResponse], naming a `status` it does not know by its shape only.
      */
     fun terminal(
         response: JsonObject,
         event: String?,
-        redactor: Redactor,
     ): FinalResponse {
         val status = response["status"]?.takeIf { it !is JsonNull }
         val named = (status as? JsonPrimitive)?.takeIf { it.isString }?.content
         val state = event ?: named
-        val shown = status?.let { redactor.text(it.toString()).take(SNIPPET) } ?: "no status"
+        val shown = status?.let { "status ${Unquoted.named(it, STATES)}" } ?: "no status"
         val output = response["output"]?.takeIf { it !is JsonNull }
         val items = (output as? JsonArray)?.map { it as? JsonObject }
         val problem =
             when {
                 state != COMPLETED && state != INCOMPLETE -> "whole response has $shown, not completed or incomplete"
-                status != null && named != state -> "response.$state event with status $shown"
+                status != null && named != state -> "response.$state event with $shown"
                 output != null && (items == null || items.any { it?.str("type") == null }) -> NOT_ITEMS
                 else -> null
             }
@@ -361,7 +361,7 @@ internal object ResponsesOutput {
         redactor: Redactor,
         rawFirst: Boolean,
     ): List<Part> =
-        output.mapNotNull { item ->
+        output.mapIndexedNotNull { index, item ->
             when (item.str("type")) {
                 "reasoning" -> {
                     Part.Reasoning(provider, model, ReasoningKind.RESPONSES_ENCRYPTED, item, summary(item, rawFirst))
@@ -372,7 +372,7 @@ internal object ResponsesOutput {
                 }
 
                 "function_call" -> {
-                    call(item, redactor)
+                    call(item, index, redactor)
                 }
 
                 else -> {
@@ -455,20 +455,27 @@ internal object ResponsesOutput {
             ?.joinToString("")
             ?.takeIf { it.isNotEmpty() }
 
+    /** The call [item] (output item [index]); one it cannot use fails by what it lacks, never quoting it. */
     private fun call(
         item: JsonObject,
+        index: Int,
         redactor: Redactor,
     ): Part.ToolCall {
         val id = item.str("call_id")
         val name = item.str("name")
         if (id == null || name == null) {
-            val shown = redactor.text(item.toString()).take(SNIPPET)
-            throw ModelError.BadResponse("function_call without call_id or name: $shown")
+            val missing = listOfNotNull("call_id".takeIf { id == null }, "name".takeIf { name == null })
+            throw ModelError.BadResponse(
+                "output item $index is a function_call without ${missing.joinToString(" or ")}",
+            )
         }
         return try {
             Part.ToolCall(ToolCallId(id), name, argumentsOf(item["arguments"]))
         } catch (e: IllegalArgumentException) {
-            throw ModelError.BadResponse("unusable call_id '${redactor.text(id).take(SNIPPET)}'", redactor.cause(e))
+            throw ModelError.BadResponse(
+                "output item $index is a function_call with an unusable call_id (${Unquoted.size(id)})",
+                redactor.cause(e),
+            )
         }
     }
 

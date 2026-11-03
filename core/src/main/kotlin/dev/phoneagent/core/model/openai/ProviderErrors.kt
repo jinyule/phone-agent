@@ -31,8 +31,10 @@ internal data class ProviderError(
         private const val DETAIL_LIMIT = 500
 
         /**
-         * Parses an error body; anything that is not a JSON error object becomes its own message.
-         * Credentials in the body are masked with [redactor] before anything is read from it.
+         * Parses an error body; anything that is not a JSON error object becomes its own message,
+         * masked, or not quoted at all when its lenient decoding holds a credential
+         * ([Redactor.quote]). Credentials in the body are masked with [redactor] before anything is
+         * read from it.
          */
         fun parse(
             body: String,
@@ -44,18 +46,19 @@ internal data class ProviderError(
                     Json.parseToJsonElement(clean)
                 } catch (notJson: SerializationException) {
                     // HTML pages, plain-text proxies: the text itself is the best message we have.
-                    val text = clean.trim().ifEmpty { "(empty body: ${notJson::class.simpleName})" }
-                    return ProviderError(text, null, null, null)
+                    val text = clean.trim().takeIf { it.isNotEmpty() }?.let(redactor::quote)
+                    return ProviderError(text ?: "(empty body: ${notJson::class.simpleName})", null, null, null)
                 }
             // Gemini's compatibility layer wraps the error object in an array.
             val obj = (if (root is JsonArray) root.firstOrNull() else root) as? JsonObject
-            return obj?.let { of(it, redactor) } ?: ProviderError(clean.trim(), null, null, null)
+            return obj?.let { of(it, redactor) } ?: ProviderError(redactor.quote(clean.trim()), null, null, null)
         }
 
         /**
          * Reads `{"error": {...}}`, `{"error": "text"}` and flat `{"message" | "detail" | "msg", "code"}`
-         * bodies. The message and `param` are masked with [redactor] (JSON escapes can hide a secret
-         * from a scan of the raw text); codes are kept as sent.
+         * bodies. The message and `param` are masked with [redactor] once decoded (JSON escapes can
+         * hide a secret from a scan of the raw text); a body with no message field is its own
+         * message, as [Redactor.quote] shows text; codes are kept as sent.
          */
         fun of(
             root: JsonObject,
@@ -63,17 +66,22 @@ internal data class ProviderError(
         ): ProviderError {
             val error = root["error"]
             val inner = error as? JsonObject ?: root
-            val message =
+            val field =
                 (error as? JsonPrimitive)?.contentOrNull
                     ?: inner.text("message")
                     ?: inner.text("detail")
                     ?: inner.text("title")
                     ?: inner.text("msg")
-                    ?: root.toString()
             // OpenRouter puts the upstream's words under metadata.raw; they explain "Provider returned error".
             val raw = (inner["metadata"] as? JsonObject)?.text("raw")
+            val message =
+                when {
+                    field == null -> redactor.quote(root.toString())
+                    raw == null -> redactor.text(field)
+                    else -> redactor.text("$field: $raw")
+                }
             return ProviderError(
-                message = redactor.text(if (raw == null) message else "$message: $raw"),
+                message = message,
                 code = inner.scalar("code"),
                 type = inner.text("type"),
                 param = inner.text("param")?.let(redactor::text),
@@ -109,7 +117,7 @@ internal object ProviderErrors {
         if (failure.status in Status.REDIRECTS) {
             // Redirects are not followed (one request per attempt): the same address fails again,
             // so this is a configuration error the user fixes, not something to retry.
-            val target = failure.headers["Location"]?.let(redactor::text)?.take(LOCATION_LIMIT) ?: "an unnamed address"
+            val target = failure.headers["Location"]?.let(redactor::quote)?.take(LOCATION_LIMIT) ?: "an unnamed address"
             return ModelError.InvalidRequest(
                 param = null,
                 detail = "HTTP ${failure.status} redirect to $target: check the base URL and use the final address",

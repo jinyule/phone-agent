@@ -24,8 +24,9 @@ import org.junit.jupiter.params.provider.CsvSource
  * holding it is left out whole; a trial reply whose content echoes it is rejected
  * ([EchoRejectionTest]), so the probe result shows none of it. The
  * secret here has no credential shape, so only a redactor that knows the request's secret can mask
- * it; text is masked before it is cut, so no prefix of the secret survives a cut. Assertions never
- * print the secret.
+ * it; the probe quotes neither the answer nor the arguments of a trial reply (model-layer §2), so
+ * no prefix of the secret survives where a quote would have been cut. Assertions never print the
+ * secret.
  */
 class SuccessRedactionTest {
     @StartStop
@@ -50,7 +51,7 @@ class SuccessRedactionTest {
     @Test
     fun `trial arguments echoing the key never reach the probe result`() =
         runTest {
-            // The cut of the quoted arguments falls inside the secret.
+            // Where a quote of the arguments would be cut falls inside the secret.
             val args = "{\"token\":\"" + "x".repeat(PAD) + ECHOED + "\"}"
             server.enqueueError(404, "{}")
             server.enqueueSse(trialCall(args))
@@ -68,7 +69,7 @@ class SuccessRedactionTest {
         backslash | placeholder\with-backslash-01   | {"token":"placeholder\\with-backslash-01"}
         slash     | placeholder/with-slash-00001    | {"token":"placeholder\/with-slash-00001"}""",
     )
-    fun `trial arguments echoing the key behind JSON escapes are masked`(
+    fun `trial arguments echoing the key behind JSON escapes never reach the probe result`(
         name: String,
         echoed: String,
         args: String,
@@ -83,7 +84,7 @@ class SuccessRedactionTest {
     }
 
     @Test
-    fun `trial arguments hiding a key shape behind a JSON escape are masked`() =
+    fun `trial arguments hiding a key shape behind a JSON escape never reach the probe result`() =
         runTest {
             // Assembled at run time so secret scanners do not take the placeholder for a real key.
             val shape = "sk-" + "abcdefghijkl"
@@ -189,7 +190,7 @@ class SuccessRedactionTest {
         const val ECHOED = "plain-placeholder-0001"
         const val PREFIX = 8
 
-        /** Probe snippets are 300 characters; `{"token":"` is 10. */
+        /** Where the probe used to cut what it quoted, 300 characters; `{"token":"` is 10. */
         const val PAD = 300 - 10 - PREFIX
     }
 }

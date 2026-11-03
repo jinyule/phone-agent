@@ -139,8 +139,8 @@ internal class ChatCompletionsStream(
         try {
             Json.parseToJsonElement(data) as? JsonObject ?: throw ModelError.BadResponse("chunk is not a JSON object")
         } catch (ignoredQuotingParseError: SerializationException) {
-            // Its message quotes the input cut at a fixed width, which can split a secret before it is masked.
-            throw ModelError.BadResponse("chunk is not JSON: ${redactor.text(data).take(SNIPPET)}")
+            // Neither its message nor the data is quoted: an escape no parser has read can hide a secret.
+            throw ModelError.BadResponse("chunk is not JSON (${Unquoted.size(data)})")
         }
 
     private fun chunk(
@@ -169,7 +169,6 @@ internal class ChatCompletionsStream(
 
     private companion object {
         const val DONE = "[DONE]"
-        const val SNIPPET = 200
         val STOP = setOf("stop", "end_turn", "eos")
         val CALLS = setOf("tool_calls", "function_call")
         val LENGTH = setOf("length", "max_tokens")
@@ -367,18 +366,19 @@ internal class ToolCallAssembler(
         }
     }
 
-    /** The finished calls, in order; arguments that are empty (absent or `null` in every fragment) become `{}`. */
+    /**
+     * The finished calls, in order; arguments that are empty (absent or `null` in every fragment)
+     * become `{}`. A call it cannot use fails by its position, never quoting its id or name.
+     */
     fun parts(): List<Part.ToolCall> =
-        slots.map { slot ->
-            if (slot.name.isEmpty()) {
-                throw ModelError.BadResponse(redactor.text("tool call ${slot.id ?: "#${slot.index}"} has no name"))
-            }
+        slots.mapIndexed { position, slot ->
+            if (slot.name.isEmpty()) throw ModelError.BadResponse("tool call $position has no name")
             val id = slot.id ?: newCallId()
             try {
                 Part.ToolCall(ToolCallId(id), slot.name.toString(), slot.args.toString().ifEmpty { "{}" })
             } catch (e: IllegalArgumentException) {
                 throw ModelError.BadResponse(
-                    "unusable tool call id '${redactor.text(id).take(ID_SNIPPET)}'",
+                    "tool call $position has an unusable id (${Unquoted.size(id)})",
                     redactor.cause(e),
                 )
             }
@@ -425,10 +425,6 @@ internal class ToolCallAssembler(
             is JsonPrimitive -> if (raw.isString) raw.content else raw.toString()
             is JsonObject, is JsonArray -> raw.toString()
         }
-
-    private companion object {
-        const val ID_SNIPPET = 200
-    }
 }
 
 /**

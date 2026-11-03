@@ -19,7 +19,7 @@ import org.junit.jupiter.params.provider.ValueSource
 /**
  * kotlinx quotes the input around a parse error at a fixed width (`JSON input: .....…`), which can
  * cut a secret in two before anything can mask it. A reply or model list that is not JSON fails
- * with the adapter's own snippet, masked before it is cut; the parser's message, quote included,
+ * without quoting it at all (model-layer §2), only its length; the parser's message, quote included,
  * goes nowhere: not into the error and not into its cause. Assertions never print the secret.
  */
 class ParseErrorRedactionTest {
@@ -74,18 +74,18 @@ class ParseErrorRedactionTest {
         assertTrue(error.message.orEmpty().contains("not JSON"), "fails as data that is not JSON")
     }
 
-    @ParameterizedTest(name = "{0} {1}, the snippet cut crosses the key")
+    @ParameterizedTest(name = "{0} {1}, the key crosses where a snippet would be cut")
     @CsvSource(
         "OPENAI_CHAT_COMPLETIONS, stream",
         "OPENAI_CHAT_COMPLETIONS, json",
         "OPENAI_RESPONSES, stream",
         "OPENAI_RESPONSES, json",
     )
-    fun `unparseable reply data whose snippet cut crosses the key`(
+    fun `unparseable reply data with the key across where a snippet would be cut`(
         protocol: ModelProtocol,
         framing: String,
     ) = runTest {
-        // The key starts 20 characters before the snippet's cut, so cutting before masking leaves its start.
+        // The key starts 20 characters before a 200-character cut: a quote cut before masking would keep its start.
         val head = """{"id":""""
         val data = head + "x".repeat(SNIPPET - CROSSING - head.length) + KEY + """" "next":1}"""
         assertTrue(data.indexOf(KEY) == SNIPPET - CROSSING, "the key crosses the cut")
@@ -144,7 +144,7 @@ class ParseErrorRedactionTest {
         const val FILLER = 250
         const val MIN_PIECE = 8
 
-        /** The adapters' snippet length for data that is not JSON. */
+        /** The length the adapters once cut a quote of data that is not JSON to. */
         const val SNIPPET = 200
         const val CROSSING = 20
     }

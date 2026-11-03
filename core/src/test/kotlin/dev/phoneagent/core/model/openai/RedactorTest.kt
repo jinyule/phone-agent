@@ -80,36 +80,22 @@ class RedactorTest {
     }
 
     @Test
-    fun `JSON is masked in its standard escaping, whatever escapes it came with`() {
-        val slashed = "placeholder/with-slash-00001"
-        val redactor = Redactor(listOf(slashed))
-        // `\/` and `\u0070` hide the secret from a scan of the text; keys are masked too.
-        assertEquals(
-            """{"token":"***","***":[1,null,"***"]}""",
-            redactor.json(
-                """{"token":"placeholder\/with-slash-00001",""" +
-                    """"placeholder\/with-slash-00001":[1,null,"\u0070laceholder/with-slash-00001"]}""",
-            ),
-        )
-        // Assembled at run time so secret scanners do not take the placeholder for a real key.
-        assertEquals("""{"token":"***"}""", Redactor.SHAPES_ONLY.json("{\"token\":\"\\u0073k-" + "abcdefghijkl\"}"))
-        assertEquals("not json {", redactor.json("not json {"), "text that is not JSON and holds nothing is kept")
-    }
-
-    @Test
-    fun `text that is not JSON is not quoted when it holds a credential, escaped or not`() {
+    fun `provider text is quoted masked, or not at all when an escape hides a credential`() {
         val slashed = "placeholder/with-slash-00001"
         val redactor = Redactor(listOf(slashed))
         val backslash = Char(92)
+        assertEquals("not json {", redactor.quote("not json {"), "text that holds nothing is kept")
+        assertEquals("Bad Gateway", redactor.quote("Bad Gateway"))
         for (escape in listOf("$backslash/", "${backslash}u002F")) {
             val cut = """{"token":"pa-1","note":"placeholder${escape}with-slash-00001"""
-            assertEquals(Redactor.WITHHELD, redactor.json(cut), "a cut argument text")
-            assertEquals(Redactor.WITHHELD, redactor.json("$cut\"}}"), "a broken argument text")
+            assertEquals(Redactor.WITHHELD, redactor.quote(cut), "a cut text")
+            assertEquals(Redactor.WITHHELD, redactor.quote("$cut\"}}"), "a broken text")
+            assertEquals(Redactor.WITHHELD, redactor.quote("$cut\"}"), "JSON written back")
         }
-        assertEquals(Redactor.WITHHELD, redactor.json("not json $slashed {"), "the secret as sent")
+        assertEquals(Redactor.WITHHELD, redactor.quote("not json $slashed {"), "the secret as sent")
         // Assembled at run time so secret scanners do not take the placeholder for a real key.
         val shaped = "s${backslash}u006b-" + "abcdefghijkl"
-        assertEquals(Redactor.WITHHELD, Redactor.SHAPES_ONLY.json("""{"note":"$shaped"""), "a credential shape")
+        assertEquals(Redactor.WITHHELD, Redactor.SHAPES_ONLY.quote("""{"note":"$shaped"""), "a credential shape")
     }
 
     @Test

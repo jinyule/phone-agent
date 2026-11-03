@@ -204,7 +204,7 @@ public class ProviderProbe internal constructor(
             wire: WireOptions,
         ): ProbeResult {
             val redactor = Redactor(env.known())
-            val problem = checkTrialCall(reply, token, redactor)
+            val problem = checkTrialCall(reply, token)
             val verified =
                 capabilities.copy(tools = true, verified = capabilities.verified + VerifiedCapability.TOOL_CALL)
             val models = listing?.models?.filter { redactor.verbatim(it.id.value) != null }
@@ -221,8 +221,8 @@ public class ProviderProbe internal constructor(
             try {
                 Json.parseToJsonElement(body) as? JsonObject
             } catch (ignoredQuotingParseError: SerializationException) {
-                // Its message quotes the input cut at a fixed width, which can split a secret before it is masked.
-                throw ModelError.BadResponse("model list is not JSON: ${redactor.text(body).take(SNIPPET)}")
+                // Neither its message nor the body is quoted: an escape no parser has read can hide a secret.
+                throw ModelError.BadResponse("model list is not JSON (${Unquoted.size(body)})")
             }
         val entries =
             root?.array("data") ?: root?.array("models") ?: throw ModelError.BadResponse("model list has no data array")
@@ -264,15 +264,12 @@ public class ProviderProbe internal constructor(
      * Why [reply] is not the expected trial call, or `null` when it is. Only a reply that finished
      * as a tool step ([StopReason.TOOL_USE]) verifies anything: one cut at the output limit or
      * left incomplete fails even with the right call. A call recovered from the answer text does
-     * not count either: the provider's tool channel is what is being verified. What it quotes
-     * from the reply is masked with [redactor], then cut; arguments are masked as JSON
-     * ([Redactor.json]): written back in the standard escaping when they parse, and not quoted at
-     * all when they do not and their lenient decoding holds a credential.
+     * not count either: the provider's tool channel is what is being verified. It quotes nothing
+     * from the reply (model-layer §2): it says what was wrong, and how long the text was.
      */
     private fun checkTrialCall(
         reply: ChatResponse,
         token: String,
-        redactor: Redactor,
     ): String? {
         val call = reply.toolCalls.firstOrNull { it.name == TrialCall.TOOL }
         val stop = reply.stopReason
@@ -282,8 +279,8 @@ public class ProviderProbe internal constructor(
             }
 
             call == null -> {
-                "the model answered without calling the trial tool: " +
-                    redactor.text(reply.parts.filterIsInstance<Part.Text>().joinToString(" ") { it.text }).take(SNIPPET)
+                val text = reply.parts.filterIsInstance<Part.Text>().sumOf { it.text.length }
+                "the model answered without calling the trial tool, with $text characters of text"
             }
 
             reply.providerMetadata?.array(RECOVERED_TOOL_CALLS)?.contains(JsonPrimitive(call.id.value)) == true -> {
@@ -295,8 +292,26 @@ public class ProviderProbe internal constructor(
             }
 
             else -> {
-                "the trial tool got unexpected arguments: ${redactor.json(call.argsJson).take(SNIPPET)}"
+                "the trial tool got arguments that are ${unexpected(call.argsJson)}, not the token it was asked for"
             }
+        }
+    }
+
+    /** What trial arguments without the right token are, unquoted. */
+    private fun unexpected(argsJson: String): String {
+        val args =
+            try {
+                Json.parseToJsonElement(argsJson)
+            } catch (ignoredNotJson: SerializationException) {
+                // Described by its length only.
+                null
+            }
+        val token = (args as? JsonObject)?.get("token")
+        return when {
+            args == null -> "not JSON (${Unquoted.size(argsJson)})"
+            args !is JsonObject -> Unquoted.shape(args)
+            token == null -> "an object without a token"
+            else -> "an object whose token is ${Unquoted.shape(token)}"
         }
     }
 
@@ -306,7 +321,7 @@ public class ProviderProbe internal constructor(
             try {
                 Json.parseToJsonElement(argsJson) as? JsonObject
             } catch (ignoredNotJson: SerializationException) {
-                // Reported by the caller, which quotes the text through Redactor.json.
+                // Reported by the caller, which describes the text without quoting it.
                 null
             }
         return (args?.get("token") as? JsonPrimitive)?.contentOrNull?.trim()
@@ -314,7 +329,6 @@ public class ProviderProbe internal constructor(
 
     private companion object {
         const val TOKEN_LENGTH = 8
-        const val SNIPPET = 300
         const val LISTING_LIMIT = 8L * 1024 * 1024
     }
 }

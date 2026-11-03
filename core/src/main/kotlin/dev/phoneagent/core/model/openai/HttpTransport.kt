@@ -58,7 +58,7 @@ internal class HttpTransport(
                     }
                 }
             try {
-                val response = blocking(io, redactor) { call.execute().also(executed::set) }
+                val response = blocking(io) { call.execute().also(executed::set) }
                 response.use { read(HttpReply(it, io, redactor)) }.also { finished.set(true) }
             } finally {
                 if (!finished.get()) {
@@ -83,7 +83,7 @@ internal class HttpReply(
 
     /** Up to [limit] bytes of the body as UTF-8 text, as sent (a listing to parse). */
     suspend fun text(limit: Long): String =
-        blocking(io, redactor) {
+        blocking(io) {
             val source = response.body.source()
             source.request(limit)
             source.buffer.readUtf8(minOf(limit, source.buffer.size))
@@ -97,7 +97,7 @@ internal class HttpReply(
      * before the cut. The cut never splits a surrogate pair.
      */
     suspend fun maskedText(limit: Int = ERROR_BODY_LIMIT): String =
-        blocking(io, redactor) {
+        blocking(io) {
             val source = response.body.source()
             val wanted = limit.toLong() + redactor.reach
             val more = source.request(wanted + 1)
@@ -115,7 +115,7 @@ internal class HttpReply(
      * CRLF is split between two reads. A last line without terminator still counts. `null` at the
      * end of the body.
      */
-    suspend fun lines(): List<String>? = blocking(io, redactor) { readLines(response.body.source()) }
+    suspend fun lines(): List<String>? = blocking(io) { readLines(response.body.source()) }
 
     private fun readLines(source: BufferedSource): List<String>? {
         val lines = mutableListOf<String>()
@@ -254,21 +254,21 @@ internal object RetryAfterStash : Interceptor {
 /**
  * Runs blocking I/O on [io]. An `IOException` becomes [ModelError.Network], unless the caller was
  * cancelled meanwhile (the cancelled call is what failed the read), in which case cancellation
- * propagates. Exception text can quote the server (status lines), so it is masked with [redactor].
- * An `IllegalArgumentException` (OkHttp rejecting a value the server sent) becomes
+ * propagates. Exception text can quote the server (status lines, header lines in hex), so the
+ * error says what failed by its type ([Unquoted.io]) and its cause keeps class names and stack
+ * traces only. An `IllegalArgumentException` (OkHttp rejecting a value the server sent) becomes
  * [ModelError.BadResponse] with fixed text and no cause; [HttpTransport.send] then cancels the call
  * and closes the response it holds.
  */
 private suspend fun <T> blocking(
     io: CoroutineDispatcher,
-    redactor: Redactor,
     block: () -> T,
 ): T =
     try {
         withContext(io) { block() }
     } catch (e: IOException) {
         currentCoroutineContext().ensureActive()
-        throw ModelError.Network(redactor.text("${e::class.simpleName}: ${e.message}"), redactor.cause(e))
+        throw ModelError.Network(Unquoted.io(e), Unquoted.bare(e))
     } catch (ignoredQuotingValidation: IllegalArgumentException) {
         // OkHttp's validation errors quote the rejected value whole, and the value is the server's.
         throw ModelError.BadResponse(INVALID_HTTP)

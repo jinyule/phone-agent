@@ -309,20 +309,28 @@ class ProviderProbeTest {
                     """{"choices":[{"index":0,"delta":{"content":"I cannot use tools."},"finish_reason":"stop"}]}""",
                 ),
             )
-            val text = failure(probe.testAndSave(profile, Kit.MODEL, Kit.capabilities(), token = "t"))
-            assertTrue(text.contains("without calling the trial tool: I cannot use tools."))
-            server.enqueueError(404, "{}")
-            server.enqueueSse(trialCall("{\"token\":\"wrong\"}"))
-            assertTrue(
-                failure(
-                    probe.testAndSave(profile, Kit.MODEL, Kit.capabilities(), token = "t"),
-                ).contains("unexpected arguments"),
+            // What was wrong and how long the text was; nothing of the reply is quoted.
+            assertEquals(
+                "the model answered without calling the trial tool, with 19 characters of text",
+                failure(probe.testAndSave(profile, Kit.MODEL, Kit.capabilities(), token = "t")),
             )
-            server.enqueueError(404, "{}")
-            server.enqueueSse(trialCall("{token=t"))
-            assertTrue(
-                failure(probe.testAndSave(profile, Kit.MODEL, Kit.capabilities(), token = "t")).contains("{token=t"),
-            )
+            val arguments =
+                mapOf(
+                    "{\"token\":\"wrong\"}" to "an object whose token is a string of 5 characters",
+                    "{\"token\":7}" to "an object whose token is a number",
+                    "{\"city\":\"t\"}" to "an object without a token",
+                    "[\"t\"]" to "an array",
+                    "{token=t" to "not JSON (8 characters)",
+                )
+            for ((args, shape) in arguments) {
+                server.enqueueError(404, "{}")
+                server.enqueueSse(trialCall(args))
+                assertEquals(
+                    "the trial tool got arguments that are $shape, not the token it was asked for",
+                    failure(probe.testAndSave(profile, Kit.MODEL, Kit.capabilities(), token = "t")),
+                    args,
+                )
+            }
         }
 
     @Test

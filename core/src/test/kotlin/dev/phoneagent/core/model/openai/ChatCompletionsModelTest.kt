@@ -185,7 +185,9 @@ class ChatCompletionsModelTest {
             val deltas = Deltas()
             val error = assertThrows<ModelError.Network> { model().complete(Kit.request(), deltas) }
             assertEquals("Hi", deltas.text, "the connection broke mid-stream")
-            assertTrue(error.cause is java.io.IOException)
+            // The cause keeps the class name and stack trace, not the message, which can quote the server.
+            val cause = checkNotNull(error.cause)
+            assertTrue(java.io.IOException::class.java.isAssignableFrom(Class.forName(cause.message)), "an I/O failure")
             assertFalse(error.cause is java.net.SocketTimeoutException, "the cut, not a timeout, ended the read")
         }
 
