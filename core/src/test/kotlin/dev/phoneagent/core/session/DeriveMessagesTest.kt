@@ -61,7 +61,7 @@ class DeriveMessagesTest {
     private fun results(vararg parts: Part.ToolResult): Message = Message(Role.TOOL, parts.toList())
 
     @Test
-    fun `messages, calls and consecutive results form the conversation`() {
+    fun `messages, calls and results form the conversation, one message per result`() {
         val messages =
             deriveMessages(
                 log(
@@ -78,15 +78,13 @@ class DeriveMessagesTest {
             listOf(
                 text(Role.USER, "hi"),
                 Message(Role.ASSISTANT, listOf(Part.Text("two taps"), tap1, tap2)),
-                results(
-                    Part.ToolResult(c1, listOf(Part.Text("tapped")), isError = false),
-                    Part.ToolResult(c2, listOf(Part.Text("no")), isError = true),
-                ),
+                results(Part.ToolResult(c1, listOf(Part.Text("tapped")), isError = false)),
+                results(Part.ToolResult(c2, listOf(Part.Text("no")), isError = true)),
                 text(Role.USER, "more"),
                 text(Role.USER, "and more"),
             ),
             messages,
-            "consecutive user messages stay separate",
+            "consecutive results and user messages stay separate",
         )
     }
 

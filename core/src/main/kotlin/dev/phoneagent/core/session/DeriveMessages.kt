@@ -17,10 +17,11 @@ import dev.phoneagent.core.model.Role
  *   UI-only, a prefix cut by steer, stop or a final failure joins the view with the next input,
  *   without its [Part.Reasoning]s (an unfinished block cannot be sent back), and not at all when
  *   nothing else is left;
- * - `tool/result` → a [Part.ToolResult]; consecutive results form one [Role.TOOL] message, so the
- *   results answering one reply travel together;
- * - `context/reasoning-dropped(upToSeq)` leaves out the [Part.Reasoning]s of replies with
- *   seq <= upToSeq; a reply left without parts is left out.
+ * - `tool/result` → a [Role.TOOL] message holding its [Part.ToolResult], one message per result
+ *   (an adapter whose wire wants them together joins consecutive ones);
+ * - `context/reasoning-dropped(upToSeq)` leaves out the reasoning blocks (a [Part.Reasoning] whose
+ *   kind `isReasoning`) of replies with seq <= upToSeq; their compaction blocks stay, and a reply
+ *   left without parts is left out.
  *
  * Every other event type contributes nothing. Messages are neither merged nor reordered otherwise:
  * consecutive user messages stay separate.
@@ -154,34 +155,31 @@ private fun assemble(
     droppedUpTo: Long,
 ): List<Message> {
     val messages = mutableListOf<Message>()
-    val results = mutableListOf<Part>()
-
-    fun flushResults() {
-        if (results.isNotEmpty()) messages += Message(Role.TOOL, results.toList())
-        results.clear()
-    }
     view.forEachIndexed { index, contribution ->
         when (val visible = contribution.visible) {
             is Visible.Result -> {
-                results += visible.part
+                messages += Message(Role.TOOL, listOf(visible.part))
             }
 
             is Visible.User -> {
-                flushResults()
                 messages += Message(Role.USER, visible.parts)
             }
 
             is Visible.Assistant -> {
-                flushResults()
-                // An interrupted prefix never carries reasoning: an unfinished block cannot be sent back.
-                val dropped = contribution.source <= droppedUpTo || visible.interrupted
-                val parts = if (dropped) visible.parts.withoutReasoning() else visible.parts
+                val parts =
+                    when {
+                        // An interrupted prefix carries no opaque block: an unfinished one cannot be sent back.
+                        visible.interrupted -> visible.parts.filterNot { it is Part.Reasoning }
+
+                        contribution.source <= droppedUpTo -> visible.parts.withoutReasoning()
+
+                        else -> visible.parts
+                    }
                 val shown = !visible.interrupted || userFollows(view, index)
                 if (shown && parts.isNotEmpty()) messages += Message(Role.ASSISTANT, parts)
             }
         }
     }
-    flushResults()
     return messages.toList()
 }
 
@@ -195,4 +193,5 @@ private fun userFollows(
         .map { it.visible }
         .firstOrNull { it !is Visible.Result } is Visible.User
 
-private fun List<Part>.withoutReasoning(): List<Part> = filterNot { it is Part.Reasoning }
+/** Without the reasoning blocks; compaction blocks hold the compacted history and stay. */
+private fun List<Part>.withoutReasoning(): List<Part> = filterNot { it is Part.Reasoning && it.kind.isReasoning }

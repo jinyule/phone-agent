@@ -171,9 +171,9 @@ class AgentLoopTest {
                 results.map { it.result.status },
             )
             assertEquals(LoopTexts().skipped, (results[1].result.content.single() as Part.Text).text)
-            val tool = model.requests[1].messages.last()
-            assertEquals(Role.TOOL, tool.role)
-            assertEquals(3, tool.parts.size, "all results of one reply travel in one message")
+            val tools = model.requests[1].messages.takeLast(3)
+            assertEquals(listOf(Role.TOOL, Role.TOOL, Role.TOOL), tools.map { it.role }, "one message per result")
+            assertEquals(listOf("c1", "c2", "c3"), tools.map { (it.parts.single() as Part.ToolResult).id.value })
         }
 
     @Test
