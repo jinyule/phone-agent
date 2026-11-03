@@ -34,8 +34,9 @@ import java.util.Base64
  *   (`wire.disableParallelToolCalls`, which [WireRules] requires).
  * - **Messages**: USER parts become `text` / `image` blocks (base64, or [IMAGE_OMITTED] for a
  *   model without vision); ASSISTANT parts become `text`, `tool_use` (`input` = the arguments
- *   when they parse as a JSON object, else `{}` by intent: [argumentsObject]) and, only for this
- *   provider and model, the stored Anthropic block of a [Part.Reasoning] verbatim; TOOL parts
+ *   when they parse as a JSON object, else `{}` by intent: [argumentsObject]) and, for this
+ *   provider whichever model produced it, the stored Anthropic block of a [Part.Reasoning]
+ *   verbatim (never stripped after a model switch: model-layer §3.3); TOOL parts
  *   become `tool_result` blocks (`is_error` only when true). Empty text is skipped and messages
  *   left empty are omitted. Consecutive messages with the same wire role are merged,
  *   `tool_result` blocks first.
@@ -59,7 +60,7 @@ internal class MessagesWire(
         images: ImageData,
     ): JsonObject {
         Preflight.toolPairs(request.messages)
-        val messages = WireMessages(provider, model, rules, images).of(request)
+        val messages = WireMessages(provider, rules, images).of(request)
         if (messages.isEmpty()) invalid("messages", "nothing to send: every message is empty")
         if (messages.last().role != WireMessage.USER) {
             invalid("messages", "the last message is the assistant's; prefill is not supported")

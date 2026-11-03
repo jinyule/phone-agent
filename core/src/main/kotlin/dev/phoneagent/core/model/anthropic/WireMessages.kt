@@ -1,6 +1,5 @@
 package dev.phoneagent.core.model.anthropic
 
-import dev.phoneagent.core.ids.ModelId
 import dev.phoneagent.core.ids.ProviderId
 import dev.phoneagent.core.ids.ToolCallId
 import dev.phoneagent.core.model.ChatRequest
@@ -17,7 +16,6 @@ import kotlinx.serialization.json.put
 /** The `messages` of one request, by the rules [MessagesWire] states. */
 internal class WireMessages(
     private val provider: ProviderId,
-    private val model: ModelId,
     private val rules: WireRules,
     private val images: ImageData,
 ) {
@@ -77,12 +75,17 @@ internal class WireMessages(
             put("input", MessagesWire.argumentsObject(call.argsJson))
         }
 
-    /** A stored Anthropic block of this provider and model, verbatim; anything else is dropped. */
+    /**
+     * A stored Anthropic block of this provider, verbatim, whichever of its models produced it: the
+     * API leaves out what the current model cannot read, and a block stripped here would be lost
+     * for a switch back, break the blocks after it, or (compaction) lose history (model-layer
+     * §3.3). Blocks of other providers and other kinds are dropped.
+     */
     private fun reasoning(
         index: Int,
         part: Part.Reasoning,
     ): JsonObject? {
-        if (part.provider != provider || part.model != model || part.kind !in ANTHROPIC_KINDS) return null
+        if (part.provider != provider || part.kind !in ANTHROPIC_KINDS) return null
         return part.opaque as? JsonObject
             ?: invalid("messages", "message $index: stored ${part.kind} block is not a JSON object")
     }

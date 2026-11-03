@@ -69,12 +69,23 @@ class WireGoldenTest {
             },
         )
 
-    /** Reasoning of another model and of another provider: never sent here. */
+    /** Reasoning of another provider and of another protocol's kind: never sent here. */
     private val foreign =
         listOf(
-            thinking.copy(model = ModelId("claude-haiku-5-5")),
             thinking.copy(provider = ProviderId("other")),
             thinking.copy(kind = ReasoningKind.RESPONSES_ENCRYPTED),
+        )
+
+    private val compaction =
+        Part.Reasoning(
+            Kit.PROVIDER,
+            Kit.MODEL,
+            ReasoningKind.ANTHROPIC_COMPACTION,
+            buildJsonObject {
+                put("type", "compaction")
+                put("content", "早先的对话：用户要查巴黎天气。")
+                put("encrypted_content", "Q29tcGFjdGVkLW5vdC1yZWFs")
+            },
         )
 
     @Test
@@ -100,7 +111,7 @@ class WireGoldenTest {
         golden("official-defaults", Kit.request(wire = Kit.wire()))
 
     @Test
-    fun `thinking is echoed verbatim and only to its own model`() =
+    fun `thinking is echoed verbatim and only to its own provider`() =
         golden(
             "thinking-echo",
             Kit.request(
@@ -116,6 +127,28 @@ class WireGoldenTest {
                 cache = CacheLayout(tools = true, system = true, recentMessages = 2),
             ),
         )
+
+    @Test
+    fun `after a switch from another model its thinking and compaction blocks are still sent`() {
+        val sonnet = ModelId("claude-sonnet-5-5")
+        golden(
+            "model-switch",
+            Kit.request(
+                Kit.user("巴黎天气怎么样？"),
+                Kit.assistant(
+                    compaction.copy(model = sonnet),
+                    thinking.copy(model = sonnet),
+                    Part.Text("我来查一下。"),
+                    Kit.call("toolu_01"),
+                ),
+                Kit.tool(Kit.result("toolu_01", Part.Text("晴，22°C"))),
+                Kit.assistant(thinking, Part.Text("巴黎晴，22°C。")),
+                Kit.user("谢谢"),
+                wire = Kit.wire(),
+                cache = CacheLayout(tools = false, system = false, recentMessages = 1),
+            ),
+        )
+    }
 
     @Test
     fun `tool results open the merged user message, images inline`() =
