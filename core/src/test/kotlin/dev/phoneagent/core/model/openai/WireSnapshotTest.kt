@@ -287,6 +287,24 @@ class WireSnapshotTest {
         }
 
     @Test
+    fun `a foreign snapshot stays refused after the caller allows its leaked-call format`() =
+        runTest {
+            val declared = mutableSetOf<LeakedCallFormat>()
+            val model = model(options = WireOptions(chat = ChatQuirks(leakedCallFormats = declared)))
+            val foreign =
+                model.prepare(null).wire.copy(
+                    recoverLeakedToolCalls = true,
+                    options = mapOf(LEAKED_CALL_FORMATS to LeakedCallFormat.DSML.optionName),
+                )
+            declared.add(LeakedCallFormat.DSML)
+            // A reply waits, so a snapshot let through fails the assertion instead of hanging.
+            server.enqueueSse(chatReply)
+            val error = assertThrows<ModelError.InvalidRequest> { model.complete(request(foreign)) }
+            assertEquals("wire.options", error.param)
+            assertEquals(0, server.requestCount, "nothing was sent")
+        }
+
+    @Test
     fun `a request still carrying the unprepared snapshot is refused`() =
         runTest {
             assertThrows<ModelError.InvalidRequest> { model().complete(Kit.request()) }
