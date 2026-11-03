@@ -101,6 +101,8 @@ class EntryLevelsTest {
         override fun cursorAtEnd(): Boolean? = null
 
         override fun selectAll(): Boolean? = null
+
+        override fun commitThroughEnd(text: String): Boolean = error("not reached: select-all is unknown")
     }
 
     private fun selection(index: Int): Pair<Int, Int> {

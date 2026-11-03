@@ -279,8 +279,10 @@ internal object EntryLevels {
     /**
      * Commits through the service's input connection. Applies only while [field] holds input focus
      * and the connection is bound to its app; [focus] focuses the field and waits for the app. A
-     * password, which cannot be read back, is replaced only once the editor confirms all of it
-     * selected ([ImeConnection.selectAll]); else the level is skipped.
+     * password, which cannot be read back, is replaced only once the editor confirms its selection
+     * from the start of the text with nothing told after it ([ImeConnection.selectAll]), and then
+     * with what follows the selection deleted ([ImeConnection.commitThroughEnd]); else the level is
+     * skipped.
      */
     fun imeConnection(
         field: AccessibilityNodeInfo,
@@ -318,7 +320,9 @@ internal object EntryLevels {
             }
         }
 
-    // Committing over a selection that is not all of a password would leave part of it beside the text.
+    // Committing over a selection that is not all of a password would leave part of it beside the
+    // text: the editor confirms where the selection starts, and what it may hold after the
+    // selection without telling is deleted.
     private fun replaceAll(
         field: AccessibilityNodeInfo,
         ime: ImeConnection,
@@ -326,7 +330,7 @@ internal object EntryLevels {
     ): TextEntry.Sent =
         when {
             !field.isPassword -> sentIf(ime.commit(text, replace = true))
-            ime.selectAll() == true -> sentIf(ime.commit(text, replace = false))
+            ime.selectAll() == true -> sentIf(ime.commitThroughEnd(text))
             else -> TextEntry.Sent.Skipped(NO_CURSOR)
         }
 

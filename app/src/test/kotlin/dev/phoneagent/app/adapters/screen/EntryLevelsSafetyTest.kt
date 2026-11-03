@@ -48,6 +48,8 @@ class EntryLevelsSafetyTest {
         override fun cursorAtEnd(): Boolean? = null
 
         override fun selectAll(): Boolean? = null
+
+        override fun commitThroughEnd(text: String): Boolean = error("not reached: select-all is unknown")
     }
 
     private open class Clipboard : ClipboardAccess {

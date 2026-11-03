@@ -223,9 +223,10 @@ internal class ServiceImeConnection(
         return if (start < 0 || end < 0) null else start == end && end == around.text.length
     }
 
-    // One character before and after the selection is asked for: none comes back only when it is
-    // all. The selection is relative to the text returned, which starts at its offset in the
-    // editor's text: all of it is selected only from offset 0; an unknown offset tells nothing.
+    // One character before and after the selection is asked for. The selection is relative to the
+    // text returned, which starts at its offset in the editor's text: nothing is before it only from
+    // offset 0, and an unknown offset tells nothing. None after it comes back at the end of the
+    // text, and also from an editor that tells less than asked: commitThroughEnd deletes the rest.
     override fun selectAll(): Boolean? {
         val connection = ime.currentInputConnection ?: return null
         connection.performContextMenuAction(android.R.id.selectAll)
@@ -238,4 +239,17 @@ internal class ServiceImeConnection(
             }
         }
     }
+
+    override fun commitThroughEnd(text: String): Boolean {
+        val connection = ime.currentInputConnection ?: return false
+        connection.commitText(text, 1, null)
+        connection.deleteSurroundingText(0, THROUGH_END_CHARS)
+        return true
+    }
 }
+
+/**
+ * How many characters [ServiceImeConnection.commitThroughEnd] deletes after the cursor at most: far
+ * more than a password, and few enough that an editor adding it to its cursor cannot overflow.
+ */
+private const val THROUGH_END_CHARS = 4096

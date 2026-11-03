@@ -317,6 +317,8 @@ class ActuatorTest {
                     override fun cursorAtEnd(): Boolean? = null
 
                     override fun selectAll(): Boolean? = null
+
+                    override fun commitThroughEnd(text: String): Boolean = error("not reached: select-all is unknown")
                 }
 
             assertEquals(Actuator.Result.Done(Actuator.Via.NODE), actuator().enter(field))

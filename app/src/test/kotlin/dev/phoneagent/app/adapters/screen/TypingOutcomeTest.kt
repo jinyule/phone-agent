@@ -4,7 +4,11 @@ import android.graphics.Rect
 import android.text.InputType
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction
+import android.view.inputmethod.SurroundingText
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import dev.phoneagent.app.service.ConnectionShadow
+import dev.phoneagent.app.service.InputMethodShadow
+import dev.phoneagent.app.service.boundServiceIme
 import dev.phoneagent.core.ports.ActionOutcome
 import dev.phoneagent.core.ports.Bounds
 import dev.phoneagent.core.ports.ElementRef
@@ -23,10 +27,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Config
 
 /**
  * What typing reports when the field does not end up showing the request (fix list r1 B5), how
- * password fields are appended to (B7), and a clipboard that could not be restored (S3).
+ * password fields are appended to (B7) and typed over (r4 C4), and a clipboard that could not be
+ * restored (S3).
  */
 @RunWith(AndroidJUnit4::class)
 class TypingOutcomeTest {
@@ -234,7 +240,8 @@ class TypingOutcomeTest {
      * An editor behind the input connection that holds the real [content], which accessibility does
      * not show for a password, and moves its selection ([anchor]..[cursor]) honestly (out-of-range
      * moves are ignored, as `BaseInputConnection` does); unless [selectsAll], it ignores select-all,
-     * as some editors do. Committed text replaces the selection.
+     * as some editors do. Committed text replaces the selection; [commitThroughEnd] also deletes what
+     * follows it.
      */
     private class Editor(
         var content: String,
@@ -281,6 +288,12 @@ class TypingOutcomeTest {
             }
             return anchor == 0 && cursor == content.length
         }
+
+        override fun commitThroughEnd(text: String): Boolean {
+            commit(text, replace = false)
+            content = content.substring(0, cursor)
+            return true
+        }
     }
 
     @Test
@@ -308,6 +321,64 @@ class TypingOutcomeTest {
             host.ime = selecting
             typeInto(field, UiAction.Type(Target.Point(500, 125), "newpw"))
             assertEquals("newpw", selecting.content)
+        }
+
+    /** A row of the editor's answers: it selected [selected] of "oldpw" and tells [around]; [typed] over or not. */
+    private class Told(
+        val name: String,
+        val selected: IntRange,
+        val around: SurroundingText,
+        val typed: Boolean,
+    )
+
+    @Test
+    @Config(shadows = [InputMethodShadow::class, ConnectionShadow::class])
+    fun aPasswordIsTypedOverWhollyOrNotAtAllWhateverTheEditorTellsOfIt() =
+        runTest {
+            // Fix list r4 C4 (Claude r5 S-1, Codex r5 S1), through the service's own input connection as
+            // built: the password is "oldpw", SET_TEXT is refused, the editor ignored select-all and
+            // tells the text around its selection as each row has it, telling less than asked in some.
+            // The field ends as "newpw", or nothing is committed and nothing submitted.
+            val rows =
+                listOf(
+                    Told("all selected", 0..4, SurroundingText("oldpw", 0, 5, 0), typed = true),
+                    Told("'pw' selected, told from offset 3", 3..4, SurroundingText("pw", 0, 2, 3), typed = false),
+                    Told("'old' selected, 'p' after it not told", 0..2, SurroundingText("old", 0, 3, 0), typed = true),
+                    Told("'old' selected, 'p' after it told", 0..2, SurroundingText("oldp", 0, 3, 0), typed = false),
+                    Told("all selected, offset unknown", 0..4, SurroundingText("oldpw", 0, 5, -1), typed = false),
+                    Told(
+                        "'oldp' selected, 'w' after it not told",
+                        0..3,
+                        SurroundingText("oldp", 0, 4, 0),
+                        typed = true,
+                    ),
+                )
+            for (row in rows) {
+                val field =
+                    field {
+                        isPassword = true
+                        text = null
+                    }
+                field.log.answer = { action, _ -> action != AccessibilityNodeInfo.ACTION_SET_TEXT }
+                host.ime = boundServiceIme()
+                ConnectionShadow.editor(row.selected, row.around)
+
+                val outcome = typeInto(field, UiAction.Type(Target.Point(500, 125), "newpw", submit = true))
+
+                val submitted =
+                    AccessibilityAction.ACTION_IME_ENTER.id in field.log.ids ||
+                        ConnectionShadow.EDITOR_ACTION in ConnectionShadow.calls
+                if (row.typed) {
+                    assertEquals(row.name, "newpw", ConnectionShadow.content)
+                    assertEquals(row.name, ActionOutcome.Status.Ok, outcome.status)
+                    assertTrue("${row.name}: submitted", submitted)
+                } else {
+                    assertEquals(row.name, "oldpw", ConnectionShadow.content)
+                    assertTrue("${row.name}: ${outcome.status}", outcome.status is ActionOutcome.Status.Failed)
+                    assertFalse("${row.name}: committed", ConnectionShadow.COMMIT in ConnectionShadow.calls)
+                    assertFalse("${row.name}: submitted", submitted)
+                }
+            }
         }
 
     @Test

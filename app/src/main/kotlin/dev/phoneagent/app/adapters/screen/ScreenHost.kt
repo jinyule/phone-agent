@@ -181,10 +181,20 @@ internal interface ImeConnection {
     fun cursorAtEnd(): Boolean?
 
     /**
-     * Selects all of the editor's text and reports whether the editor confirms that nothing is left
-     * before or after the selection, from the start of its text on, or `null` when that cannot be
-     * read (the offset of what the editor tells unknown included). Works for password fields; the
-     * text looked at is not kept.
+     * Selects all of the editor's text and reports whether the editor confirms that the selection
+     * starts at the start of its text and tells no text after it, or `null` when that cannot be read
+     * (the offset of what the editor tells unknown included). An editor may tell less than it holds
+     * after the selection, as the platform allows, so `true` holds for the start only: type over the
+     * selection with [commitThroughEnd]. Works for password fields; the text looked at is not kept.
      */
     fun selectAll(): Boolean?
+
+    /**
+     * Commits [text] over the selection, then deletes what follows the cursor, so that after
+     * [selectAll] confirmed the selection's start the editor holds just [text], whatever it told of
+     * the text after the selection. Returns whether it was sent: both go over one connection, in
+     * order, or neither when none is bound. The editor reports nothing more, so one that both tells
+     * less than it holds and ignores the delete is not told apart.
+     */
+    fun commitThroughEnd(text: String): Boolean
 }

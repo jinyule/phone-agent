@@ -309,6 +309,64 @@ class AndroidScreenDeviceTest {
         }
 
     @Test
+    fun theInputConnectionDeletesWhatFollowsTextTypedOverASelection() =
+        runBlocking<Unit> {
+            // Fix list r4 C4: commitThroughEnd on a real editor. Only "old" of "oldpw" is selected, as
+            // after a select-all the editor ignored: what follows the selection goes, nothing before it.
+            val testPackage = InstrumentationRegistry.getInstrumentation().context.packageName
+            for (password in listOf(false, true)) {
+                context.startActivity(
+                    Intent()
+                        .setClassName(testPackage, FieldActivity::class.java.name)
+                        .putExtra(FieldActivity.PASSWORD, password)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK),
+                )
+                inFront(testPackage)
+                val host = AgentAccessibility.host.value!!
+                val field = focusedField(host, password)
+                assertTrue("the input connection is bound to the field's app", editorBinds(host, field.packageName))
+                val ime = host.imeConnection()!!
+
+                assertTrue(ime.setSelection(0, 3))
+                assertEquals("old selected", 0 to 3, ime.selection())
+                assertTrue(ime.commitThroughEnd("newpw"))
+                screen.awaitChange(CHANGE_TIMEOUT_MS)
+                val shown = TextEntry.read(field)
+                log("type over 'old' of '${FieldActivity.OLD}' (password=$password): shown=$shown")
+                assertEquals("the cursor after the text typed", 5 to 5, ime.selection())
+                assertEquals("nothing after the cursor", true, ime.cursorAtEnd())
+                val text = (shown as TextEntry.Shown.Text).text
+                if (password) {
+                    assertEquals("a mask as long as the text", "newpw".length, text?.length)
+                } else {
+                    assertEquals("newpw", text)
+                }
+                // BACK hides the keyboard first, if it shows, then leaves the page.
+                repeat(2) {
+                    if (screen.snapshot().pkg ==
+                        testPackage
+                    ) {
+                        screen.act(UiAction.Key(SystemKey.BACK), on = null)
+                    }
+                }
+            }
+        }
+
+    /** The field of [FieldActivity] once it holds input focus as the page has it ([password] or not). */
+    private suspend fun focusedField(
+        host: ScreenHost,
+        password: Boolean,
+    ): android.view.accessibility.AccessibilityNodeInfo =
+        withTimeout(CHANGE_TIMEOUT_MS) {
+            var field = Aims.focusedEditable(host.windowsOn(Display.DEFAULT_DISPLAY))
+            while (field == null || field.isPassword != password) {
+                screen.awaitChange(CHANGE_TIMEOUT_MS)
+                field = Aims.focusedEditable(host.windowsOn(Display.DEFAULT_DISPLAY))
+            }
+            field
+        }
+
+    @Test
     fun capturesAFrameAndWaitsForChanges() =
         runBlocking<Unit> {
             openSettings()
