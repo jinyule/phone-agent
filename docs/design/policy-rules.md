@@ -87,7 +87,7 @@
 | Activity 名片段 | `SettingsPages`（`SENSITIVE_ACTIVITIES`） | accessibility、development、permission、security、privacy、vpn、masterclear、account 等 |
 | 一个 App 的设置页：应用信息页、存储页，以及它们弹出的确认对话框 | `SettingsPages`（`DETAILS`、`DETAILS_ACTIVITIES`、`MANAGEMENT`） | Activity 名含 installedappdetails、appinfo、appdetail、appstorage（AOSP 的 `Settings$AppStorageSettingsActivity`），或者屏上任何一段短文字说的是这类页面（应用信息、强行停止、存储和缓存、清除存储、清除数据、删除应用数据、Storage & cache、Clear storage……）时，页上的短文字（树和 OCR）按名称（本 App、名单）识别被管理的 App；识别出来就按那个 App 拒绝。其他 App（包括识别不出的）的这些页上，强行停止、清除数据 / 存储、卸载、停用、禁用这类控件一律拒绝（`hard.app_management`）；在说这些的对话框里点"确定""删除"这类按钮同样拒绝；权限入口按敏感页拒绝 |
 | 桌面 / 应用选择器 | `HardRules.LAUNCHERS` | 列出的启动器和系统应用选择器包名：AOSP Launcher3、Pixel、MIUI、华为、荣耀、三星、vivo、OPPO、OnePlus 的桌面，`com.android.intentresolver` 和 `android`（系统的应用选择器）。在这些包的屏上，点到的图标名字按名称匹配本 App 和名单。不在清单里的桌面不按图标名称拒绝，只靠打开之后的新屏判定（§6.4）。**更新方式**：在 `LAUNCHERS` 里加包名，只收厂商预装的桌面和系统选择器，包名以真机上桌面前台时的 `pkg` 或 AOSP 源码为准；判定本身由 `CallsTest` 的桌面图标用例覆盖 |
-| 链接 | `Launches.SCHEMES` | 只能打开 https、http、geo、mailto、market 链接（§6.1 第 1 步），设置页的链接打不开 |
+| 链接 | `LaunchTarget.Link.SCHEMES`（`core.ports`，和 `phone_launch`、适配器共用一份；`Launches.linkAllowed` 按它判） | 只能打开 https、http、geo、mailto、market 链接（§6.1 第 1 步），设置页的链接打不开 |
 | `phone_intent kind=settings` | `Launches.SAFE_SETTINGS_PAGES` | **白名单**：wifi、bluetooth、display、sound、battery、date、locale、location、storage、app_details。不在白名单里（包括不给 `page`）就拒绝 |
 
 ---

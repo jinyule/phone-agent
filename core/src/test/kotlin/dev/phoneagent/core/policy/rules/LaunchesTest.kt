@@ -1,5 +1,6 @@
 package dev.phoneagent.core.policy.rules
 
+import dev.phoneagent.core.ports.LaunchTarget
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -39,6 +40,14 @@ class LaunchesTest {
     )
     fun `other links do not`(link: String) {
         assertFalse(Launches.linkAllowed(link), link)
+    }
+
+    @Test
+    fun `every scheme of the shared whitelist opens, in any case`() {
+        for (scheme in LaunchTarget.Link.SCHEMES) {
+            assertTrue(Launches.linkAllowed("$scheme:x"), scheme)
+            assertTrue(Launches.linkAllowed("${scheme.uppercase()}:x"), scheme)
+        }
     }
 
     @Test

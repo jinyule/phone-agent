@@ -73,7 +73,7 @@ internal class RulesEngine(
         }
     }
 
-    /** `app` must be a package name (looked up with `phone_apps`); links only of [Launches.SCHEMES]. */
+    /** `app` must be a package name (looked up with `phone_apps`); links only of `LaunchTarget.Link.SCHEMES`. */
     private fun launchGate(step: Step.Launch): Refusal? =
         when {
             step.link -> Refusal.LINK_SCHEME.takeUnless { Launches.linkAllowed(step.target) }
