@@ -282,11 +282,12 @@ class PressTargetTest {
         }
 
     @Test
-    fun aLongPressByRefIsNotGivenToANodeTheSnapshotLeavesOut() =
+    fun aLongPressByRefMakesNoNodeActionOnANodeTheSnapshotLeavesOut() =
         runTest {
             // A clickable row holding, in the same box, one that also takes long clicks: the two are
             // alike to the read, which keeps the outer one, so the snapshot has no element for a long
-            // press and the press is held at the label's center.
+            // press and the press is held at the label's center. On a device, the touch there still
+            // goes to the innermost view under it, which may be the inner one (phase1 3.3).
             for (detail in SnapshotDetail.entries) {
                 made.clear()
                 host.gestures.clear()
