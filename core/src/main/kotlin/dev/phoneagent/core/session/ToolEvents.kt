@@ -191,7 +191,9 @@ public data class HandoffStarted(
 
 /**
  * `handoff/end`: the handoff ended: the task is back on the agent display, never left it, or
- * could not be moved ([HandoffResult.FAILED]); the next step must observe first.
+ * could not be moved ([HandoffResult.FAILED]); the next step must observe first. FAILED may also
+ * follow a hand-over whose port threw an IOException: the app may have moved, so where it is is
+ * unknown; [detail] names the move that failed (`hand over failed: …` or `take back failed: …`).
  *
  * @property promptId the prompt.
  * @property result the result returned to the waiting call.
