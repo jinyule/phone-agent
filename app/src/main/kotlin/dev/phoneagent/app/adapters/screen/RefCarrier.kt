@@ -37,8 +37,12 @@ internal class TreeEntry(
  *   of photos described alike);
  * - elements alike within one context (same role, view id and name: two plain "+" buttons of one
  *   row) are told apart only by their place, so two that swap places swap refs;
- * - in a list whose rows have no node of their own, a control that comes before its text (a
- *   checkbox, then its label) is taken with the text before it;
+ * - in a list whose rows have no node of their own, a control whose part of the row holds no
+ *   text but its own label is told apart by that label and its place only: a control that comes
+ *   before its text (a checkbox, then its label: it is taken with the text before it), or one
+ *   after a text wrapped alone in a layout that takes no clicks (the layout is a row by itself).
+ *   When the row before is replaced or removed and another control alike comes to its place,
+ *   that one takes the ref;
  * - a row the list's edge cut where the text left still tells nothing apart: rule 4 catches only
  *   rows cut down to their controls (Compose may take clipped nodes out of the tree).
  *
