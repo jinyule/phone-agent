@@ -301,6 +301,46 @@ class WireGoldenTest {
         assertFalse("max_output_tokens" in body)
     }
 
+    /**
+     * A reply cut at the output cap with a call, the call answered SKIPPED as the runtime does,
+     * then the user's next input (WP01 r3 §7 item 1): the cut arguments go back as they came.
+     */
+    private val cappedCall =
+        ChatRequest(
+            system = listOf(PromptBlock("role", "You operate a phone.")),
+            tools = listOf(tap),
+            messages =
+                listOf(
+                    Kit.user("Send the message."),
+                    Message(
+                        Role.ASSISTANT,
+                        listOf(Part.Text("Sending it."), Part.ToolCall(ToolCallId("m1"), "tap", "{\"x\":1,\"y\"")),
+                    ),
+                    Message(
+                        Role.TOOL,
+                        listOf(
+                            Part.ToolResult(
+                                ToolCallId("m1"),
+                                listOf(Part.Text("Not run: the reply was cut off, so these arguments are incomplete.")),
+                                isError = true,
+                            ),
+                        ),
+                    ),
+                    Kit.user("Go on."),
+                ),
+            wire = Kit.UNPREPARED,
+            maxOutputTokens = 256,
+        )
+
+    @Test
+    fun `a call cut at the output cap goes back with its SKIPPED result and the next input`() {
+        Kit.assertGolden("golden/chat-capped-call.json", chat(cappedCall, vision = false, echo = false))
+        Kit.assertGolden(
+            "golden/responses-capped-call.json",
+            responses(cappedCall, vision = false, includeReasoning = true),
+        )
+    }
+
     @Test
     fun `wire bodies are pure functions of the request`() {
         assertEquals(chat(conversation, vision = true, echo = true), chat(conversation, vision = true, echo = true))

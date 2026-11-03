@@ -1,0 +1,74 @@
+{
+  "model": "test-model",
+  "instructions": "You operate a phone.",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Send the message."
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "Sending it."
+        }
+      ]
+    },
+    {
+      "type": "function_call",
+      "call_id": "m1",
+      "name": "tap",
+      "arguments": "{\"x\":1,\"y\""
+    },
+    {
+      "type": "function_call_output",
+      "call_id": "m1",
+      "output": "Not run: the reply was cut off, so these arguments are incomplete."
+    },
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Go on."
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "name": "tap",
+      "description": "Taps a point.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "city": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "city"
+        ]
+      },
+      "strict": false
+    }
+  ],
+  "tool_choice": "auto",
+  "parallel_tool_calls": false,
+  "store": false,
+  "stream": true,
+  "include": [
+    "reasoning.encrypted_content"
+  ],
+  "max_output_tokens": 256
+}
