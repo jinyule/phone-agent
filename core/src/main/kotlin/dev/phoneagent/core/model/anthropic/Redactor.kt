@@ -18,8 +18,10 @@ import java.util.IdentityHashMap
  * goes on decoded text, and [quote] decodes before it decides.
  *
  * Every cut comes after masking: callers redact the full text, then cut it. A reader that must
- * stop early reads [reach] bytes past its limit and drops the [openEnd] of what it read, so a cut
- * never leaves part of a secret behind.
+ * stop early reads [reach] bytes past its limit and drops the [openEnd] of what it read: the start
+ * of a form of this request's secrets, or of a credential shape written plainly. A secret written
+ * with other escapes and cut inside is not recognized there, and its first part stays
+ * (model-layer §2, known gaps).
  *
  * Content the model produced is never masked: a reply that holds a form of a secret is rejected
  * whole ([guard], [EchoGuard]).

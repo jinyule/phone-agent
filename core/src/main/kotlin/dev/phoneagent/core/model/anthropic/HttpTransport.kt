@@ -89,8 +89,9 @@ internal class HttpReply(
      * decoded, [AnthropicError.parse]). It masks before it cuts: [Redactor.reach] bytes past [limit]
      * are read as well, so a secret that straddles the limit is masked whole. When the body goes on
      * past what was read, the code point the read split and the [Redactor.openEnd] are dropped
-     * before the cut; after a cut its [Redactor.openEnd] is dropped too, so no start of a shape the
-     * cut split is left. The cut never splits a surrogate pair.
+     * before the cut; after a cut its [Redactor.openEnd] is dropped too, so no start of a plainly
+     * written shape the cut split is left. A secret written with other escapes and cut inside is
+     * not recognized (model-layer §2, known gaps). The cut never splits a surrogate pair.
      */
     suspend fun maskedText(limit: Int = ERROR_BODY_LIMIT): String =
         blocking(io, READING_ERROR) {
