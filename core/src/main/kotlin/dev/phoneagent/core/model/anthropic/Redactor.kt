@@ -63,30 +63,23 @@ internal class Redactor(
     fun exact(text: String): String = forms.fold(text) { acc, form -> acc.replace(form, MASK) }
 
     /**
-     * [raw] provider text that was not read as JSON fields (an error body that is not JSON, a
-     * redirect target, each string of JSON with no message field) masked as [text] masks
-     * it; or not quoted at all ([WITHHELD]) when it has escapes its lenient decoding
-     * ([JsonEscapes.lenientDecode]) changes and the decoded text holds a form of this request's
-     * secrets or a credential shape (`sk-…`, JWT), since masking it as written would miss what an
-     * escape hides and leave the rest readable. Text with nothing to decode is masked in place,
-     * which then covers all of it. A `Bearer` word never withholds: [text] masks the token after
-     * it. The rule both adapters keep (WP03).
+     * Text the provider wrote ([raw]: a field of an error read decoded from JSON, a refusal's
+     * category, each string of error JSON with no message field, an error body that is not JSON, a
+     * redirect target) as a diagnosis quotes it. A secret written as sent or in its standard
+     * escaping is masked in place ([exact]); when the lenient decoding ([JsonEscapes.lenientDecode])
+     * of what is left changes it and then shows a credential (a form of a secret, an `sk-` key or a
+     * JWT), the text is not quoted at all ([WITHHELD]), since masking it as written would miss what
+     * the escape hides and leave the rest readable (`\u0073k-…`, also inside a decoded field);
+     * otherwise it is masked as [text] masks it, so a credential shape with nothing to decode is
+     * masked in place and `Bearer …` masks only the token after it. The OpenAI adapters' rule,
+     * word for word (WP03).
      */
     fun quote(raw: String): String {
-        val decoded = JsonEscapes.lenientDecode(raw)
-        val hidden = decoded != raw && (exact(decoded) != decoded || SHAPES.any { it.containsMatchIn(decoded) })
-        return if (hidden) WITHHELD else text(raw)
+        val masked = exact(raw)
+        val decoded = JsonEscapes.lenientDecode(masked)
+        val hidden = decoded != masked && (exact(decoded) != decoded || SHAPES.any { it.containsMatchIn(decoded) })
+        return if (hidden) WITHHELD else text(masked)
     }
-
-    /**
-     * A field the provider wrote, read decoded from JSON (an error's message, a refusal's category):
-     * this request's secrets in it masked ([exact]), then [quote]d. So a key the field writes plainly
-     * is masked and the field still says what went wrong, and so is a credential shape when the
-     * field has no escape left to decode; a credential shape or a secret behind escapes the field's
-     * own text writes (`\u0073k-…` inside the string, left by the JSON decoding) makes it
-     * [WITHHELD]. No shape is masked before [quote] decodes the field.
-     */
-    fun field(decoded: String): String = quote(exact(decoded))
 
     /**
      * The length of the end of [masked] (what [text] returned for text a read limit cut off) that

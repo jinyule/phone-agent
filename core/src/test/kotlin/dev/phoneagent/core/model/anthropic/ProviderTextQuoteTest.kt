@@ -247,16 +247,29 @@ class ProviderTextQuoteTest {
     }
 
     /**
-     * A header value is raw provider text: the key as sent is masked in place, since nothing in the
-     * target is left to decode; a key written with escapes withholds the target.
+     * A header value is raw provider text, quoted as an error body is (fix-list r7 S2): the key as
+     * sent or in its standard escaping is masked in place and the rest of the target kept, also
+     * when the target has another escape in it; a key written with other escapes withholds it.
      */
     @ParameterizedTest
     @MethodSource("forms")
-    fun `a redirect target that holds the key is masked, or withheld when escapes write it`(form: String) =
+    fun `a redirect target that holds the key is masked, or withheld when other escapes write it`(form: String) =
         runTest {
             server.enqueueError(TEMPORARY_REDIRECT, "", "Location" to "https://proxy.example.com/v1?note=$form")
             val error = assertThrows<ModelError.InvalidRequest> { model().complete(Kit.request()) }
-            val target = if (form == SECRET) "https://proxy.example.com/v1?note=***" else WITHHELD
+            val target = if (form in ESCAPED) WITHHELD else "https://proxy.example.com/v1?note=***"
+            val detail = "HTTP 307 redirect to $target: check the base URL and use the final address"
+            assertQuoted(error, "invalid request: $detail", form)
+        }
+
+    @ParameterizedTest
+    @MethodSource("exactForms")
+    fun `a redirect target with another escape still masks the key in place`(form: String) =
+        runTest {
+            val other = BS + "u0041"
+            server.enqueueError(TEMPORARY_REDIRECT, "", "Location" to "https://proxy.example.com/v1?key=$form&x=$other")
+            val error = assertThrows<ModelError.InvalidRequest> { model().complete(Kit.request()) }
+            val target = "https://proxy.example.com/v1?key=***&x=$other"
             val detail = "HTTP 307 redirect to $target: check the base URL and use the final address"
             assertQuoted(error, "invalid request: $detail", form)
         }
@@ -365,6 +378,10 @@ class ProviderTextQuoteTest {
 
         @JvmStatic
         fun jsonForms(): List<String> = JSON_FORMS
+
+        /** [SECRET] as sent and in its standard escaping: the forms masked before anything is decoded. */
+        @JvmStatic
+        fun exactForms(): List<String> = listOf(SECRET, JSON_FORMS.first())
 
         @JvmStatic
         fun shapedBodies(): List<Arguments> =

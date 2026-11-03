@@ -89,19 +89,34 @@ class RedactorTest {
         val rewritten = """{"detail":"send $backslash"Bearer YOUR_KEY$backslash""}"""
         val hidden = "${backslash}u0070" + secret.drop(1)
         assertAll(
-            { assertEquals("Invalid bearer ***", redactor.field("Invalid bearer token")) },
+            { assertEquals("Invalid bearer ***", redactor.quote("Invalid bearer token")) },
             {
                 val expected = "No API key. Use Bearer *** (i.e. Authorization: Bearer ***, or log in."
-                assertEquals(expected, redactor.field(missing))
+                assertEquals(expected, redactor.quote(missing))
             },
-            { assertEquals("upstream key *** rejected", redactor.field("upstream key $upstream rejected")) },
+            { assertEquals("upstream key *** rejected", redactor.quote("upstream key $upstream rejected")) },
             {
                 val expected = """{"detail":"send $backslash"Bearer ***""}"""
                 assertEquals(expected, redactor.quote(rewritten), "escapes and a Bearer word, nothing else")
             },
-            { assertEquals(Redactor.WITHHELD, redactor.field("Invalid bearer $hidden"), "the key behind an escape") },
-            { assertEquals(Redactor.WITHHELD, Redactor.SHAPES_ONLY.field("Invalid API key: $split"), "a split shape") },
-            { assertEquals(Redactor.WITHHELD, Redactor.SHAPES_ONLY.field("Invalid API key: $late"), "split late") },
+            { assertEquals(Redactor.WITHHELD, redactor.quote("Invalid bearer $hidden"), "the key behind an escape") },
+            { assertEquals(Redactor.WITHHELD, Redactor.SHAPES_ONLY.quote("Invalid API key: $split"), "a split shape") },
+            { assertEquals(Redactor.WITHHELD, Redactor.SHAPES_ONLY.quote("Invalid API key: $late"), "split late") },
+        )
+    }
+
+    /** Quote masks the exact forms first, as the OpenAI adapters' does (fix-list r7 S2). */
+    @Test
+    fun `quote masks the request's key as sent or standard-escaped before it decodes the rest`() {
+        val quoted = "pa\"ss-placeholder-0001"
+        val redactor = Redactor(listOf(quoted))
+        val backslash = Char(92)
+        val escaped = "pa$backslash\"ss-placeholder-0001"
+        val other = "${backslash}u0041"
+        assertAll(
+            { assertEquals("key *** rejected", redactor.quote("key $escaped rejected"), "standard escaping") },
+            { assertEquals("key *** and $other", redactor.quote("key $quoted and $other"), "another escape") },
+            { assertEquals("key *** and $other", redactor.quote("key $escaped and $other"), "both") },
         )
     }
 
@@ -119,15 +134,15 @@ class RedactorTest {
         val slashed = "placeholder/with-slash-00001"
         val redactor = Redactor(listOf(slashed))
         val backslash = Char(92)
-        assertEquals("invalid x-api-key", redactor.field("invalid x-api-key"), "a field that holds nothing is kept")
-        assertEquals("invalid x-api-key: ***", redactor.field("invalid x-api-key: $slashed"), "a plain key is masked")
+        assertEquals("invalid x-api-key", redactor.quote("invalid x-api-key"), "a field that holds nothing is kept")
+        assertEquals("invalid x-api-key: ***", redactor.quote("invalid x-api-key: $slashed"), "a plain key is masked")
         for (escape in listOf("$backslash/", "${backslash}u002F")) {
             val layered = "invalid x-api-key: placeholder${escape}with-slash-00001"
-            assertEquals(Redactor.WITHHELD, redactor.field(layered), "a key behind the field's own escapes")
+            assertEquals(Redactor.WITHHELD, redactor.quote(layered), "a key behind the field's own escapes")
         }
         // Assembled at run time so secret scanners do not take the placeholder for a real key.
         val shaped = "s${backslash}u006b-" + "abcdefghijkl"
-        assertEquals(Redactor.WITHHELD, Redactor.SHAPES_ONLY.field("Invalid API key: $shaped"), "a credential shape")
+        assertEquals(Redactor.WITHHELD, Redactor.SHAPES_ONLY.quote("Invalid API key: $shaped"), "a credential shape")
     }
 
     @Test
