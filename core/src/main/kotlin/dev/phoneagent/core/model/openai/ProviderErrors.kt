@@ -4,6 +4,7 @@ import dev.phoneagent.core.model.ModelError
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -13,10 +14,10 @@ import java.util.Locale
 /**
  * A provider's error report, from an HTTP error body or an error object inside a stream.
  *
- * @property message the provider's own words (shown to the user verbatim, truncated).
+ * @property message the provider's own words as an error shows them ([Redactor.field]; truncated in [detail]).
  * @property code `error.code` (string or number), or `null`.
  * @property type `error.type`, or `null`.
- * @property param `error.param`, or `null`.
+ * @property param `error.param` as [Redactor.field] shows it, or `null`.
  */
 internal data class ProviderError(
     val message: String,
@@ -31,16 +32,16 @@ internal data class ProviderError(
         private const val DETAIL_LIMIT = 500
 
         /**
-         * Parses an error body; anything that is not a JSON error object becomes its own message,
-         * masked, or not quoted at all when its lenient decoding holds a credential
-         * ([Redactor.quote]). Credentials in the body are masked with [redactor] before anything is
-         * read from it.
+         * Parses an error body, read with the request's secrets masked in their exact forms
+         * ([HttpReply.maskedText]). It is parsed before anything else is masked, so what the server
+         * wrote is checked decoded ([of]); a body that is not JSON becomes its own message as
+         * [Redactor.quote] shows it, and JSON that is not an error object as [whole] shows it.
          */
         fun parse(
             body: String,
             redactor: Redactor,
         ): ProviderError {
-            val clean = redactor.text(body)
+            val clean = redactor.exact(body)
             val root =
                 try {
                     Json.parseToJsonElement(clean)
@@ -51,14 +52,14 @@ internal data class ProviderError(
                 }
             // Gemini's compatibility layer wraps the error object in an array.
             val obj = (if (root is JsonArray) root.firstOrNull() else root) as? JsonObject
-            return obj?.let { of(it, redactor) } ?: ProviderError(redactor.quote(clean.trim()), null, null, null)
+            return obj?.let { of(it, redactor) } ?: ProviderError(whole(root, redactor), null, null, null)
         }
 
         /**
          * Reads `{"error": {...}}`, `{"error": "text"}` and flat `{"message" | "detail" | "msg", "code"}`
-         * bodies. The message and `param` are masked with [redactor] once decoded (JSON escapes can
-         * hide a secret from a scan of the raw text); a body with no message field is its own
-         * message, as [Redactor.quote] shows text; codes are kept as sent.
+         * bodies. The message, OpenRouter's `metadata.raw` and `param` are read decoded and shown as
+         * [Redactor.field] shows them; a body with no message field is its own message, as [whole]
+         * shows it. Codes and types are only matched, kept whole or left out ([Redactor.verbatim]).
          */
         fun of(
             root: JsonObject,
@@ -76,17 +77,40 @@ internal data class ProviderError(
             val raw = (inner["metadata"] as? JsonObject)?.text("raw")
             val message =
                 when {
-                    field == null -> redactor.quote(root.toString())
-                    raw == null -> redactor.text(field)
-                    else -> redactor.text("$field: $raw")
+                    field == null -> whole(root, redactor)
+                    raw == null -> redactor.field(field)
+                    else -> "${redactor.field(field)}: ${redactor.field(raw)}"
                 }
             return ProviderError(
                 message = message,
-                code = inner.scalar("code"),
-                type = inner.text("type"),
-                param = inner.text("param")?.let(redactor::text),
+                code = inner.scalar("code")?.let(redactor::verbatim),
+                type = inner.text("type")?.let(redactor::verbatim),
+                param = inner.text("param")?.let(redactor::field),
             )
         }
+
+        /**
+         * All of [root], JSON the server wrote that has no message field to read: not shown at all
+         * when a string in it (a name or a value, decoded) would not be shown as a
+         * [Redactor.field], else written back whole and masked.
+         */
+        private fun whole(
+            root: JsonElement,
+            redactor: Redactor,
+        ): String =
+            if (root.strings().any { redactor.field(it) == Redactor.WITHHELD }) {
+                Redactor.WITHHELD
+            } else {
+                redactor.text(root.toString())
+            }
+
+        /** Every string in this element: member names and string values, at any depth. */
+        private fun JsonElement.strings(): Sequence<String> =
+            when (this) {
+                is JsonPrimitive -> if (isString) sequenceOf(content) else emptySequence()
+                is JsonObject -> keys.asSequence() + values.asSequence().flatMap { it.strings() }
+                is JsonArray -> asSequence().flatMap { it.strings() }
+            }
 
         private fun JsonObject.text(key: String): String? =
             (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull?.takeIf { it.isNotBlank() }

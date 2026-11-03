@@ -99,6 +99,24 @@ class RedactorTest {
     }
 
     @Test
+    fun `exact masks only the secrets, and a field is withheld when decoding still shows a credential`() {
+        val slashed = "placeholder/with-slash-00001"
+        val redactor = Redactor(listOf(slashed))
+        val backslash = Char(92)
+        // Assembled at run time so secret scanners do not take the placeholder for a real key.
+        val shaped = "sk-" + "abcdefghijkl"
+        assertEquals("key *** and $shaped", redactor.exact("key $slashed and $shaped"), "shapes are left to text")
+        assertEquals("key *** and ***", redactor.text("key $slashed and $shaped"))
+        assertEquals("bad key ***.", redactor.field("bad key $slashed."), "the secret as sent is masked in place")
+        assertEquals("nothing here", redactor.field("nothing here"))
+        for (escape in listOf("$backslash/", "${backslash}u002F")) {
+            val behind = "bad key placeholder${escape}with-slash-00001"
+            assertEquals(Redactor.WITHHELD, redactor.field(behind), "a secret behind an escape")
+        }
+        assertEquals(Redactor.WITHHELD, redactor.field("bad key $shaped"), "a credential shape")
+    }
+
+    @Test
     fun `clean causes are kept as they are`() {
         val error = IOException("connection reset", IllegalStateException("inner"))
         assertSame(error, Redactor(listOf(secret)).cause(error))

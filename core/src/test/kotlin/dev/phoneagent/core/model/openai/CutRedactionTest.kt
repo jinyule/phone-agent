@@ -81,6 +81,23 @@ class CutRedactionTest {
         }
 
     @Test
+    fun `a key shape the 64 KiB cut leaves too short to match leaves no prefix`() =
+        runTest {
+            // Shapes are matched once the body is parsed: the cut keeps "sk-" and six more, one short of a shape.
+            val start = BODY_LIMIT - SHAPE_PREFIX
+            server.enqueue(
+                MockResponse
+                    .Builder()
+                    .code(502)
+                    .body(" ".repeat(start) + SHAPED + " ".repeat(100))
+                    .build(),
+            )
+            val error =
+                assertThrows<ModelError.Server> { model(ModelProtocol.OPENAI_CHAT_COMPLETIONS).send(Kit.request()) }
+            Straddle.assertNoPrefix("the Chat error", error.stackTraceToString(), SHAPED)
+        }
+
+    @Test
     fun `a rotated key cut by the 500-character error detail leaves no prefix`() =
         runTest {
             // The listing sends the first key; the trial, the second; its 400 echoes the first.
@@ -125,6 +142,12 @@ class CutRedactionTest {
 
         /** The cut points: error body read limit, error detail, redirect target. */
         const val BODY_LIMIT = 64 * 1024
+
+        /** A key shape the request did not send, assembled so secret scanners do not take it for a real key. */
+        val SHAPED = listOf("sk", "placeholder-shape-0003").joinToString("-")
+
+        /** "sk-" and six characters: one short of what the shape needs. */
+        const val SHAPE_PREFIX = 9
         const val DETAIL_LIMIT = 500
         const val LOCATION_LIMIT = 300
     }

@@ -90,11 +90,14 @@ internal class HttpReply(
         }
 
     /**
-     * Up to [limit] characters of an error body (HTML pages can be large) as UTF-8 text masked with
-     * the request's [Redactor], which masks before it cuts: [Redactor.reach] bytes past [limit] are
-     * read as well, so a secret that straddles the limit is masked whole. When the body goes on
-     * past what was read, the code point the read split and the [Redactor.openEnd] are dropped
-     * before the cut. The cut never splits a surrogate pair.
+     * Up to [limit] characters of an error body (HTML pages can be large) as UTF-8 text with the
+     * request's secrets masked in their exact forms ([Redactor.exact]); credential shapes are
+     * masked only once the body is parsed and its escapes decoded ([ProviderError.parse]). It
+     * masks before it cuts: [Redactor.reach] bytes past [limit] are read as well, so a secret that
+     * straddles the limit is masked whole. When the body goes on past what was read, the code
+     * point the read split and the [Redactor.openEnd] are dropped before the cut; when the cut
+     * drops text, the [Redactor.openEnd] of what it kept is dropped too (a credential shape cut
+     * too short to be one). The cut never splits a surrogate pair.
      */
     suspend fun maskedText(limit: Int = ERROR_BODY_LIMIT): String =
         blocking(io) {
@@ -102,8 +105,10 @@ internal class HttpReply(
             val wanted = limit.toLong() + redactor.reach
             val more = source.request(wanted + 1)
             val end = if (more) codePointStart(source.buffer, wanted) else source.buffer.size
-            val masked = redactor.text(source.buffer.readUtf8(end))
-            cut(if (more) masked.dropLast(redactor.openEnd(masked)) else masked, limit)
+            val masked = redactor.exact(source.buffer.readUtf8(end))
+            val read = if (more) masked.dropLast(redactor.openEnd(masked)) else masked
+            val kept = cut(read, limit)
+            if (kept.length < read.length) kept.dropLast(redactor.openEnd(kept)) else kept
         }
 
     /** A line ended by CR whose LF (if any) has not been read yet. */

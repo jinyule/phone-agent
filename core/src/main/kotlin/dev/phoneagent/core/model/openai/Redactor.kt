@@ -54,12 +54,21 @@ internal class Redactor(
      */
     fun verbatim(value: String): String? = value.takeIf { text(it) == it }
 
-    /** [text] with every credential masked. */
+    /** [text] with every credential masked: [exact], then `Bearer …` and the credential shapes. */
     fun text(text: String): String {
+        val masked = BEARER.replace(exact(text), "$1$MASK")
+        return SHAPES.fold(masked) { acc, shape -> shape.replace(acc, MASK) }
+    }
+
+    /**
+     * [text] with only the [forms] of the secrets masked, as sent and in their standard JSON
+     * escaping. What a read of raw text masks before the text is parsed: a shape matched there
+     * would stop at the first escape and leave the rest of a key to read once decoded.
+     */
+    fun exact(text: String): String {
         var masked = text
         for (form in forms) masked = masked.replace(form, MASK)
-        masked = BEARER.replace(masked, "$1$MASK")
-        return SHAPES.fold(masked) { acc, shape -> shape.replace(acc, MASK) }
+        return masked
     }
 
     /**
@@ -72,6 +81,15 @@ internal class Redactor(
     fun quote(raw: String): String = if (verbatim(JsonEscapes.lenientDecode(raw)) == null) WITHHELD else text(raw)
 
     /**
+     * A field the server wrote ([decoded] by JSON) as an error shows it: a secret written as sent
+     * or in its standard escaping is masked in place ([exact]) and the rest kept; when the
+     * lenient decoding of what is left still holds a credential (a secret behind one more escape
+     * the field's own text carries, or a credential shape), the field is not shown at all
+     * ([quote]).
+     */
+    fun field(decoded: String): String = quote(exact(decoded))
+
+    /**
      * The length of the end of [masked] (what [text] returned for text a read limit cut off) that
      * may be the start of a credential that went on: the longest end that begins a [forms] entry, or a
      * `sk-` key or JWT the cut left too short for its shape. The reader drops it.
@@ -82,12 +100,6 @@ internal class Redactor(
         val shape = OPEN_SHAPE.find(masked)?.let { masked.length - it.range.first }
         return maxOf(secret ?: 0, shape ?: 0)
     }
-
-    /** Whether the last [n] characters of this text are the first [n] of [form]. */
-    private fun String.endsWithStartOf(
-        form: String,
-        n: Int,
-    ): Boolean = form.length > n && regionMatches(length - n, form, 0, n)
 
     /**
      * [error] itself when no message it prints (causes and suppressed exceptions included) needs
@@ -159,3 +171,9 @@ internal class Redactor(
         private val OPEN_SHAPE = Regex("""(?:\bsk-[A-Za-z0-9_-]*|\beyJ[A-Za-z0-9_.-]*)\z""")
     }
 }
+
+/** Whether the last [n] characters of this text are the first [n] of [form]. */
+private fun String.endsWithStartOf(
+    form: String,
+    n: Int,
+): Boolean = form.length > n && regionMatches(length - n, form, 0, n)
