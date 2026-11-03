@@ -13,6 +13,7 @@ import dev.phoneagent.core.model.ProviderProfile
 import dev.phoneagent.core.model.ReasoningLevel
 import dev.phoneagent.core.model.Role
 import dev.phoneagent.core.model.StopReason
+import dev.phoneagent.core.model.VerifiedCapability
 import dev.phoneagent.core.model.anthropic.Kit.assertKey
 import dev.phoneagent.core.model.anthropic.Kit.base
 import dev.phoneagent.core.model.anthropic.Kit.enqueueSse
@@ -261,6 +262,42 @@ class MessagesModelTest {
             opened.await()
             call.cancel()
             assertThrows<CancellationException> { call.await() }
+        }
+
+    /**
+     * The collections a model is made from belong to the caller, who may edit them afterwards
+     * (fix-list r6, 16:2x): a snapshot given out before still completes, one request is sent, and it
+     * carries the snapshot's headers and effort. A header the adapter sets itself, added to the
+     * caller's map, would get a snapshot that shared the map refused before anything is sent.
+     */
+    @Test
+    fun `an earlier snapshot still completes after the caller edits the collections the model was made from`() =
+        runTest {
+            val headers = mutableMapOf("x-client" to "phone-agent")
+            val levels = mutableListOf(ReasoningLevel.LOW, ReasoningLevel.HIGH)
+            val verified = mutableSetOf(VerifiedCapability.TOOL_CALL)
+            val capabilities = Kit.CAPABILITIES.copy(reasoningLevels = levels, verified = verified)
+            val profile = Kit.profile(server.base(), headers = headers)
+            val model = Kit.adapters().model(profile, Kit.MODEL, capabilities, Kit.blobs())
+            val settings = model.prepare(ReasoningLevel.HIGH)
+            headers["x-client"] = "edited"
+            headers["anthropic-beta"] = "edited"
+            levels.remove(ReasoningLevel.HIGH)
+            verified.clear()
+            server.enqueueSse(Kit.TEXT_REPLY)
+            model.complete(Kit.request(reasoning = settings.reasoning, wire = settings.wire))
+            assertEquals(1, server.requestCount, "one request sent")
+            val sent = server.next()
+            assertEquals("phone-agent", sent.headers["x-client"])
+            assertFalse(sent.headers.values("anthropic-beta").contains("edited"), "the caller's later header")
+            val effort =
+                sent
+                    .json()["output_config"]
+                    ?.jsonObject
+                    ?.get("effort")
+                    ?.jsonPrimitive
+                    ?.content
+            assertEquals("high", effort)
         }
 
     @Test
