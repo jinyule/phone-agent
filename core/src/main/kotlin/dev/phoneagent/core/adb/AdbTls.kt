@@ -54,8 +54,9 @@ internal class TlsHandshakeException(
  * Client-side TLS 1.3 as adb uses it: both sides present self-signed certificates and neither
  * checks a chain. In pairing, SPAKE2 binds the code to this very channel through the exporter; on
  * connection, adbd checks our certificate's key against the paired keys. Like the adb host tool,
- * we do not authenticate adbd: what reaches it is limited to fixed commands, and the helper it
- * starts is checked by the app (uid, pid and nonce) before the app trusts it.
+ * we do not authenticate adbd, so any local process that answers like it gets our commands and
+ * their stdin: commands carry no secret, and the helper they start is trusted only once the app
+ * has checked it (uid 2000, pid, nonce). See docs/adr/2026-11-03-adb-trust-model.md.
  */
 internal class AdbTls(
     private val identity: AdbIdentity,

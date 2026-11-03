@@ -646,6 +646,19 @@ screen s12 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · 坐标 0–
 2. 重新连接（先试上次的端口，再 mDNS，最后扫本机端口），拉起助手；
 3. 如果系统马上把开关拨回关着，就认为这个网络还没被允许，停下不再反复写，改为提示用户。
 
+**内置 ADB 客户端的约定**（`core.adb`）：
+- **信任模型**：连接时不认证 adbd，和 AOSP 的 adb host 一样。本机任何能冒充 adbd 的进程，都能收到拉起命令和 stdin 里的口令。所以：
+  - 命令行里不放秘密；
+  - 助手要通过交接检查（调用方 uid 2000 + 口令）才被信任。
+
+  能防什么、不能防什么，见 `docs/adr/2026-11-03-adb-trust-model.md`。
+- **扫描只传回环地址** `127.0.0.1`：adbd 监听所有地址（AOSP `adb_wifi.cpp`），回环一定能连上，探测也不会发到局域网上。
+- **UNAUTHORIZED 是"可能未授权"**：TLS 握手刚完成时对端断开，和 adbd 拒绝我们的密钥分不清。所以：
+  - 对同一个端点先重试一次（`AdbConnectPort` 已经这样做）；
+  - 仍然是 UNAUTHORIZED，才请用户重新配对。
+
+  我们自己的 TLS 栈按类型认出的错误（例如 bad_record_mac）算 TLS，不算 UNAUTHORIZED。
+
 ### 7.2 一步执行
 
 ```

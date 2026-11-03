@@ -5,6 +5,10 @@ package dev.phoneagent.core.adb
  * helper, a self-check). It is never taken from the model, a tool or screen content: this package
  * is outside the tool layer by design (AGENTS.md §3.4, phase1 §2.1), and arguments that come from
  * data must go through [quote]. Must not be blank or contain NUL (which ends adb service names).
+ *
+ * The command line is not secret: [toString] prints all of it, logs keep it, and on the device
+ * `ps` shows it to every process. A secret (the helper's launch nonce) goes only on the stdin of
+ * [AdbSession.run], never into [text].
  */
 @JvmInline
 public value class AdbCommand(

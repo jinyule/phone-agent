@@ -80,6 +80,15 @@ Mika
   original work, and a "Modified by PhoneAgent contributors:" line saying
   what changed.
 
+  Tests whose structure and choice of cases follow Mika's tests of the same
+  commit; their code is written anew, and their vectors are public RFC data:
+    core/src/test/kotlin/com/wangzan101/mika/core/adb/CryptoTest.kt
+      -> core/src/test/kotlin/dev/phoneagent/core/adb/EdPointTest.kt
+      -> core/src/test/kotlin/dev/phoneagent/core/adb/Spake2Test.kt
+      -> core/src/test/kotlin/dev/phoneagent/core/adb/PairingAuthTest.kt
+    core/src/test/kotlin/com/wangzan101/mika/core/adb/AdbPairingTest.kt
+      -> core/src/test/kotlin/dev/phoneagent/core/adb/AdbIdentityTest.kt
+
 --------------------------------------------------------------------------------
 scrcpy (through Mika's ShellContext.kt)
   Source:   https://github.com/Genymobile/scrcpy
