@@ -25,10 +25,13 @@ import dev.phoneagent.core.session.PromptWithdrawn
 import dev.phoneagent.core.session.QuestionAnswered
 import dev.phoneagent.core.session.QuestionAsked
 import dev.phoneagent.core.session.SessionEvent
+import dev.phoneagent.core.session.SessionResumed
 import dev.phoneagent.core.session.SessionSamples
 import dev.phoneagent.core.session.StepEnded
 import dev.phoneagent.core.session.StepOutcome
 import dev.phoneagent.core.session.StepStarted
+import dev.phoneagent.core.session.StopCause
+import dev.phoneagent.core.session.TaskStopped
 import dev.phoneagent.core.session.ToolResultRecorded
 import dev.phoneagent.core.session.ToolStarted
 import dev.phoneagent.core.session.TurnEndReason
@@ -71,6 +74,23 @@ class SessionRepairTest {
             )
         assertEquals(emptyList<Repair>(), repair(RepairCause.FAILED, *closed))
         assertEquals(emptyList<Repair>(), repair(RepairCause.STOPPED))
+    }
+
+    @Test
+    fun `an unfinished stop gets task-stopped ERROR, and only an unfinished one`() {
+        val stopped =
+            arrayOf(
+                TurnStarted(1),
+                StepStarted(1, 1),
+                StepEnded(1, 1, StepOutcome.CANCELLED),
+                TurnEnded(1, TurnEndReason.STOPPED),
+            )
+        assertEquals(listOf(TaskStopped(StopCause.ERROR)), repair(RepairCause.FAILED, *stopped).map { it.event })
+        val finished = arrayOf(*stopped, TaskStopped(StopCause.USER))
+        assertEquals(emptyList<Repair>(), repair(RepairCause.FAILED, *finished))
+        val goneOn =
+            arrayOf(*finished, SessionResumed(0), TurnStarted(2), TurnEnded(2, TurnEndReason.COMPLETED))
+        assertEquals(emptyList<Repair>(), repair(RepairCause.FAILED, *goneOn))
     }
 
     @Test

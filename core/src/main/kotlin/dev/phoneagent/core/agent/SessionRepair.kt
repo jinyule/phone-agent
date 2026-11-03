@@ -15,6 +15,8 @@ import dev.phoneagent.core.session.SessionRecord
 import dev.phoneagent.core.session.StepEnded
 import dev.phoneagent.core.session.StepOutcome
 import dev.phoneagent.core.session.StepStarted
+import dev.phoneagent.core.session.StopCause
+import dev.phoneagent.core.session.TaskStopped
 import dev.phoneagent.core.session.ToolCallRecorded
 import dev.phoneagent.core.session.ToolResultRecorded
 import dev.phoneagent.core.session.ToolStarted
@@ -50,9 +52,12 @@ internal class Repair(
  *   also gets [LoopTexts.screenUnknown]. The result's source is the call's `tool/call`, else the
  *   reply;
  * - an open step gets `step/end` (`CANCELLED` when stopped, else `FAILED`);
- * - an open turn gets `turn/end` (`STOPPED` when stopped, else `FAILED`) with [detail].
+ * - an open turn gets `turn/end` (`STOPPED` when stopped, else `FAILED`) with [detail];
+ * - an unfinished stop ([unfinishedStop]) gets `task/stopped(ERROR)`: its cause was never written
+ *   and is not guessed. Only a resume meets one (in-process, `task/stopped` follows at once).
  *
- * Pure: the same log gives the same repair, in-process (stop, failure) and when resuming.
+ * Pure: the same log gives the same repair, in-process (stop, failure) and when resuming. This is
+ * the order the store accepts (`SessionStore.open`); `session/resumed` comes after it.
  */
 internal fun repairOf(
     records: List<SessionRecord>,
@@ -84,7 +89,17 @@ internal fun repairOf(
         val reason = if (stopped) TurnEndReason.STOPPED else TurnEndReason.FAILED
         repairs += Repair(TurnEnded(turn.turn, reason, detail))
     }
+    if (unfinishedStop(records)) repairs += Repair(TaskStopped(StopCause.ERROR))
     return repairs
+}
+
+/**
+ * Whether [records] end with an unfinished stop: the last `turn/end` is `STOPPED` and no
+ * `task/stopped` followed it (the process ended between the two).
+ */
+private fun unfinishedStop(records: List<SessionRecord>): Boolean {
+    val last = records.lastOrNull { it.event is TurnEnded || it.event is TaskStopped }?.event
+    return last is TurnEnded && last.reason == TurnEndReason.STOPPED
 }
 
 /** The missing result of a call that [mayHaveRun]; [effect] follows its text when it did. */

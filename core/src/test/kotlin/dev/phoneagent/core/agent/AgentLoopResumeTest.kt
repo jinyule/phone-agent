@@ -102,4 +102,32 @@ class AgentLoopResumeTest {
             val (inputs, _) = turnInputs(harness.events(), turn = 2)
             assertEquals(listOf(UserMessage(UserMessageKind.USER, listOf(Part.Text("继续")))), inputs)
         }
+
+    @Test
+    fun `an unfinished stop is resumed with task-stopped ERROR, then waits for the user`() =
+        runTest {
+            val first = stoppedRun(StopCause.USER)
+            // The process ended between turn/end(STOPPED) and task/stopped.
+            val log = first.files.log.value
+            val bytes = first.storage.files.getValue(log)
+            val lastLineStart = bytes.dropLast(1).indexOfLast { it == '\n'.code.toByte() } + 1
+            first.storage.files[log] = bytes.copyOf(lastLineStart)
+            assertEquals(TurnEnded(1, TurnEndReason.STOPPED), first.events().last())
+
+            val model = FakeChatModel().answers("好了")
+            val second = LoopHarness(this, model, storage = first.storage)
+            val resumed = second.resume()
+            advanceUntilIdle()
+            assertEquals(
+                listOf(TurnEnded(1, TurnEndReason.STOPPED), TaskStopped(StopCause.ERROR), SessionResumed(0)),
+                second.events().takeLast(3),
+                "the stop's cause was never written, so it is not guessed",
+            )
+            assertEquals(Phase.Idle, resumed.phase.value)
+            assertEquals(0, model.started.value, "nothing continues on its own")
+
+            resumed.followup(text("继续"))
+            resumed.awaitPhase(Phase.Done)
+            assertEquals(TurnEnded(2, TurnEndReason.COMPLETED), second.events().last())
+        }
 }
