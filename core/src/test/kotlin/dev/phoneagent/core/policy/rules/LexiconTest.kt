@@ -120,10 +120,21 @@ class LexiconTest {
             "Send&delete",
             "Send＆delete",
             "Send,then delete",
+            "Send and also delete",
+            "Send/delete",
+            "Send+delete",
+            "Send-and-delete",
         )) {
             assertEquals(sendDelete, lexicon.ofControl(label), label)
         }
-        listOf("Q&A", "R&D", "AT&T", "Terms&Conditions").forEach { assertNull(lexicon.ofControl(it), it) }
+        val names = listOf("Q&A", "R&D", "AT&T", "Terms&Conditions", "Photos/Videos")
+        names.forEach { assertNull(lexicon.ofControl(it), it) }
+        // A sign without spaces joins only inside a word of Latin letters and that sign.
+        val links =
+            listOf("example.com/buy", "https://www.example.com/checkout/cart", "example.com/remove-background-tips")
+        links.forEach { assertNull(lexicon.ofControl(it), it) }
+        assertEquals(Hit(IntentKind.OUTWARD, "send"), lexicon.ofControl("Send&好的"))
+        assertEquals(sendDelete, lexicon.inContext("Send and then delete this?"))
         assertEquals(Hit(IntentKind.SPEND, "pay", sends = true), lexicon.ofControl("Reply and pay"))
         // A part that names nothing adds nothing; a single part reads as before.
         assertEquals(Hit(IntentKind.OUTWARD, "post"), lexicon.ofControl("Save and post"))

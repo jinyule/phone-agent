@@ -12,9 +12,11 @@ import dev.phoneagent.core.ports.ElementRef
 import dev.phoneagent.core.ports.ElementRole
 import dev.phoneagent.core.ports.ScreenFlag
 import dev.phoneagent.core.ports.UiElement
+import org.junit.jupiter.api.Assertions.assertAll
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.function.Executable
 
 class RulesLexiconTest {
     private val lexicon = Fx.rules().lexicon
@@ -85,6 +87,12 @@ class RulesLexiconTest {
         // An English dialog that joins two actions: both count.
         val both = text("t5", "Send this and delete the chat?", window = 1)
         assertEquals(ElementRisk(IntentKind.DELETE, "确定:delete"), risk(ok, both))
+        val deletes = ElementRisk(IntentKind.DELETE, "确定:delete")
+        assertAll(
+            listOf("Send and then delete this?", "Send+delete?").map { said ->
+                Executable { assertEquals(deletes, risk(ok, text("t5", said, window = 1)), said) }
+            },
+        )
         // Text in another window is not part of the dialog; OCR lines are.
         val behind = text("t3", "删除", window = 0)
         assertNull(risk(ok, behind))

@@ -398,12 +398,48 @@ class TargetsTest {
                 "SEND And DeLeTe",
                 "Send ＆ delete",
                 "Send＆delete",
+                // Claude r5: a word left after the joiner, a slash, signs and hyphens without spaces.
+                "Send and also delete",
+                "Send/delete",
+                "Send / delete",
+                "Send+delete",
+                "Send-and-delete",
+                "Send. Then delete",
+                // Split at the slash as at "&": "Add/Remove" asks once more, as "Add & remove widgets" does.
+                "Add/Remove",
+                // Commas and semicolons join as well (19:2x): confirmation buttons that delete.
+                "Send, delete",
+                "Send; delete",
+                "Yes, delete",
+                "Yes, remove",
+                "OK, delete",
             )
         val spends = listOf("Pay and send", "Send and delete & pay", "Send+pay")
         // Split at the sign, each part still reads only by the phrase it starts with: allowed.
-        val names = listOf("Q&A", "R&D", "AT&T", "Terms&Conditions", "Android and iOS", "Brand+")
+        val names =
+            listOf("Q&A", "R&D", "AT&T", "Terms&Conditions", "Android and iOS", "Brand+", "Photos/Videos")
+                .plus("Also delete")
+                // A sign without spaces joins only inside a word of Latin letters and that sign.
+                .plus("https://www.example.com/checkout/cart")
+                .plus(listOf("example.com/buy", "example.com/remove-background-tips"))
         assertAll(asked(ConfirmReason.DELETE, deletes) + asked(ConfirmReason.SPEND, spends) + asked(null, names))
         names.forEach { assertEquals(Verdict.Allow, verdict(it), it) }
+    }
+
+    @Test
+    fun `commas join actions in a control's own label and in a dialog, not in the texts of a row`() {
+        val s = screen(el("e1", "Yes, delete"))
+        assertEquals(ConfirmReason.DELETE, reason(decide(tap("e1"), on(s))))
+        // A chat preview in a list row only opens the chat.
+        val row = el("e1", bounds = box(0, 300, 999, 400))
+        val name = text("t1", "Alice", parent = "e1")
+        val preview = text("t2", "Ok, send it", box(0, 350, 500, 390), parent = "e1")
+        assertEquals(Verdict.Allow, decide(tap("e1"), on(screen(row, name, preview))))
+        val ok = el("b1", "OK").copy(window = 1)
+        for (said in listOf("Send, then delete?", "Send, delete?")) {
+            val dialog = screen(ok, text("t3", said, window = 1))
+            assertEquals(ConfirmReason.DELETE, reason(decide(tap("b1"), on(dialog))), said)
+        }
     }
 
     @Test

@@ -28,7 +28,7 @@ internal class Lexicon(
     private val tuning: PolicyTuning,
 ) {
     /** The risk a label names, or `null`. Strong words count in labels up to [PolicyTuning.labelMax]. */
-    fun classify(label: String): Hit? = match(label, tuning.labelMax, complete = true)
+    fun classify(label: String): Hit? = match(label, tuning.labelMax, complete = true, pauses = false)
 
     /**
      * The risk a dialog text names, for the generic button in that dialog ([PolicyTuning.contextMax]).
@@ -36,7 +36,7 @@ internal class Lexicon(
      */
     fun inContext(text: String): Hit? {
         Work.dialog.increment()
-        return match(text, tuning.contextMax, complete = true)
+        return match(text, tuning.contextMax, complete = true, pauses = true)
     }
 
     /**
@@ -45,7 +45,10 @@ internal class Lexicon(
      * English, each part the label joins ("Send and delete") is read, the most severe deciding.
      */
     fun ofControl(label: String): Hit? =
-        firstMax(classify(label) ?: Phrases.strong(label, complete = true), Phrases.english(label, true, parts = true))
+        firstMax(
+            classify(label) ?: Phrases.strong(label, complete = true),
+            Phrases.english(label, true, parts = true, pauses = true),
+        )
 
     /**
      * The risk a control's label names as risk checks read it ([read]): the more severe of what
@@ -57,7 +60,7 @@ internal class Lexicon(
     fun ofLabel(label: String): Hit? {
         val read = read(label)
         val complete = whole(label)
-        return firstMax(match(read, tuning.labelMax, complete), Phrases.leading(read, complete))
+        return firstMax(match(read, tuning.labelMax, complete, pauses = false), Phrases.leading(read, complete))
     }
 
     /** "确定", "OK" and the like: the dialog decides what they do. Reads [read] of [label]. */
@@ -111,6 +114,24 @@ private fun englishPhrase(
     Words.ENGLISH_PREFIX.firstOrNull { (phrase, _) -> text.startsWith(phrase) && !latinAt(text, phrase.length) }
         ?: if (whole) Words.ENGLISH_EXACT.firstOrNull { (phrase, _) -> text == phrase } else null
 
+/**
+ * [text] with the sign of each word made of Latin letters and one [Words.ENGLISH_SIGNS] sign
+ * spaced out ("send&delete" → "send & delete"), so [Words.ENGLISH_JOINERS] splits there; any
+ * other word keeps its signs ("example.com/buy"). One pass over [text].
+ */
+private fun spacedSigns(text: String): String =
+    WORD.replace(text) { found ->
+        val word = found.value
+        val sign = word.firstOrNull { it in Words.ENGLISH_SIGNS } ?: return@replace word
+        if (word.all { it == sign || isLatinLetter(it) }) word.replace("$sign", " $sign ") else word
+    }
+
+/** A run of characters other than spaces. */
+private val WORD = Regex("\\S+")
+
+private fun isLatinLetter(c: Char): Boolean =
+    c.isLetter() && Character.UnicodeScript.of(c.code) == Character.UnicodeScript.LATIN
+
 /** [part] without the punctuation and spaces around it. */
 private fun trimmed(part: String): String = part.trim { !it.isLetterOrDigit() }
 
@@ -121,16 +142,18 @@ private fun latinAt(
 
 /**
  * What [text] names under the length limit [max]: strong words, and the parts of English joined
- * actions, count only in a text that short; exemptions only when [text] is [complete].
+ * actions, count only in a text that short, English [pauses] joining too when told; exemptions
+ * only when [text] is [complete].
  */
 private fun match(
     text: String,
     max: Int,
     complete: Boolean,
+    pauses: Boolean,
 ): Hit? {
     val short = Phrases.length(text) <= max
     return Phrases.exact(text) ?: (if (short) Phrases.strong(text, complete) else null)
-        ?: Phrases.english(text, complete, parts = short)
+        ?: Phrases.english(text, complete, parts = short, pauses = pauses)
 }
 
 /**
@@ -228,21 +251,25 @@ internal object Phrases {
      * English ([Text.phrase] form): the label starts with an [Words.ENGLISH_PREFIX] phrase at a
      * word boundary (any non-Latin letter ends a word: "Send消息"), or is an [Words.ENGLISH_EXACT]
      * phrase. Letters written apart ("s e n d") are read together. With [parts], each part the
-     * label joins with [Words.ENGLISH_JOINERS] ("Delete and send") is read by the phrase it starts
+     * label joins with [Words.ENGLISH_JOINERS] ("Delete and send"), without a word left over from
+     * the joiner ([Words.ENGLISH_FILLERS]: "and also delete"), is read by the phrase it starts
      * with, the most severe deciding, and it sends when any part does; an exact phrase is only ever
-     * the whole label ("Invite and earn" invites no one). A [label] that is not [complete] is never
-     * vetoed; a vetoed one is vetoed whole.
+     * the whole label ("Invite and earn" invites no one). With [pauses], [Words.ENGLISH_PAUSES]
+     * join too. A [label] that is not [complete] is never vetoed; a vetoed one is vetoed whole.
      */
     fun english(
         label: String,
         complete: Boolean,
         parts: Boolean,
+        pauses: Boolean,
     ): Hit? {
         val spaced = Text.phrase(label).trimEnd { !it.isLetterOrDigit() }
         val letters = spaced.split(' ')
         val text = if (letters.size > 1 && letters.all { it.length == 1 }) letters.joinToString("") else spaced
-        val pieces = if (parts) text.split(Words.ENGLISH_JOINERS) else listOf(text)
-        val read = if (pieces.size > 1) pieces.map(::trimmed) else listOf(text)
+        val joined = if (parts) spacedSigns(text).split(Words.ENGLISH_JOINERS) else listOf(text)
+        val pieces = if (pauses) joined.flatMap { it.split(Words.ENGLISH_PAUSES) } else joined
+        val read =
+            if (pieces.size > 1) pieces.map { trimmed(it).replace(Words.ENGLISH_FILLERS, "") } else listOf(text)
         val vetoes = Vetoes(label)
         return read
             .map { part ->

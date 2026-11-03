@@ -127,17 +127,39 @@ internal object Words {
 
     /**
      * What joins two actions in an English label ([Text.phrase] form): "Send and delete", "Delete
-     * & send", "Save + post", "Delete, then send", "Send&delete". Only the joiner itself is taken:
-     * "and" and "then" as whole words, at word boundaries, so joiners in a row ("and then", "&
-     * then") each split; "&" and "+" with or without spaces around them (full-width forms are
-     * these after NFKC). The spaces and commas around a joiner stay with the parts, which are read
-     * without them. Names joined by a sign ("R&D", "Q&A") split into parts that start with no
-     * phrase. Each part is read by the [ENGLISH_PREFIX] phrase it starts with, never as an
-     * [ENGLISH_EXACT] one, where strong words count: in a control's own label at any length
-     * ([Lexicon.ofControl]), elsewhere within the length limit ([PolicyTuning.labelMax],
-     * [PolicyTuning.contextMax] in dialogs).
+     * & send", "Save + post", "Delete, then send". Only the joiner itself is taken: "and" and
+     * "then" as whole words, at word boundaries, so joiners in a row ("and then", "& then") each
+     * split and so do hyphenated ones ("Send-and-delete"); an [ENGLISH_SIGNS] sign with a space on
+     * either side. The spaces and commas around a joiner stay with the parts, which are read
+     * without them. A control's own label and a dialog also split at [ENGLISH_PAUSES]. Each part is read
+     * by the [ENGLISH_PREFIX] phrase it starts with, never as an [ENGLISH_EXACT] one, where strong
+     * words count: in a control's own label at any length ([Lexicon.ofControl]), elsewhere within
+     * the length limit ([PolicyTuning.labelMax], [PolicyTuning.contextMax] in dialogs).
      */
-    val ENGLISH_JOINERS: Regex = Regex("\\b(?:and|then)\\b|[&+]")
+    val ENGLISH_JOINERS: Regex = Regex("\\b(?:and|then)\\b|(?<=\\s)[&+/]|[&+/](?=\\s)")
+
+    /**
+     * "," and ";" before a space, joining actions in a control's own label and in a dialog only
+     * ("Yes, delete", "Send; delete"): in the texts of a row they are a chat preview's ("Ok, send
+     * it"), which opens the chat.
+     */
+    val ENGLISH_PAUSES: Regex = Regex("[,;](?=\\s)")
+
+    /**
+     * Signs that join two actions ("Send & delete", "Save + post", "Send / delete"; full-width
+     * forms are these after NFKC). Without spaces they join only inside a word made of Latin
+     * letters and that one sign ("Send&delete", "Send+pay", "Send/delete", "R&D"), read then as
+     * if spaced; in any other word they are part of it ("example.com/buy",
+     * "https://www.example.com/checkout/cart"). Names so joined ("Q&A", "Photos/Videos") split
+     * into parts that start with no phrase; "Add/Remove" removes.
+     */
+    val ENGLISH_SIGNS: Set<Char> = setOf('&', '+', '/')
+
+    /**
+     * A word left at the start of a part after a joiner ("Send and also delete"): taken off, so
+     * the part is read by the phrase after it. "and" and "then" are joiners themselves.
+     */
+    val ENGLISH_FILLERS: Regex = Regex("^(?:also\\b\\W*)+")
 
     /**
      * English (spaced form): only the whole label, as [EXACT] words ("Apply" alone is often a filter
