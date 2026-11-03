@@ -123,8 +123,24 @@ internal class SettingsPages(
             (activityHas(screen, DETAILS_ACTIVITIES) || pages.shortTexts(screen).any { t -> DETAILS.any { it in t } })
 
     /** A control showing [texts] stops, clears, disables or uninstalls an app. */
-    fun managesApp(texts: List<String>): Boolean =
-        texts.any { text -> Text.compact(text).let { t -> MANAGEMENT.any { it in t } } }
+    fun managesApp(texts: List<String>): Boolean = texts.any(::manages)
+
+    /**
+     * The dialog around [element] ([Elements.context]: the other named elements of its window, or
+     * of the screen when its window is unknown, and the OCR lines) stops, clears, disables or
+     * uninstalls an app. Every text of the screen is read once per snapshot ([Work.dialog]).
+     */
+    fun dialogManages(
+        element: UiElement,
+        screen: ScreenSnapshot,
+    ): Boolean = managing.of(screen).around(element)
+
+    private val managing =
+        PerScreen { screen ->
+            val ocr = screen.ocr.orEmpty()
+            Work.dialog.add((screen.elements.size + ocr.size).toLong())
+            Managing(screen.elements.filter { e -> e.name?.let(::manages) == true }, ocr.any { manages(it.text) })
+        }
 
     private fun titles(screen: ScreenSnapshot): List<String> {
         val named =
@@ -146,12 +162,46 @@ internal class SettingsPages(
         return fragments.any { it in activity }
     }
 
+    private fun manages(text: String): Boolean = Text.compact(text).let { t -> MANAGEMENT.any { it in t } }
+
     private fun sensitive(text: String): String? =
         Text.compact(text).let { t ->
             SENSITIVE_SETTINGS.firstOrNull {
                 it in
                     t
             }
+        }
+}
+
+/**
+ * The named elements of one screen that say they manage an app, and whether an OCR line does
+ * ([SettingsPages.dialogManages]): for each window and for the whole screen, the first one and
+ * whether one on another element follows.
+ */
+private class Managing(
+    named: List<UiElement>,
+    private val drawn: Boolean,
+) {
+    private val all = Firsts(named)
+    private val windows: Map<Int?, Firsts> = named.groupBy { it.window }.mapValues { Firsts(it.value) }
+
+    fun around(element: UiElement): Boolean =
+        drawn || (if (element.window == null) all else windows[element.window])?.other(element) == true
+}
+
+/** The first of [elements], and whether one with another ref follows it. */
+private class Firsts(
+    elements: List<UiElement>,
+) {
+    private val head: UiElement? = elements.firstOrNull()
+    private val second: Boolean = head != null && elements.any { it.ref != head.ref }
+
+    /** One of [elements] is not [element]. */
+    fun other(element: UiElement): Boolean =
+        when {
+            head == null -> false
+            head.ref == element.ref -> second
+            else -> true
         }
 }
 

@@ -2,7 +2,6 @@ package dev.phoneagent.core.policy.rules
 
 import dev.phoneagent.core.policy.ElementRisk
 import dev.phoneagent.core.policy.IntentKind
-import dev.phoneagent.core.ports.ElementRole
 import dev.phoneagent.core.ports.ElementState
 import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.ports.UiElement
@@ -14,16 +13,19 @@ import java.util.concurrent.ConcurrentHashMap
  * @property target the element activated: the riskiest one the touch may reach (the smallest
  *   among equals), or `null` when there is no element there.
  * @property risk what activating it does, or `null` when ordinary.
- * @property texts all visible text on what the touch may reach: names, content and OCR.
  * @property reached every element the touch may reach with its own risk, smallest first; empty
  *   when there is none.
+ * @param texts computes [texts] when first asked for.
  */
-internal data class Assessment(
+internal class Assessment(
     val target: UiElement?,
     val risk: ElementRisk?,
-    val texts: List<String>,
     val reached: List<Reached>,
+    texts: () -> List<String>,
 ) {
+    /** All visible text on what the touch may reach: names, content and OCR. */
+    val texts: List<String> by lazy(texts)
+
     /** The kind of what the touch does: [risk]'s, or NAVIGATE when ordinary. */
     val kind: IntentKind
         get() = if (risk == null) IntentKind.NAVIGATE else risk.kind
@@ -36,7 +38,9 @@ internal data class Assessment(
 /**
  * Where a touch lands and what it activates (policy-rules.md §2, §3). The screen format's ⚠
  * ([RulesLexicon]), the intent resolver and the hard rules all read it, so the mark and the verdict
- * agree; [Controls] turns the evidence on each control into its risk.
+ * agree; [Controls] turns the evidence on each control into its risk. What is drawn at a point is
+ * collected once per point and snapshot, and each control there is judged from it and from what
+ * the control shows itself, read once per snapshot (policy-rules.md §8).
  */
 internal class Risks(
     private val controls: Controls,
@@ -48,6 +52,9 @@ internal class Risks(
 
     /** Touches at a point, short and long; read once per snapshot. */
     private val touches = PerScreen { ConcurrentHashMap<Pair<Aim.Point, Boolean>, Assessment>() }
+
+    /** What is drawn at a point; collected once per snapshot. */
+    private val drawn = PerScreen { ConcurrentHashMap<Aim.Point, Drawn>() }
 
     /** A tap aimed at [aim]; a long press when [long]. */
     fun tap(
@@ -91,7 +98,7 @@ internal class Risks(
         return if (control == null) {
             at(center, long, screen)
         } else {
-            val key = control to Evidence.drawnAt(center, screen)
+            val key = control to drawnAt(center, screen).texts
             clicks.of(screen).computeIfAbsent(key) { assess(listOf(control), center, screen) }
         }
     }
@@ -105,10 +112,9 @@ internal class Risks(
         long: Boolean,
         screen: ScreenSnapshot,
     ): Assessment =
-        touches
-            .of(
-                screen,
-            ).computeIfAbsent(point to long) { assess(Tree.under(screen, point.x, point.y, long), point, screen) }
+        touches.of(screen).computeIfAbsent(point to long) {
+            assess(Tree.under(screen, point.x, point.y, long), point, screen)
+        }
 
     /**
      * What Enter on [screen] presses: the focused control, as a tap by ref on it ([activation]);
@@ -119,229 +125,98 @@ internal class Risks(
         return if (focused == null || Elements.editable(focused)) null else activation(focused, screen)
     }
 
-    /** The visible text on [element], as a tap by ref at its center sees it. */
+    /** The visible text on [element], as a tap by ref at its center sees it ([Evidence.of]). */
     fun texts(
         element: UiElement,
         screen: ScreenSnapshot,
-    ): List<String> = Evidence.of(element, Geometry.center(element.bounds), screen)
+    ): List<String> =
+        (controls.shown(element, screen) + drawnAt(Geometry.center(element.bounds), screen).texts).distinct()
+
+    /** The OCR lines at [point] ([Evidence.drawnAt]) and what they say, collected once per point. */
+    private fun drawnAt(
+        point: Aim.Point,
+        screen: ScreenSnapshot,
+    ): Drawn =
+        drawn.of(screen).computeIfAbsent(point) {
+            Work.points.increment()
+            val texts = Evidence.drawnAt(it, screen)
+            Drawn(texts, controls.said(texts, screen))
+        }
 
     private fun assess(
         candidates: List<UiElement>,
         point: Aim.Point?,
         screen: ScreenSnapshot,
     ): Assessment {
-        val drawn = Evidence.drawnAt(point, screen)
-        val judged =
-            candidates.map { element ->
-                val texts = Evidence.of(element, point, screen)
-                Reached(element, controls.risk(element, texts, screen), texts)
-            }
+        val drawn = if (point == null) NOTHING_DRAWN else drawnAt(point, screen)
+        Work.judged.add(candidates.size.toLong())
+        val judged = candidates.map { Reached(it, controls.risk(it, drawn.said, screen)) }
         val riskiest = judged.maxWithOrNull(byRisk)
-        val texts = (judged.flatMap(Reached::texts) + drawn).distinct()
-        return Assessment(
-            riskiest?.element,
-            if (riskiest ==
-                null
-            ) {
-                controls.ofText(drawn, screen)
-            } else {
-                riskiest.risk
-            },
-            texts,
-            judged,
-        )
+        val risk = if (riskiest == null) controls.ofText(drawn.said, screen) else riskiest.risk
+        return Assessment(riskiest?.element, risk, judged) {
+            val shown = candidates.flatMap { controls.shown(it, screen) + drawn.texts } + drawn.texts
+            Work.gathered.add(shown.size.toLong())
+            shown.distinct()
+        }
     }
 }
 
-/** A control a touch may reach, with its risk and its text. */
+/** A control a touch may reach, with its risk. */
 internal data class Reached(
     val element: UiElement,
     val risk: ElementRisk?,
-    val texts: List<String>,
 )
+
+/** The OCR lines at a point and what they say. */
+private class Drawn(
+    val texts: List<String>,
+    val said: Said,
+)
+
+/** Nothing drawn: a touch without a point. */
+private val NOTHING_DRAWN = Drawn(emptyList(), NOTHING_SAID)
 
 /** The text evidence on a control. */
 internal object Evidence {
     /**
-     * What [element] shows: its name, the names in its content ([Elements.content]), the OCR
-     * lines at [point], and, when it is a control the tree gives no text at all, the OCR lines
-     * inside it (a drawn button). Inside a container that takes no click, only the point counts.
+     * What [element] shows: what it shows itself ([shown]) and the OCR lines at [point]. Inside a
+     * container that takes no click, only the point counts.
      */
     fun of(
         element: UiElement,
         point: Aim.Point?,
+        screen: ScreenSnapshot,
+    ): List<String> = (shown(element, screen) + if (point == null) emptyList() else drawnAt(point, screen)).distinct()
+
+    /**
+     * What [element] shows itself: its name, the names in its content ([Elements.content]), and,
+     * when it is a control the tree gives no text at all, the OCR lines inside it (a drawn button).
+     */
+    fun shown(
+        element: UiElement,
         screen: ScreenSnapshot,
     ): List<String> {
         val own = listOfNotNull(element.name?.takeIf(String::isNotBlank)) + Elements.content(element, screen)
         val drawnButton = own.isEmpty() && Elements.clickable(element)
         val inside =
             if (drawnButton) {
-                screen.ocr.orEmpty().filter {
-                    Geometry.inside(it.bounds, element.bounds)
-                }
+                val lines = screen.ocr.orEmpty()
+                Work.ocr.add(lines.size.toLong())
+                lines.filter { Geometry.inside(it.bounds, element.bounds) }.map { it.text }
             } else {
                 emptyList()
             }
-        return (own + inside.map { it.text } + drawnAt(point, screen)).distinct()
+        return (own + inside).distinct()
     }
 
-    /** The OCR lines at [point]; none without a point. */
+    /** The OCR lines at [point]. */
     fun drawnAt(
-        point: Aim.Point?,
+        point: Aim.Point,
         screen: ScreenSnapshot,
-    ): List<String> =
-        if (point == null) {
-            emptyList()
-        } else {
-            screen.ocr
-                .orEmpty()
-                .filter { Geometry.contains(it.bounds, point.x, point.y) }
-                .map { it.text }
-        }
-}
-
-/**
- * The one place that turns the evidence on a control into a risk (policy-rules.md §3): its name,
- * the text inside it at any depth, and the OCR over it. Spending in particular is decided here; a
- * control without any text on a payment page counts as paying.
- */
-internal class Controls(
-    private val lexicon: Lexicon,
-    private val pages: Pages,
-    private val settings: SettingsPages,
-    private val fields: Fields,
-) {
-    private val byHit: Comparator<Hit> = compareBy { severity(it.kind) }
-
-    /**
-     * The risk of activating [element], whose visible text is [texts]; inputs and clear buttons only
-     * edit. A risk that keeps a would-be clear button from being one ([Fields.clearing]) counts too.
-     */
-    fun risk(
-        element: UiElement,
-        texts: List<String>,
-        screen: ScreenSnapshot,
-    ): ElementRisk? {
-        val clearing = if (Elements.editable(element)) null else fields.clearing(element, texts, screen)
-        val veto = clearing?.veto
-        return when {
-            Elements.editable(element) || (clearing != null && veto == null) -> {
-                null
-            }
-
-            else -> {
-                val found =
-                    settingsEntry(texts, screen) ?: labelled(element, texts, screen) ?: settingsControl(element, screen)
-                listOfNotNull(found, veto?.let { ElementRisk(it.kind, it.matched) }).maxWithOrNull(byRisk)
-            }
-        }
-    }
-
-    private val byRisk: Comparator<ElementRisk> = compareBy { severity(it.kind) }
-
-    /** The risk of touching where there is no element and only [texts] (OCR) are drawn. */
-    fun ofText(
-        texts: List<String>,
-        screen: ScreenSnapshot,
-    ): ElementRisk? = best(texts.mapNotNull { lexicon.classify(it, screen) }) ?: unlabeled(texts, screen)
-
-    private fun settingsEntry(
-        texts: List<String>,
-        screen: ScreenSnapshot,
-    ): ElementRisk? = settings.sensitiveEntry(texts, screen)?.let { ElementRisk(IntentKind.SETTINGS, "settings:$it") }
-
-    /**
-     * The riskiest word among the control's own label, its label as a whole ([Lexicon.ofLabel]) and
-     * each text; an icon's resource id when there is no text; a generic button by its dialog. A
-     * strong word counts at any length in the control's own label: its name, or the one text it
-     * shows, or on a payment page any text on it. A control that shows several texts elsewhere (a
-     * list row: a name, a preview, a time) is read text by text, so a long preview is not a button.
-     */
-    private fun labelled(
-        element: UiElement,
-        texts: List<String>,
-        screen: ScreenSnapshot,
-    ): ElementRisk? {
-        val label = Elements.label(element, screen)
-        val own = listOfNotNull(element.name?.takeIf(String::isNotBlank) ?: texts.singleOrNull())
-        val whole = if (pages.isPayment(screen)) texts else own
-        val hits =
-            whole.mapNotNull { lexicon.ofControl(it, screen) } +
-                listOfNotNull(lexicon.ofLabel(label, screen), icon(element, texts)) +
-                texts.mapNotNull { lexicon.classify(it, screen) }
-        return best(hits)
-            ?: if (lexicon.isGeneric(label)) generic(element, screen, lexicon.read(label)) else unlabeled(texts, screen)
-    }
-
-    private fun best(hits: List<Hit>): ElementRisk? =
-        hits.maxWithOrNull(byHit)?.let { ElementRisk(it.kind, it.matched) }
-
-    /** No text at all on a payment page: it may well be the pay button. */
-    private fun unlabeled(
-        texts: List<String>,
-        screen: ScreenSnapshot,
-    ): ElementRisk? =
-        if (texts.isEmpty() &&
-            pages.isPayment(screen)
-        ) {
-            ElementRisk(IntentKind.SPEND, Words.UNLABELED_ON_PAYMENT_PAGE)
-        } else {
-            null
-        }
-
-    /** An icon button without any text: its resource id ("btn_send") says what it does. */
-    private fun icon(
-        element: UiElement,
-        texts: List<String>,
-    ): Hit? {
-        val words = if (texts.isEmpty()) element.resourceId?.let(Text::idWords).orEmpty() else emptyList()
-        return words.firstNotNullOfOrNull { word -> Words.ID_WORDS[word]?.let { Hit(it, "id:$word") } }
-    }
-
-    /**
-     * The dialog risk of every named element and OCR line on a screen, in reading order, OCR
-     * last, each with the element it is on (`null` for OCR); read once per snapshot.
-     */
-    private val contextHits =
-        PerScreen { screen ->
-            val named = screen.elements.mapNotNull { e -> e.name?.takeIf(String::isNotBlank)?.let { e to it } }
-            val drawn = screen.ocr.orEmpty().map { null to it.text }
-            (named + drawn).mapNotNull { (on, text) -> lexicon.inContext(text)?.let { on to it } }
-        }
-
-    /**
-     * "确定" and the like do what the dialog around them says ([Elements.context]): pay on a
-     * payment page or when the dialog mentions paying, else delete or reach out when it mentions
-     * that, else nothing.
-     */
-    private fun generic(
-        element: UiElement,
-        screen: ScreenSnapshot,
-        label: String,
-    ): ElementRisk? {
-        val hits =
-            contextHits.of(screen).mapNotNull { (on, hit) ->
-                hit.takeIf {
-                    on == null ||
-                        Elements.around(on, element)
-                }
-            }
-        val spend =
-            hits.firstOrNull { it.kind == IntentKind.SPEND }
-                ?: Hit(IntentKind.SPEND, "payment page").takeIf { pages.isPayment(screen) }
-        val found = spend ?: hits.firstOrNull { it.kind == IntentKind.DELETE } ?: hits.firstOrNull()
-        return found?.let { ElementRisk(it.kind, "${Text.bare(label)}:${it.matched}") }
-    }
-
-    /** In the settings app, toggles, pickers and enable / force-stop buttons change the system. */
-    private fun settingsControl(
-        element: UiElement,
-        screen: ScreenSnapshot,
-    ): ElementRisk? {
-        if (screen.pkg != Pages.SETTINGS) return null
-        val toggles = element.role in TOGGLES || ScreenIndex.of(screen).children(element).any { it.role in TOGGLES }
-        val acts = toggles || Text.bare(lexicon.read(Elements.label(element, screen))) in SETTINGS_ACTIONS
-        return ElementRisk(IntentKind.SETTINGS, "settings:control").takeIf { acts }
+    ): List<String> {
+        val lines = screen.ocr.orEmpty()
+        Work.ocr.add(lines.size.toLong())
+        return lines.filter { Geometry.contains(it.bounds, point.x, point.y) }.map { it.text }
     }
 }
 
@@ -360,25 +235,8 @@ private val SEVERITY: List<IntentKind> =
 /** The rank of [kind] in [SEVERITY]; no risk ranks lowest. */
 internal fun severity(kind: IntentKind?): Int = SEVERITY.indexOf(kind)
 
-private val TOGGLES = setOf(ElementRole.SWITCH, ElementRole.CHECKBOX, ElementRole.RADIO, ElementRole.PICKER)
-
-private val SETTINGS_ACTIONS =
-    setOf(
-        "强行停止",
-        "停用",
-        "启用",
-        "开启",
-        "关闭",
-        "打开",
-        "允许",
-        "拒绝",
-        "授权",
-        "卸载更新",
-        "forcestop",
-        "disable",
-        "enable",
-        "turnon",
-        "turnoff",
-        "allow",
-        "deny",
-    )
+/** The more severe of [first] and [next], [first] among equals. */
+internal fun firstMax(
+    first: Hit?,
+    next: Hit?,
+): Hit? = if (next != null && severity(next.kind) > severity(first?.kind)) next else first

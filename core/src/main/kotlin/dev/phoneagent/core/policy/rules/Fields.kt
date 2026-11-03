@@ -5,11 +5,12 @@ import dev.phoneagent.core.policy.IntentKind
 import dev.phoneagent.core.ports.ElementState
 import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.ports.UiElement
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Input fields: how sensitive they are, and which taps only edit them (policy-rules.md §5).
  *
- * [editsField] is adapted from Mika's `IrreversibleDetector` (Copyright 2026 wangzan101,
+ * [clearing] is adapted from Mika's `IrreversibleDetector` (Copyright 2026 wangzan101,
  * Apache-2.0). Modified by PhoneAgent contributors: an icon without text counts as a clear button
  * only inside a field that holds text or under a clearing word, any other text on it (OCR too)
  * decides instead, and the distance comes from [PolicyTuning]. See NOTICE.
@@ -57,57 +58,50 @@ internal class Fields(
     }
 
     /**
-     * Tapping [element] (whose visible text is [texts]) only edits a field (§3.3): a clear button
-     * ("×", "清空", an id with "clear") inside or right next to a field; or an icon the tree says
-     * nothing about inside a field, when the only text drawn on it is a clearing word ("清除",
-     * "×"), or when nothing is drawn on it and the field holds text. Never when any text on it
-     * names another risk ("支付", "发送", "删除聊天记录"): that text decides instead.
-     */
-    fun editsField(
-        element: UiElement,
-        texts: List<String>,
-        screen: ScreenSnapshot,
-    ): Boolean = clearing(element, texts, screen)?.let { it.veto == null } ?: false
-
-    /**
-     * [element] as a would-be clear button ([editsField]): `null` when it is none; else the most
-     * severe risk a text on it names besides clearing (its [Clearing.veto]), read at any length,
-     * which then decides the tap (policy-rules.md §0: a risk once found is never dropped).
+     * [element] as a would-be clear button (§3.3), when its visible text says [said]: `null` when
+     * it is none; else the most severe risk a text on it names besides clearing (its
+     * [Clearing.veto]), read at any length, which then decides the tap (policy-rules.md §0: a risk
+     * once found is never dropped). A clear button is one ("×", "清空", an id with "clear") inside
+     * or right next to a field; or an icon the tree says nothing about inside a field, when the
+     * only text drawn on it is a clearing word ("清除", "×"), or when nothing is drawn on it and the
+     * field holds text. Where it sits among the fields is read once per element and snapshot.
      */
     fun clearing(
         element: UiElement,
-        texts: List<String>,
+        said: Said,
         screen: ScreenSnapshot,
     ): Clearing? {
-        val label = Elements.label(element, screen)
-        val clears = clearWord(label) || "clear" in element.resourceId?.let(Text::idWords).orEmpty()
-        val icon = label.isBlank() && element.resourceId == null
-        val drawnClear = texts.isNotEmpty() && texts.all(::clearWord)
-        val fields = ScreenIndex.of(screen).editables.filter { it.ref != element.ref }
+        val at = places.of(screen).computeIfAbsent(element) { placeOf(it, screen) }
+        val drawnClear = !said.isEmpty && said.allClear
         val near =
-            fields.any { field ->
-                val inside = Geometry.inside(element.bounds, field.bounds)
-                val iconClears = icon && inside && (drawnClear || (texts.isEmpty() && !field.value.isNullOrEmpty()))
-                iconClears || (clears && (inside || next(element, field)))
-            }
-        return if (near) Clearing(vetoOf(texts, screen)) else null
+            (at.icon && ((drawnClear && at.inField) || (said.isEmpty && at.inFilledField))) || (at.clears && at.byField)
+        return if (near) Clearing(said.veto) else null
     }
 
-    /** The most severe risk among [texts] other than clearing the field, the first among equals. */
-    private fun vetoOf(
-        texts: List<String>,
+    private val places = PerScreen { ConcurrentHashMap<UiElement, Place>() }
+
+    private fun placeOf(
+        element: UiElement,
         screen: ScreenSnapshot,
-    ): Hit? =
-        texts
-            .filterNot(::clearWord)
-            .mapNotNull { lexicon.ofControl(it, screen) }
-            .maxWithOrNull(compareBy { severity(it.kind) })
+    ): Place {
+        val label = Elements.label(element, screen)
+        val fields = ScreenIndex.of(screen).editables.filter { it.ref != element.ref }
+        Work.fields.add(fields.size.toLong())
+        val inside = fields.filter { Geometry.inside(element.bounds, it.bounds) }
+        return Place(
+            clears = clearWord(label) || "clear" in element.resourceId?.let(Text::idWords).orEmpty(),
+            icon = label.isBlank() && element.resourceId == null,
+            inField = inside.isNotEmpty(),
+            inFilledField = inside.any { !it.value.isNullOrEmpty() },
+            byField = inside.isNotEmpty() || fields.any { next(element, it) },
+        )
+    }
 
     /**
      * A [Words.FIELD_CLEAR] entry: a word ([Text.bare] form) or a symbol such as "×" ([Text.compact]
      * form); never a text longer than what is read of a label ([Lexicon.whole]).
      */
-    private fun clearWord(text: String): Boolean =
+    fun clearWord(text: String): Boolean =
         lexicon.whole(text) && (Text.bare(text) in Words.FIELD_CLEAR || Text.compact(text) in Words.FIELD_CLEAR)
 
     private fun next(
@@ -170,6 +164,22 @@ internal class Clearing(
 )
 
 /**
+ * Where an element sits among the fields of its screen ([Fields.clearing]).
+ *
+ * @property clears its label is a clearing word or its resource id says "clear".
+ * @property icon it has no label and no resource id.
+ * @property inField it lies inside a field; [inFilledField] inside one that holds text.
+ * @property byField it lies inside a field or right next to one.
+ */
+private class Place(
+    val clears: Boolean,
+    val icon: Boolean,
+    val inField: Boolean,
+    val inFilledField: Boolean,
+    val byField: Boolean,
+)
+
+/**
  * Which fields search rather than send when submitted (policy-rules.md §2): the field says so
  * ([Fields.saysSearch]) or a search button sits on its row, and no control on its row may send or
  * pay. A control on the row whose label is too long to read whole ([Lexicon.whole]) may: what is
@@ -180,14 +190,25 @@ internal class Searches(
     private val fields: Fields,
     private val risks: Risks,
 ) {
-    /** Enter in [field] searches. */
+    /** Fields that search, and controls that may send or are search buttons; each read once per snapshot. */
+    private val searching = PerScreen { ConcurrentHashMap<UiElement, Boolean>() }
+    private val reaching = PerScreen { ConcurrentHashMap<UiElement, Boolean>() }
+    private val buttons = PerScreen { ConcurrentHashMap<UiElement, Boolean>() }
+
+    /** Enter in [field] searches; its row is looked at once per snapshot ([Work.row]). */
     fun isSearch(
         field: UiElement,
         screen: ScreenSnapshot,
+    ): Boolean = searching.of(screen).computeIfAbsent(field) { look(it, screen) }
+
+    private fun look(
+        field: UiElement,
+        screen: ScreenSnapshot,
     ): Boolean {
+        Work.row.add(screen.elements.size.toLong())
         val row = screen.elements.filter { it.ref != field.ref && Geometry.sameRow(it.bounds, field.bounds) }
-        return row.none { mayReach(it, screen) } &&
-            (fields.saysSearch(field) || row.any { fields.searchButton(it, screen) })
+        val button = { e: UiElement -> buttons.of(screen).computeIfAbsent(e) { fields.searchButton(it, screen) } }
+        return row.none { mayReach(it, screen) } && (fields.saysSearch(field) || row.any(button))
     }
 
     /**
@@ -197,7 +218,10 @@ internal class Searches(
     private fun mayReach(
         element: UiElement,
         screen: ScreenSnapshot,
-    ): Boolean = !lexicon.whole(Elements.label(element, screen)) || risks.activation(element, screen).kind in REACHES
+    ): Boolean =
+        reaching.of(screen).computeIfAbsent(element) {
+            !lexicon.whole(Elements.label(it, screen)) || risks.activation(it, screen).kind in REACHES
+        }
 }
 
 /** What a control on a field's row does that makes the field no search field. */

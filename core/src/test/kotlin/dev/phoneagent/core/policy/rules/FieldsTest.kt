@@ -14,15 +14,26 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
+/**
+ * Tapping [element], whose visible text is [texts], only edits a field, as [Controls.risk] reads it:
+ * it is a clear button ([Fields.clearing]) and no text on it names another risk.
+ */
+internal fun Reading.editsField(
+    element: UiElement,
+    texts: List<String>,
+    screen: ScreenSnapshot,
+): Boolean = fields.clearing(element, controls.said(texts, screen), screen)?.let { it.veto == null } ?: false
+
 class FieldsTest {
     private val plain = screen()
     private val fields = Reading(PolicyTuning()).fields
     private val searches = Reading(PolicyTuning()).searches
+    private val reading = Reading(PolicyTuning())
 
     private fun edits(
         element: UiElement,
         s: ScreenSnapshot,
-    ): Boolean = fields.editsField(element, Evidence.of(element, Geometry.center(element.bounds), s), s)
+    ): Boolean = reading.editsField(element, Evidence.of(element, Geometry.center(element.bounds), s), s)
 
     @Test
     fun `fields are classified by hint, name and resource id, never by what is typed`() {
@@ -110,6 +121,9 @@ class FieldsTest {
         assertFalse(edits(icon, drawn))
         val crossed = screen(input.copy(value = null), icon, ocr = listOf(Fx.ocr("清除", box(610, 115, 680, 145))))
         assertTrue(edits(icon, crossed))
+        // A clearing word drawn on an icon outside every field clears nothing.
+        val away = el("b11", bounds = box(0, 500, 100, 560))
+        assertFalse(edits(away, screen(input, away, ocr = listOf(Fx.ocr("×", box(10, 510, 90, 550))))))
         // Only a clearing word: "删除" or "删除聊天记录" drawn on it is a delete, not a clear button.
         for (drawnDelete in listOf("删除", "删除聊天记录")) {
             val deletes = screen(input, icon, ocr = listOf(Fx.ocr(drawnDelete, box(610, 115, 680, 145))))

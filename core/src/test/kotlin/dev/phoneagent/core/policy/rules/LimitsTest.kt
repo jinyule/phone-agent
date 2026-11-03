@@ -179,8 +179,8 @@ class LimitsTest {
         val clear = el("b1", "清空      ", bounds = box(700, 110, 790, 150))
         val fields = Reading(PolicyTuning(labelRead = 6)).fields
         val s = screen(input, clear)
-        assertFalse(fields.editsField(clear, listOf("清空      "), s))
-        assertTrue(Reading(PolicyTuning()).fields.editsField(clear, listOf("清空      "), s))
+        assertFalse(Reading(PolicyTuning(labelRead = 6)).editsField(clear, listOf("清空      "), s))
+        assertTrue(Reading(PolicyTuning()).editsField(clear, listOf("清空      "), s))
         // Nor is a search button, and a field next to it is no search field.
         val bare = field("f2", bounds = box(0, 300, 800, 360))
         val search = el("b2", "搜索      ", bounds = box(820, 300, 999, 360))

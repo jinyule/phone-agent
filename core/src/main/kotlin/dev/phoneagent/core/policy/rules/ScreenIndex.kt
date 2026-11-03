@@ -53,6 +53,9 @@ internal class ScreenIndex private constructor(
     /** The editable elements, in reading order. */
     val editables: List<UiElement> = elements.filter(Elements::editable)
 
+    /** Positions of the elements by area, smallest first, in reading order among equals. */
+    private val byArea: IntArray = elements.indices.sortedBy { Geometry.area(elements[it].bounds) }.toIntArray()
+
     fun byRef(ref: ElementRef): UiElement? = positions[ref]?.let(elements::get)
 
     /** The elements whose parent is [element], in reading order. */
@@ -81,14 +84,16 @@ internal class ScreenIndex private constructor(
         return contents.get(at) ?: contentOf(element).also { contents.set(at, it) }
     }
 
-    /** Visits each element below [element] at most once. */
+    /** Visits each element below [element] at most once ([Work.content]). */
     private fun contentOf(element: UiElement): List<String> {
         val center = Geometry.center(element.bounds)
         val seen = mutableSetOf(element.ref)
         val inside = mutableListOf<Int>()
         val queue = ArrayDeque(listOf(element.ref))
         while (queue.isNotEmpty()) {
-            for (at in children[queue.removeFirst()].orEmpty()) {
+            val below = children[queue.removeFirst()].orEmpty()
+            Work.content.add(below.size.toLong())
+            for (at in below) {
                 val child = elements[at]
                 val separate = Elements.clickable(child) && !Geometry.contains(child.bounds, center.x, center.y)
                 if (!separate && seen.add(child.ref)) {
@@ -103,26 +108,34 @@ internal class ScreenIndex private constructor(
     /**
      * As [Tree.under]: the elements containing ([x], [y]) that take the touch (clickable, or also
      * long-clickable when [long]) and contain no other one there, smallest first; without any, the
-     * smallest element there. Marks the ancestors of every such element there once, so it costs
-     * time in proportion to the snapshot.
+     * smallest element there. Makes [PASSES] passes over the snapshot and marks each element at
+     * most once as the ancestor of one there, so it looks at most `(PASSES + 1) · n` times at an
+     * element of a snapshot of `n` ([Work.under]).
      */
     fun under(
         x: Int,
         y: Int,
         long: Boolean,
     ): List<UiElement> {
-        val hit = elements.indices.filter { Geometry.contains(elements[it].bounds, x, y) }
-        val controls = hit.filter { Elements.clickable(elements[it]) || (long && Elements.longClickable(elements[it])) }
+        val hit = BooleanArray(elements.size) { Geometry.contains(elements[it].bounds, x, y) }
+        val takes =
+            BooleanArray(elements.size) {
+                hit[it] && (Elements.clickable(elements[it]) || (long && Elements.longClickable(elements[it])))
+            }
         val outer = BooleanArray(elements.size)
-        for (control in controls) {
-            var at = parents[control]
+        var marked = 0L
+        for (control in elements.indices) {
+            var at = if (takes[control]) parents[control] else -1
             while (at >= 0 && !outer[at]) {
                 outer[at] = true
+                marked++
                 at = parents[at]
             }
         }
-        val innermost = controls.filterNot { outer[it] }.map(elements::get)
-        return innermost.sortedWith(BY_AREA).ifEmpty { listOfNotNull(hit.map(elements::get).minWithOrNull(BY_AREA)) }
+        val innermost = byArea.filter { takes[it] && !outer[it] }
+        Work.touches.increment()
+        Work.under.add(PASSES * elements.size + marked)
+        return innermost.ifEmpty { listOfNotNull(byArea.firstOrNull { hit[it] }) }.map(elements::get)
     }
 
     private fun position(ref: ElementRef?): Int = ref?.let(positions::get) ?: -1
@@ -158,7 +171,12 @@ internal class ScreenIndex private constructor(
     companion object {
         private const val UNKNOWN = -2
         private const val ON_PATH = -1
-        private val BY_AREA: Comparator<UiElement> = compareBy { Geometry.area(it.bounds) }
+
+        /**
+         * Passes of [under] over the snapshot: whether each element is there, whether it takes the
+         * touch, its ancestors, those left in area order, and the smallest one there when none is left.
+         */
+        private const val PASSES = 5L
         private val LAST = PerScreen(::ScreenIndex)
 
         /** The index of [screen], built once for the last snapshot asked for. */

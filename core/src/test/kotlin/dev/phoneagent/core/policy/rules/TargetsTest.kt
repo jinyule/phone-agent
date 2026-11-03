@@ -106,6 +106,20 @@ class TargetsTest {
     }
 
     @Test
+    fun `every OCR line at the point counts, with what the control shows itself`() {
+        val s =
+            screen(
+                el("e1", "查看", bounds = box(400, 400, 600, 450)),
+                ocr = listOf(ocr("详情", box(410, 405, 590, 445)), ocr("立即支付", box(420, 410, 580, 440))),
+            )
+        assertEquals(listOf("查看", "详情", "立即支付"), Reading(PolicyTuning()).risks.texts(s.elements[0], s))
+        assertEquals(ConfirmReason.SPEND, reason(decide(point(500, 425), on(s))))
+        // The same text drawn as shown: one text, read as the control's own label.
+        val same = s.copy(ocr = listOf(ocr("查看", box(410, 405, 590, 445))))
+        assertEquals(listOf("查看"), Reading(PolicyTuning()).risks.texts(same.elements[0], same))
+    }
+
+    @Test
     fun `OCR inside an element counts only for a control the tree names nothing on`() {
         val image = el("e1", role = ElementRole.IMAGE, bounds = box(400, 400, 600, 450), states = emptySet())
         val s = screen(image, ocr = listOf(ocr("删除", box(450, 405, 550, 445))))

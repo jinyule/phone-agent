@@ -153,7 +153,7 @@ internal class HardRules(
                 listOfNotNull(intent.target?.let { it to intent.kind })
         return each.any { (element, kind) ->
             (kind == IntentKind.DELETE || reading.lexicon.isGeneric(Elements.label(element, screen))) &&
-                settings.managesApp(Elements.context(element, screen))
+                settings.dialogManages(element, screen)
         }
     }
 

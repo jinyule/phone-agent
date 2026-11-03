@@ -9,12 +9,16 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 
 /**
- * Reading hostile texts and screens ends (policy-rules.md §8). Each case of [BoundsProbe] runs in
- * a JVM of its own, killed when it has not finished within [LIMIT_SECONDS]. The time is not
- * measured: the limit is only how long to wait before calling a case hung. It is at least thirty
- * times what any case takes on a developer machine, JVM start included, so a slow machine does not
- * fail it, while on the rules before these bounds (81d14af) eight of the nine cases did not finish
- * within it.
+ * Reading hostile texts and screens ends, in a number of steps within bounds quadratic in the
+ * screen (policy-rules.md §8). Each case of [BoundsProbe] runs in a JVM of its own; it fails when
+ * the steps counted reading one of its screens ([Work]) exceed their bounds
+ * ([BoundsProbe.exceeded]), and it is killed when it has not finished within [LIMIT_SECONDS].
+ * The counts are what proves the bounds; time is not measured. The limit is only how long to wait
+ * before calling a case hung: at least thirty times what any case takes on a developer machine,
+ * JVM start included, so a slow machine does not fail it. On the rules before the first bounds
+ * (81d14af) eight of the first nine cases did not finish within it; on 41f46f5 the cases of
+ * touches over candidates and of drawn text over everything read the OCR lines 4.1 and 8.2
+ * billion times, against bounds of about 10 and 20 million.
  */
 class BoundsTest {
     @Test
@@ -29,6 +33,22 @@ class BoundsTest {
             val case = build()
             case.screens.forEach { assertEquals(case.readable, reading.readable(it), name) }
         }
+    }
+
+    @Test
+    fun `a count above its bound fails the probe`() {
+        val s = Fx.screen(Fx.el("e1", "确定"), Fx.el("e2"), ocr = listOf(Fx.ocr("删除")))
+        // Two elements and one OCR line: three touches look at 36 elements, five OCR lines are read
+        // for two owns and three points, and the sum, 49, is within 13·3² + 42·3 + 4 = 247.
+        val within =
+            Work.counts().mapValues { 0L } +
+                mapOf("touches" to 3L, "under" to 36L, "owns" to 2L, "points" to 3L, "ocr" to 5L)
+        assertEquals(emptyList<String>(), BoundsProbe.exceeded(s, 11, within))
+        val counts = mapOf("under" to 37L, "ocr" to 6L, "content" to 1L, "gathered" to 2000L)
+        assertEquals(
+            listOf("under 37 > 36", "ocr 6 > 5", "content 1 > 0", "gathered 2000 > 9", "total 2052 > 247"),
+            BoundsProbe.exceeded(s, 1, within + counts),
+        )
     }
 
     @ParameterizedTest(name = "{0}")

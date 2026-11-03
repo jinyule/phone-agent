@@ -22,8 +22,14 @@ internal class Lexicon(
     /** The risk a label names, or `null`. Strong words count in labels up to [PolicyTuning.labelMax]. */
     fun classify(label: String): Hit? = match(label, tuning.labelMax, complete = true)
 
-    /** The risk a dialog text names, for the generic button in that dialog ([PolicyTuning.contextMax]). */
-    fun inContext(text: String): Hit? = match(text, tuning.contextMax, complete = true)
+    /**
+     * The risk a dialog text names, for the generic button in that dialog ([PolicyTuning.contextMax]).
+     * Counted as a dialog text read ([Work.dialog]).
+     */
+    fun inContext(text: String): Hit? {
+        Work.dialog.increment()
+        return match(text, tuning.contextMax, complete = true)
+    }
 
     /**
      * The risk a control's own label names: as [classify], and a strong word anywhere in it counts

@@ -16,7 +16,8 @@ internal class Reading(
     val pages: Pages = Pages(tuning, amounts)
     val settings: SettingsPages = SettingsPages(tuning, pages)
     val fields: Fields = Fields(tuning, lexicon, pages)
-    val risks: Risks = Risks(Controls(lexicon, pages, settings, fields))
+    val controls: Controls = Controls(lexicon, pages, settings, fields)
+    val risks: Risks = Risks(controls)
     val searches: Searches = Searches(lexicon, fields, risks)
 
     /**

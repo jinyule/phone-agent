@@ -21,7 +21,8 @@ import kotlin.system.exitProcess
  * engine on taps by ref and by point, typing, Enter, swipes, scrolls and observing, at every
  * level, with the re-check of every card. Screens are sized at the default limits of
  * [PolicyTuning] or far beyond them ([Case.readable]). Run as `main(case)` in a JVM of its own,
- * so a case that does not finish can be killed; exits 0 when the case is done.
+ * so a case that does not finish can be killed; exits 0 when the case is done, and 1 as soon as
+ * the steps counted reading one readable screen ([Work]) exceed their bounds ([exceeded]).
  */
 internal object BoundsProbe {
     /** Characters of a hostile text that is not part of a screen (call arguments, a label read alone). */
@@ -36,6 +37,24 @@ internal object BoundsProbe {
     private const val LEVEL_TEXT = 5
     private const val LEAF = "第一行文字很长很长很长第二行文字也很长很长"
     private val WHOLE = box(0, 400, 999, 450)
+    private val SCREEN = box(0, 0, 999, 999)
+
+    /** Controls of each kind in the small screen of a case that is cubic without the bounds, read first. */
+    private const val SMALL = 200
+
+    /** Controls of each kind in the full screen of such a case: three kinds, within [MAX_ELEMENTS]. */
+    private const val FULL = 1_600
+
+    /** Points [drive] touches besides the elements' centers: a tap and the start of a swipe. */
+    private val TOUCHED = listOf(Aim.Point(500, 425), Aim.Point(100, 425))
+
+    /**
+     * The bound on all steps counted reading a readable screen of `n` elements and OCR lines for
+     * the 11 calls of [drive] (policy-rules.md §8): the bounds of [exceeded] add up to at most
+     * `11·E² + 26·E·M + 42·E + 17·M + 4`, which is at most `13·n² + 42·n + 4`, so at most `14·n²`
+     * once `n` ≥ 43.
+     */
+    private fun total(n: Long): Long = 13 * n * n + 42 * n + 4
 
     /** One case: texts read alone, and screens that are all within the limits or all beyond them. */
     class Case(
@@ -54,6 +73,8 @@ internal object BoundsProbe {
             "total labels on one row" to ::totalLabels,
             "dialog buttons" to ::dialogButtons,
             "deep labels" to ::deepLabels,
+            "touches over candidates" to ::touchesOverCandidates,
+            "drawn over everything" to ::drawnOverEverything,
             "beyond the limits" to ::beyondTheLimits,
         )
 
@@ -61,8 +82,76 @@ internal object BoundsProbe {
     fun main(args: Array<String>) {
         val case = CASES.getValue(args.single())()
         texts(case.texts)
-        case.screens.forEach(::drive)
+        for (s in case.screens) {
+            Work.reset()
+            val steps = drive(s)
+            val counts = Work.counts()
+            val over = if (case.readable) exceeded(s, steps, counts) else emptyList()
+            println("${s.elements.size} elements, ${s.ocr.orEmpty().size} OCR lines: $counts")
+            if (over.isNotEmpty()) {
+                println("over the bounds: $over")
+                exitProcess(1)
+            }
+        }
         exitProcess(0)
+    }
+
+    /**
+     * The counts of [Work] after reading [s] for [steps] calls ([drive]) that exceed their bounds
+     * (policy-rules.md §8), with `E` elements, `M` OCR lines, `F` fields and parents `D` deep:
+     *
+     * - `touches` ≤ `E + 2`: one per point and kind of touch, at the elements' centers and [TOUCHED];
+     * - `under` ≤ `6·E·touches`: five passes and each element marked at most once, per touch;
+     * - `points` ≤ `E + 2`: what is drawn at a point is collected once;
+     * - `owns` ≤ `E`: what an element shows itself is read once;
+     * - `judged` ≤ `E·touches + E`: every control under a touch, and each control clicked by ref once;
+     * - `ocr` ≤ `M·(owns + points)`: the OCR lines, once for each point and inside each drawn button;
+     * - `texts` ≤ `E·(D + 1) + M·(owns + points)`: each element's name, its content (every element
+     *   is in the content of at most `D` ancestors) and the OCR inside it, and what is drawn at each point;
+     * - `content` ≤ `E·D`: each element is looked at from each of its ancestors at most once;
+     * - `dialog` ≤ `2·(E + M)`: every text, once for generic buttons and once for app management;
+     * - `row`, `fields` ≤ `E·F`: each field's row and each element's place among the fields, once;
+     * - `gathered` ≤ `steps·(2·E + (2·E + 1)·M)`: what each step's touch shows, whose candidates'
+     *   contents do not overlap, each with the OCR at the point;
+     * - and their sum ≤ `13·n² + 42·n + 4` with `n = E + M` ([total]).
+     */
+    fun exceeded(
+        s: ScreenSnapshot,
+        steps: Int,
+        counts: Map<String, Long>,
+    ): List<String> {
+        val e = s.elements.size.toLong()
+        val m =
+            s.ocr
+                .orEmpty()
+                .size
+                .toLong()
+        val f = s.elements.count(Elements::editable).toLong()
+        val d = ScreenIndex.of(s).depth.toLong()
+        val n = e + m
+        val count = { name: String -> counts.getValue(name) }
+        val drawn = m * (count("owns") + count("points"))
+        val bounds =
+            mapOf(
+                "touches" to e + TOUCHED.size,
+                "under" to 6 * e * count("touches"),
+                "points" to e + TOUCHED.size,
+                "owns" to e,
+                "judged" to e * count("touches") + e,
+                "ocr" to drawn,
+                "texts" to e * (d + 1) + drawn,
+                "content" to e * d,
+                "dialog" to 2 * n,
+                "row" to e * f,
+                "fields" to e * f,
+                "gathered" to steps * (2 * e + (2 * e + 1) * m),
+            )
+        val sum = counts.values.sum()
+        return bounds
+            .filter { (name, bound) ->
+                count(name) > bound
+            }.map { (name, bound) -> "$name ${count(name)} > $bound" } +
+            listOfNotNull("total $sum > ${total(n)}".takeIf { sum > total(n) })
     }
 
     /** Unclosed brackets: one note scan per opening bracket was quadratic. */
@@ -158,6 +247,48 @@ internal object BoundsProbe {
         return Case(emptyList(), screens, readable = true)
     }
 
+    /**
+     * Controls that cover the whole screen, generic and unrelated, so every one is a candidate
+     * under every point; elements that take no touch, each at a point of its own; OCR lines away
+     * from every point. Reading the OCR lines, the controls' own words and their dialog again
+     * for each control under each point was cubic. A small screen first, then a full one.
+     */
+    private fun touchesOverCandidates(): Case =
+        Case(
+            emptyList(),
+            listOf(SMALL, FULL).map { n ->
+                val controls = (1..n).map { el("b$it", "确定", bounds = SCREEN) }
+                screen(*(controls + images(n)).toTypedArray(), ocr = List(n) { Fx.ocr("删除记录", box(0, 0, 9, 9)) })
+            },
+            readable = true,
+        )
+
+    /**
+     * Controls without names that cover the whole screen, each a drawn button showing every OCR
+     * line; OCR lines, all different, that cover the whole screen and so every point; elements
+     * that take no touch, each at a point of its own. A small screen first, then a full one.
+     */
+    private fun drawnOverEverything(): Case =
+        Case(
+            emptyList(),
+            listOf(SMALL, FULL).map { n ->
+                val controls = (1..n).map { el("b$it", bounds = SCREEN) }
+                screen(*(controls + images(n)).toTypedArray(), ocr = List(n) { Fx.ocr("第${it}行", SCREEN) })
+            },
+            readable = true,
+        )
+
+    /** [n] images that take no touch, each at a point of its own on a grid over the screen. */
+    private fun images(n: Int): List<UiElement> {
+        val side = generateSequence(1) { it + 1 }.first { it * it >= n }
+        val step = SCREEN.right / side
+        return (0 until n).map {
+            val left = it % side * step
+            val top = it / side * step
+            el("i${it + 1}", role = ElementRole.IMAGE, bounds = box(left, top, left + 2, top + 2), states = emptySet())
+        }
+    }
+
     /** Screens beyond each limit are not read: each one must be refused in time in proportion to it. */
     private fun beyondTheLimits(): Case {
         val many = (1..MAX_ELEMENTS * 20).map { el("e$it", "支付", bounds = WHOLE) }
@@ -204,8 +335,11 @@ internal object BoundsProbe {
         }
     }
 
-    /** Every public read of [s]: the lexicon on every element and every kind of call at every level. */
-    private fun drive(s: ScreenSnapshot) {
+    /**
+     * Every public read of [s]: the lexicon on every element and every kind of call at every
+     * level. Returns how many different calls it makes.
+     */
+    private fun drive(s: ScreenSnapshot): Int {
         val policy = Fx.rules()
         s.elements.forEach { policy.lexicon.activationRisk(it, s) }
         val refs =
@@ -218,10 +352,17 @@ internal object BoundsProbe {
                 )
             } +
                 listOf(
-                    call("phone_tap", "x" to 500, "y" to 425),
+                    call("phone_tap", "x" to TOUCHED[0].x, "y" to TOUCHED[0].y),
                     call("phone_type", "text" to "你好", "submit" to true),
                     call("phone_key", "key" to "enter"),
-                    call("phone_swipe", "x1" to 100, "y1" to 425, "x2" to 900, "y2" to 425, "durationMs" to 300),
+                    call(
+                        "phone_swipe",
+                        "x1" to TOUCHED[1].x,
+                        "y1" to TOUCHED[1].y,
+                        "x2" to 900,
+                        "y2" to TOUCHED[1].y,
+                        "durationMs" to 300,
+                    ),
                     call("phone_observe"),
                 )
         for (c in calls) {
@@ -232,6 +373,7 @@ internal object BoundsProbe {
                 if (verdict is Verdict.Confirm) policy.engine.evaluate(c, intent, ctx.copy(approved = verdict.card))
             }
         }
+        return calls.size
     }
 
     /**
