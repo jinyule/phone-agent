@@ -227,16 +227,25 @@ internal object AnthropicErrors {
         }
     }
 
-    /** The field path a validation message starts with (`messages.2.content.0: …`), or `null`. */
-    private fun paramOf(message: String): String? = PARAM_PREFIX.find(message)?.groupValues?.get(1)
+    /**
+     * The field path a validation message starts with (`messages.2.content.0: …`), or `null`:
+     * segments of lower-case letters, digits and `_` joined by single dots, the first starting
+     * with a letter or `_`. Checked in constant stack depth however many segments the path has.
+     */
+    private fun paramOf(message: String): String? =
+        PARAM_PREFIX
+            .find(message)
+            ?.groupValues
+            ?.get(1)
+            ?.takeIf { ".." !in it && !it.endsWith('.') }
 
     private const val MS_PER_SECOND = 1000.0
 
     /** Characters of a redirect target kept in the message, after masking. */
     private const val LOCATION_LIMIT = 300
 
-    /** `messages.1.content.0.tool_use.input: Field required`, `tool_choice: …`. */
-    private val PARAM_PREFIX = Regex("""^([a-z_][a-z0-9_]*(?:\.[a-z0-9_]+)*): """)
+    /** `messages.1.content.0.tool_use.input: Field required`, `tool_choice: …`; [paramOf] checks the dots. */
+    private val PARAM_PREFIX = Regex("""^([a-z_][a-z0-9_.]*): """)
 
     /** Preserved thinking: the block's signature does not cover this history (model-layer §5). */
     private val BINDING_PHRASES =

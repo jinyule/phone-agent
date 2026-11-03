@@ -11,9 +11,11 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.MethodSource
+import org.junit.jupiter.params.provider.ValueSource
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import kotlin.random.Random
 
 /** Anthropic error bodies and statuses map to [ModelError] kinds (model-layer §2, §3.3). */
 class AnthropicErrorsTest {
@@ -65,6 +67,29 @@ class AnthropicErrorsTest {
         assertEquals("messages.1.content.0.tool_use.input", (nested as ModelError.InvalidRequest).param)
         val plain = map(400, body("invalid_request_error", "Your credit balance is too low"))
         assertNull((plain as ModelError.InvalidRequest).param)
+    }
+
+    @Test
+    fun `a field path as long as an error body is read whole`() {
+        val path = "messages" + ".0".repeat(PATH_SEGMENTS)
+        val error = map(400, body("invalid_request_error", "$path: Field required"))
+        assertEquals(path, (error as ModelError.InvalidRequest).param)
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["messages..0: x", "messages.: x", "messages.0.: x", ".messages: x", "0messages: x"])
+    fun `a path with an empty segment or a digit first names no field`(message: String) {
+        assertNull((map(400, body("invalid_request_error", message)) as ModelError.InvalidRequest).param)
+    }
+
+    @Test
+    fun `random messages name the field the path pattern before r10 names`() {
+        val random = Random(SEED)
+        repeat(PATH_CASES) {
+            val message = buildString { repeat(random.nextInt(MAX_PATH_PIECES)) { append(PATH_PIECES.random(random)) } }
+            val error = map(400, body("invalid_request_error", message)) as ModelError.InvalidRequest
+            assertEquals(PATH_BEFORE.find(message)?.groupValues?.get(1), error.param, "for [$message]")
+        }
     }
 
     @Test
@@ -186,6 +211,19 @@ class AnthropicErrorsTest {
 
         /** The shortest piece of a key that counts as part of it. */
         private const val PIECE = 6
+
+        /** Segments of a path that fills an error body (64 KiB). */
+        private const val PATH_SEGMENTS = 32_000
+
+        /** The field path pattern before r10: a repeated group, whose stack grows with the segments. */
+        private val PATH_BEFORE = Regex("""^([a-z_][a-z0-9_]*(?:\.[a-z0-9_]+)*): """)
+
+        /** Pieces of field paths and what may follow or break them. */
+        private val PATH_PIECES =
+            listOf("messages", "tool_choice", "a", "z", "_", "0", "9", "A", "-", ".", "..", ":", ": ", " ", "x")
+        private const val SEED = 10
+        private const val PATH_CASES = 20_000
+        private const val MAX_PATH_PIECES = 10
 
         @JvmStatic
         fun cases(): List<Array<Any>> =
