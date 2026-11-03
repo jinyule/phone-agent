@@ -58,8 +58,10 @@ internal object RefMatcher {
             val element: ReadElement,
         ) : Match
 
-        /** The element is gone, moved, replaced or ambiguous: the model must observe again. */
-        data object Stale : Match
+        /** The element is gone, moved, replaced or ambiguous ([reason]): the model must observe again. */
+        data class Stale(
+            val reason: StaleReason,
+        ) : Match
 
         /** [ref] was not shown in the planned snapshot. */
         data object UnknownRef : Match
@@ -73,8 +75,83 @@ internal object RefMatcher {
     ): Match {
         if (planned.snapshot.elements.none { it.ref == ref }) return Match.UnknownRef
         val entry = planned.tree.first { it.ref == ref }
-        val index = RefCarrier.pair(planned.tree, fresh.elements).indexOf(ref)
-        val element = fresh.elements.getOrNull(index)
-        return if (element != null && element.element.bounds == entry.bounds) Match.Found(element) else Match.Stale
+        val paired = RefCarrier.pair(planned.tree, fresh.elements)
+        val element = fresh.elements.getOrNull(paired.indexOf(ref))
+        return when {
+            element == null -> Match.Stale(StaleReasons.of(entry, planned.tree, fresh.elements, paired.toSet()))
+            element.element.bounds == entry.bounds -> Match.Found(element)
+            else -> Match.Stale(StaleReason.MOVED)
+        }
     }
+}
+
+/**
+ * Why a planned element was not found again, for tests and the log. The model is told only
+ * `StaleRef` so far: carrying the reason there is a change of WP01's contract.
+ */
+internal enum class StaleReason {
+    /** The screen the action was planned on is no longer remembered. */
+    FORGOTTEN,
+
+    /** The element, or the one alike in the fresh read, was read only in part or is a row cut down to its controls. */
+    UNRELIABLE,
+
+    /** A label of its window outside lists changed, or the window is gone. */
+    WINDOW_CHANGED,
+
+    /** A label of its row changed, or the row is gone. */
+    ROW_CHANGED,
+
+    /** It is there, but not where the model saw it. */
+    MOVED,
+
+    /** Several elements are alike and none could be told for it. */
+    AMBIGUOUS,
+
+    /** Nothing in the fresh read is it. */
+    NOT_FOUND,
+}
+
+/** Explains why [RefCarrier.pair] paired a planned element with nothing; it decides nothing itself. */
+internal object StaleReasons {
+    /** Why [entry] of [tree] is not among the [paired] refs of [fresh]. */
+    fun of(
+        entry: TreeEntry,
+        tree: List<TreeEntry>,
+        fresh: List<ReadElement>,
+        paired: Set<ElementRef?>,
+    ): StaleReason {
+        val identity = entry.identity
+        val context = identity.context
+        val sameScope =
+            fresh.filter {
+                it.identity.window == identity.window &&
+                    it.identity.context?.scope == context?.scope
+            }
+        val parent = entry.parent?.takeIf { it !in paired }?.let { ref -> tree.first { it.ref == ref } }
+        val alike = fresh.filter { it.identity.copy(reliable = true) == identity.copy(reliable = true) }
+        val alikeBefore = tree.count { it.identity == identity && it.parent == entry.parent }
+        return when {
+            !identity.reliable -> StaleReason.UNRELIABLE
+
+            context?.scope == IdentityContext.Scope.WINDOW &&
+                sameScope.any {
+                    !it.identity.reliable
+                }
+            -> StaleReason.UNRELIABLE
+
+            sameScope.none { it.identity.context == context } -> changed(context)
+
+            parent != null -> of(parent, tree, fresh, paired)
+
+            alike.any { !it.identity.reliable } -> StaleReason.UNRELIABLE
+
+            alike.size > 1 || alikeBefore > 1 -> StaleReason.AMBIGUOUS
+
+            else -> StaleReason.NOT_FOUND
+        }
+    }
+
+    private fun changed(context: IdentityContext?): StaleReason =
+        if (context?.scope == IdentityContext.Scope.ROW) StaleReason.ROW_CHANGED else StaleReason.WINDOW_CHANGED
 }

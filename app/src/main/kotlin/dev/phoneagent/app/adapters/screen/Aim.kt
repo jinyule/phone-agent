@@ -31,8 +31,10 @@ internal sealed interface Resolution {
         val aim: Aim,
     ) : Resolution
 
-    /** The planned element no longer matches: the model must observe again. */
-    data object Stale : Resolution
+    /** The planned element no longer matches ([reason]): the model must observe again. */
+    data class Stale(
+        val reason: StaleReason,
+    ) : Resolution
 
     /** The target is invalid; [reason] is for the model, in English. */
     data class Invalid(
@@ -80,13 +82,13 @@ internal object Aims {
             }
 
             planned == null -> {
-                Resolution.Stale
+                Resolution.Stale(StaleReason.FORGOTTEN)
             }
 
             else -> {
                 when (val match = RefMatcher.match(planned, target.ref, read)) {
                     is RefMatcher.Match.Found -> Resolution.Aimed(Aim.AtElement(match.element))
-                    RefMatcher.Match.Stale -> Resolution.Stale
+                    is RefMatcher.Match.Stale -> Resolution.Stale(match.reason)
                     RefMatcher.Match.UnknownRef -> Resolution.Invalid("screen $on has no element @${target.ref}")
                 }
             }

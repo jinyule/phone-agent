@@ -32,14 +32,26 @@ class DiffBaseTest {
             assertNull(outcome.diff)
         }
 
+    /** A list of [people], a button each, one under the other from the middle of the display. */
+    private fun people(vararg people: String) =
+        node("androidx.recyclerview.widget.RecyclerView", Rect(0, 1000, 1000, 1800)).with(
+            *people
+                .mapIndexed {
+                    index,
+                    person,
+                    ->
+                    button(person, Rect(0, 1000 + index * 200, 500, 1100 + index * 200))
+                }.toTypedArray(),
+        )
+
     @Test
     fun withoutABaseScreenTheDiffIsAgainstTheLatestOne() =
         runTest {
-            host.show(button("Alice", Rect(0, 1000, 500, 1100)))
+            // A row added to a list; a label added outside lists would renumber the window (r3 B1).
+            host.show(people("Alice"))
             val port = mainPort(host)
             port.snapshot()
-            host.onGesture =
-                { host.show(button("Alice", Rect(0, 1000, 500, 1100)), button("Bob", Rect(0, 1200, 500, 1300))) }
+            host.onGesture = { host.show(people("Alice", "Bob")) }
 
             val outcome = port.act(UiAction.Tap(Target.Point(250, 525)), on = null)
 

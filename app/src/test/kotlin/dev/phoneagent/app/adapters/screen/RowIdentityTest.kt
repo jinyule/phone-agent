@@ -137,8 +137,10 @@ class RowIdentityTest {
         )
 
     @Test
-    fun aControlNextToATickingTimeKeepsItsRef() =
+    fun aControlNextToATickingTimeIsStale() =
         runTest {
+            // The cost the user accepted (fix list r3 B1): any label of the window outside lists counts,
+            // numbers too, so a control beside a clock goes stale as the clock ticks.
             host.show(player("0:12"))
             val port = mainPort(host)
             val s1 = port.snapshot()
@@ -147,8 +149,9 @@ class RowIdentityTest {
 
             val outcome = port.act(UiAction.Tap(Target.Ref(s1.elements.single { it.name == "Pause" }.ref)), s1.id)
 
-            assertEquals(ActionOutcome.Status.Ok, outcome.status)
-            assertTrue(pause.clicked)
+            assertEquals(ActionOutcome.Status.StaleRef, outcome.status)
+            assertFalse(pause.clicked)
+            assertTrue(host.gestures.isEmpty())
         }
 
     @Test

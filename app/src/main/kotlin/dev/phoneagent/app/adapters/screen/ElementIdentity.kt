@@ -6,14 +6,15 @@ import java.security.MessageDigest
 
 /**
  * Who an element is, as far as the accessibility tree tells, leaving out where it is and what it
- * currently holds (value, states): its window, role, view id, name, and the row it sits in.
+ * currently holds (value, states): its window, role, view id, name, and the [context] that tells
+ * it apart from elements alike (phase1 §3.3 "防过期引用").
  *
- * The row tells apart the controls every row has ("Like", "Add to cart", a checkbox): [row] stands
- * for every label of the row, in reading order, however many and however long ([RowKey]). Labels
- * are the nodes' own text or description, also of nodes clipped out of view that the row still
- * holds, so a row keeps its key while it scrolls. What counts as the row is decided by
- * [Identities.of]. An identity whose row, or whose surroundings ([Around]), could not be read in
- * full (the read stopped inside them) is not [reliable]: nothing is paired by it.
+ * The context is the labels of the element's window outside lists when it is in no list, else of
+ * its row ([Identities.of]). Labels are the nodes' own text or description, of nodes out of view
+ * too while the tree still holds them, so scrolling a list renumbers neither the bars around it
+ * nor a row that is still partly in view. An identity is not [reliable] when its context could
+ * not be read in full, or is a row the list's edge cut down to its controls: nothing is paired
+ * by it.
  *
  * Used by [RefCarrier] for both carrying refs to the next screen and finding a planned element
  * again before an action ([RefMatcher]); there is no second notion of identity.
@@ -23,21 +24,36 @@ internal data class ElementIdentity(
     val role: ElementRole,
     val resourceId: String?,
     val name: String?,
-    val row: RowKey?,
+    val context: IdentityContext?,
     val reliable: Boolean = true,
 )
 
+/** What tells an element apart: the labels ([key]) of its window outside lists, or of its row ([scope]). */
+internal data class IdentityContext(
+    val scope: Scope,
+    val key: LabelKey,
+) {
+    /** Whose labels [key] holds. */
+    enum class Scope {
+        /** The element's window, outside lists. */
+        WINDOW,
+
+        /** The element's row of a list. */
+        ROW,
+    }
+}
+
 /**
- * Labels in reading order as a digest (SHA-256, its first 128 bits): two rows have the same key
- * only when they hold the same labels, whatever their number and length.
+ * Labels in reading order as a digest (SHA-256, its first 128 bits): two contexts have the same
+ * key only when they hold the same labels, whatever their number and length, digits included.
  */
-internal data class RowKey(
+internal data class LabelKey(
     val high: Long,
     val low: Long,
 ) {
     internal companion object {
         /** The key of [labels], in order. */
-        fun of(labels: List<String>): RowKey =
+        fun of(labels: List<String>): LabelKey =
             labels.fold(Builder()) { builder, label -> builder.add(digestOf(label)) }.build()
 
         /** The digest of one label, which [Builder.add] takes. */
@@ -54,65 +70,31 @@ internal data class RowKey(
         fun add(labelDigest: ByteArray): Builder = apply { digest.update(labelDigest) }
 
         /** The key of the labels added. */
-        fun build(): RowKey {
+        fun build(): LabelKey {
             val bytes = ByteBuffer.wrap(digest.digest())
-            return RowKey(bytes.long, bytes.long)
+            return LabelKey(bytes.long, bytes.long)
         }
-    }
-}
-
-/**
- * The [labels] around an element that is in no row, as a bag, digits left out. The element keeps
- * its ref only while one bag holds the other: labels may come or go around it (a banner, an error
- * message) and numbers may change (a player's time, a clock), but no label may be replaced
- * (another card in its place).
- */
-internal class Around(
-    labels: List<String>,
-) {
-    private val counts: Map<String, Int> = labels.groupingBy { it.filterNot(Char::isDigit) }.eachCount()
-
-    /** Whether one of this and [other] holds the other. */
-    fun fits(other: Around): Boolean = holds(this, other) || holds(other, this)
-
-    private companion object {
-        fun holds(
-            big: Around,
-            small: Around,
-        ): Boolean = small.counts.all { (label, count) -> (big.counts[label] ?: 0) >= count }
     }
 }
 
 /** Computes the [ElementIdentity] of every node of one read. */
 internal object Identities {
-    /** How a list holds its items. */
-    enum class ListKind {
-        /** An adapter view or a node with collection info: each child is an item. */
-        COLLECTION,
-
-        /** A scroll view: its only child wraps the content, whose children are the items. */
-        WRAPPED,
-
-        /** Any other scrolling node: each child is an item. */
-        PLAIN,
-    }
-
     /**
-     * What a node is for rows: [list] how it holds items (`null` when it is no list), [item]
-     * whether it carries collection item info, [interactive] whether it takes clicks or checks.
+     * What a node is for contexts: [list] whether it is a list, a collection that recycles or
+     * lazily loads its children (a scroll view is not one: it holds all of its content);
+     * [interactive] whether it takes clicks or checks.
      */
     class Shape(
-        val list: ListKind?,
-        val item: Boolean,
+        val list: Boolean,
         val interactive: Boolean,
     )
 
     /**
      * What identities are made of, per node of the tree walked, in pre-order, whether the node is
-     * visible or not: [base] is the identity without its row (`null` for a node the read leaves
-     * out), [label] the node's whole text or description, [parent] the index of the node above,
-     * [cut] whether the walk stopped inside its subtree (node or depth budget) before reaching a
-     * list.
+     * visible or not: [base] is the identity without its context (`null` for a node the read
+     * leaves out), [label] the node's whole text or description, [parent] the index of the node
+     * above. [cut]: the walk left out a node below it with no list in between (for a list: one of
+     * its children). [clipped]: a child of a list that the list's edge may have cut.
      */
     class Facts(
         val base: ElementIdentity?,
@@ -120,111 +102,132 @@ internal object Identities {
         val shape: Shape,
         val parent: Int?,
         val cut: Boolean,
-    )
-
-    /** The identity of one node and, for an element in no row, the labels [around] it. */
-    class Who(
-        val identity: ElementIdentity,
-        val around: Around?,
+        val clipped: Boolean = false,
     )
 
     /**
      * The identity of each node of [nodes] (pre-order, parents first), `null` where [Facts.base] is.
      *
-     * The row of an element is:
-     * - inside a list item: the innermost item (a list in the item adds its own label only, not
-     *   its items, which scroll; the item stays the same);
-     * - a clickable or checkable node outside lists holding labels below it: itself;
-     * - none otherwise. A list, a scroll view's content wrapper or a node holding a list is the
-     *   screen's structure; another container is told apart by its own identity; an element with
-     *   no label below it but its own (a control, a text) is told apart by the labels [Who.around]
-     *   it, those of the nearest node above holding other labels (a card, a dialog).
+     * The context of an element (fix list r3 B1):
+     * - in no list: every label of its window outside lists, in reading order, of nodes out of
+     *   view too; a list adds its own label only (rule 1). A list itself is in no list.
+     * - in a list: its row. A child of the list that is a container (holding more than one label,
+     *   a list, or nodes none of which takes clicks) is a row; the other children (a text, a
+     *   button, a button holding its text: rows that have no node of their own) form rows in
+     *   reading order, each ending after a child that takes clicks or checks (rule 2). A list in
+     *   a row adds its own label only.
+     *
+     * Not reliable (no ref is carried or matched by it):
+     * - the walk left out a node with no list in between: in no list, the whole window; else the
+     *   row it is in; a list that lost children, its last row if that row is still open (rule 3);
+     * - a row the list's edge cut whose labels are all of its controls (rule 4): what told it
+     *   apart may be gone. Rows not cut and elements in no list are not held to this.
      */
-    fun of(nodes: List<Facts>): List<Who?> = Rows(nodes).identities()
+    fun of(nodes: List<Facts>): List<ElementIdentity?> = Contexts(nodes).identities()
+
+    /** The nodes whose labels make one context: a window's root, or the children of a list in one row. */
+    private class Owner(
+        val scope: IdentityContext.Scope,
+    ) {
+        val members = ArrayList<Int>()
+
+        /** A row that may have lost members the walk left out. */
+        var incomplete = false
+    }
 
     /** One computation of [of]. */
-    private class Rows(
+    private class Contexts(
         private val nodes: List<Facts>,
     ) {
         private val children = nodes.indices.groupBy { nodes[it].parent }
-        private val items = HashSet<Int>()
-        private val wrappers = HashSet<Int>()
         private val end = IntArray(nodes.size) { it + 1 }
 
-        // Labels in each subtree (a list counting its own only) and whether the subtree holds a list.
+        // Labels in each subtree (a list below counting its own only), whether it holds a list, and
+        // whether a node in it takes clicks or checks.
         private val labels = IntArray(nodes.size)
         private val holdsList = BooleanArray(nodes.size)
+        private val clickable = BooleanArray(nodes.size)
+
+        // Labels inside a control that holds that one label only, within the row.
+        private val ofControl = BooleanArray(nodes.size)
+        private val rowOf = arrayOfNulls<Owner>(nodes.size)
+        private val keyed = HashMap<Owner, IdentityContext>()
+        private val reliable = HashMap<Owner, Boolean>()
         private val digests = HashMap<Int, ByteArray>()
-        private val keys = HashMap<Int, RowKey>()
-        private val arounds = HashMap<Int, Around>()
 
         init {
-            nodes.indices.filter { nodes[it].shape.list != null }.forEach(::findItems)
             for (i in nodes.indices.reversed()) {
-                labels[i] += own(i)
+                val own = if (nodes[i].label != null) 1 else 0
+                labels[i] += own
+                clickable[i] = clickable[i] || nodes[i].shape.interactive
                 nodes[i].parent?.let { parent ->
+                    val list = nodes[i].shape.list
                     end[parent] = maxOf(end[parent], end[i])
-                    val list = nodes[i].shape.list != null
-                    labels[parent] += if (list) own(i) else labels[i]
+                    labels[parent] += if (list) own else labels[i]
                     holdsList[parent] = holdsList[parent] || list || holdsList[i]
+                    clickable[parent] = clickable[parent] || clickable[i]
                 }
             }
+            for (i in nodes.indices) {
+                val parent = nodes[i].parent
+                val inControl = parent != null && !nodes[parent].shape.list && ofControl[parent]
+                ofControl[i] = inControl || (nodes[i].shape.interactive && labels[i] == 1)
+            }
+            nodes.indices.filter { nodes[it].shape.list }.forEach(::findRows)
         }
 
-        fun identities(): List<Who?> {
-            val itemAround = arrayOfNulls<Int>(nodes.size)
+        fun identities(): List<ElementIdentity?> {
+            val owner = arrayOfNulls<Owner>(nodes.size)
             return nodes.indices.map { i ->
-                itemAround[i] = if (i in items) i else nodes[i].parent?.let { itemAround[it] }
-                nodes[i].base?.let { base ->
-                    val row = itemAround[i] ?: ownRow(i)
-                    val holder = if (row == null) holderOf(i) else null
-                    val identity =
-                        base.copy(row = row?.let(::keyOf), reliable = listOfNotNull(row, holder).none { nodes[it].cut })
-                    Who(identity, holder?.let(::aroundOf))
+                val parent = nodes[i].parent
+                val mine =
+                    when {
+                        parent == null -> Owner(IdentityContext.Scope.WINDOW).also { it.members += i }
+                        nodes[parent].shape.list -> checkNotNull(rowOf[i])
+                        else -> checkNotNull(owner[parent])
+                    }
+                owner[i] = mine
+                nodes[i].base?.copy(context = contextOf(mine), reliable = reliableOf(mine))
+            }
+        }
+
+        /** Splits the children of [list] into rows. */
+        private fun findRows(list: Int) {
+            var open: Owner? = null
+            for (child in children[list].orEmpty()) {
+                // A container: more than one label, a list in it, or nodes none of which takes clicks.
+                val container =
+                    labels[child] > 1 || holdsList[child] || !(children[child].isNullOrEmpty() || clickable[child])
+                if (nodes[child].shape.list || container) {
+                    open = null
+                    rowOf[child] = Owner(IdentityContext.Scope.ROW).also { it.members += child }
+                } else {
+                    val row = open ?: Owner(IdentityContext.Scope.ROW)
+                    row.members += child
+                    rowOf[child] = row
+                    open = row.takeUnless { clickable[child] }
                 }
             }
+            if (nodes[list].cut) open?.incomplete = true
         }
 
-        private fun own(i: Int): Int = if (nodes[i].label != null) 1 else 0
-
-        /** Records the items of [list] and the wrapper looked through to reach them. */
-        private fun findItems(list: Int) {
-            val kids = children[list].orEmpty()
-            val wrapper = kids.singleOrNull()?.takeIf { !children[it].isNullOrEmpty() }
-            val collection = nodes[list].shape.list == ListKind.COLLECTION || kids.any { nodes[it].shape.item }
-            if (!collection && nodes[list].shape.list == ListKind.WRAPPED && wrapper != null) {
-                wrappers += wrapper
-                items += children.getValue(wrapper)
-            } else {
-                items += kids
-            }
-        }
-
-        /** Whether [i] is part of the screen's structure: a list, a wrapper, or holding a list. */
-        private fun structural(i: Int): Boolean = nodes[i].shape.list != null || i in wrappers || holdsList[i]
-
-        /** [i] itself, when it is a clickable container outside lists holding other labels. */
-        private fun ownRow(i: Int): Int? =
-            i.takeIf { !structural(i) && nodes[i].shape.interactive && labels[i] > own(i) }
-
-        /** For a control or text outside rows, the nearest node above it holding labels outside it. */
-        private fun holderOf(i: Int): Int? =
-            if (structural(i) || labels[i] > own(i)) {
-                null
-            } else {
-                generateSequence(nodes[i].parent) { nodes[it].parent }.firstOrNull { labels[it] > labels[i] }
+        private fun contextOf(owner: Owner): IdentityContext =
+            keyed.getOrPut(owner) {
+                val key = LabelKey.Builder()
+                owner.members.flatMap(::labelsOf).forEach { i -> key.add(digestOf(i)) }
+                IdentityContext(owner.scope, key.build())
             }
 
-        /** The key of [owner]'s labels; a list below it adds its own label only. */
-        private fun keyOf(owner: Int): RowKey =
-            keys.getOrPut(owner) {
-                val key = RowKey.Builder()
-                labelsOf(owner).forEach { i -> key.add(digestOf(i)) }
-                key.build()
+        private fun reliableOf(owner: Owner): Boolean =
+            reliable.getOrPut(owner) {
+                val whole = !owner.incomplete && owner.members.none(::cutBelow)
+                val cutToControls =
+                    owner.members.any { nodes[it].clipped } && owner.members.flatMap(::labelsOf).all { ofControl[it] }
+                whole && !cutToControls
             }
 
-        private fun aroundOf(holder: Int): Around =
-            arounds.getOrPut(holder) { Around(labelsOf(holder).map { checkNotNull(nodes[it].label) }) }
+        /** Whether the walk left out a node of [i]'s own labels; a list's lost children are its rows'. */
+        private fun cutBelow(i: Int): Boolean = nodes[i].cut && !nodes[i].shape.list
 
         /** Indices of the labelled nodes of [owner]'s subtree in reading order, skipping into lists. */
         private fun labelsOf(owner: Int): List<Int> {
@@ -232,11 +235,12 @@ internal object Identities {
             var i = owner
             while (i < end[owner]) {
                 if (nodes[i].label != null) found += i
-                i = if (nodes[i].shape.list != null) end[i] else i + 1
+                i = if (nodes[i].shape.list) end[i] else i + 1
             }
             return found
         }
 
-        private fun digestOf(i: Int): ByteArray = digests.getOrPut(i) { RowKey.digestOf(checkNotNull(nodes[i].label)) }
+        private fun digestOf(i: Int): ByteArray =
+            digests.getOrPut(i) { LabelKey.digestOf(checkNotNull(nodes[i].label)) }
     }
 }

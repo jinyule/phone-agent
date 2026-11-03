@@ -165,27 +165,20 @@ class RefCarrierTest {
         assertEquals(ElementRef("e3"), second.tree[1].parent)
     }
 
-    /** An "OK" outside any row, with [around] the labels around it (`null`: nothing around it). */
-    private fun ok(around: List<String>?): TreeBuilder =
-        TreeBuilder().apply { add("OK", top = 100, role = ElementRole.BUTTON, more = More(around = around)) }
-
-    private fun ok(vararg around: String): TreeBuilder = ok(around.toList())
+    /** An "OK" outside lists, in a window whose labels outside lists are [labels]. */
+    private fun ok(vararg labels: String): TreeBuilder =
+        TreeBuilder().apply { add("OK", top = 100, role = ElementRole.BUTTON, more = More(window = labels.toList())) }
 
     @Test
-    fun anElementInNoRowKeepsItsRefWhileTheLabelsAroundItFit() {
+    fun anElementInNoListKeepsItsRefOnlyWhileItsWindowHoldsTheSameLabels() {
+        // Fix list r3 B1 rule 1: a line coming, going or replaced, a number changing, all count.
         val first = first(ok("Delete Ada?", "OK"))
 
-        assertEquals("a line came", first.refs, first.then(ok("Delete Ada?", "Undo is not possible", "OK")).refs)
-        assertEquals("a line went", first.refs, first.then(ok("OK")).refs)
-        assertEquals("nothing around it now", first.refs, first.then(ok(null)).refs)
+        assertEquals(first.refs, first.then(ok("Delete Ada?", "OK")).refs)
+        assertNotEquals("a line came", first.refs, first.then(ok("Delete Ada?", "Undo is not possible", "OK")).refs)
+        assertNotEquals("a line went", first.refs, first.then(ok("OK")).refs)
         assertNotEquals("a line replaced", first.refs, first.then(ok("Delete Bob?", "OK")).refs)
-    }
-
-    @Test
-    fun anElementThatHadNothingAroundItIsComparedByItselfOnly() {
-        val first = first(ok(null))
-
-        assertEquals(first.refs, first.then(ok("Delete Bob?", "OK")).refs)
+        assertNotEquals("a number", first.refs, first.then(ok("Delete 2 photos?", "OK")).refs)
     }
 
     @Test

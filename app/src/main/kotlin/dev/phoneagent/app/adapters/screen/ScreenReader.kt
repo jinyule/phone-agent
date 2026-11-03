@@ -34,7 +34,6 @@ internal class NodePlace(
  * @property place where it sits in the read.
  * @property brief whether [SnapshotDetail.BRIEF] shows it.
  * @property identity who it is, for carrying and re-matching refs.
- * @property around for an element in no row, the labels around it ([Identities.Who.around]).
  */
 internal class ReadElement(
     val element: UiElement,
@@ -42,7 +41,6 @@ internal class ReadElement(
     val place: NodePlace,
     val brief: Boolean,
     val identity: ElementIdentity,
-    val around: Around? = null,
 ) {
     /** The node to act on. */
     val node: AccessibilityNodeInfo get() = target.node
@@ -257,7 +255,7 @@ internal object ScreenReader {
     private class Walker(
         private val geometry: DisplayGeometry,
     ) {
-        /** A kept node before identities are known; [base] is its identity without a row. */
+        /** A kept node before identities are known; [base] is its identity without a context. */
         private class Kept(
             val element: UiElement,
             val target: NodeTarget,
@@ -266,14 +264,22 @@ internal object ScreenReader {
             val base: ElementIdentity,
         )
 
-        /** A walked node, kept or not (clipped children still tell rows apart); [kept] indexes [Walker.kept]. */
+        /**
+         * A walked node, kept or not (children out of view still tell rows apart); [kept] indexes
+         * [Walker.kept]; [clipped] as [Identities.Facts.clipped]; [viewport] for a list.
+         */
         private class Walked(
             val label: String?,
             val shape: Identities.Shape,
             val parent: Int?,
             val kept: Int?,
+            val clipped: Boolean,
+            val viewport: Viewport?,
         ) {
             var cut = false
+
+            /** For a list, how many of its children were walked so far. */
+            var children = 0
         }
 
         private val kept = ArrayList<Kept>()
@@ -299,7 +305,13 @@ internal object ScreenReader {
             val role = NodeFacts.roleOf(node)
             val index = if (node.isVisibleToUser) keep(node, role, place) else null
             val me = walked.size
-            walked += Walked(NodeText.identityLabel(node), NodeFacts.shapeOf(node, role), above, index)
+            val shape = NodeFacts.shapeOf(node, role)
+            val list = above?.let(walked::get)?.takeIf { it.shape.list }
+            val clipped =
+                list?.viewport?.clips(Rect().also(node::getBoundsInScreen), first = list.children == 0) == true
+            list?.let { it.children++ }
+            val viewport = if (shape.list) NodeFacts.viewportOf(node) else null
+            walked += Walked(NodeText.identityLabel(node), shape, above, index, clipped, viewport)
             val childPlace =
                 if (index == null) place else NodePlace(place.windowId, place.windowPackage, index, place.depth + 1)
             path += me
@@ -311,12 +323,16 @@ internal object ScreenReader {
             path.removeAt(path.lastIndex)
         }
 
-        /** A node was not walked: the subtrees around it are incomplete, up to the nearest list. */
+        /**
+         * A node was not walked: the nodes above it are incomplete up to the nearest list, which
+         * keeps the rest of its rows; a list whose own child was not walked lost rows.
+         */
         private fun markCut() {
             for (i in path.indices.reversed()) {
                 val node = walked[path[i]]
-                if (node.shape.list != null) return
-                node.cut = true
+                val list = node.shape.list
+                if (!list || i == path.lastIndex) node.cut = true
+                if (list) return
             }
         }
 
@@ -325,14 +341,17 @@ internal object ScreenReader {
             val identities =
                 Identities.of(
                     walked.map {
-                        Identities.Facts(it.kept?.let { k -> kept[k].base }, it.label, it.shape, it.parent, it.cut)
+                        val base = it.kept?.let { k -> kept[k].base }
+                        Identities.Facts(base, it.label, it.shape, it.parent, it.cut, it.clipped)
                     },
                 )
-            val ofKept = arrayOfNulls<Identities.Who>(kept.size)
+            val ofKept = arrayOfNulls<ElementIdentity>(kept.size)
             walked.forEachIndexed { i, node -> node.kept?.let { ofKept[it] = identities[i] } }
-            return kept.mapIndexed { i, k ->
-                val who = checkNotNull(ofKept[i])
-                ReadElement(k.element, k.target, k.place, k.brief, who.identity, who.around)
+            return kept.mapIndexed {
+                i,
+                k,
+                ->
+                ReadElement(k.element, k.target, k.place, k.brief, checkNotNull(ofKept[i]))
             }
         }
 
@@ -377,7 +396,7 @@ internal object ScreenReader {
                     role,
                     element.resourceId,
                     NodeText.identityNameOf(node, role),
-                    row = null,
+                    context = null,
                 )
             val brief = name != null || interactive || opaqueLeaf(node, pixels)
             kept += Kept(element, NodeTarget(node, pixels), place, brief, base)

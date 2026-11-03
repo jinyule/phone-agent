@@ -1,7 +1,9 @@
 package dev.phoneagent.app.adapters.screen
 
+import android.graphics.Rect
 import android.os.Build
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction
 import dev.phoneagent.core.ports.ElementRole
 import dev.phoneagent.core.ports.ElementState
 
@@ -10,8 +12,20 @@ internal object NodeFacts {
     private const val CHROME_ROLE = "AccessibilityNodeInfo.chromeRole"
     private val LIST_CLASSES = listOf("RecyclerView", "ListView", "GridView", "ScrollView", "ViewPager")
 
-    // Adapter views: every child is an item, however large.
+    // Views that recycle or lazily load their children; nodes with collection info are lists too.
     private val COLLECTION_CLASSES = listOf("RecyclerView", "ListView", "GridView", "ViewPager", "ViewPager2")
+    private val BACKWARD =
+        setOf(
+            AccessibilityAction.ACTION_SCROLL_BACKWARD.id,
+            AccessibilityAction.ACTION_SCROLL_UP.id,
+            AccessibilityAction.ACTION_SCROLL_LEFT.id,
+        )
+    private val FORWARD =
+        setOf(
+            AccessibilityAction.ACTION_SCROLL_FORWARD.id,
+            AccessibilityAction.ACTION_SCROLL_DOWN.id,
+            AccessibilityAction.ACTION_SCROLL_RIGHT.id,
+        )
     private val SWITCH_CLASSES = listOf("Switch", "SwitchCompat", "SwitchMaterial")
 
     /** Role from the widget class alone, or `null` when the class says nothing. */
@@ -53,21 +67,36 @@ internal object NodeFacts {
         cls: String,
     ): Boolean = node.isScrollable || node.collectionInfo != null || LIST_CLASSES.any(cls::endsWith)
 
-    /** What [node] (of role [role]) is for rows ([Identities.of]). */
+    /**
+     * What [node] (of role [role]) is for contexts ([Identities.of]): a list only when it recycles
+     * or lazily loads its children (collection info, an adapter view, a pager); a scroll view holds
+     * all of its content and is none.
+     */
     fun shapeOf(
         node: AccessibilityNodeInfo,
         role: ElementRole,
     ): Identities.Shape {
         val cls = node.className?.toString().orEmpty()
-        val list =
-            when {
-                role != ElementRole.LIST -> null
-                node.collectionInfo != null || COLLECTION_CLASSES.any(cls::endsWith) -> Identities.ListKind.COLLECTION
-                cls.endsWith("ScrollView") -> Identities.ListKind.WRAPPED
-                else -> Identities.ListKind.PLAIN
-            }
+        val list = role == ElementRole.LIST && (node.collectionInfo != null || COLLECTION_CLASSES.any(cls::endsWith))
         val interactive = node.isClickable || node.isLongClickable || node.isCheckable
-        return Identities.Shape(list, item = node.collectionItemInfo != null, interactive = interactive)
+        return Identities.Shape(list, interactive)
+    }
+
+    /**
+     * The viewport of list [node]: its bounds, its axis (sideways for a one-row collection and a
+     * pager) and the ways it can still scroll, from its scroll actions.
+     */
+    fun viewportOf(node: AccessibilityNodeInfo): Viewport {
+        val info = node.collectionInfo
+        val cls = node.className?.toString().orEmpty()
+        val sideways = (info != null && info.rowCount == 1 && info.columnCount != 1) || cls.endsWith("ViewPager")
+        val actions = node.actionList.map { it.id }.toSet()
+        return Viewport(
+            Rect().also(node::getBoundsInScreen),
+            sideways,
+            back = actions.any(BACKWARD::contains),
+            forward = actions.any(FORWARD::contains),
+        )
     }
 
     /** Interaction states of [node]. */
@@ -100,6 +129,34 @@ internal object NodeFacts {
             @Suppress("DEPRECATION")
             node.isChecked
         }
+}
+
+/**
+ * What part of a list is in view ([box]), along which axis it scrolls ([sideways]) and whether it
+ * can still scroll [back] and [forward]: which of its children its edge may have cut.
+ */
+internal class Viewport(
+    private val box: Rect,
+    private val sideways: Boolean,
+    private val back: Boolean,
+    private val forward: Boolean,
+) {
+    /**
+     * Whether a child at [bounds] may have been cut by the list's edge: it reaches past the list,
+     * or touches an edge the list can still scroll past, or is the [first] child of a list that
+     * can scroll back (what came before it may have been taken out of the tree). Sideways both
+     * edges count either way, as right-to-left lists scroll the other way round.
+     */
+    fun clips(
+        bounds: Rect,
+        first: Boolean,
+    ): Boolean {
+        val atStart = if (sideways) bounds.left <= box.left else bounds.top <= box.top
+        val atEnd = if (sideways) bounds.right >= box.right else bounds.bottom >= box.bottom
+        val backward = back || (sideways && forward)
+        val onward = forward || (sideways && back)
+        return !box.contains(bounds) || (backward && (first || atStart)) || (onward && atEnd)
+    }
 }
 
 /**

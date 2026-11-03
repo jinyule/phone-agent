@@ -227,6 +227,22 @@ class AndroidScreenTest {
             show(button("OK", Rect(0, 1000, 500, 1100)), button("Cancel", Rect(500, 1000, 1000, 1100)))
             val screen = screen()
             val first = screen.snapshot()
+            // The layout moves the buttons down; the window holds the same labels.
+            show(button("OK", Rect(0, 1100, 500, 1200)), button("Cancel", Rect(500, 1100, 1000, 1200)))
+
+            val second = screen.snapshot()
+
+            assertEquals(first.ref("OK"), second.ref("OK"))
+            assertEquals(first.ref("Cancel"), second.ref("Cancel"))
+        }
+
+    @Test
+    fun aLabelThatAppearsOutsideListsGivesTheWindowNewRefsNoEarlierElementHad() =
+        runTest {
+            // Fix list r3 B1 rule 1: the window's labels outside lists are what tells its controls apart.
+            show(button("OK", Rect(0, 1000, 500, 1100)), button("Cancel", Rect(500, 1000, 1000, 1100)))
+            val screen = screen()
+            val first = screen.snapshot()
             // A banner appears on top and pushes the buttons down.
             show(
                 button("Update available", Rect(0, 0, 1000, 100)),
@@ -236,10 +252,8 @@ class AndroidScreenTest {
 
             val second = screen.snapshot()
 
-            assertEquals(first.ref("OK"), second.ref("OK"))
-            assertEquals(first.ref("Cancel"), second.ref("Cancel"))
-            val banner = second.ref("Update available").ref
-            assertTrue("a new element gets a ref no earlier element had", first.elements.none { it.ref == banner })
+            val before = first.elements.map { it.ref }.toSet()
+            assertTrue("no ref of the first screen is used again", second.elements.none { it.ref in before })
             assertEquals(
                 second.elements.size,
                 second.elements

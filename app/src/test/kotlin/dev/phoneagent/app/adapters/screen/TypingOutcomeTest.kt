@@ -68,7 +68,7 @@ class TypingOutcomeTest {
             ScreenObserver(surface, system, analyzer, AndroidScreen.sequentialSnapshotIds(), SnapshotHistory(keep = 8))
         val parts = PortParts(surface, system, analyzer, observer, ScreenTimings(), injector = null)
         val element = UiElement(ElementRef("e1"), ElementRole.INPUT, bounds = Bounds(0, 100, 999, 150))
-        val identity = ElementIdentity(1, ElementRole.INPUT, resourceId = null, name = "Amount", row = null)
+        val identity = ElementIdentity(1, ElementRole.INPUT, resourceId = null, name = "Amount", context = null)
         val read =
             ReadElement(
                 element,

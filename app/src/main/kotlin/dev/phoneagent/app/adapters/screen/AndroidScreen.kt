@@ -1,6 +1,7 @@
 package dev.phoneagent.app.adapters.screen
 
 import android.accessibilityservice.AccessibilityService
+import android.util.Log
 import dev.phoneagent.core.ids.SnapshotId
 import dev.phoneagent.core.ports.ActionOutcome
 import dev.phoneagent.core.ports.Frame
@@ -27,7 +28,8 @@ import java.util.concurrent.atomic.AtomicLong
  *   refs are carried from screen to screen ([RefCarrier]), quality and fingerprint come from the
  *   [SnapshotAnalyzer];
  * - actions re-read the tree first and find ref targets again with the same identity ([RefMatcher]);
- *   a target that no longer matches yields `StaleRef` without touching the device;
+ *   a target that no longer matches yields `StaleRef` without touching the device (why, a
+ *   [StaleReason], goes to the log only);
  * - after an action the display settles on accessibility events ([ChangeWatch]) and is read back
  *   at the detail of the screen the action was based on;
  * - nothing here touches this app's own windows (`Refused`);
@@ -109,7 +111,9 @@ internal class AndroidScreen(
                         ActionRun(parts, host, geometry, baseline, base?.snapshot).perform(action, resolved.aim)
                     }
 
-                    Resolution.Stale -> {
+                    is Resolution.Stale -> {
+                        // Only the ref, the screen id and the reason: nothing of what the screen shows.
+                        Log.i(TAG, "${targetOf(action)?.let(::refOf)} planned on $on is stale: ${resolved.reason}")
                         Outcomes.STALE
                     }
 
@@ -192,6 +196,9 @@ internal class AndroidScreen(
     }
 
     internal companion object {
+        /** Log tag of the screen port. */
+        const val TAG = "PhoneAgentScreen"
+
         /** What a screenshot that did not come in time counts as. */
         private val TIMED_OUT = Screenshot.Failed(AccessibilityService.ERROR_TAKE_SCREENSHOT_INTERNAL_ERROR)
 
@@ -200,6 +207,8 @@ internal class AndroidScreen(
             val next = AtomicLong(first)
             return { SnapshotId("s${next.getAndIncrement()}") }
         }
+
+        private fun refOf(target: Target): String? = (target as? Target.Ref)?.let { "@${it.ref}" }
 
         private fun targetOf(action: UiAction): Target? =
             when (action) {

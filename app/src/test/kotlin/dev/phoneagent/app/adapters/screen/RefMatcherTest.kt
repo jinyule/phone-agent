@@ -50,6 +50,8 @@ class RefMatcherTest {
         fingerprint = "f",
     )
 
+    private fun stale(reason: StaleReason) = RefMatcher.Match.Stale(reason)
+
     private fun match(
         planned: Observed,
         ref: String,
@@ -95,15 +97,15 @@ class RefMatcherTest {
         val matchAda = { fresh: TreeBuilder -> match(planned, "e2", fresh) }
 
         assertEquals(RefMatcher.Match.Found::class, matchAda(chats("Ada" to 100))::class)
-        assertEquals(RefMatcher.Match.Stale, matchAda(chats("Ada" to 101)))
-        assertEquals(RefMatcher.Match.Stale, matchAda(chats("Bob" to 100)))
+        assertEquals(stale(StaleReason.MOVED), matchAda(chats("Ada" to 101)))
+        assertEquals(stale(StaleReason.NOT_FOUND), matchAda(chats("Bob" to 100)))
         assertEquals(
-            RefMatcher.Match.Stale,
+            stale(StaleReason.WINDOW_CHANGED),
             matchAda(
                 TreeBuilder(window = 2).apply { add("Ada", top = 100, parent = add("Chats", top = 0)) },
             ),
         )
-        assertEquals(RefMatcher.Match.Stale, matchAda(TreeBuilder()))
+        assertEquals(stale(StaleReason.WINDOW_CHANGED), matchAda(TreeBuilder()))
     }
 
     @Test
@@ -112,7 +114,7 @@ class RefMatcherTest {
 
         val fresh = TreeBuilder().apply { add("Delete", top = 100, parent = add("Bob", top = 100)) }
 
-        assertEquals(RefMatcher.Match.Stale, match(planned, "e2", fresh))
+        assertEquals(stale(StaleReason.NOT_FOUND), match(planned, "e2", fresh))
     }
 
     @Test
@@ -124,7 +126,7 @@ class RefMatcherTest {
         val oneMore = chats("Like" to 100, "Like" to 200, "Like" to 300)
         assertSame(oneMore.elements[2], (match(planned, "e3", oneMore) as RefMatcher.Match.Found).element)
         // Both moved: nothing tells which is the planned one.
-        assertEquals(RefMatcher.Match.Stale, match(planned, "e3", chats("Like" to 150, "Like" to 250)))
+        assertEquals(stale(StaleReason.AMBIGUOUS), match(planned, "e3", chats("Like" to 150, "Like" to 250)))
     }
 
     @Test

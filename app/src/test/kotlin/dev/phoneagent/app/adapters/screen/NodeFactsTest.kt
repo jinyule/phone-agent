@@ -2,11 +2,11 @@ package dev.phoneagent.app.adapters.screen
 
 import android.graphics.Rect
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction
 import android.view.accessibility.AccessibilityNodeInfo.RangeInfo
 import android.widget.TextView
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import dev.phoneagent.app.adapters.screen.Identities.ListKind
 import dev.phoneagent.core.ports.ElementRole
 import dev.phoneagent.core.ports.ElementState
 import org.junit.Assert.assertEquals
@@ -97,115 +97,90 @@ class NodeFactsTest {
     }
 
     @Test
-    fun adapterViewsHoldItemsScrollViewsWrapThemAndOtherListsHoldThem() {
-        assertEquals(ListKind.COLLECTION, shapeOf("androidx.recyclerview.widget.RecyclerView").list)
-        assertEquals(ListKind.COLLECTION, shapeOf("androidx.viewpager2.widget.ViewPager2") { isScrollable = true }.list)
-        assertEquals(
-            ListKind.COLLECTION,
+    fun onlyCollectionsThatRecycleOrLoadLazilyAreLists() {
+        // Fix list r3 B1 rule 1: a scroll view holds all of its content and is no list.
+        assertTrue(shapeOf("androidx.recyclerview.widget.RecyclerView").list)
+        assertTrue(shapeOf("android.widget.ListView").list)
+        assertTrue(shapeOf("androidx.viewpager2.widget.ViewPager2") { isScrollable = true }.list)
+        assertTrue(
             shapeOf("android.view.View") { collectionInfo = AccessibilityNodeInfo.CollectionInfo(3, 1, false) }.list,
         )
-        assertEquals(ListKind.WRAPPED, shapeOf("android.widget.ScrollView").list)
-        assertEquals(ListKind.PLAIN, shapeOf("android.view.View") { isScrollable = true }.list)
-        assertNull(shapeOf("android.widget.LinearLayout").list)
+        assertFalse(shapeOf("android.widget.ScrollView").list)
+        assertFalse(shapeOf("androidx.core.widget.NestedScrollView") { isScrollable = true }.list)
+        assertFalse(shapeOf("android.view.View") { isScrollable = true }.list)
+        assertFalse(shapeOf("android.widget.LinearLayout").list)
+        assertFalse(
+            "a list's class with another role",
+            shapeOf("androidx.recyclerview.widget.RecyclerView") { isEditable = true }.list,
+        )
     }
 
     @Test
-    fun aShapeTellsItemsAndWhatTakesClicks() {
-        val item =
-            shapeOf("android.widget.LinearLayout") {
-                collectionItemInfo = AccessibilityNodeInfo.CollectionItemInfo(0, 1, 0, 1, false)
-            }
-        assertTrue(item.item)
-        assertFalse(item.interactive)
+    fun aShapeTellsWhatTakesClicks() {
+        assertFalse(shapeOf("android.widget.LinearLayout").interactive)
         assertTrue(shapeOf("android.widget.LinearLayout") { isClickable = true }.interactive)
         assertTrue(shapeOf("android.widget.LinearLayout") { isLongClickable = true }.interactive)
         assertTrue(shapeOf("android.widget.CheckBox") { isCheckable = true }.interactive)
     }
-}
 
-@RunWith(AndroidJUnit4::class)
-class NodeTextTest {
-    private val box = Rect(0, 0, 100, 100)
+    private val listBox = Rect(0, 200, 1000, 1800)
 
-    @Test
-    fun aClickableContainerIsNamedByItsVisibleDescendants() {
-        val title = node("android.widget.TextView", box) { text = "Alice" }
-        val preview = node("android.widget.TextView", box) { text = "See you at 5" }
-        val hidden = node("android.widget.TextView", box) { text = "secret" }
-        hidden.isVisibleToUser = false
-        val row = node("android.widget.LinearLayout", box) { isClickable = true }.with(title, preview, hidden)
-
-        assertEquals("Alice See you at 5", NodeText.nameOf(row, ElementRole.BUTTON))
-        assertNull("lists are not named by their rows", NodeText.nameOf(row, ElementRole.LIST))
-    }
+    /** The viewport of a list at [listBox] of [className], configured by [setup]. */
+    private fun viewport(
+        className: String = "androidx.recyclerview.widget.RecyclerView",
+        setup: AccessibilityNodeInfo.() -> Unit = {},
+    ): Viewport = NodeFacts.viewportOf(node(className, listBox, setup = setup))
 
     @Test
-    fun aggregatedNamesAreCapped() {
-        val long = node("android.widget.TextView", box) { text = "x".repeat(200) }
-        val row = node("android.widget.LinearLayout", box) { isClickable = true }.with(long)
-
-        assertEquals(NodeText.MAX_AGGREGATE + 1, NodeText.nameOf(row, ElementRole.BUTTON)?.length)
-    }
-
-    @Test
-    fun fieldsAreNamedByDescriptionOrLabelNeverByTheirContent() {
-        val label = TextView(ApplicationProvider.getApplicationContext()).apply { text = "Email" }
-        val field =
-            node("android.widget.EditText", box) {
-                isEditable = true
-                text = "ada@example.com"
+    fun aChildIsCutWhereTheListCanStillScroll() {
+        // Fix list r3 B1 rule 4: a child touching an edge the list can scroll past may have lost
+        // nodes there; so may the first child of a list that can scroll back.
+        val both =
+            viewport {
+                addAction(AccessibilityAction.ACTION_SCROLL_BACKWARD)
+                addAction(AccessibilityAction.ACTION_SCROLL_FORWARD)
             }
-        assertNull(NodeText.nameOf(field, ElementRole.INPUT))
-        field.addLabeledBy(label)
+        val atTop = viewport { addAction(AccessibilityAction.ACTION_SCROLL_DOWN) }
+        val still = viewport()
+        val top = Rect(0, 200, 1000, 300)
+        val middle = Rect(0, 900, 1000, 1000)
+        val bottom = Rect(0, 1700, 1000, 1800)
 
-        assertEquals("Email", NodeText.nameOf(field, ElementRole.INPUT))
-        assertEquals("ada@example.com", NodeText.valueOf(field, ElementRole.INPUT))
-        field.contentDescription = "Work email"
-        assertEquals("Work email", NodeText.nameOf(field, ElementRole.INPUT))
+        assertTrue(both.clips(top, first = false))
+        assertTrue(both.clips(bottom, first = false))
+        assertTrue("the first child", both.clips(middle, first = true))
+        assertFalse(both.clips(middle, first = false))
+        assertFalse("nothing above to scroll back to", atTop.clips(top, first = true))
+        assertTrue(atTop.clips(bottom, first = false))
+        assertFalse(still.clips(top, first = true))
+        assertFalse(still.clips(bottom, first = false))
+        assertTrue("reaching past the list", still.clips(Rect(0, 100, 1000, 300), first = false))
+        assertTrue("out of view", still.clips(Rect(), first = false))
+        assertTrue(viewport { addAction(AccessibilityAction.ACTION_SCROLL_UP) }.clips(top, first = false))
     }
 
     @Test
-    fun aHintReportedAsTextIsNotContent() {
-        val field =
-            node("android.widget.EditText", box) {
-                isEditable = true
-                text = "Search"
-                hintText = "Search"
+    fun aListThatScrollsSidewaysCutsAtItsSidesEitherWay() {
+        val row = viewport { collectionInfo = AccessibilityNodeInfo.CollectionInfo(1, 5, false) }
+        val forward =
+            viewport {
+                collectionInfo = AccessibilityNodeInfo.CollectionInfo(1, -1, false)
+                addAction(AccessibilityAction.ACTION_SCROLL_FORWARD)
             }
+        val pager =
+            viewport("androidx.viewpager.widget.ViewPager") { addAction(AccessibilityAction.ACTION_SCROLL_BACKWARD) }
+        val left = Rect(0, 900, 300, 1000)
+        val right = Rect(700, 900, 1000, 1000)
 
-        assertEquals("", NodeText.fieldText(field))
-        assertEquals("Search", NodeText.hintOf(field))
-    }
-
-    @Test
-    fun longTextIsCut() {
-        val text = node("android.widget.TextView", box) { this.text = "y".repeat(600) }
-
-        assertEquals(NodeText.MAX_TEXT + 1, NodeText.nameOf(text, ElementRole.TEXT)?.length)
-    }
-
-    @Test
-    fun whatTellsElementsApartIsTheWholeLabel() {
-        val text = node("android.widget.TextView", box) { this.text = "y".repeat(600) + "Ada" }
-        val field =
-            node("android.widget.EditText", box) {
-                isEditable = true
-                this.text = "secret"
-            }
-
-        assertEquals("y".repeat(600) + "Ada", NodeText.identityLabel(text))
-        assertNull("never a field's content", NodeText.identityLabel(field))
-    }
-
-    @Test
-    fun aClickableContainerHasNoNameOfItsOwnInItsIdentity() {
-        val title = node("android.widget.TextView", box) { text = "Alice" }
-        val row = node("android.widget.LinearLayout", box) { isClickable = true }.with(title)
-        val labelled = node("android.widget.EditText", box) { contentDescription = "Amount" }
-
-        assertEquals("Alice", NodeText.nameOf(row, ElementRole.BUTTON))
-        assertNull(NodeText.identityNameOf(row, ElementRole.BUTTON))
-        assertEquals("Alice", NodeText.identityNameOf(title, ElementRole.TEXT))
-        assertEquals("Amount", NodeText.identityNameOf(labelled, ElementRole.INPUT))
+        assertFalse(row.clips(left, first = true))
+        assertTrue("right to left, forward is to the left", forward.clips(left, first = false))
+        assertTrue(forward.clips(right, first = false))
+        assertTrue(pager.clips(right, first = false))
+        assertFalse("not along the scrolling axis", forward.clips(Rect(300, 200, 700, 300), first = false))
+        assertTrue(
+            viewport {
+                addAction(AccessibilityAction.ACTION_SCROLL_RIGHT)
+            }.clips(Rect(0, 1700, 1000, 1800), first = false),
+        )
     }
 }
