@@ -1,0 +1,66 @@
+{
+  "source": "constructed: gateway sending call arguments as a JSON object with number, boolean, array and null members",
+  "next": true,
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "tool_call",
+          "id": "call_obj1",
+          "name": "get_weather",
+          "argsJson": "{\"city\":\"Paris\",\"days\":3,\"metric\":true,\"hours\":[9,12.5,18],\"alerts\":false,\"wind\":{\"gusts\":null,\"limit\":40}}"
+        }
+      ],
+      "stopReason": "TOOL_USE",
+      "usage": {
+        "inputTokens": 120,
+        "outputTokens": 30
+      },
+      "providerMetadata": {
+        "id": "chatcmpl-test",
+        "model": "test-model",
+        "finish_reason": "tool_calls"
+      }
+    },
+    "deltas": {
+      "text": "",
+      "reasoning": "",
+      "calls": [
+        {
+          "id": "call_obj1",
+          "name": "get_weather",
+          "args": "{\"city\":\"Paris\",\"days\":3,\"metric\":true,\"hours\":[9,12.5,18],\"alerts\":false,\"wind\":{\"gusts\":null,\"limit\":40}}"
+        }
+      ]
+    },
+    "next": [
+      {
+        "role": "system",
+        "content": "Be brief."
+      },
+      {
+        "role": "user",
+        "content": "Weather in Paris?"
+      },
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "call_obj1",
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "arguments": "{\"city\":\"Paris\",\"days\":3,\"metric\":true,\"hours\":[9,12.5,18],\"alerts\":false,\"wind\":{\"gusts\":null,\"limit\":40}}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "call_obj1",
+        "content": "Sunny."
+      }
+    ]
+  }
+}

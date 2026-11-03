@@ -1,15 +1,22 @@
 package dev.phoneagent.core.model.openai
 
+import dev.phoneagent.core.model.ChatModel
 import dev.phoneagent.core.model.ChatResponse
 import dev.phoneagent.core.model.Credential
+import dev.phoneagent.core.model.Message
 import dev.phoneagent.core.model.ModelError
 import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.Part
+import dev.phoneagent.core.model.Role
 import dev.phoneagent.core.model.openai.Kit.base
+import dev.phoneagent.core.model.openai.Kit.enqueueSse
+import dev.phoneagent.core.model.openai.Kit.json
+import dev.phoneagent.core.model.openai.Kit.next
 import dev.phoneagent.core.model.openai.WireSupport.array
 import dev.phoneagent.core.model.openai.WireSupport.str
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.addJsonObject
@@ -35,7 +42,9 @@ import kotlin.io.path.name
  * Replays every stream fixture under `wire/<provider>/` through the real adapter and HTTP stack,
  * once in one piece and once in 7-byte chunks, and compares the outcome with
  * `<case>.expect.json` (`expect`); a mismatch leaves the actual expectation file for review
- * ([Kit.assertWire]). Delta invariants are checked on every successful replay.
+ * ([Kit.assertWire]). Delta invariants are checked on every successful replay. A fixture with
+ * `"next": true` also pins the history of the request after it (`expect.next`): the reply as the
+ * assistant turn and an answer to each of its calls, as the adapter sends them back.
  */
 class ReplayTest {
     @StartStop
@@ -50,7 +59,9 @@ class ReplayTest {
             val whole = run(fixture, meta, Int.MAX_VALUE)
             val chunked = run(fixture, meta, CHUNK)
             assertEquals(whole, chunked, "chunking must not change the outcome")
-            Kit.assertWire(metaPath, Kit.prettyText(JsonObject(meta + ("expect" to whole))))
+            val expect =
+                if (meta["next"] == JsonPrimitive(true)) JsonObject(whole + ("next" to next(meta, whole))) else whole
+            Kit.assertWire(metaPath, Kit.prettyText(JsonObject(meta + ("expect" to expect))))
         }
 
     @Test
@@ -80,24 +91,7 @@ class ReplayTest {
                 .chunkedBody(body, chunk)
                 .build(),
         )
-        val responses = meta.str("protocol") == "responses"
-        val profile =
-            Kit.profile(
-                server.base(),
-                protocol = if (responses) ModelProtocol.OPENAI_RESPONSES else ModelProtocol.OPENAI_CHAT_COMPLETIONS,
-                credential = if (meta["plan"] == JsonPrimitive(true)) Kit.PLAN else Credential.None,
-                reasoningField = meta.str("reasoningField"),
-                preset = meta.str("preset"),
-            )
-        val recover = meta.array("recover").orEmpty().map { LeakedCallFormat.valueOf((it as JsonPrimitive).content) }
-        // A custom route recovers only formats it declares; a preset route only its preset's.
-        val wire =
-            if (profile.preset == null) {
-                Kit.declaring(profile, recover.toSet())
-            } else {
-                Kit.recovering(profile, recover.toSet())
-            }
-        val model = Kit.adapters().model(profile, Kit.MODEL, Kit.capabilities(), Kit.blobs(), wire)
+        val model = model(meta)
         val deltas = Deltas()
         return try {
             val response = model.complete(Kit.request(), deltas)
@@ -128,6 +122,50 @@ class ReplayTest {
         }
     }
 
+    private fun model(meta: JsonObject): ChatModel {
+        val responses = meta.str("protocol") == "responses"
+        val profile =
+            Kit.profile(
+                server.base(),
+                protocol = if (responses) ModelProtocol.OPENAI_RESPONSES else ModelProtocol.OPENAI_CHAT_COMPLETIONS,
+                credential = if (meta["plan"] == JsonPrimitive(true)) Kit.PLAN else Credential.None,
+                reasoningField = meta.str("reasoningField"),
+                preset = meta.str("preset"),
+            )
+        val recover = meta.array("recover").orEmpty().map { LeakedCallFormat.valueOf((it as JsonPrimitive).content) }
+        // A custom route recovers only formats it declares; a preset route only its preset's.
+        val wire =
+            if (profile.preset == null) {
+                Kit.declaring(profile, recover.toSet())
+            } else {
+                Kit.recovering(profile, recover.toSet())
+            }
+        return Kit.adapters().model(profile, Kit.MODEL, Kit.capabilities(), Kit.blobs(), wire)
+    }
+
+    /**
+     * The `messages` (Chat) or `input` (Responses) of the request after [outcome]: the user turn,
+     * the reply's parts as the assistant turn, and a text answer to each of its calls.
+     */
+    private suspend fun next(
+        meta: JsonObject,
+        outcome: JsonObject,
+    ): JsonElement {
+        val reply = Json.decodeFromJsonElement(serializer<ChatResponse>(), checkNotNull(outcome["response"]))
+        val answers = reply.toolCalls.map { Part.ToolResult(it.id, listOf(Part.Text("Sunny.")), isError = false) }
+        val request =
+            Kit.request(
+                Kit.user("Weather in Paris?"),
+                Message(Role.ASSISTANT, reply.parts),
+                Message(Role.TOOL, answers),
+            )
+        val responses = meta.str("protocol") == "responses"
+        server.enqueueSse(Kit.wire(if (responses) "openai-responses/text.sse" else "chat/text-include-usage.sse"))
+        model(meta).complete(request, Deltas())
+        repeat(REPLAYS) { server.next() }
+        return checkNotNull(server.next().json()[if (responses) "input" else "messages"])
+    }
+
     /** What the UI streamed must agree with the reply the log records. */
     private fun checkInvariants(
         response: ChatResponse,
@@ -155,6 +193,9 @@ class ReplayTest {
 
     companion object {
         private const val CHUNK = 7
+
+        /** Requests one [replay] makes before [next]: the whole and the chunked run. */
+        private const val REPLAYS = 2
         private const val MIN_FIXTURES = 40
 
         /** Fixture paths relative to `wire/`: every `.sse`, and `.json` bodies that are not expectations or goldens. */

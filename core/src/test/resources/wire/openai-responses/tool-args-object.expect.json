@@ -1,0 +1,61 @@
+{
+  "source": "constructed: gateway sending call arguments as a JSON object with number, boolean, array and null members",
+  "protocol": "responses",
+  "next": true,
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "tool_call",
+          "id": "call_obj1",
+          "name": "get_weather",
+          "argsJson": "{\"city\":\"Paris\",\"days\":3,\"metric\":true,\"hours\":[9,12.5,18],\"alerts\":false,\"wind\":{\"gusts\":null,\"limit\":40}}"
+        }
+      ],
+      "stopReason": "TOOL_USE",
+      "usage": {
+        "inputTokens": 120,
+        "outputTokens": 30
+      },
+      "providerMetadata": {
+        "id": "resp_test",
+        "model": "gpt-test",
+        "status": "completed"
+      }
+    },
+    "deltas": {
+      "text": "",
+      "reasoning": "",
+      "calls": [
+        {
+          "id": "call_obj1",
+          "name": "get_weather",
+          "args": "{\"city\":\"Paris\",\"days\":3,\"metric\":true,\"hours\":[9,12.5,18],\"alerts\":false,\"wind\":{\"gusts\":null,\"limit\":40}}"
+        }
+      ]
+    },
+    "next": [
+      {
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Weather in Paris?"
+          }
+        ]
+      },
+      {
+        "type": "function_call",
+        "call_id": "call_obj1",
+        "name": "get_weather",
+        "arguments": "{\"city\":\"Paris\",\"days\":3,\"metric\":true,\"hours\":[9,12.5,18],\"alerts\":false,\"wind\":{\"gusts\":null,\"limit\":40}}"
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "call_obj1",
+        "output": "Sunny."
+      }
+    ]
+  }
+}

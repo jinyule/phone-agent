@@ -1,0 +1,12 @@
+event: response.created
+data: {"type":"response.created","sequence_number":0,"response":{"id":"resp_test","object":"response","created_at":1793500000,"model":"gpt-test","status":"in_progress","output":[]}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","sequence_number":1,"output_index":0,"item":{"id":"fc_1","type":"function_call","status":"in_progress","call_id":"call_obj1","name":"get_weather"}}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","sequence_number":2,"output_index":0,"item":{"id":"fc_1","type":"function_call","status":"completed","arguments":{"city": "Paris", "days": 3, "metric": true, "hours": [9, 12.5, 18], "alerts": false, "wind": {"gusts": null, "limit": 40}},"call_id":"call_obj1","name":"get_weather"}}
+
+event: response.completed
+data: {"type":"response.completed","sequence_number":3,"response":{"id":"resp_test","object":"response","created_at":1793500000,"model":"gpt-test","status":"completed","output":[{"id":"fc_1","type":"function_call","status":"completed","arguments":{"city": "Paris", "days": 3, "metric": true, "hours": [9, 12.5, 18], "alerts": false, "wind": {"gusts": null, "limit": 40}},"call_id":"call_obj1","name":"get_weather"}],"usage":{"input_tokens":120,"output_tokens":30,"total_tokens":150}}}
+
