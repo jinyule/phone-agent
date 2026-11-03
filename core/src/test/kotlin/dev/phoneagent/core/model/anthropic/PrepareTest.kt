@@ -4,6 +4,7 @@ import dev.phoneagent.core.ids.ModelId
 import dev.phoneagent.core.model.ModelError
 import dev.phoneagent.core.model.ProviderProfile
 import dev.phoneagent.core.model.ReasoningLevel
+import dev.phoneagent.core.model.VerifiedCapability
 import dev.phoneagent.core.model.WireSetting
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -81,5 +82,20 @@ class PrepareTest {
         live["x-extra"] = "added"
         assertEquals(mapOf("x-client" to "phone-agent"), before.wire.headers)
         assertEquals(before, model.prepare(ReasoningLevel.HIGH))
+    }
+
+    @Test
+    fun `capabilities edited after the model was made change neither prepare nor the model's info`() {
+        val levels = mutableListOf(ReasoningLevel.LOW, ReasoningLevel.HIGH)
+        val verified = mutableSetOf(VerifiedCapability.TOOL_CALL)
+        val capabilities = Kit.CAPABILITIES.copy(reasoningLevels = levels, verified = verified)
+        val model = Kit.adapters().model(Kit.profile(), Kit.MODEL, capabilities, Kit.blobs())
+        val before = model.prepare(ReasoningLevel.HIGH)
+        assertEquals(ReasoningLevel.HIGH, before.reasoning)
+        levels.remove(ReasoningLevel.HIGH)
+        verified.clear()
+        assertEquals(before, model.prepare(ReasoningLevel.HIGH), "the levels the model was made with")
+        assertEquals(listOf(ReasoningLevel.LOW, ReasoningLevel.HIGH), model.info.capabilities.reasoningLevels)
+        assertEquals(setOf(VerifiedCapability.TOOL_CALL), model.info.capabilities.verified)
     }
 }

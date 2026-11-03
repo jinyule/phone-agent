@@ -53,7 +53,9 @@ public class AnthropicAdapters internal constructor(
      * [AnthropicSettings.effectiveFor] fits them to this model first when one profile serves
      * several). [blobs] reads the images of the session it serves. [ChatModel.prepare] gives the
      * snapshot of these inputs as they are now; requests are shaped by their own `wire` snapshot,
-     * never by later changes to [profile].
+     * never by later changes to [profile]. The model keeps its own copy of [capabilities]' level
+     * list and verified set, so later edits to the collections given here change neither
+     * [ChatModel.prepare] nor [ChatModel.info].
      *
      * Throws [IllegalArgumentException] for a profile of another protocol, and
      * [ModelError.InvalidRequest] naming the setting for [settings] that do not fit the endpoint
@@ -70,7 +72,12 @@ public class AnthropicAdapters internal constructor(
         require(profile.protocol == ModelProtocol.ANTHROPIC_MESSAGES) {
             "Provider ${profile.id}: ${profile.protocol} is not Anthropic Messages"
         }
-        val info = ModelInfo(profile.id, model, profile.protocol, capabilities)
+        val frozen =
+            capabilities.copy(
+                reasoningLevels = capabilities.reasoningLevels?.toList(),
+                verified = capabilities.verified.toSet(),
+            )
+        val info = ModelInfo(profile.id, model, profile.protocol, frozen)
         return MessagesModel(profile, info, blobs, env, settings)
     }
 }
