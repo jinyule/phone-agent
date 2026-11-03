@@ -24,7 +24,7 @@ class EchoGuardTest {
         val window = guard.Window()
         ECHOED.dropLast(1).forEach { window.next(it.toString()) }
         val error = assertThrows<ModelError.BadResponse> { window.next(ECHOED.takeLast(1)) }
-        assertTrue(CredentialEcho.discardsStreamed(error))
+        assertTrue(error.discardsStreamed)
     }
 
     @Test
@@ -70,10 +70,11 @@ class EchoGuardTest {
     }
 
     @Test
-    fun `only the fixed text is the marked rejection`() {
-        assertEquals("bad response: ${CredentialEcho.DETAIL}", CredentialEcho.error().message)
-        assertFalse(CredentialEcho.discardsStreamed(ModelError.BadResponse("other")))
-        assertFalse(CredentialEcho.discardsStreamed(ModelError.Network(CredentialEcho.DETAIL)))
+    fun `the rejection is fixed text that discards what was streamed`() {
+        val error = CredentialEcho.error()
+        assertEquals("bad response: ${CredentialEcho.DETAIL}", error.message)
+        assertTrue(error.discardsStreamed)
+        assertEquals(null, error.cause)
     }
 
     private companion object {

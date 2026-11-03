@@ -185,7 +185,7 @@ public class ProviderProbe internal constructor(
         }
 
         private fun failed(error: ModelError): ProbeResult =
-            if (CredentialEcho.discardsStreamed(error)) {
+            if (error.discardsStreamed) {
                 // Fixed text without provider words: masking it would only garble it (a one-letter key).
                 ProbeResult.Failed(
                     ProbeStep.TOOL_CALL,

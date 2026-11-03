@@ -58,7 +58,7 @@ class EchoRejectionTest {
         deltas: Deltas = Deltas(),
     ): ModelError {
         val error = assertThrows<ModelError.BadResponse> { model.send(Kit.request(), deltas) }
-        assertTrue(CredentialEcho.discardsStreamed(error), "the rejection carries the marker")
+        assertTrue(error.discardsStreamed, "the rejection carries the marker")
         assertEquals("bad response: ${CredentialEcho.DETAIL}", error.message)
         assertFalse(error.stackTraceToString().contains(secret.take(PREFIX)), "the error holds the secret (not shown)")
         val escaped = JsonPrimitive(secret).toString().removeSurrounding("\"")

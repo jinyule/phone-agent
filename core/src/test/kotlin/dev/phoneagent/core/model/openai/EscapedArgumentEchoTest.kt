@@ -90,7 +90,7 @@ class EscapedArgumentEchoTest {
         val error = assertThrows<Throwable> { model.send(Kit.request(), deltas) }
         assertNoPiece("the error", error.stackTraceToString(), key)
         assertTrue(
-            error is ModelError.BadResponse && CredentialEcho.discardsStreamed(error),
+            error is ModelError.BadResponse && error.discardsStreamed,
             "the marked echo rejection",
         )
         assertEquals("bad response: ${CredentialEcho.DETAIL}", error.message)

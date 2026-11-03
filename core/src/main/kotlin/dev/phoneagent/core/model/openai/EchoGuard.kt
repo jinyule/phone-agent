@@ -110,19 +110,13 @@ internal class EchoGuard(
 
 /**
  * The failure of a reply that echoed a request secret ([EchoGuard]): a [ModelError.BadResponse]
- * with fixed text, so no part of the echo reaches the error.
- *
- * The runtime must not keep what the attempt streamed (no interrupted assistant message, only the
- * attempt and this reason), and the UI clears the fragments it showed. WP01 adds a marker for that
- * to [ModelError] (A11); until it lands, [discardsStreamed] stands in for it and recognizes the
- * fixed text.
+ * with fixed text, so no part of the echo reaches the error, and with
+ * [ModelError.discardsStreamed] set: the runtime does not keep what the attempt streamed (no
+ * interrupted assistant message, only the attempt and this reason), and the UI takes back the
+ * fragments it showed.
  */
 internal object CredentialEcho {
     const val DETAIL: String = "the reply contained a credential this request sent and was discarded"
 
-    fun error(): ModelError.BadResponse = ModelError.BadResponse(DETAIL)
-
-    /** Placeholder for WP01's marker: whether [error] is this failure, whose streamed output must not be kept. */
-    fun discardsStreamed(error: Throwable): Boolean =
-        error is ModelError.BadResponse && error.message == "bad response: $DETAIL"
+    fun error(): ModelError.BadResponse = ModelError.BadResponse(DETAIL, discardsStreamed = true)
 }

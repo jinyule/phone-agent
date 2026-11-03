@@ -121,7 +121,7 @@ class DroppedContentTest {
             val error = assertThrows<Throwable> { model.send(Kit.request(), deltas) }
             assertNoPiece("the error", error.stackTraceToString())
             assertTrue(
-                error is ModelError.BadResponse && CredentialEcho.discardsStreamed(error),
+                error is ModelError.BadResponse && error.discardsStreamed,
                 "marked echo rejection",
             )
         }
@@ -203,7 +203,7 @@ class DroppedContentTest {
             val error = assertThrows<Throwable> { model.send(Kit.request(), deltas) }
             assertNoPiece("the error", error.stackTraceToString())
             assertTrue(
-                error is ModelError.BadResponse && CredentialEcho.discardsStreamed(error),
+                error is ModelError.BadResponse && error.discardsStreamed,
                 "marked echo rejection",
             )
             val shown = deltas.all.filterIsInstance<Delta.ToolCallArgs>().joinToString("") { it.fragment }

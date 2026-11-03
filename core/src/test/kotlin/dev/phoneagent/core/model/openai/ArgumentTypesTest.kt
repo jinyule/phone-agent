@@ -95,7 +95,7 @@ class ArgumentTypesTest {
             val error = assertThrows<Throwable> { model(protocol, NUMBER).send(Kit.request()) }
             assertFalse(error.stackTraceToString().contains(NUMBER), "the error holds the key (value not shown)")
             assertTrue(
-                error is ModelError.BadResponse && CredentialEcho.discardsStreamed(error),
+                error is ModelError.BadResponse && error.discardsStreamed,
                 "the marked echo rejection",
             )
         }
