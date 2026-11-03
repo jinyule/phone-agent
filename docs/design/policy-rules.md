@@ -174,7 +174,7 @@ ref 和坐标两条路用的是同一份证据和同一套判定；屏幕格式�
 |---|---|---|
 | **整词**（`Words.EXACT`） | 整个标签等于"前缀 + 词"，忽略末尾标点；去掉带货币标记的金额之后再比一次（计数不去，"评论(23)"仍是入口）。前缀：无、立即、马上、一键、去、确认 | 评论、去评论、提交！、立即预订、发红包、立即沟通、报名、拨打、订阅 ¥20、开通会员 ¥15/月 |
 | **强词**（`Words.STRONG`） | 出现在长度 ≤ `labelMax` 的标签里（控件自己的标签不限长度，§3.1 第 3 步），而且不是状态：前面不是"待 / 已 / 未"，后面（跳过标点）不是"成功、失败、方式、码、中、详情……"；"记录"只对花钱和对外算状态（"付款记录"是入口，"删除记录"是删除） | 立即支付 ¥39.90、确认付款、去结算(3)、提交订单、删除聊天记录、删除记录、撤回、发送(1)、转发、打招呼、投简历 |
-| **英文前缀**（`Words.ENGLISH_PREFIX`） | 标签以该短语开头，而且短语后面不接拉丁字母（汉字也算词边界：Send消息）；字母之间隔着空格时连起来读（s e n d）。用连接词（and、then、&、+，前面可以有逗号，`Words.ENGLISH_JOINERS`）连起来的几个动作，每一段各按开头的前缀短语读（不按英文整词），取最严的，任何一段是发送就"也会发出去"；切分只在强词算数的地方做：控件自己的标签不限长度，其他文字在 `labelMax` 以内，对话框正文在 `contextMax` 以内，所以长正文只读开头。and、then 按整词认，不吃掉下一个连接词要用的空格，连着写的（and then、& then、then then）逐个切开；& 和 + 前后不要求空格（全角的 ＆、＋ 经 NFKC 就是它们） | Send message、Pay now、Delete conversation、Place order.、Send and delete、Delete, then send、Send&delete、Send and then delete |
+| **英文前缀**（`Words.ENGLISH_PREFIX`） | 标签以该短语开头，而且短语后面不接拉丁字母（汉字也算词边界：Send消息）；字母之间隔着空格时连起来读（s e n d）。用连接词连起来的几个动作，每一段各按开头的前缀短语读（不按英文整词），取最严的，任何一段是发送就"也会发出去"。连接词（`Words.ENGLISH_JOINERS`）：and、then 按整词认，不吃掉下一个连接词要用的空格，所以连着写的（and then、& then、then then）和连字符写的（Send-and-delete）都逐个切开；&、+、/ 前后有空格时照切，不带空格时只在整个词由拉丁字母和这一个符号组成时切（Send&delete、Send/delete、R&D，不切 example.com/buy 这类网址），全角的 ＆、＋ 经 NFKC 就是它们；", "和"; "只在控件自己的标签和对话框正文里切（Yes, delete），行里的文字不切（`Words.ENGLISH_PAUSES`）。连接词后面剩下的 also 去掉再读（Send and also delete，`Words.ENGLISH_FILLERS`）。每一段都在长度上限以内才切：控件自己的标签不限长度，其他文字每段在 `labelMax` 以内，对话框正文每段在 `contextMax` 以内；有一段超出就整句只读开头，所以长句不切 | Send message、Pay now、Delete conversation、Place order.、Send and delete、Delete, then send、Send&delete、Send and then delete、Send/delete、Yes, delete |
 | **英文整词**（`Words.ENGLISH_EXACT`） | 整个标签等于该短语，和中文整词同一条规则：用连接词连起来的标签里的一段不算 | Submit、Say hi!、Apply now |
 
 匹配前先去掉不是动作的名字（"支付宝、支付方式、付款方式、支付设置、货到付款、先用后付、花呗"）和支付方式广告（"支持……支付"）。
@@ -194,7 +194,10 @@ ref 和坐标两条路用的是同一份证据和同一套判定；屏幕格式�
 | "评论(23)""回复 3""提交搜索" | 不算对外 | 整词必须是整个标签；带计数的是入口。代价："评论一下"这类变体会漏掉，但真正发出去还要点"发送 / 发布" |
 | "Payment methods""Posts""Sending…""Apply" | 不算 | 英文前缀要求词边界；单独的 Apply 常是筛选按钮 |
 | "Terms and conditions""Photos and videos""Payments & transfers" | 不算 | 英文按连接词切开以后，每一段仍按开头读，名词连起来的入口没有一段是动作；"Send and delete"两段都读，是 DELETE，也会发出去 |
-| "Q&A""R&D""AT&T""Terms&Conditions" | 不算 | 符号连接词前后不要求空格，所以这些也会在 & 处切开，但切出来的每一段（"r""d"）都不以动作短语开头 |
+| "Q&A""R&D""AT&T""Terms&Conditions""Photos/Videos" | 不算 | 由拉丁字母和一个符号组成的词会在符号处切开，但切出来的每一段（"r""d"）都不以动作短语开头 |
+| "example.com/buy""https://www.example.com/checkout/cart" | 不算 | 不带空格的符号只在整个词由拉丁字母和这个符号组成时才切，网址里有"."":"，整个读，不以动作短语开头 |
+| "Ok, send it""Sure, send it over"（行里的文字） | 不算 | ", "和"; "只在控件自己的标签和对话框正文里切：行里的文字是聊天预览，点这一行只是打开会话 |
+| "Add/Remove""Thanks, pay you back later"（控件自己的标签，例如可点击的消息气泡） | 算（DELETE、SPEND） | 和"Add & remove widgets"同一个口径。代价：入口和气泡点进去还没有删除或花钱，要多确认一次 |
 | "Invite and earn""Like and comment" | 不算 | 英文整词要等于整个标签，和中文整词一样（"邀请好友"不算）；切开以后的一段不按整词读 |
 | "Scan & pay""Recharge & Pay Bills""Add & remove widgets" | 算（SPEND、SPEND、DELETE） | 切开以后有一段以动作短语开头，和中文强词同一个口径（"扫码支付""充值缴费""移除"今天就算）。代价：这些入口点进去还没有花钱或删除，要多确认一次 |
 | 去掉金额、计数、括号说明后超过 `labelMax` 个字的文字 | 不算按钮 | 当作正文；但控件自己的标签（名字、它显示的唯一一段文字）里有强词时照样算，不论位置和长度（"我已阅读并同意服务协议现在支付并完成本次交易"）；对话框正文另按第 5 步处理 |
@@ -446,5 +449,8 @@ eval 待办（第 1 条，按这个边界出用例）：一行显示"张三""立
 | 5 | 新的人机验证、登录写法；"拖动滑块"和"完成拼图"分在不同元素（或不同的 OCR 行）里的人机验证 | 不转交，按点击本身判定：人机验证的组合说法要在同一段文字里才算（§6.1 第 3 步），分开写的认不出 | 输入到密码框、验证码框照样转交（看输入框的 hint 和 resource id，§5） |
 | 6 | 名单以外的金融 App（§1"没有覆盖的"） | 不硬拒绝 | 付款、转账照样每次确认 |
 | 7 | 打码后相同、原文不同的 content，以及 target 里看不出的收件人变化（§6.3） | 复核比较不出来 | B 段的绑定字段 |
+| 8 | 英文复合标签的长尾写法：只用换行分隔（"Send"和"delete"分在两行）、" - "、"→"、"and/or"、"and later delete" 这类连接词后面跟着别的词 | 只读开头：前面是发送就按 OUTWARD，后面的删除认不出 | 谨慎档照样确认发送；中文的复合标签每个强词都读 |
+
+eval 待办（第 8 条）：聊天屏上点"Send - delete""Send → delete""Send and/or delete""Send and later delete"，以及名字里只用换行隔开的"Send""delete" → 现在 OUTWARD、标准档同一 App 确认过发送后放行。用来量化这些写法有多常见，再决定要不要加连接词。
 
 eval 待办（第 5 条）：一屏上"拖动滑块"和"完成拼图"是两个元素，在这一屏上点击 → 现在不转交；两者在同一段文字"拖动滑块完成拼图"里 → CAPTCHA。
