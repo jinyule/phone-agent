@@ -94,7 +94,8 @@ internal object Identities {
      * visible or not: [base] is the identity without its context (`null` for a node the read
      * leaves out), [label] the node's whole text or description, [parent] the index of the node
      * above. [cut]: the walk left out a node below it with no list in between (for a list: one of
-     * its children), or, for a child of a list, a child of the list beside it could not be read. [clipped]: a child of a list that the list's edge may have cut.
+     * its children), or, for a child of a list, a child of the list beside it could not be read.
+     * [clipped]: a child of a list that the list's edge may have cut.
      */
     class Facts(
         val base: ElementIdentity?,
