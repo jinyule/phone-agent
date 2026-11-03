@@ -63,8 +63,8 @@ internal class Redactor(
     fun exact(text: String): String = forms.fold(text) { acc, form -> acc.replace(form, MASK) }
 
     /**
-     * [raw] provider text that was not read as JSON fields (an error body that is not JSON or not a
-     * JSON object, the whole of one without a message, a redirect target) masked as [text] masks
+     * [raw] provider text that was not read as JSON fields (an error body that is not JSON, a
+     * redirect target, each string of JSON with no message field) masked as [text] masks
      * it; or not quoted at all ([WITHHELD]) when it has escapes its lenient decoding
      * ([JsonEscapes.lenientDecode]) changes and the decoded text holds a form of this request's
      * secrets or a credential shape (`sk-…`, JWT), since masking it as written would miss what an

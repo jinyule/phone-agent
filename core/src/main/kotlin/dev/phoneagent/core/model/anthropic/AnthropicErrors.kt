@@ -3,6 +3,8 @@ package dev.phoneagent.core.model.anthropic
 import dev.phoneagent.core.model.ModelError
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -27,11 +29,11 @@ internal data class AnthropicError(
         private const val DETAIL_LIMIT = 500
 
         /**
-         * Parses an error body; anything that is not an Anthropic error object becomes its own
-         * message, masked, or not quoted at all when an escape in it hides a credential
-         * ([Redactor.quote]). Only the request's secrets are masked before the body is parsed
-         * ([Redactor.exact]); credential shapes are masked in what was decoded, since a shape
-         * matched before decoding stops at the first escape inside it.
+         * Parses an error body; a body that is not JSON becomes its own message as [Redactor.quote]
+         * shows it, and JSON that is not an object as [whole] shows it. Only the request's secrets
+         * are masked before the body is parsed ([Redactor.exact]); credential shapes are masked in
+         * what was decoded, since a shape matched before decoding stops at the first escape inside
+         * it.
          */
         fun parse(
             body: String,
@@ -46,7 +48,7 @@ internal data class AnthropicError(
                     val text = clean.trim().takeIf { it.isNotEmpty() }?.let(redactor::quote)
                     return AnthropicError(null, text ?: "(empty body: ${notJson::class.simpleName})")
                 }
-            return (root as? JsonObject)?.let { of(it, redactor) } ?: AnthropicError(null, redactor.quote(clean.trim()))
+            return (root as? JsonObject)?.let { of(it, redactor) } ?: AnthropicError(null, whole(root, redactor))
         }
 
         /**
@@ -54,7 +56,7 @@ internal data class AnthropicError(
          * `{"error": "text"}` some gateways send. The message field is masked once decoded (JSON
          * escapes can hide a secret from a scan of the raw text), or withheld when its own text hides
          * one behind further escapes ([Redactor.field]); a body without one is its own message, as
-         * [Redactor.quote] shows provider text.
+         * [whole] shows it.
          */
         fun of(
             root: JsonObject,
@@ -63,8 +65,33 @@ internal data class AnthropicError(
             val inner = root["error"] as? JsonObject ?: root
             val field = inner.text("message") ?: (root["error"] as? JsonPrimitive)?.contentOrNull
             val type = inner.text("type")?.takeIf { it != "error" }
-            return AnthropicError(type, field?.let(redactor::field) ?: redactor.quote(root.toString()))
+            return AnthropicError(type, field?.let(redactor::field) ?: whole(root, redactor))
         }
+
+        /**
+         * All of [root], JSON the server wrote that has no message field to read: not shown at all
+         * when [Redactor.quote] would not show a string in it (a member name or a value, decoded),
+         * else written back whole and masked. The whole written back is not what is checked: writing
+         * it back escapes each backslash again, so one decoding would only take that layer off. The
+         * OpenAI adapters' `whole` (WP03).
+         */
+        private fun whole(
+            root: JsonElement,
+            redactor: Redactor,
+        ): String =
+            if (root.strings().any { redactor.quote(it) == Redactor.WITHHELD }) {
+                Redactor.WITHHELD
+            } else {
+                redactor.text(root.toString())
+            }
+
+        /** Every string in this element: member names and string values, at any depth. */
+        private fun JsonElement.strings(): Sequence<String> =
+            when (this) {
+                is JsonPrimitive -> if (isString) sequenceOf(content) else emptySequence()
+                is JsonObject -> keys.asSequence() + values.asSequence().flatMap { it.strings() }
+                is JsonArray -> asSequence().flatMap { it.strings() }
+            }
 
         private fun JsonObject.text(key: String): String? =
             (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull?.takeIf { it.isNotBlank() }

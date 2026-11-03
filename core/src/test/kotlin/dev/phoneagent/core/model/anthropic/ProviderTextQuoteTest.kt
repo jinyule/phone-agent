@@ -19,11 +19,12 @@ import org.junit.jupiter.params.provider.MethodSource
 /**
  * Provider text in errors (model-layer §2). A message field read from JSON, a stream error
  * event's included, and a refusal's category are masked once decoded, and withheld
- * ([WITHHELD]) when their own text hides a key behind a further layer of escapes. Text that was not read as a
- * field (an error body that is not JSON or not a JSON object, the whole of one without a message,
- * a redirect target) is masked as written, or not quoted at all ([WITHHELD]) when a
- * secret hides behind its escapes. Each case runs with the key written JSON-escaped, with a `u`
- * escape and with `\/`, and as sent where the text need not be JSON.
+ * ([WITHHELD]) when their own text hides a key behind a further layer of escapes. JSON with no
+ * message field to read (not an object, or an object without one) is checked string by string the
+ * same way, then written back masked. Text that was not read as JSON (an error body that is not
+ * JSON, a redirect target) is masked as written, or not quoted at all ([WITHHELD]) when a secret
+ * hides behind its escapes. Each case runs with the key written JSON-escaped, with a `u` escape and
+ * with `\/`, and as sent where the text need not be JSON.
  */
 class ProviderTextQuoteTest {
     private val server = Kit.loopbackServer()
@@ -55,22 +56,20 @@ class ProviderTextQuoteTest {
 
     @ParameterizedTest
     @MethodSource("jsonForms")
-    fun `an error body that is JSON but not an object is quoted the same way`(form: String) =
+    fun `an error body that is JSON but not an object is masked once decoded`(form: String) =
         runTest {
             server.enqueueError(BAD_GATEWAY, """["upstream rejected $form"]""")
             val error = assertThrows<ModelError.Server> { model().complete(Kit.request()) }
-            val shown = if (form in ESCAPED) WITHHELD else """["upstream rejected ***"]"""
-            assertQuoted(error, "server error 502: $shown", form)
+            assertQuoted(error, """server error 502: ["upstream rejected ***"]""", form)
         }
 
     @ParameterizedTest
     @MethodSource("jsonForms")
-    fun `an error object without a message is quoted whole the same way`(form: String) =
+    fun `an error object without a message is masked once decoded`(form: String) =
         runTest {
             server.enqueueError(INTERNAL, """{"type":"error","error":{"type":"api_error","note":"$form"}}""")
             val error = assertThrows<ModelError.Server> { model().complete(Kit.request()) }
-            val shown = if (form in ESCAPED) WITHHELD else MASKED_OBJECT
-            assertQuoted(error, "server error 500: $shown", form)
+            assertQuoted(error, "server error 500: $MASKED_OBJECT", form)
         }
 
     @ParameterizedTest
@@ -95,14 +94,17 @@ class ProviderTextQuoteTest {
             assertQuoted(error, "server error 500: rejected ***", form)
         }
 
-    /** The event was parsed, not masked as written first: its re-encoding holds the key JSON-escaped. */
+    /**
+     * The event is not masked as written first: its strings are checked once decoded, and the event
+     * written back holds the key in its standard escaping, which masking finds.
+     */
     @ParameterizedTest
     @MethodSource("jsonForms")
-    fun `a stream error event without a message is withheld`(form: String) =
+    fun `a stream error event without a message is masked once decoded`(form: String) =
         runTest {
             server.enqueueSse(Kit.sse("error" to """{"type":"error","error":{"type":"api_error","note":"$form"}}"""))
             val error = assertThrows<ModelError.Server> { model().complete(Kit.request()) }
-            assertQuoted(error, "server error 500: $WITHHELD", form)
+            assertQuoted(error, "server error 500: $MASKED_OBJECT", form)
         }
 
     @ParameterizedTest
@@ -204,6 +206,47 @@ class ProviderTextQuoteTest {
     }
 
     /**
+     * A key written with one escape more than the JSON takes, in JSON with no message field to read
+     * (an error object without one, JSON that is not an object, a stream error event without one):
+     * each string in it is checked once decoded, as a message field is (fix-list r7 S1). Checking the
+     * whole written back would miss it: writing back escapes each backslash again, and one decoding
+     * only takes that layer off.
+     */
+    @ParameterizedTest(name = "{0}, {1}")
+    @MethodSource("doubleEscaped")
+    fun `a key behind a second escape in JSON without a message is withheld`(
+        body: String,
+        key: String,
+    ) = runTest {
+        val written = BS + BS + "u00" + key[0].code.toString(HEX_RADIX) + key.drop(1)
+        val expected =
+            when (body) {
+                NO_MESSAGE -> {
+                    val error = """{"type":"error","error":{"type":"$AUTH","detail":"key $written"}}"""
+                    server.enqueueError(UNAUTHORIZED, error)
+                    "authentication failed: $WITHHELD"
+                }
+
+                NOT_OBJECT -> {
+                    server.enqueueError(BAD_GATEWAY, """["key $written"]""")
+                    "server error 502: $WITHHELD"
+                }
+
+                else -> {
+                    server.enqueueSse(
+                        Kit.sse("error" to """{"type":"error","error":{"type":"api_error","detail":"key $written"}}"""),
+                    )
+                    "server error 500: $WITHHELD"
+                }
+            }
+        val error = assertThrows<ModelError> { Kit.model(server, credentials = Keys(key)).complete(Kit.request()) }
+        val printed = error.stackTraceToString()
+        val pieces = key.windowed(PIECE).filter { it in printed }
+        assertTrue(pieces.isEmpty(), "$body, $key: ${pieces.size} pieces of the key in the error")
+        assertEquals(expected, error.message)
+    }
+
+    /**
      * A header value is raw provider text: the key as sent is masked in place, since nothing in the
      * target is left to decode; a key written with escapes withholds the target.
      */
@@ -261,6 +304,8 @@ class ProviderTextQuoteTest {
         const val SENT = "the request's key"
         const val SHAPE_ONLY = "only its shape"
         const val AUTH = "authentication_error"
+        const val NOT_OBJECT = "JSON that is not an object"
+        const val STREAM_NO_MESSAGE = "stream error without a message"
 
         const val UNAUTHORIZED = 401
         const val BAD_GATEWAY = 502
@@ -296,6 +341,9 @@ class ProviderTextQuoteTest {
         /** [letter] written as a `u` escape. */
         fun uEscaped(letter: Char): String = BS + "u00" + letter.code.toString(HEX_RADIX)
 
+        /** A gateway's key, of no credential shape: only its exact forms can find it. */
+        const val GATEWAY = "gwkey-" + "abcdefghijklmnopqrstuvwxyz0123456789"
+
         /** A key with a quote and a slash, so that each escaping writes it differently. */
         const val SECRET = "pa\"ss/word-0001"
 
@@ -323,6 +371,12 @@ class ProviderTextQuoteTest {
             listOf(JSON_MESSAGE, NOT_JSON, NO_MESSAGE).flatMap { body ->
                 listOf(SLASH, U_LETTER).map { writing -> Arguments.of(body, writing, SENT) } +
                     Arguments.of(body, U_LETTER, SHAPE_ONLY)
+            }
+
+        @JvmStatic
+        fun doubleEscaped(): List<Arguments> =
+            listOf(NO_MESSAGE, NOT_OBJECT, STREAM_NO_MESSAGE).flatMap { body ->
+                listOf(SHAPED, GATEWAY).map { key -> Arguments.of(body, key) }
             }
 
         @JvmStatic
