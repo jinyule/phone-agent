@@ -85,6 +85,28 @@ class LocalPortScanTest {
     }
 
     @Test
+    fun `with one IO thread the budget still ends a scan whose probes hang`() {
+        val silent = List(6) { ServerSocket(0, 1, InetAddress.getLoopbackAddress()) }
+        val executor = Executors.newSingleThreadExecutor { task -> Thread(task, "one-io").apply { isDaemon = true } }
+        try {
+            // Probes that would wait a minute, behind a read timeout of two: only the close at the budget ends them.
+            val config = PortScanConfig(budgetMs = 2_000, probeTimeoutMs = 60_000, parallelism = 4)
+            val sockets = SocketPortProbe(config, executor.asCoroutineDispatcher())
+            val probe = PortProbe { host, port -> sockets.probe(host, silent[port - 1].localPort) }
+            val scan = LocalPortScan({ listOf("127.0.0.1") }, 1..silent.size, config, probe)
+            // Outside the test's scope, so that a stuck scan fails the test instead of hanging it.
+            val result = CoroutineScope(Job()).async { scan.scan(emptySet()) }
+            assertEquals(
+                ScanResult(emptyList(), 0),
+                inRealTime { withTimeoutOrNull(10.seconds) { result.await() } },
+            )
+        } finally {
+            silent.forEach { it.close() }
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
     fun `a probe read that closing the socket did not end still ends at the socket timeout`() {
         ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { silent ->
             val probe = SocketPortProbe(PortScanConfig(probeTimeoutMs = 100), testIo)

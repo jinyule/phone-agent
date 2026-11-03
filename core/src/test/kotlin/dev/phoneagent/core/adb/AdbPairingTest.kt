@@ -164,14 +164,15 @@ class AdbPairingTest {
         try {
             val io = if (kind == "executor") executor.asCoroutineDispatcher() else testIo.limitedParallelism(1)
             FakePairingServer("482916", Behavior.SILENT_AFTER_SPAKE2).use { device ->
+                // The socket's read timeout (twice this) outlasts the guard: only the close ends the read in time.
                 assertTimeoutPreemptively(Duration.ofSeconds(20)) {
                     runTest {
-                        val config = AdbConfig(pairingTimeoutMs = 4_000)
+                        val config = AdbConfig(pairingTimeoutMs = 15_000)
                         val result =
                             async { AdbClient(identity, TestTls.exporter, config, io).pair(device.endpoint, code) }
                         holdTimeUntil(device.gotSpake2)
                         assertFailure(PairingFailure.TIMEOUT, result.await())
-                        assertEquals(4_000, virtualTime)
+                        assertEquals(15_000, virtualTime)
                         device.clientClosed.get(10, TimeUnit.SECONDS)
                     }
                 }

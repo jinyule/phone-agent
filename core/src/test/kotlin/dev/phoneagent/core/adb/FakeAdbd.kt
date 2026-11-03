@@ -118,6 +118,9 @@ class FakeAdbd(
         /** An OKAY for the stream while no write of the client waits for one. */
         data object UnsolicitedOkay : Misaddressed
 
+        /** Output addressed to a local id the client never used. */
+        data object ToUnknownStream : Misaddressed
+
         data class Flood(
             val bytes: Int,
         ) : Reply
@@ -417,6 +420,7 @@ class FakeAdbd(
                 Reply.CnxnInStream -> answer(output, deviceCnxn())
                 Reply.UnknownCommand -> answer(output, packet(UNKNOWN_COMMAND, myId, clientId))
                 Reply.UnsolicitedOkay -> send(Aosp.A_OKAY)
+                Reply.ToUnknownStream -> answer(output, packet(Aosp.A_WRTE, myId, clientId + 50, exitPacket(0)))
             }
             return exit(Reply.Exit(0, ""), shell)
         }

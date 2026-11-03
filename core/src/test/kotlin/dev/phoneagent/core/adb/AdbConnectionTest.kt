@@ -146,6 +146,7 @@ class AdbConnectionTest {
         "CnxnInStream, PROTOCOL",
         "UnknownCommand, PROTOCOL",
         "UnsolicitedOkay, PROTOCOL",
+        "ToUnknownStream, PROTOCOL",
     )
     fun `a broken stream fails with its class and closes the session`(
         name: String,
@@ -440,13 +441,14 @@ class AdbConnectionTest {
     fun `with one IO thread a hanging command still times out and its socket is closed`(kind: String) =
         withOneIoThread(kind) { io ->
             FakeAdbd(paired, reply = { Reply.Hang }).use { adbd ->
-                val session = inRealTime { connect(adbd, AdbConfig(commandTimeoutMs = 2_500), io) }
+                // The socket's read timeout (twice this) outlasts the guard: only the close ends the read in time.
+                val session = inRealTime { connect(adbd, AdbConfig(commandTimeoutMs = 15_000), io) }
                 assertTimeoutPreemptively(Duration.ofSeconds(20)) {
                     runTest {
                         val result = async { session.run(id) }
                         holdTimeUntil(adbd.gotOpen)
                         assertFailure(CommandFailure.TIMEOUT, result.await())
-                        assertEquals(2_500, virtualTime)
+                        assertEquals(15_000, virtualTime)
                         assertFalse(session.isOpen)
                         adbd.clientClosed.get(10, TimeUnit.SECONDS)
                     }
@@ -459,12 +461,13 @@ class AdbConnectionTest {
     fun `with one IO thread a silent adbd still times out the connect`(kind: String) =
         withOneIoThread(kind) { io ->
             FakeAdbd(paired, Behavior.SILENT).use { adbd ->
+                // The socket's read timeout (twice this) outlasts the guard: only the close ends the read in time.
                 assertTimeoutPreemptively(Duration.ofSeconds(20)) {
                     runTest {
-                        val result = async { client(AdbConfig(connectTimeoutMs = 3_000), io).connect(adbd.endpoint) }
+                        val result = async { client(AdbConfig(connectTimeoutMs = 15_000), io).connect(adbd.endpoint) }
                         holdTimeUntil(adbd.gotCnxn)
                         assertConnectFailure(ConnectFailure.TIMEOUT, result.await())
-                        assertEquals(3_000, virtualTime)
+                        assertEquals(15_000, virtualTime)
                         adbd.clientClosed.get(10, TimeUnit.SECONDS)
                     }
                 }
@@ -637,6 +640,7 @@ class AdbConnectionTest {
                 "CnxnInStream" to Reply.CnxnInStream,
                 "UnknownCommand" to Reply.UnknownCommand,
                 "UnsolicitedOkay" to Reply.UnsolicitedOkay,
+                "ToUnknownStream" to Reply.ToUnknownStream,
             )
     }
 }

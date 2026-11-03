@@ -131,18 +131,16 @@ class AdbIdentityTest {
             val io = StandardTestDispatcher(testScheduler)
             // Never derived from the shared test keys: the JDK caches RSA blinding values per modulus,
             // and a broken key with the same modulus would spoil them for the good one.
-            val generator = KeyPairGenerator.getInstance("RSA").apply { initialize(RSAKeyGenParameterSpec(2048, F4)) }
-            val key = generator.generateKeyPair().private as RSAPrivateCrtKey
+            val key = rsa(F4)
             val blobs =
                 mapOf(
                     "public exponent 2: the public key cannot be rebuilt" to crt(key, exponent = BigInteger.TWO),
-                    "public exponent 3: an RSA key, but not one we create" to
-                        crt(
-                            key,
-                            exponent = BigInteger.valueOf(3),
-                        ),
                     "CRT values that do not belong together: it cannot sign" to
                         crt(key, primeExponentP = key.primeExponentP + BigInteger.TWO),
+                    // Keys that sign well but that we never create:
+                    "public exponent 3" to rsa(BigInteger.valueOf(3)).encoded,
+                    "public exponent 2^32 + 15, more than adb's 32-bit field holds" to
+                        rsa(BigInteger("4294967311")).encoded,
                 )
             for ((what, blob) in blobs) {
                 val store = MemoryStore(blob)
@@ -160,7 +158,9 @@ class AdbIdentityTest {
             val longest = AdbIdentity.loadOrCreate(store, "x".repeat(7_489), io).identity
             assertEquals(8_190, longest.adbPublicKey.toByteArray().size, "one byte below PeerInfo's 8191 for the NUL")
             for (name in listOf("x".repeat(7_490), "\u00e9".repeat(3_745), "x".repeat(8_000))) {
-                assertThrows<IllegalArgumentException> { AdbIdentity.loadOrCreate(store, name, io) }
+                val untouched = MemoryStore(identity.privateKey.encoded)
+                assertThrows<IllegalArgumentException> { AdbIdentity.loadOrCreate(untouched, name, io) }
+                assertEquals(0, untouched.reads, "checked before the store is read")
                 assertThrows<IllegalArgumentException> { AdbIdentity.generate(name) }
                 assertThrows<IllegalArgumentException> { AdbIdentity.fromPkcs8(identity.privateKey.encoded, name) }
             }
@@ -188,6 +188,13 @@ class AdbIdentityTest {
         assertTrue(AdbIdentity.generate("a").fingerprint != AdbIdentity.generate("a").fingerprint)
     }
 
+    /** A throwaway RSA-2048 private key with public exponent [exponent]. */
+    private fun rsa(exponent: BigInteger): RSAPrivateCrtKey {
+        val generator = KeyPairGenerator.getInstance("RSA")
+        generator.initialize(RSAKeyGenParameterSpec(2048, exponent))
+        return generator.generateKeyPair().private as RSAPrivateCrtKey
+    }
+
     /** [key] re-encoded as PKCS#8 with one of its values replaced. */
     private fun crt(
         key: RSAPrivateCrtKey,
@@ -212,8 +219,12 @@ class AdbIdentityTest {
         var bytes: ByteArray? = null,
     ) : AdbKeyStore {
         var writes = 0
+        var reads = 0
 
-        override fun read(): ByteArray? = bytes
+        override fun read(): ByteArray? {
+            reads++
+            return bytes
+        }
 
         override fun write(pkcs8: ByteArray) {
             writes++
