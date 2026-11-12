@@ -62,8 +62,11 @@ internal class Actuator(
      * window come since). Apps may answer the action `false` although it ran, so a `false` after
      * which [probe] sees a change is done; any other `false` is [Result.NotDone], saying it may have
      * happened when the answer took [ScreenTimings.clickUncertainMs] or longer (the platform gave up
-     * waiting), else that the app refused it. Once the center is checked before a touch (M2), the
-     * touch may come back for a `false` answered quickly.
+     * waiting), else that the app refused it. The touch may come back for a `false` answered quickly
+     * (M2) only once the policy authorizes what it reaches: what takes a touch at the center is
+     * [press] itself, or the policy authorized it first and the pairing and the window at the center
+     * are checked again before the touch. A center merely unchanged since the plan is not enough: a
+     * sibling over it may have been there all along.
      */
     suspend fun tap(
         element: NodeTarget,
