@@ -18,6 +18,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
+import java.util.Collections
+import java.util.IdentityHashMap
 
 private const val LIST = "androidx.recyclerview.widget.RecyclerView"
 private const val LAYOUT = "android.widget.LinearLayout"
@@ -78,43 +80,55 @@ class LeftOutAncestorTest {
 
         private fun list(
             bounds: Rect,
-            shown: Boolean = true,
             setup: AccessibilityNodeInfo.() -> Unit = {},
         ) = make(LIST, bounds) {
-            isVisibleToUser = shown
             collectionInfo = CollectionInfo(1, 1, false)
             setup()
         }
 
         /**
          * [shape] for [person]; the nodes between the Like and the change are left out of the read
-         * when [leftOut]; the header of [Shape.WINDOW_HEADER] cannot be read unless [readable].
+         * when [leftOut] and look as [look] says; the header of [Shape.WINDOW_HEADER] cannot be read
+         * unless [readable].
          */
         fun show(
             shape: Shape,
             person: String,
             leftOut: Boolean,
             readable: Boolean = true,
+            look: Look = Look(),
         ) {
-            val shown = !leftOut
+            val between: AccessibilityNodeInfo.() -> Unit = {
+                isVisibleToUser = !leftOut
+                look.state(this)
+            }
+
+            fun Rect.held() = Rect(left, top + look.scrolled, right, bottom + look.scrolled)
+
+            fun Rect.grown() = Rect(left, top, right, bottom + look.grown)
             when (shape) {
                 Shape.NESTED_LIST_LABEL, Shape.WRAPPED_IN_A_NESTED_LIST -> {
-                    val like = like(Rect(700, 700, 1000, 800))
+                    val like = like(Rect(700, 700, 1000, 800).held())
                     val wrapped =
                         if (shape == Shape.NESTED_LIST_LABEL) {
                             like
                         } else {
-                            make(LAYOUT, Rect(0, 700, 1000, 800)) { isVisibleToUser = shown }.with(like)
+                            make(LAYOUT, Rect(0, 700, 1000, 800).held().grown(), between).with(like)
                         }
-                    val items = list(Rect(0, 600, 1000, 900), shown) { text = "$person's items" }.with(wrapped)
+                    val items =
+                        list(Rect(0, 600, 1000, 900).held().grown()) {
+                            text = "$person's items"
+                            between()
+                        }.with(wrapped)
                     host.show(list(Rect(0, 300, 1000, 1800)).with(items))
                 }
 
                 Shape.SECTION_TITLE -> {
-                    val title = make(TEXT, Rect(0, 300, 1000, 400)) { text = person }
-                    val items = list(Rect(0, 600, 1000, 900), shown).with(like(Rect(700, 700, 1000, 800)))
-                    val section = make(LAYOUT, Rect(0, 300, 1000, 900)) { isVisibleToUser = shown }.with(title, items)
-                    host.show(list(Rect(0, 300, 1000, 1800)).with(section))
+                    val title = make(TEXT, Rect(0, 300, 1000, 400).held()) { text = person }
+                    val items = list(Rect(0, 600, 1000, 900).held().grown(), between)
+                    val section = make(LAYOUT, Rect(0, 300, 1000, 900).held().grown(), between)
+                    items.with(like(Rect(700, 700, 1000, 800).held()))
+                    host.show(list(Rect(0, 300, 1000, 1800)).with(section.with(title, items)))
                 }
 
                 Shape.WINDOW_HEADER -> {
@@ -123,14 +137,49 @@ class LeftOutAncestorTest {
                             text = "Chat with $person"
                             if (!readable) viewIdResourceName = "$APP:id/unreadable"
                         }
-                    val song = make(TEXT, Rect(0, 300, 600, 400)) { text = "Song" }
-                    val row = make(LAYOUT, Rect(0, 300, 1000, 400)).with(song, like(Rect(700, 300, 1000, 400)))
-                    val list = list(Rect(0, 300, 1000, 1800), shown).with(row)
-                    val root = make("android.widget.FrameLayout", GEOMETRY.pixels) { isVisibleToUser = shown }
+                    val song = make(TEXT, Rect(0, 300, 600, 400).held()) { text = "Song" }
+                    val like = like(Rect(700, 300, 1000, 400).held())
+                    val row = make(LAYOUT, Rect(0, 300, 1000, 400).held()).with(song, like)
+                    val list = list(Rect(0, 300, 1000, 1800).grown(), between).with(row)
+                    val root = make("android.widget.FrameLayout", GEOMETRY.pixels, between)
                     host.windows = mapOf(0 to listOf(window(root.with(header, list), id = 1, layer = 1)))
                 }
             }
         }
+    }
+
+    /**
+     * How the nodes between the Like and the change look on one screen: [state] set on each, their
+     * bounds [grown] at the bottom by that much (the window's root aside: it fills the display),
+     * and everything the outer list holds (the only list, for [Shape.WINDOW_HEADER]) [scrolled]
+     * down by that much.
+     */
+    private class Look(
+        val state: AccessibilityNodeInfo.() -> Unit = {},
+        val grown: Int = 0,
+        val scrolled: Int = 0,
+    )
+
+    /**
+     * A change after the plan of the nodes between alone, from [before] to [after], that leaves a
+     * kept node its identity: of their states, or of their bounds. Only a scroll moves the Like.
+     */
+    private enum class Change(
+        val before: Look,
+        val after: Look,
+        val movesTheLike: Boolean = false,
+    ) {
+        SELECTED(Look(), Look(state = { isSelected = true })),
+        FOCUSED(Look(), Look(state = { isFocused = true })),
+        CHECKED(
+            Look(state = { isCheckable = true }),
+            Look(state = {
+                isCheckable = true
+                checked = AccessibilityNodeInfo.CHECKED_STATE_TRUE
+            }),
+        ),
+        RESIZED(Look(), Look(grown = 50)),
+        SCROLLED(Look(), Look(scrolled = 100), movesTheLike = true),
     }
 
     /** What a tap on the Like planned on one screen did on the next, with nothing observed in between. */
@@ -141,6 +190,16 @@ class LeftOutAncestorTest {
         val actions: List<Int>,
         val gestures: Int,
     )
+
+    /** The Like kept its ref and was pressed by its node. */
+    private val pressed =
+        Seen(
+            renumbered = false,
+            removedAndAdded = false,
+            status = ActionOutcome.Status.Ok,
+            actions = listOf(AccessibilityNodeInfo.ACTION_CLICK),
+            gestures = 0,
+        )
 
     /**
      * Shows [cell] for [before], plans on it, shows it for [after] and taps the planned Like;
@@ -167,13 +226,14 @@ class LeftOutAncestorTest {
         val port = mainPort(screen.host)
         val options = SnapshotOptions(detail = detail)
         val planned = port.snapshot(options)
-        val like = planned.elements.single { it.name == "Like" }
+        // A checkable node between takes the Like's text for its name: the Like is the button.
+        val like = planned.elements.single { it.name == "Like" && it.role == ElementRole.BUTTON }
         screen.show(false)
         val outcome = port.act(UiAction.Tap(Target.Ref(like.ref)), planned.id)
         val actions = screen.made.flatMap { it.log.ids }
         val gestures = screen.host.gestures.size
         val fresh = outcome.after ?: port.snapshot(options)
-        val freshLike = fresh.elements.single { it.name == "Like" }
+        val freshLike = fresh.elements.single { it.name == "Like" && it.role == ElementRole.BUTTON }
         val diff = RefDiffAnalyzer().diff(planned, fresh)
         return Seen(
             renumbered = freshLike.ref != like.ref,
@@ -280,14 +340,6 @@ class LeftOutAncestorTest {
     @Test
     fun withNothingChangedTheLikeKeepsItsRefAndIsPressedWhetherTheNodesBetweenAreKeptOrLeftOut() =
         runTest {
-            val pressed =
-                Seen(
-                    renumbered = false,
-                    removedAndAdded = false,
-                    status = ActionOutcome.Status.Ok,
-                    actions = listOf(AccessibilityNodeInfo.ACTION_CLICK),
-                    gestures = 0,
-                )
             val failures =
                 cells.flatMap { cell ->
                     listOf(false, true).mapNotNull { leftOut ->
@@ -298,6 +350,62 @@ class LeftOutAncestorTest {
 
             assertEquals(emptyList<String>(), failures)
         }
+
+    @Test
+    fun aChangeOfTheNodesBetweenThatLeavesAKeptNodeItsIdentityDoesTheSameWhetherTheyAreKeptOrLeftOut() =
+        runTest {
+            // States and bounds make no part of a kept node's identity: the Like keeps its ref and
+            // is pressed, or is stale (MOVED) when the scroll moved it too, the nodes between kept or not.
+            val moved =
+                Seen(
+                    renumbered = false,
+                    removedAndAdded = false,
+                    status = ActionOutcome.Status.StaleRef(StaleReason.MOVED),
+                    actions = emptyList(),
+                    gestures = 0,
+                )
+            val failures =
+                Change.entries.flatMap { change ->
+                    cells.flatMap { cell ->
+                        val (kept, leftOut) =
+                            listOf(false, true).map { left ->
+                                tapLike(cell.detail) { planned ->
+                                    show(cell.shape, "Bob", left, look = if (planned) change.before else change.after)
+                                }
+                            }
+                        val expected = if (change.movesTheLike) moved else pressed
+                        listOfNotNull(
+                            "kept: $kept, expected $expected".takeUnless { kept == expected },
+                            "left out: $leftOut, kept: $kept".takeUnless { leftOut == kept },
+                        ).map { "$change $cell: $it" }
+                    }
+                }
+
+            assertEquals(emptyList<String>(), failures)
+        }
+
+    @Test
+    fun aReadMakesOneLineagePerNodeItWalksSharingTheNodesAboveHoweverDeepTheyAre() {
+        // [levels] nodes out of view, one in the other, the topmost the root of the window, each
+        // holding [wide] buttons: those of a level have every level above them in their lineage,
+        // which copied into each would make 40 * (1 + 2 + ... + 80) = 129600 nodes.
+        val levels = Lineage.MAX
+        val wide = 40
+        val nested = List(levels) { node(LAYOUT, GEOMETRY.pixels) { isVisibleToUser = false } }
+        nested.forEachIndexed { level, layout ->
+            repeat(wide) { i -> layout.with(button("B$level-$i", Rect(0, 40 * i, 500, 40 * i + 30))) }
+            nested.getOrNull(level + 1)?.let { layout.with(it) }
+        }
+        val host = FakeHost().apply { windows = mapOf(0 to listOf(window(nested.first(), id = 1, layer = 1))) }
+
+        val elements = ScreenReader.read(host.windowsOn(0), GEOMETRY, OWN).elements
+
+        val made = Collections.newSetFromMap(IdentityHashMap<Lineage, Boolean>())
+        elements.forEach { element -> made += generateSequence(element.identity.lineage) { it.outer } }
+        assertEquals(levels * wide, elements.size)
+        assertEquals((1..levels).associateWith { wide }, elements.groupingBy { it.identity.lineage?.size }.eachCount())
+        assertEquals("one per node walked below one left out", levels * (wide + 1) - 1, made.size)
+    }
 
     @Test
     fun theLineageOfTheDeepestNodeReadHoldsEveryNodeAboveIt() {
