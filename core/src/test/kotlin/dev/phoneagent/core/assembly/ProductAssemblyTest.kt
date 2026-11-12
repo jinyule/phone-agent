@@ -8,8 +8,10 @@ import dev.phoneagent.core.agent.LoopHarness
 import dev.phoneagent.core.agent.ReasoningDropRecovery
 import dev.phoneagent.core.agent.RetryInterceptor
 import dev.phoneagent.core.agent.awaitStopped
+import dev.phoneagent.core.agent.text
 import dev.phoneagent.core.model.ModelCapabilities
 import dev.phoneagent.core.policy.rules.PolicyTuning
+import dev.phoneagent.core.policy.rules.Refusal
 import dev.phoneagent.core.ports.ActionOutcome
 import dev.phoneagent.core.ports.ActionOutcome.Effect
 import dev.phoneagent.core.ports.ActionOutcome.Status
@@ -24,6 +26,7 @@ import dev.phoneagent.core.session.SessionEvent
 import dev.phoneagent.core.session.SessionFiles
 import dev.phoneagent.core.session.StopCause
 import dev.phoneagent.core.testing.FakeChatModel
+import dev.phoneagent.core.testing.FakeChatModel.Companion.call
 import dev.phoneagent.core.testing.InMemoryStoragePort
 import dev.phoneagent.core.testing.Screens
 import dev.phoneagent.core.testing.Screens.box
@@ -40,6 +43,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -158,6 +162,31 @@ class ProductAssemblyTest {
         val defaults = assemble(model(vision = false), PRODUCT).policyRules.tuning
         assertEquals(PolicyTuning().byName(), defaults.mapValues { (_, value) -> value.jsonPrimitive.int })
     }
+
+    @Test
+    fun `the policy judges with the tuning the run records`() =
+        runTest {
+            suspend fun observed(tuning: PolicyTuning): AssembledLoop {
+                val model = model(vision = false).calls(call("c0", "phone_observe")).answers("好")
+                return AssembledLoop(this, model, ScriptedScreen(Screens.CHAT), PRODUCT.copy(tuning = tuning)).ran()
+            }
+            val unreadable = Refusal.UNREADABLE_SCREEN.hint
+            val read = observed(PolicyTuning()).resultOf("c0").text()
+            assertFalse(unreadable in read, read)
+            assertTrue("张三" in read, read)
+
+            val few = observed(PolicyTuning(maxElements = 1))
+            val withheld = few.resultOf("c0").text()
+            assertTrue(unreadable in withheld, withheld)
+            assertFalse("张三" in withheld, withheld)
+            val recorded =
+                few
+                    .events()
+                    .filterIsInstance<PolicyRulesRecorded>()
+                    .single()
+                    .tuning
+            assertEquals(1, recorded.getValue("maxElements").jsonPrimitive.int)
+        }
 
     @Test
     fun `an assembled task records its rules first, and again when it is resumed`() =
