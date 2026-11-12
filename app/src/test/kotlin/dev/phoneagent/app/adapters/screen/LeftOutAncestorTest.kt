@@ -152,14 +152,23 @@ class LeftOutAncestorTest {
         before: String,
         after: String,
         readableAfter: Boolean = true,
+    ): Seen =
+        tapLike(cell.detail) { planned ->
+            if (planned) show(cell.shape, before, leftOut) else show(cell.shape, after, leftOut, readableAfter)
+        }
+
+    /** Plans on the screen [show] shows when told it is the one planned on, then taps the planned Like on the next. */
+    private suspend fun TestScope.tapLike(
+        detail: SnapshotDetail,
+        show: Screen.(planned: Boolean) -> Unit,
     ): Seen {
         val screen = Screen()
-        screen.show(cell.shape, before, leftOut)
+        screen.show(true)
         val port = mainPort(screen.host)
-        val options = SnapshotOptions(detail = cell.detail)
+        val options = SnapshotOptions(detail = detail)
         val planned = port.snapshot(options)
         val like = planned.elements.single { it.name == "Like" }
-        screen.show(cell.shape, after, leftOut, readableAfter)
+        screen.show(false)
         val outcome = port.act(UiAction.Tap(Target.Ref(like.ref)), planned.id)
         val actions = screen.made.flatMap { it.log.ids }
         val gestures = screen.host.gestures.size
@@ -220,6 +229,49 @@ class LeftOutAncestorTest {
                         "kept: $kept, expected $stale".takeUnless { kept == stale },
                         "left out: $leftOut, kept: $kept".takeUnless { leftOut == kept },
                     ).map { "$cell: $it" }
+                }
+
+            assertEquals(emptyList<String>(), failures)
+        }
+
+    @Test
+    fun aRowCutDownToItsControlsAboveTheNodesBetweenMakesTheLikeStaleWhetherTheyAreKeptOrLeftOut() =
+        runTest {
+            // After the plan the row reaches past the top of the list, its only label the Like's own
+            // (phase1 rule 4); no label changes, the Like does not move.
+            fun Screen.showRow(
+                leftOut: Boolean,
+                top: Int,
+            ) {
+                val like =
+                    make("android.widget.Button", Rect(700, 450, 1000, 550)) {
+                        text = "Like"
+                        isClickable = true
+                    }
+                val wrapper = make(LAYOUT, Rect(600, 400, 1000, 600)) { isVisibleToUser = !leftOut }.with(like)
+                val row = make(LAYOUT, Rect(0, top, 1000, 600)) { isVisibleToUser = !leftOut }.with(wrapper)
+                val list =
+                    make(LIST, Rect(0, 300, 1000, 1800)) { collectionInfo = CollectionInfo(1, 1, false) }.with(row)
+                host.show(list)
+            }
+            val failures =
+                SnapshotDetail.entries.flatMap { detail ->
+                    val (kept, leftOut) =
+                        listOf(false, true).map { left ->
+                            tapLike(detail) { planned -> showRow(left, top = if (planned) 400 else 250) }
+                        }
+                    val stale =
+                        Seen(
+                            renumbered = true,
+                            removedAndAdded = true,
+                            status = ActionOutcome.Status.StaleRef(StaleReason.UNRELIABLE),
+                            actions = emptyList(),
+                            gestures = 0,
+                        )
+                    listOfNotNull(
+                        "kept: $kept, expected $stale".takeUnless { kept == stale },
+                        "left out: $leftOut, kept: $kept".takeUnless { leftOut == kept },
+                    ).map { "$detail: $it" }
                 }
 
             assertEquals(emptyList<String>(), failures)

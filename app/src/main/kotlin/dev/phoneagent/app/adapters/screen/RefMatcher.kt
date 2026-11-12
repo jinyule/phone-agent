@@ -145,7 +145,9 @@ internal object StaleReasons {
         val identity = entry.identity
         if (!identity.reliable) return StaleReason.UNRELIABLE
         val parent = entry.parent?.takeIf { it !in paired }?.let { ref -> tree.first { it.ref == ref } }
-        val alike = fresh.filter { it.identity.copy(reliable = true) == identity.copy(reliable = true) }
+        // Alike as kept nodes would be: what the nodes between lack shows in the element's reliability.
+        val bare = identity.copy(reliable = true, lineage = null)
+        val alike = fresh.filter { it.identity.copy(reliable = true, lineage = null) == bare }
         val alikeBefore = tree.count { it.identity == identity && it.parent == entry.parent }
         // The element, then the nodes left out above it, nearest first, up to its parent.
         val upward = sequenceOf(identity) + identity.lineage?.nodes().orEmpty()
