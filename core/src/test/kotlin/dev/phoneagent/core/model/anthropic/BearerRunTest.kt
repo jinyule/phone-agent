@@ -6,9 +6,10 @@ import kotlin.random.Random
 
 /**
  * The Bearer rule of [Redactor.text] (model-layer §2 rule 4) on runs longer than any error body,
- * and on random text against the regular expression fix-list r10 S1 gave for the rule: the same
- * result for every text, without the stack that expression takes for a long run of bearer words.
- * The pieces hold no `sk-` or JWT shape, so only the Bearer rule changes the text.
+ * on a run with nothing after it, and on random text against the regular expression fix-list r10
+ * S1 gave for the rule: the same result for every text, without the stack that expression takes
+ * for a long run of bearer words. The pieces hold no `sk-` or JWT shape, so only the Bearer rule
+ * changes the text.
  */
 class BearerRunTest {
     @Test
@@ -16,6 +17,19 @@ class BearerRunTest {
         assertEquals("Bearer ***", Redactor.SHAPES_ONLY.text("Bearer ".repeat(RUN) + TOKEN))
         val forbearers = "the " + "forbearer ".repeat(RUN) + TOKEN + " applies"
         assertEquals("the forbearer *** applies", Redactor.SHAPES_ONLY.text(forbearers))
+    }
+
+    /** Whitespace and then the end or a quote after the run: its last word is the token. */
+    @Test
+    fun `with nothing after a run its last word is masked`() {
+        assertEquals("rejected Bearer *** ", Redactor.SHAPES_ONLY.text("rejected Bearer Bearer "))
+    }
+
+    /** The same rule, where the last word is the token and only ends in `bearer`. */
+    @Test
+    fun `a token that ends in bearer is masked when nothing follows it`() {
+        val text = "rejected Bearer ${TOKEN}bearer \""
+        assertEquals("rejected Bearer *** \"", Redactor.SHAPES_ONLY.text(text))
     }
 
     @Test
