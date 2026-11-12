@@ -3,11 +3,14 @@ package dev.phoneagent.core.session
 import dev.phoneagent.core.model.ModelErrorKind
 import dev.phoneagent.core.model.StopReason
 import dev.phoneagent.core.model.ToolDef
+import dev.phoneagent.core.ports.LaunchTarget
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.serializer
+import org.junit.jupiter.api.Assertions.assertAll
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.function.Executable
 
 /**
  * Ranges and invariants that the KDoc promises are enforced where a log is read: every bad line is
@@ -111,7 +114,34 @@ class DecodeBoundaryTest {
         assertTrue(ModelErrorKind.NETWORK.retryable)
     }
 
+    @Test
+    fun `a package name of any length in a launch is read, or is corruption of its line`() {
+        // FWD-B1 sweep: package names were checked by a regex repeating a group, which overflowed the stack.
+        val name = "a" + ".a".repeat(REPEATS)
+        val launch =
+            encodedPayload(
+                SessionSamples.events.filterIsInstance<ScreenLaunched>().first { it.target is LaunchTarget.App },
+            )
+        val cells =
+            listOf(
+                Executable {
+                    val read = read(envelope("screen/launch", launch.replace("com.example.chat", name)))
+                    val target = (read.records.last().event as ScreenLaunched).target
+                    assertEquals(name, (target as LaunchTarget.App).packageName)
+                },
+                Executable {
+                    val bad = envelope("screen/launch", launch.replace("com.example.chat", "$name."))
+                    val error = runCatching { read(bad) }.exceptionOrNull()
+                    assertTrue(error is SessionCorruptedException && error.line == prefix.size + 2, "$error")
+                },
+            )
+        assertAll(cells)
+    }
+
     private companion object {
+        /** Segments in the long package name: far more than the stack holds repetitions of a regex group. */
+        const val REPEATS = 32_000
+
         val tapDef: String =
             Json.encodeToString(
                 serializer<ToolDef>(),

@@ -149,7 +149,7 @@ public sealed interface LaunchTarget {
         val cold: Boolean = false,
     ) : LaunchTarget {
         init {
-            require(PACKAGE_NAME.matches(packageName)) { "Invalid package name '$packageName'" }
+            require(isPackageName(packageName)) { "Invalid package name '$packageName'" }
         }
     }
 
@@ -220,4 +220,20 @@ public enum class SystemIntentKind {
     SETTINGS,
 }
 
-internal val PACKAGE_NAME: Regex = Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")
+/**
+ * Whether [text] is a Java package name: two or more segments joined by `.`, each an ASCII letter
+ * and then ASCII letters, digits and `_`; what `[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+`
+ * matches. Checked without a regex, in time in proportion to [text] and constant stack, however
+ * many segments it has.
+ */
+internal fun isPackageName(text: String): Boolean {
+    val segments = text.split('.')
+    return segments.size >= 2 && segments.all(::isSegment)
+}
+
+private fun isSegment(segment: String): Boolean =
+    segment.isNotEmpty() &&
+        segment[0].isAsciiLetter() &&
+        segment.all { it.isAsciiLetter() || it in '0'..'9' || it == '_' }
+
+private fun Char.isAsciiLetter(): Boolean = this in 'a'..'z' || this in 'A'..'Z'
