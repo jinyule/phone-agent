@@ -6,6 +6,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -38,7 +39,8 @@ class ElementIdentityTest {
     ): Int {
         nodes +=
             Identities.Facts(
-                if (kind.shown) ElementIdentity(1, role, resourceId = null, name = label, context = null) else null,
+                ElementIdentity(1, role, resourceId = null, name = label, context = null),
+                kept = kind.shown,
                 label = label,
                 shape = Identities.Shape(kind.list, kind.interactive),
                 parent = parent,
@@ -381,5 +383,44 @@ class ElementIdentityTest {
         assertFalse(reliable(first))
         assertTrue(reliable(toaster))
         assertTrue(reliable(second))
+    }
+
+    @Test
+    fun aLineageHoldsTheNodesLeftOutUpToTheNearestKeptOneAsTheyWouldBeKept() {
+        // Fix list fwd B1b: the window "Inbox" > out of view "level 0" > "level 1" > "level 2", each with a leaf.
+        val inbox = add("Inbox")
+        val levels = ArrayList<Int>()
+        val leaves = ArrayList<Int>()
+        repeat(3) { level ->
+            levels += add("level $level", parent = levels.lastOrNull() ?: inbox, kind = Kind(shown = false))
+            leaves += add("leaf $level", parent = levels.last(), role = ElementRole.TEXT)
+        }
+        val middle = add("middle", parent = levels.last())
+        val bottom = add("bottom", parent = middle, role = ElementRole.TEXT)
+        val feed = add(null, parent = levels.last(), kind = list)
+        val card = add("card", parent = feed, kind = Kind(shown = false))
+        val like = add("Like", parent = card, role = ElementRole.BUTTON, kind = control)
+        val identities = identities()
+        val lineages = leaves.map { checkNotNull(identities[it]?.lineage) }
+        val window = identities[inbox]?.context
+
+        assertNull("nothing left out above", identities[inbox]?.lineage)
+        assertEquals(listOf(1, 2, 3), lineages.map { it.size })
+        assertEquals(
+            listOf(
+                ElementIdentity(1, ElementRole.CONTAINER, null, "level 2", window),
+                ElementIdentity(1, ElementRole.CONTAINER, null, "level 1", window),
+                ElementIdentity(1, ElementRole.CONTAINER, null, "level 0", window),
+            ),
+            lineages[2].nodes().toList(),
+        )
+        assertSame("shared, not copied", lineages[1].outer, lineages[2].outer?.outer)
+        assertEquals(lineages[2], identities[middle]?.lineage)
+        assertNull("a kept node ends it", identities[bottom]?.lineage)
+        assertEquals(
+            "the row it would have had kept",
+            listOf(ElementIdentity(1, ElementRole.CONTAINER, null, "card", inRow("card", "Like"))),
+            identities[like]?.lineage?.nodes()?.toList(),
+        )
     }
 }

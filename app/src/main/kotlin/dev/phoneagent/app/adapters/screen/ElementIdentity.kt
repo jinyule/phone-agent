@@ -16,6 +16,11 @@ import java.security.MessageDigest
  * that of a node above it, could not be read in full, or is a row the list's edge cut down to its
  * controls: nothing is paired by it.
  *
+ * The [lineage] holds the nodes the read leaves out between the element and the nearest node it
+ * keeps above (fix list fwd B1b), with the identities they would have had kept: the element is
+ * paired only while each of them has the identity it had, as were they kept it would be paired
+ * only below them.
+ *
  * Used by [RefCarrier] for both carrying refs to the next screen and finding a planned element
  * again before an action ([RefMatcher]); there is no second notion of identity.
  */
@@ -26,7 +31,49 @@ internal data class ElementIdentity(
     val name: String?,
     val context: IdentityContext?,
     val reliable: Boolean = true,
+    val lineage: Lineage? = null,
 )
+
+/**
+ * The nodes a read leaves out (out of view, too small, or alike to a node it keeps) between an
+ * element and the nearest node kept above it: [node], the one nearest the element, and [outer], the
+ * rest (`null`: none). Each is the identity the node would have had kept, with its context and
+ * reliability (which the element takes on: [ElementIdentity.reliable]); not its bounds, which
+ * pairing a kept node does not need either. Equal when all nodes are, in order.
+ *
+ * At most [MAX] nodes, as a read walks no deeper. A lineage is the [outer] of those of the nodes
+ * below, not copied into them: a read makes one per node it walks, and each in constant time.
+ */
+internal class Lineage(
+    val outer: Lineage?,
+    val node: ElementIdentity,
+) {
+    /** How many nodes it holds. */
+    val size: Int = (outer?.size ?: 0) + 1
+
+    private val hash: Int = HASH_BASE * (outer?.hash ?: 0) + node.hashCode()
+
+    /** Its nodes, the one nearest the element first. */
+    fun nodes(): Sequence<ElementIdentity> = generateSequence(this) { it.outer }.map { it.node }
+
+    override fun equals(other: Any?): Boolean =
+        when {
+            this === other -> true
+            other !is Lineage || hash != other.hash || size != other.size -> false
+            else -> node == other.node && outer == other.outer
+        }
+
+    override fun hashCode(): Int = hash
+
+    override fun toString(): String = nodes().toList().asReversed().joinToString(prefix = "Lineage(", postfix = ")")
+
+    internal companion object {
+        /** Most nodes a lineage holds: those above the deepest node a read walks ([ScreenReader.MAX_DEPTH]). */
+        const val MAX: Int = ScreenReader.MAX_DEPTH
+
+        private const val HASH_BASE = 31
+    }
+}
 
 /** What tells an element apart: the labels ([key]) of its window outside lists, or of its row ([scope]). */
 internal data class IdentityContext(
@@ -103,17 +150,21 @@ internal object Identities {
 
     /**
      * What identities are made of, per node of the tree walked, in pre-order, whether the node is
-     * visible or not: [base] is the identity without its context (`null` for a node the read
-     * leaves out), [label] the node's whole text or description, [parent] the index of the node
-     * above, [loss] what the walk may have lost of it.
+     * visible or not: [identity] is the identity without its context, [kept] whether the read keeps
+     * the node, [label] the node's whole text or description, [parent] the index of the node above,
+     * [loss] what the walk may have lost of it.
      */
     class Facts(
-        val base: ElementIdentity?,
+        val identity: ElementIdentity,
+        val kept: Boolean,
         val label: String?,
         val shape: Shape,
         val parent: Int?,
         val loss: Loss = Loss(),
-    )
+    ) {
+        /** [identity] when the read keeps the node, else `null`. */
+        val base: ElementIdentity? get() = identity.takeIf { kept }
+    }
 
     /**
      * The identity of each node of [nodes] (pre-order, parents first), `null` where [Facts.base] is.
@@ -143,6 +194,9 @@ internal object Identities {
      *   (fix list fwd B1). A kept node above that is not reliable gets a new ref, and so does all
      *   below it; a node the read leaves out (out of view, or alike to a kept one) gets no ref, and
      *   what it lacks is passed down all the same.
+     *
+     * The [ElementIdentity.lineage] of a node holds the nodes left out between it and the nearest
+     * kept node above, each with the context it would have had it been kept (fix list fwd B1b).
      */
     fun of(nodes: List<Facts>): List<ElementIdentity?> = Contexts(nodes).identities()
 
@@ -235,6 +289,8 @@ internal object Identities {
             val owner = arrayOfNulls<Owner>(nodes.size)
             // Per node walked, kept or not: its context and those of all nodes above it are reliable.
             val whole = BooleanArray(nodes.size)
+            // Per node walked: the nodes left out between it and the nearest kept node above.
+            val lineage = arrayOfNulls<Lineage>(nodes.size)
             return nodes.indices.map { i ->
                 val parent = nodes[i].parent
                 val mine =
@@ -245,7 +301,12 @@ internal object Identities {
                     }
                 owner[i] = mine
                 whole[i] = reliableOf(mine) && (parent == null || whole[parent])
-                nodes[i].base?.copy(context = contextOf(mine), reliable = whole[i])
+                lineage[i] =
+                    parent?.takeUnless { nodes[it].kept }?.let { above ->
+                        val context = contextOf(checkNotNull(owner[above]))
+                        Lineage(lineage[above], nodes[above].identity.copy(context = context, reliable = whole[above]))
+                    }
+                nodes[i].base?.copy(context = contextOf(mine), reliable = whole[i], lineage = lineage[i])
             }
         }
 

@@ -262,28 +262,31 @@ internal object ScreenReader {
     private class Walker(
         private val geometry: DisplayGeometry,
     ) {
-        /** A kept node before identities are known; [base] is its identity without a context. */
+        /** A kept node before identities are known. */
         private class Kept(
             val element: UiElement,
             val target: NodeTarget,
             val place: NodePlace,
             val brief: Boolean,
-            val base: ElementIdentity,
         )
 
         /**
-         * A walked node, kept or not (children out of view still tell rows apart); [kept] indexes
-         * [Walker.kept]; [clipped] as [Identities.Loss.clipped]; [viewport] for a list.
+         * A walked node, kept or not (children out of view still tell rows apart); [identity] is
+         * its identity without a context, the one it has or would have had kept; [kept] indexes
+         * [Walker.kept]; [viewport] for a list.
          */
         private class Walked(
+            val identity: ElementIdentity,
             val label: String?,
             val shape: Identities.Shape,
             val parent: Int?,
             val kept: Int?,
-            val clipped: Boolean,
             val viewport: Viewport?,
         ) {
             var cut = false
+
+            /** For a child of a list, as [Identities.Loss.clipped]. */
+            var clipped = false
 
             /** For a child of a list, as [Identities.Loss.besideGap]. */
             var besideGap = false
@@ -319,15 +322,24 @@ internal object ScreenReader {
             }
             visited++
             val role = NodeFacts.roleOf(node)
-            val index = if (node.isVisibleToUser) keep(node, role, place) else null
+            val label = NodeText.identityLabel(node)
+            val identity =
+                ElementIdentity(
+                    place.windowId,
+                    role,
+                    node.viewIdResourceName?.substringAfter(":id/")?.ifBlank { null },
+                    NodeText.identityNameOf(node, role),
+                    context = null,
+                )
+            val index = if (node.isVisibleToUser) keep(node, identity, place) else null
             val me = walked.size
             val shape = NodeFacts.shapeOf(node, role)
             val list = above?.let(walked::get)?.takeIf { it.shape.list }
-            val clipped =
-                list?.viewport?.clips(Rect().also(node::getBoundsInScreen), first = list.children == 0) == true
             val viewport = if (shape.list) NodeFacts.viewportOf(node) else null
-            walked += Walked(NodeText.identityLabel(node), shape, above, index, clipped, viewport)
+            walked += Walked(identity, label, shape, above, index, viewport)
             list?.let {
+                val bounds = Rect().also(node::getBoundsInScreen)
+                walked[me].clipped = it.viewport?.clips(bounds, first = it.children == 0) == true
                 it.children++
                 walked[me].besideGap = it.gap
                 it.gap = false
@@ -376,9 +388,9 @@ internal object ScreenReader {
             val identities =
                 Identities.of(
                     walked.map {
-                        val base = it.kept?.let { k -> kept[k].base }
                         Identities.Facts(
-                            base,
+                            it.identity,
+                            it.kept != null,
                             it.label,
                             it.shape,
                             it.parent,
@@ -398,9 +410,10 @@ internal object ScreenReader {
 
         private fun keep(
             node: AccessibilityNodeInfo,
-            role: ElementRole,
+            identity: ElementIdentity,
             place: NodePlace,
         ): Int? {
+            val role = identity.role
             val pixels =
                 geometry.clip(Rect().also(node::getBoundsInScreen))?.takeIf {
                     it.width() >= MIN_SIDE_PX &&
@@ -429,18 +442,10 @@ internal object ScreenReader {
                     secret = node.isPassword,
                     parent = place.parent?.let(::provisional),
                     window = place.windowId,
-                    resourceId = node.viewIdResourceName?.substringAfter(":id/")?.ifBlank { null },
-                )
-            val base =
-                ElementIdentity(
-                    place.windowId,
-                    role,
-                    element.resourceId,
-                    NodeText.identityNameOf(node, role),
-                    context = null,
+                    resourceId = identity.resourceId,
                 )
             val brief = name != null || interactive || opaqueLeaf(node, pixels)
-            kept += Kept(element, NodeTarget(node, pixels), place, brief, base)
+            kept += Kept(element, NodeTarget(node, pixels), place, brief)
             return index
         }
 

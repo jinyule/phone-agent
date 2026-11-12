@@ -20,13 +20,14 @@ internal class TreeEntry(
  * names the same element. [RefMatcher] pairs a planned screen with a fresh read the same way.
  *
  * An element keeps its ref when the port can tell it is the same element: same [ElementIdentity]
- * (window, role, view id, name, and its context: every label of its window outside lists, or every
- * label of its row) under the same parent, and that combination occurs exactly once in each
- * screen; among several, only the one at the same place in both screens keeps its ref. Parents are
- * paired first, so an element whose parent got a new ref gets one too. Anything ambiguous, and any
- * element whose identity is not [ElementIdentity.reliable] (read only in part, or a row the list's
- * edge cut down to its controls, it or a node above it), gets a new number above all numbers handed
- * out before, and its old ref is void: a ref never comes back for a different element.
+ * (window, role, view id, name, its context: every label of its window outside lists, or every
+ * label of its row, and the nodes the read left out between it and its parent with theirs) under
+ * the same parent, and that combination occurs exactly once in each screen; among several, only
+ * the one at the same place in both screens keeps its ref. Parents are paired first, so an
+ * element whose parent got a new ref gets one too. Anything ambiguous, and any element whose
+ * identity is not [ElementIdentity.reliable] (read only in part, or a row the list's edge cut down
+ * to its controls, it or a node above it), gets a new number above all numbers handed out before,
+ * and its old ref is void: a ref never comes back for a different element.
  *
  * It renumbers rather than guess: any changed label outside lists (a clock, a carousel, a banner)
  * gives everything of that window outside lists new refs, the lists and their rows with it; any

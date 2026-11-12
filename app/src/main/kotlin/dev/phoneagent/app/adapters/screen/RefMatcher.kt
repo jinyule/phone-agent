@@ -98,7 +98,12 @@ internal object RefMatcher {
     }
 }
 
-/** Explains why [RefCarrier.pair] paired a planned element with nothing; it decides nothing itself. */
+/**
+ * Explains why [RefCarrier.pair] paired a planned element with nothing; it decides nothing itself.
+ * The nodes of an element's [ElementIdentity.lineage] count as the nodes they would be had the
+ * reads kept them, between the element and its parent: in the planned screen, they are looked at
+ * after the element and before its parent; in the fresh read, with the nodes kept.
+ */
 internal object StaleReasons {
     /** Why [entry] of [tree] is not among the [paired] refs of [fresh]. */
     fun of(
@@ -106,35 +111,71 @@ internal object StaleReasons {
         tree: List<TreeEntry>,
         fresh: List<ReadElement>,
         paired: Set<ElementRef?>,
+    ): StaleReason = of(entry, tree, fresh, paired, Read(fresh))
+
+    /**
+     * Of the fresh read's kept nodes and the nodes in their lineages: their contexts, and the
+     * windows where any of them outside lists is unreliable.
+     */
+    private class Read(
+        fresh: List<ReadElement>,
+    ) {
+        val contexts = HashSet<Pair<Int, IdentityContext?>>()
+        val unreliableWindows = HashSet<Int>()
+
+        init {
+            for (element in fresh) {
+                val identity = element.identity
+                for (node in sequenceOf(identity) + identity.lineage?.nodes().orEmpty()) {
+                    contexts += node.window to node.context
+                    val windowScope = node.context?.scope == IdentityContext.Scope.WINDOW
+                    if (windowScope && !node.reliable) unreliableWindows += node.window
+                }
+            }
+        }
+    }
+
+    private fun of(
+        entry: TreeEntry,
+        tree: List<TreeEntry>,
+        fresh: List<ReadElement>,
+        paired: Set<ElementRef?>,
+        read: Read,
     ): StaleReason {
         val identity = entry.identity
-        val context = identity.context
-        val sameScope =
-            fresh.filter {
-                it.identity.window == identity.window &&
-                    it.identity.context?.scope == context?.scope
-            }
+        if (!identity.reliable) return StaleReason.UNRELIABLE
         val parent = entry.parent?.takeIf { it !in paired }?.let { ref -> tree.first { it.ref == ref } }
-        val alike = fresh.filter { it.identity.copy(reliable = true) == identity.copy(reliable = true) }
+        val bare = identity.copy(reliable = true, lineage = null)
+        val alike = fresh.filter { it.identity.copy(reliable = true, lineage = null) == bare }
         val alikeBefore = tree.count { it.identity == identity && it.parent == entry.parent }
-        return when {
-            !identity.reliable -> StaleReason.UNRELIABLE
-
-            context?.scope == IdentityContext.Scope.WINDOW &&
-                sameScope.any {
-                    !it.identity.reliable
-                }
-            -> StaleReason.UNRELIABLE
-
-            sameScope.none { it.identity.context == context } -> changed(context)
-
-            parent != null -> of(parent, tree, fresh, paired)
-
+        // The element, then the nodes left out above it, nearest first, up to its parent.
+        val upward = sequenceOf(identity) + identity.lineage?.nodes().orEmpty()
+        return upward.firstNotNullOfOrNull { contextReason(it, read) } ?: when {
+            parent != null -> of(parent, tree, fresh, paired, read)
             alike.any { !it.identity.reliable } -> StaleReason.UNRELIABLE
-
             alike.size > 1 || alikeBefore > 1 -> StaleReason.AMBIGUOUS
-
             else -> StaleReason.NOT_FOUND
+        }
+    }
+
+    /** What the context of [identity] says in the fresh [read]: unreliable, changed, or `null` for found. */
+    private fun contextReason(
+        identity: ElementIdentity,
+        read: Read,
+    ): StaleReason? {
+        val context = identity.context
+        return when {
+            context?.scope == IdentityContext.Scope.WINDOW && identity.window in read.unreliableWindows -> {
+                StaleReason.UNRELIABLE
+            }
+
+            (identity.window to context) !in read.contexts -> {
+                changed(context)
+            }
+
+            else -> {
+                null
+            }
         }
     }
 
