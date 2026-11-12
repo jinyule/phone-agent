@@ -5,7 +5,9 @@ package dev.phoneagent.core.policy.rules
  * [Words.ENGLISH_SIGNS] sign with a space (`[ \t\n\x0B\f\r]`) right before and right after it.
  * The joiners are left out; the parts keep everything else. The same parts as
  * `text.split(Regex("\\b(?:and|then)\\b|(?<=\\s)[&+/](?=\\s)"))` on the JVM, with its word
- * boundaries ([WordEdges]), in time in proportion to [text].
+ * boundaries ([WordEdges]) and spaces, on every platform: Android, whose `\b` and `\s` are
+ * Unicode, kept "Sendéand delete" and "发送and删除" whole (policy-rules.md §8). In time in
+ * proportion to [text].
  */
 internal fun splitJoiners(text: String): List<String> {
     val edges = WordEdges(text)

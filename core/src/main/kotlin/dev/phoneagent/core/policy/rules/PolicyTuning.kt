@@ -94,8 +94,14 @@ public data class PolicyTuning(
 
     /** Constants. */
     public companion object {
-        /** Version of the rules and of these defaults; bumped with every change that can alter a verdict. */
-        public const val RULES_VERSION: Int = 6
+        /**
+         * Version of the rules and of these defaults; bumped with every change that can alter a verdict.
+         * 7: "also", "and" and "then" are whole words by the same word characters on every platform,
+         * ASCII ones and a non-spacing mark on a letter or digit, so on Android, whose regexes count
+         * every letter and mark, a label with another letter or mark next to them can now ask
+         * (policy-rules.md §8).
+         */
+        public const val RULES_VERSION: Int = 7
 
         private const val MAX_LENGTH = 1000
         private const val MAX_LIMIT = 10_000_000
