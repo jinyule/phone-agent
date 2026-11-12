@@ -204,14 +204,16 @@ class PhaseOneToolsTest {
     }
 
     @Test
-    fun `hand_to_user shows stopped, timed out and unknown as unknown, though it only reads`() {
+    fun `hand_to_user shows stopped, timed out, unknown and an error not its own as unknown, though it reads`() {
         // It moves the app between the screens, and a stopped hand-off is not taken back: the app
-        // may already be with the user, so "failed" would state as certain what is not.
+        // may already be with the user, so "failed" would state as certain what is not. An ERROR
+        // without its own handoff detail is the runtime's (handOff threw: a failed take-back).
         val handOff = tools.single { it.def.name == "hand_to_user" }
         assertEquals(RiskClass.READ, handOff.risk)
         assertEquals(
             READ_STATES +
                 mapOf(
+                    ToolStatus.ERROR to StepState.UNKNOWN,
                     ToolStatus.TIMEOUT to StepState.UNKNOWN,
                     ToolStatus.CANCELLED to StepState.UNKNOWN,
                     ToolStatus.OUTCOME_UNKNOWN to StepState.UNKNOWN,

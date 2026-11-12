@@ -8,11 +8,21 @@ import dev.phoneagent.core.tool.ToolContext
 import dev.phoneagent.core.tool.ToolGroup
 import dev.phoneagent.core.tool.ToolResult
 import dev.phoneagent.core.tool.ToolStatus
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import java.util.Locale
 
 /**
  * `hand_to_user(kind, reason)` (phase1 §5, §7.3): the user does this step themselves. The call's
  * `reason` is what the user is asked to do. Whatever the result, the screen has changed, so the
  * model is told to observe before acting.
+ *
+ * Every result it reports itself names the handoff's outcome in `details.handoff` (`done`,
+ * `declined`, `expired`, `unavailable`, `failed`): the hand-off settled, and its card says how. An
+ * ERROR without it is the runtime's, not its own: handOff threw instead of returning (a failed
+ * take-back, or a hand-over that did not settle, so the app may be with the user:
+ * `ToolInteraction.handOff`), or the call failed around it. Whether the hand-off happened is then
+ * unknown, so its card shows UNKNOWN, not FAILED.
  */
 internal class HandToUserTool(
     mask: (String) -> String,
@@ -34,6 +44,8 @@ internal class HandToUserTool(
     // It moves the app to the user's screen, and a stopped hand-off is not taken back.
     override val mayChangePhone: Boolean = true
 
+    override fun uncertain(result: ToolResult): Boolean = result.details?.get(OUTCOME) == null
+
     override suspend fun execute(
         call: ToolCall,
         ctx: ToolContext,
@@ -41,9 +53,13 @@ internal class HandToUserTool(
         val args = reader(call)
         return when (val parsed = args.finish(USAGE, args.choice("kind", KINDS, required = true))) {
             is Parsed.Invalid -> ToolResults.invalid(parsed.message)
-            is Parsed.Ok -> report(ctx.interaction.handOff(parsed.value, call.reason))
+            is Parsed.Ok -> reported(ctx.interaction.handOff(parsed.value, call.reason))
         }
     }
+
+    /** [result] as the model reads it, with the outcome in its details. */
+    private fun reported(result: HandoffResult): ToolResult =
+        report(result).copy(details = buildJsonObject { put(OUTCOME, result.name.lowercase(Locale.ROOT)) })
 
     private fun report(result: HandoffResult): ToolResult =
         when (result) {
@@ -79,6 +95,9 @@ internal class HandToUserTool(
 
     private companion object {
         const val USAGE = "hand_to_user(kind=login/captcha/payment/secure_page/choose/other)"
+
+        /** The details key naming the outcome of a handoff the tool reported itself. */
+        const val OUTCOME = "handoff"
     }
 }
 

@@ -1,5 +1,6 @@
 package dev.phoneagent.core.tools
 
+import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.ports.AskResult
 import dev.phoneagent.core.ports.HandoffKind
 import dev.phoneagent.core.ports.HandoffResult
@@ -12,11 +13,15 @@ import dev.phoneagent.core.testing.detail
 import dev.phoneagent.core.testing.text
 import dev.phoneagent.core.tool.EndReason
 import dev.phoneagent.core.tool.RiskClass
+import dev.phoneagent.core.tool.StepDetail
+import dev.phoneagent.core.tool.StepState
 import dev.phoneagent.core.tool.ToolControl
 import dev.phoneagent.core.tool.ToolGroup
 import dev.phoneagent.core.tool.ToolResult
 import dev.phoneagent.core.tool.ToolStatus
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
@@ -123,6 +128,58 @@ class UserToolsTest {
             assertTrue(texts[3].contains("可能没能把 App 交到用户手上"), texts[3])
             assertTrue(texts[3].contains("也可能用户处理完以后没能把 App 收回来"), texts[3])
         }
+
+    @Test
+    fun `hand_to_user reports every outcome with its handoff detail, and its card shows it settled`() =
+        runTest {
+            val handOff = tools.getValue("hand_to_user")
+            val call = call("hand_to_user", """{"kind":"login"}""")
+            val outcomes =
+                HandoffResult.entries.associateWith { outcome ->
+                    run("hand_to_user", """{"kind":"login"}""", FakeInteraction(handoffResult = outcome))
+                }
+            assertEquals(
+                HandoffResult.entries.associateWith { it.name.lowercase() },
+                outcomes.mapValues { (_, result) -> result.detail("handoff") },
+            )
+            // The runtime may add a line to the text (the screen note when no screen was read after
+            // the handoff): what the tool reported stays settled.
+            val noted = outcomes.mapValues { (_, result) -> result.copy(content = result.content + Part.Text("先观察")) }
+            for (results in listOf(outcomes, noted)) {
+                assertEquals(
+                    mapOf(
+                        HandoffResult.DONE to StepState.SUCCEEDED,
+                        HandoffResult.DECLINED to StepState.FAILED,
+                        HandoffResult.EXPIRED to StepState.FAILED,
+                        HandoffResult.UNAVAILABLE to StepState.FAILED,
+                        HandoffResult.FAILED to StepState.FAILED,
+                    ),
+                    results.mapValues { (_, result) -> handOff.presentResult(call, result).state },
+                )
+            }
+            assertEquals(
+                listOf(StepDetail("kind", "login"), StepDetail("handoff", "declined")),
+                handOff.presentResult(call, outcomes.getValue(HandoffResult.DECLINED)).details,
+            )
+        }
+
+    @Test
+    fun `hand_to_user's card shows an error it did not report itself as unknown`() {
+        // What the runtime records when handOff threw instead of returning: a failed take-back or
+        // a hand-over that did not settle, so the app may be with the user (UserInteraction.handOff).
+        val handOff = tools.getValue("hand_to_user")
+        val call = call("hand_to_user", """{"kind":"login"}""")
+        val failedTakeBack =
+            ToolResult.failure(
+                ToolStatus.ERROR,
+                "工具执行出错，异常类型：dev.phoneagent.core.ports.ScreenUnavailableException\n" +
+                    "交接之后还没有读到屏幕：请先调用 phone_observe。",
+            )
+        assertEquals(StepState.UNKNOWN, handOff.presentResult(call, failedTakeBack).state)
+        // Details without the handoff outcome are not the tool's own either.
+        val foreign = failedTakeBack.copy(details = buildJsonObject { put("answer", "declined") })
+        assertEquals(StepState.UNKNOWN, handOff.presentResult(call, foreign).state)
+    }
 
     @Test
     fun `request_confirmation reports the approval it was run after, without asking again`() =
