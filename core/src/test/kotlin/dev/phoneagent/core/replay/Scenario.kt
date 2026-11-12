@@ -65,15 +65,18 @@ data class ScenarioTask(
 )
 
 /**
- * The policy rules a fixture's verdicts came from.
+ * The policy rules a fixture's verdicts came from. Replay requires both to be what it runs with
+ * ([PolicyPins.current]): a fixture judged by other rules is stale and is refreshed, which
+ * rewrites this pin. Until the run's rules are in the log (WP09), they are pinned here.
  *
  * @property rulesVersion `PolicyTuning.RULES_VERSION` at recording time, >= 1.
- * @property tuning the `PolicyTuning` fields that differ from their defaults, by name.
+ * @property tuning every `PolicyTuning` field, by name ([PolicyPins.values]), so a changed
+ *   default shows even when `RULES_VERSION` was not bumped with it.
  */
 @Serializable
 data class PolicyPin(
     val rulesVersion: Int,
-    val tuning: Map<String, Int> = emptyMap(),
+    val tuning: Map<String, Int>,
 ) {
     init {
         require(rulesVersion >= 1) { "scenario.json: policy.rulesVersion must be >= 1, got $rulesVersion" }
@@ -81,13 +84,21 @@ data class PolicyPin(
 }
 
 /**
- * Product settings of the recording that differ from the defaults.
+ * Product settings of the recording that differ from the defaults. The others (screen format,
+ * tools and loop configs) are the defaults; a scenario that needs one of them set adds a field.
  *
  * @property vision whether the screen components were built for a model that sees images.
+ * @property ownPackages the app's package names, as `PolicyRules` takes them.
+ * @property ownLabels the app's labels, as `PolicyRules` takes them.
+ * @property tuning the `PolicyTuning` fields set for this scenario, by name; the others keep their
+ *   defaults ([PolicyPins.tuning]).
  */
 @Serializable
 data class Assembly(
     val vision: Boolean = false,
+    val ownPackages: Set<String> = setOf("dev.phoneagent"),
+    val ownLabels: Set<String> = setOf("PhoneAgent"),
+    val tuning: Map<String, Int> = emptyMap(),
 )
 
 /**

@@ -28,6 +28,7 @@ import dev.phoneagent.core.policy.ActionIntent
 import dev.phoneagent.core.policy.IntentKind
 import dev.phoneagent.core.policy.SecurityLevel
 import dev.phoneagent.core.policy.Verdict
+import dev.phoneagent.core.policy.rules.PolicyTuning
 import dev.phoneagent.core.ports.AppEntry
 import dev.phoneagent.core.ports.Bounds
 import dev.phoneagent.core.ports.ElementRef
@@ -218,7 +219,7 @@ object ReplaySamples {
             description = "Observe the screen, then say who is on it.",
             model = info,
             task = ScenarioTask(SecurityLevel.STANDARD, unattended = false),
-            policy = PolicyPin(rulesVersion = 6),
+            policy = PolicyPins.current(PolicyTuning()),
             device =
                 Device(
                     surface,

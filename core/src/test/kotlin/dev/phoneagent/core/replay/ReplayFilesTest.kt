@@ -2,6 +2,7 @@ package dev.phoneagent.core.replay
 
 import dev.phoneagent.core.ids.ToolCallId
 import dev.phoneagent.core.model.Part
+import dev.phoneagent.core.policy.rules.PolicyTuning
 import dev.phoneagent.core.ports.ScreenUnavailableException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -74,7 +75,7 @@ class ReplayFilesTest {
 
     @Test
     fun `a rules version below 1 fails`() {
-        assertThrows<IllegalArgumentException> { PolicyPin(rulesVersion = 0) }
+        assertThrows<IllegalArgumentException> { PolicyPin(rulesVersion = 0, PolicyPins.values(PolicyTuning())) }
     }
 
     @Test
