@@ -7,7 +7,6 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -15,8 +14,8 @@ import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import java.io.File
-import java.io.IOException
 import java.security.GeneralSecurityException
+import java.security.ProviderException
 import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -32,10 +31,15 @@ class SealedFileKeyStoreTest {
     /** AES-GCM under a key in memory; replacing [key] is what a keystore reset does. */
     private class SoftwareWrap : KeyWrap {
         var key: SecretKey = newKey()
-        var failSeal = false
+
+        /** Thrown by [seal] instead of sealing. */
+        var sealFailure: Exception? = null
+
+        /** Thrown by [open] instead of opening. */
+        var openFailure: Exception? = null
 
         override fun seal(plain: ByteArray): ByteArray {
-            if (failSeal) throw GeneralSecurityException("keystore is locked")
+            sealFailure?.let { throw it }
             val iv = ByteArray(IV_BYTES).also(SecureRandom()::nextBytes)
             val cipher = Cipher.getInstance(GCM)
             cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(TAG_BITS, iv))
@@ -43,6 +47,7 @@ class SealedFileKeyStoreTest {
         }
 
         override fun open(sealed: ByteArray): ByteArray {
+            openFailure?.let { throw it }
             val cipher = Cipher.getInstance(GCM)
             cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG_BITS, sealed, 0, IV_BYTES))
             return cipher.doFinal(sealed, IV_BYTES, sealed.size - IV_BYTES)
@@ -95,14 +100,39 @@ class SealedFileKeyStoreTest {
     }
 
     @Test
-    fun `a key that cannot be sealed is not written and fails as IOException`() {
+    fun `a key that cannot be opened, checked or Keystore-internal, reads as unusable`() {
+        store.write(pkcs8)
+        val read =
+            keystoreFailures().map { failure ->
+                wrap.openFailure = failure
+                runCatching { store.read() }.fold({ "${it?.size} bytes" }, { it.javaClass.simpleName })
+            }
+        assertEquals(listOf("0 bytes", "0 bytes"), read)
+    }
+
+    @Test
+    fun `a key that cannot be sealed, checked or Keystore-internal, is not written and fails as IOException`() {
         store.write(pkcs8)
         val before = file.readBytes()
-        wrap.failSeal = true
-        val failure = assertThrows(IOException::class.java) { store.write(ByteArray(10)) }
-        assertTrue(failure.cause is GeneralSecurityException)
-        assertArrayEquals(before, file.readBytes())
+        val written =
+            keystoreFailures().map { failure ->
+                wrap.sealFailure = failure
+                val thrown = runCatching { store.write(ByteArray(10)) }.exceptionOrNull()
+                "${thrown?.javaClass?.simpleName} from ${thrown?.cause?.javaClass?.simpleName}, " +
+                    "kept ${before.contentEquals(file.readBytes())}"
+            }
+        assertEquals(
+            listOf(
+                "IOException from GeneralSecurityException, kept true",
+                "IOException from ProviderException, kept true",
+            ),
+            written,
+        )
     }
+
+    /** A checked Keystore refusal, and an internal failure as the Keystore reports it: unchecked. */
+    private fun keystoreFailures(): List<Exception> =
+        listOf(GeneralSecurityException("keystore is locked"), ProviderException("Keystore operation failed"))
 }
 
 private const val GCM = "AES/GCM/NoPadding"

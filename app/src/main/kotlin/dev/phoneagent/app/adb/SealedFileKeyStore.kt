@@ -20,13 +20,18 @@ import java.io.FileNotFoundException
 import java.io.IOException
 import java.security.GeneralSecurityException
 import java.security.KeyStore
+import java.security.ProviderException
 import java.security.UnrecoverableKeyException
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/** Seals the stored adb key and opens it again; both throw [GeneralSecurityException] when they cannot. */
+/**
+ * Seals the stored adb key and opens it again; both throw [GeneralSecurityException] when they
+ * cannot, or [ProviderException] for a failure inside the Android Keystore (it reports those
+ * unchecked).
+ */
 internal interface KeyWrap {
     /** [plain] encrypted and authenticated, IV included. */
     @Throws(GeneralSecurityException::class, IOException::class)
@@ -43,7 +48,9 @@ internal interface KeyWrap {
  * [KeyWrap.seal] returned, written through [AtomicFile], so a crash leaves the old key or the new
  * one. A file that cannot be opened (the keystore key was lost in a reset, or the file is damaged)
  * reads as unusable bytes: `AdbIdentity.loadOrCreate` then replaces the identity and reports
- * `REPLACED`, and the device has to be paired again.
+ * `REPLACED`, and the device has to be paired again. A key that cannot be sealed fails [write] with
+ * [IOException] and leaves the file as it was. Checked and Keystore-internal failures of [wrap] are
+ * treated alike.
  */
 internal class SealedFileKeyStore(
     private val file: File,
@@ -82,15 +89,25 @@ internal class SealedFileKeyStore(
             wrap.open(sealed)
         } catch (unopenable: GeneralSecurityException) {
             // The key cannot be recovered; replacing it is the only way on.
-            Log.w(TAG, "the stored adb key cannot be opened; a new identity replaces it", unopenable)
-            UNUSABLE
+            unusable(unopenable)
+        } catch (keystoreInternal: ProviderException) {
+            // The Keystore's own failures arrive unchecked; the same as a checked refusal.
+            unusable(keystoreInternal)
         }
+
+    private fun unusable(cause: Exception): ByteArray {
+        Log.w(TAG, "the stored adb key cannot be opened; a new identity replaces it", cause)
+        return UNUSABLE
+    }
 
     private fun seal(pkcs8: ByteArray): ByteArray =
         try {
             wrap.seal(pkcs8)
         } catch (failed: GeneralSecurityException) {
             throw IOException("cannot seal the adb key", failed)
+        } catch (keystoreInternal: ProviderException) {
+            // The Keystore's own failures arrive unchecked; the same as a checked refusal.
+            throw IOException("cannot seal the adb key", keystoreInternal)
         }
 
     private companion object {
