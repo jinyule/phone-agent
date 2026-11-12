@@ -20,8 +20,6 @@ import dev.phoneagent.core.model.openai.ProviderProbe
 import dev.phoneagent.core.model.openai.WireOptions
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.security.GeneralSecurityException
@@ -37,8 +35,9 @@ import java.util.UUID
  * the next successful load deletes ([CredentialStore.retainOnly]). A failure writes nothing.
  *
  * The probe sees the typed key through a resolver of its own, which knows only this run's ref:
- * nothing reaches the credential store before the trial passed. Runs are serialized, so the UI and
- * the debug injection cannot interleave saves.
+ * nothing reaches the credential store before the trial passed. Not safe to run concurrently with
+ * itself or with a load of the settings: the caller serializes them (ModelServices holds one lock
+ * over loads, resets and runs).
  */
 internal class ModelSetup(
     private val credentials: CredentialStore,
@@ -47,8 +46,6 @@ internal class ModelSetup(
     private val io: CoroutineDispatcher = Dispatchers.IO,
     private val newGeneration: () -> String = { UUID.randomUUID().toString().take(GENERATION_CHARS) },
 ) {
-    private val running = Mutex()
-
     /**
      * Tests [form] and saves it as the only provider, replacing [current] (the loaded settings, or
      * `null`). A blank key keeps the stored key of the same provider when it is readable and the
@@ -59,31 +56,30 @@ internal class ModelSetup(
         form: ProviderForm,
         current: ModelSettings?,
         onModel: (ModelId) -> Unit = {},
-    ): SetupOutcome =
-        running.withLock {
-            val kept = withContext(io) { keptRef(form, current) }
-            val problems = FormCheck.problems(form, hasStoredKey = kept != null)
-            if (problems.isNotEmpty()) return@withLock SetupOutcome.Invalid(problems)
-            val typed = form.typedKey.takeIf { form.auth == AuthChoice.API_KEY && it.isNotEmpty() }
-            val ref = typed?.let { SecretRef("api-key/${form.providerId}/${newGeneration()}") } ?: kept
-            val credential = ref?.let { Credential.ApiKey(it) } ?: Credential.None
-            val profile = form.profile(credential)
-            val probe = probeWith(TrialCredentials(ref, typed, credentials))
-            val stored = current?.providers?.firstOrNull { it.profile.id == form.providerId }
-            val run =
-                try {
-                    Trials(form, profile, probe, onModel, stored).run()
-                } catch (ignoredUnsendable: IllegalArgumentException) {
-                    // The HTTP client refused the address or a header the profile accepted (core checks
-                    // both like the client does, so this is a disagreement): a form problem, not a crash.
-                    null
-                }
-            when (run) {
-                null -> SetupOutcome.Invalid(listOf(FormProblem.NOT_SENDABLE))
-                is TrialRun.Failed -> SetupOutcome.Failed(run.checks)
-                is TrialRun.Passed -> save(form, profile, run, typed?.let { checkNotNull(ref) to it })
+    ): SetupOutcome {
+        val kept = withContext(io) { keptRef(form, current) }
+        val problems = FormCheck.problems(form, hasStoredKey = kept != null)
+        if (problems.isNotEmpty()) return SetupOutcome.Invalid(problems)
+        val typed = form.typedKey.takeIf { form.auth == AuthChoice.API_KEY && it.isNotEmpty() }
+        val ref = typed?.let { SecretRef("api-key/${form.providerId}/${newGeneration()}") } ?: kept
+        val credential = ref?.let { Credential.ApiKey(it) } ?: Credential.None
+        val profile = form.profile(credential)
+        val probe = probeWith(TrialCredentials(ref, typed, credentials))
+        val stored = current?.providers?.firstOrNull { it.profile.id == form.providerId }
+        val run =
+            try {
+                Trials(form, profile, probe, onModel, stored).run()
+            } catch (ignoredUnsendable: IllegalArgumentException) {
+                // The HTTP client refused the address or a header the profile accepted (core checks
+                // both like the client does, so this is a disagreement): a form problem, not a crash.
+                null
             }
+        return when (run) {
+            null -> SetupOutcome.Invalid(listOf(FormProblem.NOT_SENDABLE))
+            is TrialRun.Failed -> SetupOutcome.Failed(run.checks)
+            is TrialRun.Passed -> save(form, profile, run, typed?.let { checkNotNull(ref) to it })
         }
+    }
 
     /** The ref of the stored key [form] keeps when its key field is blank and the key is readable, or `null`. */
     private fun keptRef(
@@ -295,8 +291,15 @@ internal data class ModelCheck(
     val capabilities: ModelCapabilities?,
 )
 
-/** What [ModelSetup.testAndSave] did. */
+/** What a "test and save" did. */
 internal sealed interface SetupOutcome {
+    /**
+     * The loaded settings file is broken (ModelServices does not run [ModelSetup] then): nothing was
+     * sent, written or deleted. Only an explicit reset, which deletes the file and every key, makes
+     * saving possible again.
+     */
+    data object SettingsBroken : SetupOutcome
+
     /** The form cannot be tested; nothing was sent or written. */
     data class Invalid(
         val problems: List<FormProblem>,

@@ -24,6 +24,12 @@ class ModelSettingsStopTest {
     }
 
     @Test
+    fun brokenSettingsAskForAResetFirst() {
+        FakeSettingsScreen(compose, ProviderForm.start(null), run = RunState.Done(SetupOutcome.SettingsBroken))
+        compose.onNodeWithText(text(R.string.result_settings_broken)).assertExists()
+    }
+
+    @Test
     fun aRequestTheHttpClientRefusesSaysNothingWasSent() {
         FakeSettingsScreen(
             compose,

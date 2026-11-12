@@ -89,6 +89,7 @@
     <string name="result_not_saved_key">测试都通过了，但 key 没能保存。之前的设置保持不变。</string>
     <string name="result_not_saved_settings">测试都通过了，但设置没能写入。之前的设置保持不变。</string>
     <string name="result_nothing_saved">没有保存任何内容。</string>
+    <string name="result_settings_broken">已保存的设置损坏了。请先重置，再保存新的设置。</string>
     <string name="result_error">出现意外错误，这次测试中断了。请重试。</string>
     <string name="reason_credential_echoed">回复里出现了 key，所以被拒绝。请换一个 key；服务不需要 key 时请选“无”。</string>
     <string name="reason_credential_in_trial">这个 key 本身就是试调用请求的一部分，任何正确的回复都会重复它。请换一个 key；服务不需要 key 时请选“无”。</string>

@@ -23,6 +23,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -32,7 +34,12 @@ import java.io.File
  *
  * Settings are in `filesDir`, keys in `noBackupFilesDir` (see [CredentialStore] for what happens
  * when settings arrive without their keys). Keys nobody references are deleted only after the
- * settings loaded successfully: while the file is broken, nothing is deleted until the user resets.
+ * settings loaded successfully: while the file is broken, nothing is saved or deleted until an
+ * explicit [reset].
+ *
+ * [reload], [reset] and [testAndSave] hold one [lock] from start to end, the state they publish
+ * included: a load can never delete a key that a save running beside it has just written, and
+ * the UI and the debug injection cannot interleave saves.
  */
 internal class ModelServices(
     filesDir: File,
@@ -40,6 +47,7 @@ internal class ModelServices(
     cipher: SecretCipher,
     probeWith: (CredentialResolver) -> ProviderProbe = { OpenAiAdapters(it).probe() },
     private val io: CoroutineDispatcher = Dispatchers.IO,
+    private val lock: Mutex = Mutex(),
 ) {
     /** The keys. */
     val credentials: CredentialStore = CredentialStore(File(noBackupDir, CREDENTIALS_DIR), cipher, io)
@@ -51,7 +59,9 @@ internal class ModelServices(
     val state: StateFlow<SettingsState> = current.asStateFlow()
 
     /** Reads the settings again, and on success deletes the keys they no longer use. */
-    suspend fun reload(): SettingsState =
+    suspend fun reload(): SettingsState = lock.withLock { load() }
+
+    private suspend fun load(): SettingsState =
         withContext(io) {
             val next =
                 when (val load = file.load()) {
@@ -63,21 +73,29 @@ internal class ModelServices(
             next
         }
 
-    /** "Test and save" of [form] against the current settings; publishes them when saved. */
+    /**
+     * "Test and save" of [form] against the current settings (loaded first if they never were);
+     * publishes them when saved. While the settings are broken it does nothing and says
+     * [SetupOutcome.SettingsBroken].
+     */
     suspend fun testAndSave(
         form: ProviderForm,
         onModel: (ModelId) -> Unit = {},
-    ): SetupOutcome {
-        val outcome = setup.testAndSave(form, (state.value as? SettingsState.Ready)?.settings, onModel)
-        if (outcome is SetupOutcome.Saved) current.value = withContext(io) { ready(outcome.settings) }
-        return outcome
-    }
+    ): SetupOutcome =
+        lock.withLock {
+            val now = current.value.takeUnless { it == SettingsState.Loading } ?: load()
+            if (now is SettingsState.Broken) return@withLock SetupOutcome.SettingsBroken
+            val outcome = setup.testAndSave(form, (now as? SettingsState.Ready)?.settings, onModel)
+            if (outcome is SetupOutcome.Saved) current.value = withContext(io) { ready(outcome.settings) }
+            outcome
+        }
 
-    /** Deletes the settings and every key: what the broken-settings page offers. */
-    suspend fun reset(): SettingsState {
-        withContext(io) { file.reset() }
-        return reload()
-    }
+    /** Deletes the settings and every key, then loads (finding none): the only way out of broken settings. */
+    suspend fun reset(): SettingsState =
+        lock.withLock {
+            withContext(io) { file.reset() }
+            load()
+        }
 
     private fun ready(settings: ModelSettings?): SettingsState.Ready {
         credentials.retainOnly(settings?.refs().orEmpty())

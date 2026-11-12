@@ -91,6 +91,7 @@
     <string name="result_not_saved_key">All checks passed, but the key could not be stored. The previous setup stays.</string>
     <string name="result_not_saved_settings">All checks passed, but the settings could not be written. The previous setup stays.</string>
     <string name="result_nothing_saved">Nothing was saved.</string>
+    <string name="result_settings_broken">The saved settings are damaged. Reset them before saving new ones.</string>
     <string name="result_error">Something unexpected went wrong, and the run stopped. Try again.</string>
     <string name="reason_credential_echoed">The reply contained the key, so it was rejected. Use another key, or choose None if the service needs no key.</string>
     <string name="reason_credential_in_trial">The key is part of the trial request itself, so every correct reply would repeat it. Use another key, or choose None if the service needs no key.</string>

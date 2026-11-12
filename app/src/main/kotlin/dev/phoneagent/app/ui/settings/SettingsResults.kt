@@ -63,6 +63,10 @@ private fun Outcome(outcome: SetupOutcome) {
             Checks(outcome.checks)
             Text(stringResource(R.string.result_saved))
         }
+
+        SetupOutcome.SettingsBroken -> {
+            Text(stringResource(R.string.result_settings_broken), color = MaterialTheme.colorScheme.error)
+        }
     }
 }
 

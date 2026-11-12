@@ -36,6 +36,8 @@ import kotlinx.serialization.serializer
  * ([DebugModelConfigProvider]). A submitted request goes through the same "test and save" as the
  * form, so every model it names is really called once, and its key ends up in the Keystore-backed
  * store like a typed one. [status] reports how the last request went and never repeats its input.
+ * While the saved settings are broken a request is not run (`settings_broken`), and nothing is saved
+ * or deleted; `"reset": true` first deletes the settings and every key, as the UI's reset.
  */
 internal class DebugModelConfig(
     private val services: ModelServices,
@@ -73,7 +75,7 @@ internal class DebugModelConfig(
         val request = parsed(bytes) ?: return null
         last = state("running")
         return scope.launch {
-            services.reload()
+            if (request.reset) services.reset() else services.reload()
             val outcome =
                 services.testAndSave(request.form()) { model ->
                     last =
@@ -102,6 +104,10 @@ internal class DebugModelConfig(
 
     private fun report(outcome: SetupOutcome): JsonObject =
         when (outcome) {
+            SetupOutcome.SettingsBroken -> {
+                state("settings_broken")
+            }
+
             is SetupOutcome.Invalid -> {
                 state(
                     "invalid",
@@ -209,6 +215,9 @@ private fun state(
  * {"baseUrl": "http://10.0.2.2:11434/v1", "protocol": "OPENAI_CHAT_COMPLETIONS", "auth": "none",
  *  "models": {"main": "qwen3:8b", "vision": "qwen2.5vl:7b"}, "visionImages": true}
  * ```
+ *
+ * @property reset delete the saved settings and every key before this request, as the UI's reset
+ *   does: the way out of `settings_broken`.
  */
 @Serializable
 @Suppress("LongParameterList") // One parameter per JSON field of the request.
@@ -222,6 +231,7 @@ internal class DebugModelRequest(
     val models: DebugModels,
     val visionImages: Boolean = false,
     val contextTokens: Int? = null,
+    val reset: Boolean = false,
 ) {
     /** The form this request fills in. */
     fun form(): ProviderForm {

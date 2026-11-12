@@ -6,6 +6,10 @@ import dev.phoneagent.app.model.settings.ModelSettings
 import dev.phoneagent.app.model.settings.ModelSettingsFile
 import dev.phoneagent.app.model.settings.SettingsFixtures
 import dev.phoneagent.app.model.settings.SettingsProblemKind
+import dev.phoneagent.app.model.setup.AuthChoice
+import dev.phoneagent.app.model.setup.FakeProvider
+import dev.phoneagent.app.model.setup.ProviderForm
+import dev.phoneagent.app.model.setup.SetupOutcome
 import dev.phoneagent.core.model.SecretRef
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
@@ -78,6 +82,53 @@ class ModelServicesTest {
         assertEquals(SettingsState.Ready(null, emptyMap()), runBlocking { services.reset() })
         assertEquals(emptyList<File>(), keyDir.listFiles()!!.toList())
         assertTrue(!File(files, ModelSettingsFile.NAME).exists())
+    }
+
+    @Test
+    fun aBrokenFileIsNotOverwrittenBySavingUntilTheUserResets() {
+        services.credentials.put(SettingsFixtures.REF, "sk-test-not-a-real-key")
+        val file = File(files, ModelSettingsFile.NAME)
+        file.writeText("{ not json")
+        reload() as SettingsState.Broken
+        FakeProvider().use { provider ->
+            val custom = ProviderForm.start(null)
+            val form = custom.copy(baseUrl = provider.baseUrl, auth = AuthChoice.NONE, mainModel = "main-model")
+            val outcome = runBlocking { services.testAndSave(form) }
+            // Collected first, so a run that saves shows everything it changed.
+            assertEquals(
+                listOf<Any>(SetupOutcome.SettingsBroken, "{ not json", CredentialStatus.PRESENT, 0),
+                listOf(
+                    outcome,
+                    file.readText(),
+                    services.credentials.status(SettingsFixtures.REF),
+                    provider.requests.size,
+                ),
+            )
+            runBlocking { services.reset() }
+            assertTrue(runBlocking { services.testAndSave(form) } is SetupOutcome.Saved)
+        }
+    }
+
+    @Test
+    fun aSaveBeforeAnyLoadFindsTheBrokenFileFirst() {
+        services.credentials.put(SettingsFixtures.REF, "sk-test-not-a-real-key")
+        val file = File(files, ModelSettingsFile.NAME)
+        file.writeText("{ not json")
+        FakeProvider().use { provider ->
+            val custom = ProviderForm.start(null)
+            val form = custom.copy(baseUrl = provider.baseUrl, auth = AuthChoice.NONE, mainModel = "main-model")
+            val outcome = runBlocking { services.testAndSave(form) }
+            assertEquals(
+                listOf<Any>(SetupOutcome.SettingsBroken, "{ not json", CredentialStatus.PRESENT, 0),
+                listOf(
+                    outcome,
+                    file.readText(),
+                    services.credentials.status(SettingsFixtures.REF),
+                    provider.requests.size,
+                ),
+            )
+            assertTrue(services.state.value is SettingsState.Broken)
+        }
     }
 
     @Test
