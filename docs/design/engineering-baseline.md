@@ -87,39 +87,54 @@ phone-agent/
 
 ### 3.2 会话回放测试（P0，最重要）
 
-**为什么要做**：主循环、提示词、上下文压缩、安全判定的回归，都能在没有真机、没有 key 的情况下确定性地复现。这是 dsh 最有价值的工程做法。手机场景的不同之处在于，工具的另一端是设备，所以**设备侧也要回放**。
+**为什么要做**：主循环、提示词、上下文压缩、安全判定的回归，都能在没有真机、没有 key 的情况下确定性地复现。这是 dsh 最有价值的工程做法。手机场景的不同之处在于，工具的另一端是设备，所以**设备侧也要回放**。代码在 `core` 的测试源集 `dev.phoneagent.core.replay`。
 
 **fixture 结构**：
 ```
 core/src/test/resources/sessions/<scenario>/
-├─ scenario.yml                 profile、模型协议、recording: live|authored、说明
-├─ session.jsonl                事件溯源日志（phase1-architecture §3.9）
-├─ blobs/                       截图等大对象，按内容哈希命名（可以为空）
+├─ scenario.json                录制方式（authored|live）、说明、模型和能力、task/start 的档位、
+│                               和默认值不同的装配参数、policy.rulesVersion 与 tuning、设备
+├─ session.jsonl                事件溯源日志（phase1-architecture §3.9），归一化后
+├─ requests.expected.jsonl      录制时模型收到的每个请求
+├─ blobs/<sha256>               截图等大对象，文件名是内容的 SHA-256（可以没有）
 ├─ system-prompt.expected.md    边车：系统提示词全文
 ├─ tool-schemas.expected.json   边车：工具定义
-└─ replay.override.json         可选：按调用下标注入异常、超时等
+└─ replay.override.json         可选：日志里没有的设备事实，和人为注入的故障
 ```
+- `scenario.json` 用 kotlinx.serialization 严格读：未知键、缺键都失败。设备相关的值（surface、分辨率、dpi、ROM、App 版本、AppCatalog）只放这里，不进日志。
+- `requests.expected.jsonl` 每行是一个 `ChatRequest`：`n`、`logSeq`（发出时日志最后一条记录的 seq）、`model` 和 `settings`（变化时才写，否则为 null）、`keep`（和上一个请求共有的前缀消息数）、`append`（其余消息）。为什么要存：`ReplayChecker` 证明"发出的 = 日志推出的"，事件比较证明"日志没变"，但两者都用当前代码推导；`deriveMessages` 或 `toRequest` 改了，它们照样通过，只有和录制时的请求比才看得出来。
+- 比 `ChatRequest` 这一层，不比线路字节：`prepare` 的输出（wire 快照、钳制后的档位）本来就在请求里；线路字节是适配器在同一 `mappingVersion` 下的纯函数，由各适配器的线路金样覆盖；图片在请求里是内容哈希，比哈希一样严格。
+- `replay.override.json` 的每条事实按（调用的 `{{call:n}}` token，这个调用的第几次端口调用）定位，计数时记录的和没记录的都算：`awaitChange` 的返回值（它从不进日志）、`frame` 返回 null、`snapshot`/`frame`/`awaitChange` 抛出或挂起、动作记成 `threw X` 时异常的 message、设备耗时 `delayMs`。
 
 **回放怎么跑**：
-- `ReplayChatModel`：从日志里的 assistant 事件得到逐次调用的脚本，**按调用顺序**提供回复；多出的调用报 "script exhausted"；结束时 `assertConsumed()`，少调用也失败；动态值用 `{{fromRequest:regex}}` 从实时请求中提取。
-- `ReplayScreen`：按顺序提供录下的观察结果和动作结果；**同时断言本次请求的动作（工具名 + 归一化后的参数）与录制时一致**。
-- 断言内容：
-  - 每次模型请求（消息序列、工具清单）与录制时**逐字节一致**，这也是"模型可见 ⟺ 已记录"的执行检查；
-  - PolicyEngine 的判定序列一致；
-  - 事件序列一致（归一化之后）；
-  - 两个边车文件一致。
+- `ReplayChatModel`：请求 n 的结局是 `logSeq_n` 之后、`logSeq_{n+1}` 之前（含）的 `assistant/message` 或 `assistant/attempt`。正常回复先把文字作为 delta 流出再原样返回；中断前缀加 `assistant/attempt` 是先流出前缀、再抛按 kind 重建的 `ModelError`（重建后的 message 必须和记录逐字相同，否则装载失败）；只有中断前缀、没有结局的，流出前缀后挂到被取消。`prepare(level)` 钳制后必须等于录制时的档位，返回录下的 wire。多出的请求报 "script exhausted at request #n"；结束时 `assertConsumed()`，少调用也失败。
+- `{{fromRequest:REGEX}}`：只能是 `argsJson` 里一个完整的 JSON 字符串值，REGEX 按 JSON 转义写、至少一个分组；取实时请求全部文字（含工具结果里的）中最后一个匹配的第 1 组，作为 JSON 字符串插入，`argsJson` 其余部分逐字保留。写 fixture 时 `assistant/message` 恢复成模板。
+- `ReplayScreen`：每个调用一个队列，当前调用从回放日志推出（最后一条点名了某个调用、且它还没有 `tool/result` 的记录）。每次端口调用的方法必须和录制时一致；`act`、`launch` 还要比 `UiAction` 和 `on`、或 `LaunchTarget`。不一致就当场失败，并记进结束时的检查。快照的 fingerprint 和 quality 用当前的 analyzer 重算（quality 影响自动附图，是模型可见的；改 analyzer 要 refresh fixture），diff 按录制值给。设备耗时在虚拟时间里 delay。
+- 断言（全部收集，一次报出）：
+  - 请求文件逐字节一致，加上每次请求的 `ReplayChecker` 严格检查；
+  - `policy/verdict` 序列一致；`scenario.json` 的 `rulesVersion`、`tuning` 和当前值严格相等，判定变了而版本没变时单独提示"没升 RULES_VERSION"；
+  - 事件序列一致（两边都解码、用当前编解码器重写、再归一化）；
+  - 两个边车文件一致；
+  - 脚本、设备队列、override、外部输入全部用完。
 
-**三种模式**（Gradle 属性 `-PsessionSnapshot=`）：
-- `replay`：默认，CI 只跑这个。
-- `record`：在真机加真实 key 上运行。来源可以是评测任务，也可以是手动任务；跑完自动做归一化、gitleaks 扫描，并生成一份**人工隐私审查清单**（截图、通讯录、聊天内容只允许来自测试账号）。
-- `refresh`：无 key。模型输入不变、只是产品输出变了时，更新期望。
+**三种模式**（Gradle 属性 `-PsessionSnapshot=`，由约定插件 `phoneagent.session-replay` 解析并传给 `:core:test`）：
+- `replay`：默认，CI 只跑这个。取值非法，或 `CI=true` 时不是 `replay`，在配置阶段就失败。
+- `record`：跑录制来源并写出新 fixture。M1 的来源是 JVM 上的 authored 场景；真模型加真机的来源留给 WP11。跑完自动归一化、gitleaks 扫描（本机没装时只警告，清单里写"未扫描"，CI 扫全历史兜底），并生成一份**人工隐私审查清单** `core/build/session-record/<scenario>/privacy-checklist.md`（不提交；截图、通讯录、聊天内容只允许来自测试账号）。
+- `refresh`：无 key。用 fixture 里的模型回复、设备事实和外部输入跑一遍，就地重写日志、请求文件、边车和 rulesVersion；模型回复和设备事实永远不会被它改掉。它不碰 prompt-surface 金样和 loop 金样：三者共用比对和接受的写法，各自一个接受开关。
+- `record` 和 `refresh` 只跑回放测试，并且不进缓存、不算 up-to-date（它们写 `src/`）。
 
-**归一化**：
-- id 按首次出现替换成带类型的 token，如 `{{task:1}}`；
-- 时间置零，耗时去掉；
-- 设备相关的分辨率和包版本放进 `scenario.yml`。
+**归一化**（每个数值字段和 id 字段的类别登记在 `core/src/test/resources/replay/normalized-fields.txt`，新字段没登记测试就失败）：
+- N1 `time`、`createdAt` 置 0；
+- N2 `approval/asked.expiresAt` 改成相对本条记录的时间；
+- N3 `request/retry.delayMs` 置 0（含随机抖动）；
+- N4 task、session、call、prompt 四类 id 按首次出现换成 `{{task:1}}` 这样的 token，回放时换成 `task-1`（SessionId 只允许 `[A-Za-z0-9._-]`）；SnapshotId、元素 ref、BlobRef、provider、model、seq 引用、opaque、providerMetadata 不换；文字和 JSON 参数一律不改；
+- N5 录制时把本次用到的 key 换成 `{{credential:n}}`（原样、转义一层、转义两层都换）；**每种模式**装载 fixture 时都检查，出现 `sk-`、JWT、`Bearer` 形状的文字就失败；
+- N6 设备相关的值放进 `scenario.json`；
+- N7 恢复 `{{fromRequest:…}}` 模板。
 
-**原则**：修 fixture，不修归一化器。任何非平凡的、模型可见或用户可见的改动，**同一个 PR 里**就要更新相应的 fixture。
+归一化器的锁定测试：模型可见的每一类改动（文字、参数、工具名、结果、两个调用的结果互换、两个不同的 id、header、压缩范围、opaque、图片……）归一化后仍然不同，每种一个测试；交换律（先归一化再 `deriveMessages` 和反过来逐字节相同）；字段登记表完整。
+
+**原则**：修 fixture，不修归一化器。任何非平凡的、模型可见或用户可见的改动，**同一个 PR 里**就要更新相应的 fixture（`record-session` 技能列出要跑的命令）。
 
 ---
 
@@ -228,8 +243,8 @@ core/src/test/resources/sessions/<scenario>/
 |---|---|---|
 | `pre-push-checks` | 按变更面挑最小检查集 | P0 |
 | `code-review` | 必查项：taskId 贯穿、取消语义、只在边界校验、模型可见内容进日志、PolicyEngine 绕过风险、隐藏 API 的降级路径 | P0 |
-| `add-tool` | 新增工具的流程：schema → RiskClass 和 PolicyEngine 分类 → 展示函数 → 回放 fixture → 金样 | P0 |
-| `record-session` | 录制、归一化、隐私审查 fixture | P0 |
+| `add-tool` | 新增工具的流程：schema → RiskClass 和 PolicyEngine 分类 → 展示函数 → authored 场景并 refresh 全部 fixture → prompt-surface 金样 | P0 |
+| `record-session` | 什么时候 record、refresh 或改 authored 脚本；回放失败怎么看；隐私审查；改了模型可见内容时要跑的全部命令 | P0 |
 | `android-device-debug` | 真机或模拟器上调试 helper 和虚拟屏 | P1 |
 
 **文档纪律**：
