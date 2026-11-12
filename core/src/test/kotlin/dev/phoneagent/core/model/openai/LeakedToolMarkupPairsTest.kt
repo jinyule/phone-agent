@@ -13,7 +13,8 @@ import kotlin.random.Random
  * How [LeakedToolMarkup] finds its blocks (fix-list r10b): each open tag with the first close tag
  * after it, as the lazy patterns it replaced found them, on random text; and a bounded number of
  * reads of each character on open tags without close tags, which those patterns took time growing
- * with its square to read.
+ * with its square to read. The reads are counted through [LeakedToolMarkup.recover] and, for each
+ * tag, through [pairs] itself, where no copy of the text made on the way in hides them (fix-list r11).
  */
 class LeakedToolMarkupPairsTest {
     /** Open tags without close tags, in about 64 KiB of answer text. */
@@ -38,6 +39,34 @@ class LeakedToolMarkupPairsTest {
             }
         assertAll(reads.map { (format, most) -> { assertTrue(most <= MAX_READS, "$tags, $format: $most reads") } })
     }
+
+    /** Open tags of one [tag] without close tags, in about 64 KiB, given to [pairs] directly. */
+    enum class Unclosed(
+        internal val tag: Tag,
+        val text: String,
+    ) {
+        FUNCTION_CALLS(Tag.FUNCTION_CALLS, FUNCTION_CALLS_OPEN.repeat(LIMIT / FUNCTION_CALLS_OPEN.length)),
+        INVOKE(Tag.INVOKE, INVOKE_OPEN.repeat(LIMIT / INVOKE_OPEN.length)),
+        INVOKE_UNQUOTED_NAMES(Tag.INVOKE, UNQUOTED_NAME.repeat(LIMIT / UNQUOTED_NAME.length)),
+        PARAMETER(Tag.PARAMETER, PARAMETER_OPEN.repeat(LIMIT / PARAMETER_OPEN.length)),
+        PARAMETER_UNQUOTED_NAMES(Tag.PARAMETER, UNQUOTED_PARAMETER.repeat(LIMIT / UNQUOTED_PARAMETER.length)),
+        TOOL_CALL(Tag.TOOL_CALL, "<tool_call>".repeat(TOOL_CALL_OPENS)),
+    }
+
+    @ParameterizedTest
+    @EnumSource(Unclosed::class)
+    fun `pairs reads each character a bounded number of times, for each tag`(cell: Unclosed) {
+        val text = CountingChars(cell.text)
+        val found = pairs(text, cell.tag)
+        assertAll(
+            { assertEquals(0, found.size, "$cell") },
+            { assertTrue(text.most() <= MAX_READS, "$cell: ${text.most()} reads") },
+        )
+    }
+
+    @Test
+    fun `every tag is counted through pairs directly`() =
+        assertEquals(Tag.entries.toSet(), Unclosed.entries.map { it.tag }.toSet())
 
     @Test
     fun `a close tag written in an open tag's name does not close it`() {
@@ -78,6 +107,7 @@ class LeakedToolMarkupPairsTest {
         const val INVOKE_CLOSE = "</｜DSML｜invoke>"
         const val PARAMETER_OPEN = "<｜DSML｜parameter name=\"x\" string=\"false\">"
         const val UNQUOTED_NAME = "<｜DSML｜invoke name=\""
+        const val UNQUOTED_PARAMETER = "<｜DSML｜parameter name=\""
 
         fun block(body: String) = FUNCTION_CALLS_OPEN + body + FUNCTION_CALLS_CLOSE
 
