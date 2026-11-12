@@ -68,12 +68,12 @@
     <string name="problem_key_missing">请填写 API Key，或者选“无”。</string>
     <string name="problem_key_not_header_safe">API Key 里有无法发送的字符。</string>
     <string name="problem_base_url_invalid">地址要写成 https://host[:端口][/path]，端口在 1 到 65535 之间，末尾不带斜杠；只有本地服务可以用 http。</string>
-    <string name="problem_header_invalid">有 header 名字像凭据，或者值无法发送。</string>
+    <string name="problem_header_invalid">有请求头的名字像凭据，或者值无法发送。</string>
     <string name="problem_unknown_preset">不认识这个预设。</string>
     <string name="problem_protocol_unsupported">这个协议还不能调用。</string>
     <string name="problem_context_invalid">上下文长度必须是正数。</string>
     <string name="problem_vision_needs_images">看图模型必须能接收图片。</string>
-    <string name="problem_not_sendable">地址或某个 header 无法发送。没有保存任何内容。</string>
+    <string name="problem_not_sendable">地址或某个请求头无法发送。没有保存任何内容。</string>
 
     <!-- Model settings: test results -->
     <string name="result_model">模型 %1$s</string>
