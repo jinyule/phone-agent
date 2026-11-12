@@ -67,7 +67,8 @@ object ReplayFiles {
     const val BLOBS: String = "blobs"
 
     /** The files a fixture directory may hold; anything else is a stray file. */
-    val KNOWN: Set<String> = setOf(SCENARIO, SESSION, REQUESTS, OVERRIDE, BLOBS)
+    val KNOWN: Set<String> =
+        setOf(SCENARIO, SESSION, REQUESTS, OVERRIDE, BLOBS, FixtureTexts.SYSTEM_PROMPT, FixtureTexts.TOOL_SCHEMAS)
 
     /** Unknown keys fail (the default); defaults are written out, so a written file says everything. */
     private val json =
@@ -112,7 +113,9 @@ object ReplayFiles {
                     .toList()
             }
         require(stray.isEmpty()) { "${dir.name}: stray files $stray (a fixture holds $KNOWN)" }
-        val texts = listOf(SCENARIO, SESSION, REQUESTS, OVERRIDE).filter { dir.resolve(it).isRegularFile() }
+        val texts =
+            listOf(SCENARIO, SESSION, REQUESTS, OVERRIDE, FixtureTexts.SYSTEM_PROMPT, FixtureTexts.TOOL_SCHEMAS)
+                .filter { dir.resolve(it).isRegularFile() }
         for (file in texts) Credentials.checkShapes("${dir.name}/$file", dir.resolve(file).readText())
         for (file in listOf(SCENARIO, SESSION, REQUESTS)) require(file in texts) { "${dir.name}: $file is missing" }
 

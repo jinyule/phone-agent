@@ -1,0 +1,66 @@
+{
+    "format": 1,
+    "recording": "authored",
+    "description": "Observe the list of chats, tap 张三's row (its ref read from the screen), then answer.",
+    "model": {
+        "provider": "test-anthropic",
+        "model": "claude-test",
+        "protocol": "ANTHROPIC_MESSAGES",
+        "capabilities": {
+            "tools": true,
+            "vision": false,
+            "contextTokens": 128000,
+            "maxOutputTokens": null,
+            "reasoningLevels": null,
+            "promptCaching": "IMPLICIT",
+            "thinkingBinding": "NONE",
+            "verified": []
+        }
+    },
+    "task": {
+        "level": "STANDARD",
+        "unattended": false
+    },
+    "policy": {
+        "rulesVersion": 6,
+        "tuning": {
+            "labelMax": 12,
+            "contextMax": 40,
+            "shortText": 20,
+            "totalTextMax": 30,
+            "labelRead": 120,
+            "titleBand": 150,
+            "clearNear": 80,
+            "rowSwipeMin": 100,
+            "rowMinWidth": 600,
+            "carouselMax": 400,
+            "maxElements": 5000,
+            "maxScreenText": 100000,
+            "maxDepth": 100,
+            "totalsRead": 8
+        }
+    },
+    "assembly": {
+        "vision": false,
+        "ownPackages": [
+            "dev.phoneagent"
+        ],
+        "ownLabels": [
+            "PhoneAgent"
+        ],
+        "tuning": {}
+    },
+    "device": {
+        "surface": {
+            "displayId": 7,
+            "kind": "AGENT"
+        },
+        "widthPx": 1080,
+        "heightPx": 2400,
+        "densityDpi": 440,
+        "build": null,
+        "sdk": null,
+        "packages": {},
+        "apps": []
+    }
+}

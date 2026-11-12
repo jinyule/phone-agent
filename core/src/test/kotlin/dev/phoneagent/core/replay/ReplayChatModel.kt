@@ -190,7 +190,7 @@ class ReplayChatModel(
         return when (outcome) {
             is ScriptedOutcome.Reply -> {
                 val reply = RequestTemplates.resolve(outcome.response, request, "request #${outcome.n}")
-                remember(outcome.response, reply)
+                resolved += RequestTemplates.changes(outcome.response, reply)
                 reply.parts.filterIsInstance<Part.Text>().forEach { onDelta(Delta.Text(it.text)) }
                 reply
             }
@@ -210,17 +210,6 @@ class ReplayChatModel(
     /** Fails with [AssertionError] unless every recorded request was made. */
     fun assertConsumed() {
         if (sent != script.size) throw AssertionError("the recording made ${script.size} requests, the replay $sent")
-    }
-
-    private fun remember(
-        template: ChatResponse,
-        reply: ChatResponse,
-    ) {
-        template.parts.zip(reply.parts).forEach { (before, after) ->
-            if (before is Part.ToolCall && after is Part.ToolCall && before.argsJson != after.argsJson) {
-                resolved[before.id] = RequestTemplates.Resolved(before.argsJson, after.argsJson)
-            }
-        }
     }
 
     companion object {

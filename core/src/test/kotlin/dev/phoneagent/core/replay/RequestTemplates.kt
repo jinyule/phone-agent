@@ -83,6 +83,24 @@ object RequestTemplates {
         )
 
     /**
+     * What resolving [template] gave in [reply] ([resolve]): the arguments of each call that
+     * changed, by call.
+     */
+    fun changes(
+        template: ChatResponse,
+        reply: ChatResponse,
+    ): Map<ToolCallId, Resolved> =
+        template.parts
+            .zip(reply.parts)
+            .mapNotNull { (before, after) ->
+                if (before is Part.ToolCall && after is Part.ToolCall && before.argsJson != after.argsJson) {
+                    before.id to Resolved(before.argsJson, after.argsJson)
+                } else {
+                    null
+                }
+            }.toMap()
+
+    /**
      * [parts] with the arguments of each call in [templates] put back to its template, when they
      * are what the template resolved to (N7: the fixture keeps the template, not the value).
      */

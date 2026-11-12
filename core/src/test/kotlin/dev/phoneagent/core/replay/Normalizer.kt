@@ -124,6 +124,18 @@ class Normalizer(
     /** How many replacements each key needed so far, by placeholder number. */
     val credentialHits: Map<Int, Int> get() = hits
 
+    /**
+     * The token [raw] got as an id of [kind] (a class with a token) in what was normalized so far,
+     * or `null` when it did not occur: how record mode writes the calls of `replay.override.json`.
+     */
+    fun tokenOf(
+        kind: FieldClass,
+        raw: String,
+    ): String? {
+        val name = kind.token ?: return null
+        return tokens[name]?.get(raw)?.let { Tokens.of(name, it) }
+    }
+
     /** The normalized text of a canonical `session.jsonl`. */
     fun session(text: String): String =
         lines(text)
