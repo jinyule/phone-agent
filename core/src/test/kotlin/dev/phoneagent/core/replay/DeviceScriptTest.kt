@@ -1,0 +1,205 @@
+package dev.phoneagent.core.replay
+
+import dev.phoneagent.core.ids.PromptId
+import dev.phoneagent.core.ids.ToolCallId
+import dev.phoneagent.core.policy.ActionIntent
+import dev.phoneagent.core.policy.IntentKind
+import dev.phoneagent.core.policy.SecurityLevel
+import dev.phoneagent.core.policy.Verdict
+import dev.phoneagent.core.ports.ActionOutcome
+import dev.phoneagent.core.ports.ConfirmCard
+import dev.phoneagent.core.ports.ConfirmReason
+import dev.phoneagent.core.ports.ElementRef
+import dev.phoneagent.core.ports.Target
+import dev.phoneagent.core.ports.UiAction
+import dev.phoneagent.core.session.ApprovalAsked
+import dev.phoneagent.core.session.PolicyVerdictRecorded
+import dev.phoneagent.core.session.ScreenActed
+import dev.phoneagent.core.session.ScreenObserved
+import dev.phoneagent.core.session.SessionEvent
+import dev.phoneagent.core.session.SessionRecord
+import dev.phoneagent.core.session.ToolResultRecorded
+import dev.phoneagent.core.tool.ToolResult
+import dev.phoneagent.core.tool.ToolStatus
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
+
+class DeviceScriptTest {
+    private val call = ReplaySamples.call
+    private val other = ToolCallId("toolu_02")
+    private val tap = UiAction.Tap(Target.Ref(ElementRef("e2")))
+
+    private fun records(vararg events: SessionEvent): List<SessionRecord> =
+        events.mapIndexed { i, e ->
+            SessionRecord(i + 1L, 0, e)
+        }
+
+    private fun script(
+        records: List<SessionRecord> = ReplaySamples.records,
+        vararg facts: DeviceFact,
+    ) = DeviceScript.of(records, ReplayOverride(device = facts.toList()))
+
+    private fun verdict(id: ToolCallId) =
+        PolicyVerdictRecorded(id, SecurityLevel.STANDARD, ActionIntent(IntentKind.NAVIGATE), Verdict.Allow)
+
+    private fun result(id: ToolCallId) = ToolResultRecorded(id, "phone_tap", ToolResult(ToolStatus.OK, emptyList()))
+
+    private fun acted(
+        id: ToolCallId,
+        outcome: ActionOutcome,
+    ) = ScreenActed(id, ReplaySamples.snapshot.id, tap, outcome)
+
+    private fun failure(block: () -> Unit): String =
+        assertThrows<IllegalArgumentException> { block() }.message.orEmpty()
+
+    // OpenCall
+
+    @Test
+    fun `the open call is the latest one named that has no result`() {
+        assertEquals(other, OpenCall.after(records(verdict(call), verdict(other))))
+    }
+
+    @Test
+    fun `a result closes its call and the earlier open call is current again`() {
+        assertEquals(call, OpenCall.after(records(verdict(call), verdict(other), result(other))))
+    }
+
+    @Test
+    fun `an approval names its card's call`() {
+        val card = ConfirmCard(call, ConfirmReason.OUTWARD, "send", "Chat")
+        assertEquals(
+            call,
+            OpenCall.after(records(verdict(call), verdict(other), ApprovalAsked(PromptId("p-1"), card, expiresAt = 1))),
+        )
+    }
+
+    @Test
+    fun `no call is open when every call has its result`() {
+        assertNull(OpenCall.after(records(verdict(call), result(call))))
+    }
+
+    // DeviceScript
+
+    @Test
+    fun `the logged port calls of a call are its steps, frames included`() {
+        val steps = script().getValue(call)
+        assertEquals(listOf(DevicePort.SNAPSHOT to 10L, DevicePort.FRAME to 11L), steps.map { it.port to it.seq })
+        assertEquals(listOf(1, 2), steps.map { it.op })
+        assertEquals(DeviceResult.Snapshot(ReplaySamples.snapshot), steps[0].result)
+    }
+
+    @Test
+    fun `an unlogged fact takes its place among the logged port calls`() {
+        val steps =
+            script(
+                facts = arrayOf(DeviceFact("toolu_01", 2, DevicePort.AWAIT_CHANGE, changed = false)),
+            ).getValue(call)
+        assertEquals(listOf(DevicePort.SNAPSHOT, DevicePort.AWAIT_CHANGE, DevicePort.FRAME), steps.map { it.port })
+        assertEquals(listOf(1, 2, 3), steps.map { it.op })
+        assertEquals(DeviceResult.Changed(false), steps[1].result)
+    }
+
+    @Test
+    fun `a note gives a logged port call its delay`() {
+        val steps =
+            script(
+                facts = arrayOf(DeviceFact("toolu_01", 1, DevicePort.SNAPSHOT, delayMs = 250)),
+            ).getValue(call)
+        assertEquals(listOf(250L, 0L), steps.map { it.delayMs })
+    }
+
+    @Test
+    fun `a fact for a call the log does not drive makes its own queue`() {
+        val steps =
+            script(
+                facts =
+                    arrayOf(
+                        DeviceFact(
+                            "toolu_09",
+                            1,
+                            DevicePort.SNAPSHOT,
+                            throws = Thrown(IllegalStateException::class.java.name, "x"),
+                        ),
+                    ),
+            )
+        assertEquals(
+            DeviceResult.Throws(Thrown(IllegalStateException::class.java.name, "x")),
+            steps.getValue(ToolCallId("toolu_09")).single().result,
+        )
+    }
+
+    @Test
+    fun `an action cut off by a cancellation hangs`() {
+        val unfinished =
+            ActionOutcome(ActionOutcome.Status.Failed(DeviceScript.UNFINISHED), ActionOutcome.Effect.UNKNOWN)
+        val step = script(records(verdict(call), acted(call, unfinished))).getValue(call).single()
+        assertEquals(DeviceResult.Hangs, step.result)
+        assertEquals(tap to ReplaySamples.snapshot.id, step.action to step.on)
+    }
+
+    @Test
+    fun `an action that threw throws the exception its fact gives`() {
+        val threw =
+            ActionOutcome(ActionOutcome.Status.Failed("threw java.io.IOException"), ActionOutcome.Effect.UNKNOWN)
+        val thrown = Thrown("java.io.IOException", "helper gone")
+        val step =
+            script(
+                records(verdict(call), acted(call, threw)),
+                DeviceFact("toolu_01", 1, DevicePort.ACT, throws = thrown),
+            ).getValue(call).single()
+        assertEquals(DeviceResult.Throws(thrown), step.result)
+    }
+
+    @Test
+    fun `an action that threw without its fact fails`() {
+        val threw =
+            ActionOutcome(ActionOutcome.Status.Failed("threw java.io.IOException"), ActionOutcome.Effect.UNKNOWN)
+        assertTrue("must give its message" in failure { script(records(verdict(call), acted(call, threw))) })
+    }
+
+    @Test
+    fun `a fact naming another exception class than the log fails`() {
+        val threw =
+            ActionOutcome(ActionOutcome.Status.Failed("threw java.io.IOException"), ActionOutcome.Effect.UNKNOWN)
+        val fact =
+            DeviceFact("toolu_01", 1, DevicePort.ACT, throws = Thrown(IllegalStateException::class.java.name, "x"))
+        assertTrue(
+            "the fact says java.lang.IllegalStateException" in
+                failure { script(records(verdict(call), acted(call, threw)), fact) },
+        )
+    }
+
+    @Test
+    fun `a fact that gives an exception to an action that returned fails`() {
+        val ok = ActionOutcome(ActionOutcome.Status.Ok, ActionOutcome.Effect.CHANGED)
+        val fact = DeviceFact("toolu_01", 1, DevicePort.ACT, throws = Thrown("java.io.IOException", "x"))
+        assertTrue("did not throw" in failure { script(records(verdict(call), acted(call, ok)), fact) })
+    }
+
+    @Test
+    fun `a fact beyond its call's port calls fails`() {
+        assertTrue(
+            "facts name ops [5]" in
+                failure { script(facts = arrayOf(DeviceFact("toolu_01", 5, DevicePort.SNAPSHOT, delayMs = 1))) },
+        )
+    }
+
+    @Test
+    fun `a note on a port call of another method fails`() {
+        assertTrue(
+            "is a SNAPSHOT, the fact says FRAME" in
+                failure { script(facts = arrayOf(DeviceFact("toolu_01", 1, DevicePort.FRAME, delayMs = 1))) },
+        )
+    }
+
+    @Test
+    fun `a read for no call while a call is open fails`() {
+        assertTrue(
+            "replay cannot place it" in
+                failure { script(records(verdict(call), ScreenObserved(null, ReplaySamples.snapshot))) },
+        )
+    }
+}
