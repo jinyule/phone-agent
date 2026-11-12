@@ -1,0 +1,331 @@
+# Normalization class of every numeric and id field a fixture can hold (engineering-baseline §3.2).
+# Columns: <scope> <path> <leaf type> <class>. NormalizedFieldsTest fails when the serializers
+# can write a field that is missing here, or a line names a field that no longer exists; its
+# failure writes the full current list to core/build/replay/normalized-fields.actual.txt.
+#
+# Scopes: header (line 1 of session.jsonl), envelope (a record line without its data), an event
+# type (that record's data), requests (a line of requests.expected.jsonl).
+# Paths: name, name[] (each element), {sub} (that sealed subtype), * (each map value).
+#
+# Classes:
+#   time      wall-clock time, set to 0                        (N1)
+#   expiry    absolute deadline, kept relative to record time  (N2)
+#   duration  jittered wait, set to 0                          (N3)
+#   task, session, call, prompt
+#             id replaced by {{kind:n}}, numbered by first occurrence in the log  (N4)
+#   kept      id that replay reproduces as is (snapshot, element, blob, provider, model)
+#   seq       a seq or a reference to one, kept
+#   value     any other number (sizes, counts, coordinates, amounts, versions), kept
+header                    version                                                   Int        value
+header                    sessionId                                                 SessionId  session
+header                    taskId                                                    TaskId     task
+header                    createdAt                                                 Long       time
+
+envelope                  seq                                                       Long       seq
+envelope                  time                                                      Long       time
+envelope                  surfaceOp.{replace}.startSeq                              Long       seq
+envelope                  surfaceOp.{replace}.endSeq                                Long       seq
+envelope                  sources[]                                                 Long       seq
+
+requests                  n                                                         Int        value
+requests                  logSeq                                                    Long       seq
+requests                  model.provider                                            ProviderId kept
+requests                  model.model                                               ModelId    kept
+requests                  settings.wire.mappingVersion                              Int        value
+requests                  settings.cache.recentMessages                             Int        value
+requests                  settings.contextEdits.{server}.clearToolUsesAboveTokens   Int        value
+requests                  settings.contextEdits.{server}.keepToolUses               Int        value
+requests                  settings.contextEdits.{server}.compactAboveTokens         Int        value
+requests                  settings.maxOutputTokens                                  Int        value
+requests                  keep                                                      Int        value
+requests                  append[].parts[].{image}.blob                             BlobRef    kept
+requests                  append[].parts[].{image}.width                            Int        value
+requests                  append[].parts[].{image}.height                           Int        value
+requests                  append[].parts[].{reasoning}.provider                     ProviderId kept
+requests                  append[].parts[].{reasoning}.model                        ModelId    kept
+requests                  append[].parts[].{tool_call}.id                           ToolCallId call
+requests                  append[].parts[].{tool_result}.id                         ToolCallId call
+
+approval/asked            promptId                                                  PromptId   prompt
+approval/asked            card.callId                                               ToolCallId call
+approval/asked            card.amount.minor                                         Long       value
+approval/asked            expiresAt                                                 Long       expiry
+
+approval/decided          promptId                                                  PromptId   prompt
+
+assistant/attempt         attempt                                                   Int        value
+assistant/attempt         httpStatus                                                Int        value
+assistant/attempt         retryAfterMs                                              Long       value
+
+assistant/message         attempt                                                   Int        value
+assistant/message         provider                                                  ProviderId kept
+assistant/message         model                                                     ModelId    kept
+assistant/message         parts[].{image}.blob                                      BlobRef    kept
+assistant/message         parts[].{image}.width                                     Int        value
+assistant/message         parts[].{image}.height                                    Int        value
+assistant/message         parts[].{reasoning}.provider                              ProviderId kept
+assistant/message         parts[].{reasoning}.model                                 ModelId    kept
+assistant/message         parts[].{tool_call}.id                                    ToolCallId call
+assistant/message         parts[].{tool_result}.id                                  ToolCallId call
+assistant/message         usage.inputTokens                                         Int        value
+assistant/message         usage.outputTokens                                        Int        value
+assistant/message         usage.cacheReadTokens                                     Int        value
+assistant/message         usage.cacheWriteTokens                                    Int        value
+assistant/message         usage.reasoningTokens                                     Int        value
+
+compaction/end            inputTokens                                               Int        value
+
+compaction/prune          parts[].{image}.blob                                      BlobRef    kept
+compaction/prune          parts[].{image}.width                                     Int        value
+compaction/prune          parts[].{image}.height                                    Int        value
+compaction/prune          parts[].{reasoning}.provider                              ProviderId kept
+compaction/prune          parts[].{reasoning}.model                                 ModelId    kept
+compaction/prune          parts[].{tool_call}.id                                    ToolCallId call
+compaction/prune          parts[].{tool_result}.id                                  ToolCallId call
+
+compaction/start          inputTokens                                               Int        value
+
+compaction/summary        parts[].{image}.blob                                      BlobRef    kept
+compaction/summary        parts[].{image}.width                                     Int        value
+compaction/summary        parts[].{image}.height                                    Int        value
+compaction/summary        parts[].{reasoning}.provider                              ProviderId kept
+compaction/summary        parts[].{reasoning}.model                                 ModelId    kept
+compaction/summary        parts[].{tool_call}.id                                    ToolCallId call
+compaction/summary        parts[].{tool_result}.id                                  ToolCallId call
+
+handoff/end               promptId                                                  PromptId   prompt
+
+handoff/start             promptId                                                  PromptId   prompt
+handoff/start             callId                                                    ToolCallId call
+
+inbox/spliced             removed                                                   Int        value
+inbox/spliced             added[].parts[].{image}.blob                              BlobRef    kept
+inbox/spliced             added[].parts[].{image}.width                             Int        value
+inbox/spliced             added[].parts[].{image}.height                            Int        value
+inbox/spliced             added[].parts[].{reasoning}.provider                      ProviderId kept
+inbox/spliced             added[].parts[].{reasoning}.model                         ModelId    kept
+inbox/spliced             added[].parts[].{tool_call}.id                            ToolCallId call
+inbox/spliced             added[].parts[].{tool_result}.id                          ToolCallId call
+
+policy/verdict            callId                                                    ToolCallId call
+policy/verdict            intent.target.ref                                         ElementRef kept
+policy/verdict            intent.target.bounds.left                                 Int        value
+policy/verdict            intent.target.bounds.top                                  Int        value
+policy/verdict            intent.target.bounds.right                                Int        value
+policy/verdict            intent.target.bounds.bottom                               Int        value
+policy/verdict            intent.target.parent                                      ElementRef kept
+policy/verdict            intent.target.window                                      Int        value
+policy/verdict            intent.amount.minor                                       Long       value
+policy/verdict            verdict.{confirm}.card.callId                             ToolCallId call
+policy/verdict            verdict.{confirm}.card.amount.minor                       Long       value
+
+prompt/withdrawn          promptId                                                  PromptId   prompt
+
+question/answered         promptId                                                  PromptId   prompt
+
+question/asked            promptId                                                  PromptId   prompt
+question/asked            callId                                                    ToolCallId call
+
+context/reasoning-dropped upToSeq                                                   Long       seq
+
+request/header            provider                                                  ProviderId kept
+request/header            model                                                     ModelId    kept
+request/header            wire.mappingVersion                                       Int        value
+request/header            cache.recentMessages                                      Int        value
+request/header            contextEdits.{server}.clearToolUsesAboveTokens            Int        value
+request/header            contextEdits.{server}.keepToolUses                        Int        value
+request/header            contextEdits.{server}.compactAboveTokens                  Int        value
+request/header            maxOutputTokens                                           Int        value
+
+request/retry             attempt                                                   Int        value
+request/retry             delayMs                                                   Long       duration
+
+screen/action             callId                                                    ToolCallId call
+screen/action             on                                                        SnapshotId kept
+screen/action             action.{scroll}.target.{point}.x                          Int        value
+screen/action             action.{scroll}.target.{point}.y                          Int        value
+screen/action             action.{scroll}.target.{ref}.ref                          ElementRef kept
+screen/action             action.{set_wheel}.target.{point}.x                       Int        value
+screen/action             action.{set_wheel}.target.{point}.y                       Int        value
+screen/action             action.{set_wheel}.target.{ref}.ref                       ElementRef kept
+screen/action             action.{swipe}.from.x                                     Int        value
+screen/action             action.{swipe}.from.y                                     Int        value
+screen/action             action.{swipe}.to.x                                       Int        value
+screen/action             action.{swipe}.to.y                                       Int        value
+screen/action             action.{swipe}.durationMs                                 Long       value
+screen/action             action.{tap}.target.{point}.x                             Int        value
+screen/action             action.{tap}.target.{point}.y                             Int        value
+screen/action             action.{tap}.target.{ref}.ref                             ElementRef kept
+screen/action             action.{type}.target.{point}.x                            Int        value
+screen/action             action.{type}.target.{point}.y                            Int        value
+screen/action             action.{type}.target.{ref}.ref                            ElementRef kept
+screen/action             outcome.after.id                                          SnapshotId kept
+screen/action             outcome.after.surface.displayId                           Int        value
+screen/action             outcome.after.elements[].ref                              ElementRef kept
+screen/action             outcome.after.elements[].bounds.left                      Int        value
+screen/action             outcome.after.elements[].bounds.top                       Int        value
+screen/action             outcome.after.elements[].bounds.right                     Int        value
+screen/action             outcome.after.elements[].bounds.bottom                    Int        value
+screen/action             outcome.after.elements[].parent                           ElementRef kept
+screen/action             outcome.after.elements[].window                           Int        value
+screen/action             outcome.after.ocr[].bounds.left                           Int        value
+screen/action             outcome.after.ocr[].bounds.top                            Int        value
+screen/action             outcome.after.ocr[].bounds.right                          Int        value
+screen/action             outcome.after.ocr[].bounds.bottom                         Int        value
+screen/action             outcome.after.ocr[].confidence                            Double     value
+screen/action             outcome.diff.added[].ref                                  ElementRef kept
+screen/action             outcome.diff.added[].bounds.left                          Int        value
+screen/action             outcome.diff.added[].bounds.top                           Int        value
+screen/action             outcome.diff.added[].bounds.right                         Int        value
+screen/action             outcome.diff.added[].bounds.bottom                        Int        value
+screen/action             outcome.diff.added[].parent                               ElementRef kept
+screen/action             outcome.diff.added[].window                               Int        value
+screen/action             outcome.diff.removed[]                                    ElementRef kept
+screen/action             outcome.diff.changed[].ref                                ElementRef kept
+screen/action             outcome.diff.changed[].bounds.left                        Int        value
+screen/action             outcome.diff.changed[].bounds.top                         Int        value
+screen/action             outcome.diff.changed[].bounds.right                       Int        value
+screen/action             outcome.diff.changed[].bounds.bottom                      Int        value
+screen/action             outcome.diff.changed[].parent                             ElementRef kept
+screen/action             outcome.diff.changed[].window                             Int        value
+screen/action             outcome.diff.ocrAdded[].bounds.left                       Int        value
+screen/action             outcome.diff.ocrAdded[].bounds.top                        Int        value
+screen/action             outcome.diff.ocrAdded[].bounds.right                      Int        value
+screen/action             outcome.diff.ocrAdded[].bounds.bottom                     Int        value
+screen/action             outcome.diff.ocrAdded[].confidence                        Double     value
+screen/action             outcome.diff.ocrRemoved[].bounds.left                     Int        value
+screen/action             outcome.diff.ocrRemoved[].bounds.top                      Int        value
+screen/action             outcome.diff.ocrRemoved[].bounds.right                    Int        value
+screen/action             outcome.diff.ocrRemoved[].bounds.bottom                   Int        value
+screen/action             outcome.diff.ocrRemoved[].confidence                      Double     value
+
+screen/frame              blob                                                      BlobRef    kept
+screen/frame              width                                                     Int        value
+screen/frame              height                                                    Int        value
+screen/frame              snapshotId                                                SnapshotId kept
+
+screen/launch             callId                                                    ToolCallId call
+screen/launch             outcome.after.id                                          SnapshotId kept
+screen/launch             outcome.after.surface.displayId                           Int        value
+screen/launch             outcome.after.elements[].ref                              ElementRef kept
+screen/launch             outcome.after.elements[].bounds.left                      Int        value
+screen/launch             outcome.after.elements[].bounds.top                       Int        value
+screen/launch             outcome.after.elements[].bounds.right                     Int        value
+screen/launch             outcome.after.elements[].bounds.bottom                    Int        value
+screen/launch             outcome.after.elements[].parent                           ElementRef kept
+screen/launch             outcome.after.elements[].window                           Int        value
+screen/launch             outcome.after.ocr[].bounds.left                           Int        value
+screen/launch             outcome.after.ocr[].bounds.top                            Int        value
+screen/launch             outcome.after.ocr[].bounds.right                          Int        value
+screen/launch             outcome.after.ocr[].bounds.bottom                         Int        value
+screen/launch             outcome.after.ocr[].confidence                            Double     value
+screen/launch             outcome.diff.added[].ref                                  ElementRef kept
+screen/launch             outcome.diff.added[].bounds.left                          Int        value
+screen/launch             outcome.diff.added[].bounds.top                           Int        value
+screen/launch             outcome.diff.added[].bounds.right                         Int        value
+screen/launch             outcome.diff.added[].bounds.bottom                        Int        value
+screen/launch             outcome.diff.added[].parent                               ElementRef kept
+screen/launch             outcome.diff.added[].window                               Int        value
+screen/launch             outcome.diff.removed[]                                    ElementRef kept
+screen/launch             outcome.diff.changed[].ref                                ElementRef kept
+screen/launch             outcome.diff.changed[].bounds.left                        Int        value
+screen/launch             outcome.diff.changed[].bounds.top                         Int        value
+screen/launch             outcome.diff.changed[].bounds.right                       Int        value
+screen/launch             outcome.diff.changed[].bounds.bottom                      Int        value
+screen/launch             outcome.diff.changed[].parent                             ElementRef kept
+screen/launch             outcome.diff.changed[].window                             Int        value
+screen/launch             outcome.diff.ocrAdded[].bounds.left                       Int        value
+screen/launch             outcome.diff.ocrAdded[].bounds.top                        Int        value
+screen/launch             outcome.diff.ocrAdded[].bounds.right                      Int        value
+screen/launch             outcome.diff.ocrAdded[].bounds.bottom                     Int        value
+screen/launch             outcome.diff.ocrAdded[].confidence                        Double     value
+screen/launch             outcome.diff.ocrRemoved[].bounds.left                     Int        value
+screen/launch             outcome.diff.ocrRemoved[].bounds.top                      Int        value
+screen/launch             outcome.diff.ocrRemoved[].bounds.right                    Int        value
+screen/launch             outcome.diff.ocrRemoved[].bounds.bottom                   Int        value
+screen/launch             outcome.diff.ocrRemoved[].confidence                      Double     value
+
+screen/snapshot           callId                                                    ToolCallId call
+screen/snapshot           snapshot.id                                               SnapshotId kept
+screen/snapshot           snapshot.surface.displayId                                Int        value
+screen/snapshot           snapshot.elements[].ref                                   ElementRef kept
+screen/snapshot           snapshot.elements[].bounds.left                           Int        value
+screen/snapshot           snapshot.elements[].bounds.top                            Int        value
+screen/snapshot           snapshot.elements[].bounds.right                          Int        value
+screen/snapshot           snapshot.elements[].bounds.bottom                         Int        value
+screen/snapshot           snapshot.elements[].parent                                ElementRef kept
+screen/snapshot           snapshot.elements[].window                                Int        value
+screen/snapshot           snapshot.ocr[].bounds.left                                Int        value
+screen/snapshot           snapshot.ocr[].bounds.top                                 Int        value
+screen/snapshot           snapshot.ocr[].bounds.right                               Int        value
+screen/snapshot           snapshot.ocr[].bounds.bottom                              Int        value
+screen/snapshot           snapshot.ocr[].confidence                                 Double     value
+
+session/resumed           droppedTailBytes                                          Int        value
+
+side/request              provider                                                  ProviderId kept
+side/request              model                                                     ModelId    kept
+side/request              request.messages[].parts[].{image}.blob                   BlobRef    kept
+side/request              request.messages[].parts[].{image}.width                  Int        value
+side/request              request.messages[].parts[].{image}.height                 Int        value
+side/request              request.messages[].parts[].{reasoning}.provider           ProviderId kept
+side/request              request.messages[].parts[].{reasoning}.model              ModelId    kept
+side/request              request.messages[].parts[].{tool_call}.id                 ToolCallId call
+side/request              request.messages[].parts[].{tool_result}.id               ToolCallId call
+side/request              request.wire.mappingVersion                               Int        value
+side/request              request.cache.recentMessages                              Int        value
+side/request              request.contextEdits.{server}.clearToolUsesAboveTokens    Int        value
+side/request              request.contextEdits.{server}.keepToolUses                Int        value
+side/request              request.contextEdits.{server}.compactAboveTokens          Int        value
+side/request              request.maxOutputTokens                                   Int        value
+
+side/response             outcome.{completed}.response.parts[].{image}.blob         BlobRef    kept
+side/response             outcome.{completed}.response.parts[].{image}.width        Int        value
+side/response             outcome.{completed}.response.parts[].{image}.height       Int        value
+side/response             outcome.{completed}.response.parts[].{reasoning}.provider ProviderId kept
+side/response             outcome.{completed}.response.parts[].{reasoning}.model    ModelId    kept
+side/response             outcome.{completed}.response.parts[].{tool_call}.id       ToolCallId call
+side/response             outcome.{completed}.response.parts[].{tool_result}.id     ToolCallId call
+side/response             outcome.{completed}.response.usage.inputTokens            Int        value
+side/response             outcome.{completed}.response.usage.outputTokens           Int        value
+side/response             outcome.{completed}.response.usage.cacheReadTokens        Int        value
+side/response             outcome.{completed}.response.usage.cacheWriteTokens       Int        value
+side/response             outcome.{completed}.response.usage.reasoningTokens        Int        value
+side/response             outcome.{failed}.httpStatus                               Int        value
+side/response             outcome.{failed}.retryAfterMs                             Long       value
+
+step/end                  turn                                                      Int        value
+step/end                  step                                                      Int        value
+
+step/start                turn                                                      Int        value
+step/start                step                                                      Int        value
+
+tool/call                 call.id                                                   ToolCallId call
+tool/call                 call.taskId                                               TaskId     task
+tool/call                 call.sessionId                                            SessionId  session
+
+tool/executed             callId                                                    ToolCallId call
+
+tool/result               callId                                                    ToolCallId call
+tool/result               result.content[].{image}.blob                             BlobRef    kept
+tool/result               result.content[].{image}.width                            Int        value
+tool/result               result.content[].{image}.height                           Int        value
+tool/result               result.content[].{reasoning}.provider                     ProviderId kept
+tool/result               result.content[].{reasoning}.model                        ModelId    kept
+tool/result               result.content[].{tool_call}.id                           ToolCallId call
+tool/result               result.content[].{tool_result}.id                         ToolCallId call
+
+tool/started              callId                                                    ToolCallId call
+tool/started              verdictSeq                                                Long       seq
+
+turn/end                  turn                                                      Int        value
+
+turn/start                turn                                                      Int        value
+
+user/message              parts[].{image}.blob                                      BlobRef    kept
+user/message              parts[].{image}.width                                     Int        value
+user/message              parts[].{image}.height                                    Int        value
+user/message              parts[].{reasoning}.provider                              ProviderId kept
+user/message              parts[].{reasoning}.model                                 ModelId    kept
+user/message              parts[].{tool_call}.id                                    ToolCallId call
+user/message              parts[].{tool_result}.id                                  ToolCallId call
