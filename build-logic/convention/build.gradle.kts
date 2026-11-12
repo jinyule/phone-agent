@@ -49,6 +49,10 @@ gradlePlugin {
             id = "phoneagent.session-format"
             implementationClass = "dev.phoneagent.buildlogic.SessionFormatConventionPlugin"
         }
+        register("sessionReplay") {
+            id = "phoneagent.session-replay"
+            implementationClass = "dev.phoneagent.buildlogic.SessionReplayConventionPlugin"
+        }
         register("privilegedProtocol") {
             id = "phoneagent.privileged.protocol"
             implementationClass = "dev.phoneagent.buildlogic.PrivilegedProtocolConventionPlugin"
