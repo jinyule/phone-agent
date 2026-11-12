@@ -22,7 +22,15 @@ import java.util.concurrent.TimeUnit
  */
 object Gitleaks {
     private const val TIMEOUT_S = 60L
-    private const val LEAKS = 1
+
+    /** An ANSI colour code: `--no-color` covers the findings, not gitleaks' own log lines. */
+    private val COLOUR = Regex("\u001B\\[[0-9;]*m")
+
+    /**
+     * The exit code gitleaks is told to give when it finds leaks: its default, 1, is also what it
+     * gives when it fails itself (a config it cannot load, say), and 0 means clean.
+     */
+    const val LEAKS_EXIT: Int = 42
 
     /** What a scan found. */
     sealed interface Scan {
@@ -32,32 +40,47 @@ object Gitleaks {
         /** Nothing. */
         data object Clean : Scan
 
-        /** Leaks, as gitleaks reported them (redacted). */
+        /** Leaks, as gitleaks reported them: rule, file and line of each, the secret redacted. */
         data class Found(
             val report: String,
         ) : Scan
     }
 
-    /** Scans [dir] with the repository's config. Fails with [IllegalStateException] when gitleaks itself fails. */
-    fun scan(dir: Path): Scan {
+    /**
+     * Scans [dir] with the repository's config, using [executable] ([onPath] by default; `null` is
+     * [Scan.NotInstalled]). Fails with [IllegalStateException] when gitleaks fails itself or does
+     * not finish within [timeoutS] seconds: the fixture is then not scanned, which is not the same
+     * as leaks.
+     */
+    fun scan(
+        dir: Path,
+        executable: Path? = onPath(),
+        timeoutS: Long = TIMEOUT_S,
+    ): Scan {
         val gitleaks =
-            executable()
+            executable
                 ?: return Scan.NotInstalled.also { System.err.println("gitleaks not installed: $dir not scanned") }
         val config = Path.of("..", ".gitleaks.toml").takeIf { Files.isRegularFile(it) }
         val command =
-            listOf(gitleaks.toString(), "dir", "--redact", "--no-banner") +
+            listOf(gitleaks.toString(), "dir", "--verbose", "--redact", "--no-color", "--no-banner") +
+                listOf("--exit-code", LEAKS_EXIT.toString()) +
                 config?.let { listOf("--config", it.toString()) }.orEmpty() + dir.toString()
-        val process = ProcessBuilder(command).redirectErrorStream(true).start()
-        val report = process.inputStream.bufferedReader().readText()
-        check(process.waitFor(TIMEOUT_S, TimeUnit.SECONDS)) { "gitleaks did not finish within $TIMEOUT_S s" }
-        return when (process.exitValue()) {
+        val log = Files.createTempFile("gitleaks", ".log")
+        val process = ProcessBuilder(command).redirectErrorStream(true).redirectOutput(log.toFile()).start()
+        val finished = process.waitFor(timeoutS, TimeUnit.SECONDS)
+        if (!finished) process.destroyForcibly()
+        // gitleaks cuts a finding's context at a byte count: a split character is replaced, not thrown on.
+        val report = String(Files.readAllBytes(log), Charsets.UTF_8).replace(COLOUR, "").also { Files.delete(log) }
+        check(finished) { "gitleaks did not finish within $timeoutS s: $dir is not scanned" }
+        return when (val exit = process.exitValue()) {
             0 -> Scan.Clean
-            LEAKS -> Scan.Found(report)
-            else -> error("gitleaks failed (${process.exitValue()}): $report")
+            LEAKS_EXIT -> Scan.Found(report)
+            else -> error("gitleaks failed (exit $exit): $dir is not scanned\n$report")
         }
     }
 
-    private fun executable(): Path? =
+    /** The gitleaks on the PATH, or `null`. */
+    fun onPath(): Path? =
         System
             .getenv("PATH")
             .orEmpty()

@@ -61,7 +61,7 @@ prompt-surface 金样和 loop 金样用上面同一条 `cp -R` 接受，会话 f
 ## 4. 隐私审查（每次 record 之后，提交之前）
 
 - 打开 `core/build/session-record/<scenario>/privacy-checklist.md`，逐项确认截图和用户图片、屏幕文字、用户输入和回答、App 列表都来自测试账号；标着"suspected number"的项（像卡号、手机号）要逐个看；看一遍 `blobs/` 里的每张图。
-- 录制会用 gitleaks 扫 fixture 目录，扫出东西录制就失败。清单写"gitleaks 未扫描"（本机没装，测试输出里也有警告）时，本机装上 gitleaks 再扫一次，或者在 PR 里写明。
+- 录制会用 gitleaks 扫 fixture 目录，扫出东西录制就失败，信息里有规则、文件和行（密钥是 REDACTED）。gitleaks 自己出错（配置读不了、超时）时录制也失败，信息写的是 "gitleaks failed"、fixture 没扫过，不是"有泄漏"。清单写"gitleaks 未扫描"（本机没装，测试输出里也有警告）时，本机装上 gitleaks 再扫一次，或者在 PR 里写明。
 - 清单里 `{{credential:n}}` 有命中，说明 key 进了日志：先查清楚是怎么进去的。
 - 任何模式装载 fixture 时，出现 `sk-`、JWT、`Bearer` 形状的文字都会失败。不要为了过检查去改写这类文字：它本来就不该在 fixture 里。
 - 测试用的假 key 写成明显的占位，例如 `sk-test-not-a-real-key`，只放在单测里，不放进 fixture。
