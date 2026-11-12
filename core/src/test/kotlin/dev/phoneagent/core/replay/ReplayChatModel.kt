@@ -241,7 +241,7 @@ class ReplayChatModel(
  */
 class RequestTape(
     private val model: ChatModel,
-    private val lastSeq: () -> Long,
+    private val lastSeq: suspend () -> Long,
 ) : ChatModel by model {
     private val taken = mutableListOf<RecordedRequest>()
 

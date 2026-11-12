@@ -11,6 +11,8 @@ import dev.phoneagent.core.ports.ScreenFlag
 import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.ports.ScreenUnavailableException
 import dev.phoneagent.core.ports.SnapshotAnalyzer
+import dev.phoneagent.core.ports.SnapshotDetail
+import dev.phoneagent.core.ports.SnapshotOptions
 import dev.phoneagent.core.ports.SurfaceRef
 import dev.phoneagent.core.ports.Target
 import dev.phoneagent.core.ports.TreeQuality
@@ -109,6 +111,25 @@ class ReplayScreenTest {
         runTest {
             val read = screen(step(1, DevicePort.SNAPSHOT, DeviceResult.Snapshot(ReplaySamples.snapshot))).snapshot()
             assertEquals(ReplaySamples.snapshot.copy(fingerprint = "now-1", quality = TreeQuality.SPARSE), read)
+        }
+
+    @Test
+    fun `a read at the recorded detail returns the recorded tree`() =
+        runTest {
+            val full = ReplaySamples.snapshot.copy(detail = SnapshotDetail.FULL)
+            val read =
+                screen(step(1, DevicePort.SNAPSHOT, DeviceResult.Snapshot(full)))
+                    .snapshot(SnapshotOptions(detail = SnapshotDetail.FULL))
+            assertEquals(SnapshotDetail.FULL, read.detail)
+        }
+
+    @Test
+    fun `a read at another detail than the recording's fails`() =
+        runTest {
+            val full = ReplaySamples.snapshot.copy(detail = SnapshotDetail.FULL)
+            val screen = screen(step(1, DevicePort.SNAPSHOT, DeviceResult.Snapshot(full)))
+            val message = failure(screen) { screen.snapshot(SnapshotOptions(detail = SnapshotDetail.BRIEF)) }
+            assertTrue("the recording read FULL detail, replay BRIEF" in message, message)
         }
 
     @Test

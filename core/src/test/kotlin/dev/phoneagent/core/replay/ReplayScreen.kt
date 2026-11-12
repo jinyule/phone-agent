@@ -37,7 +37,7 @@ class ReplayScreen(
     script: Map<ToolCallId?, List<DeviceStep>>,
     private val blobs: Map<BlobRef, ByteArray>,
     private val analyzer: SnapshotAnalyzer,
-    private val currentCall: () -> ToolCallId?,
+    private val currentCall: suspend () -> ToolCallId?,
 ) : ScreenPort {
     private val queues = script.mapValues { ArrayDeque(it.value) }
     private val failed = mutableListOf<String>()
@@ -45,9 +45,20 @@ class ReplayScreen(
     /** The mismatches so far. */
     val problems: List<String> get() = failed.toList()
 
+    /**
+     * A read must ask for the detail the recording's read was taken at (`ScreenSnapshot.detail`,
+     * which the port fills in): a re-check that reads BRIEF where the recording read FULL sees
+     * other elements. Steps from `replay.override.json` (a read that threw or hung) carry no
+     * snapshot to compare with. The other option, `ocr`, is not in the log and is not compared.
+     */
     override suspend fun snapshot(options: SnapshotOptions): ScreenSnapshot {
-        val step = next(DevicePort.SNAPSHOT) { null }
-        return finish(step) { (it as DeviceResult.Snapshot).snapshot.let(::analyzed) }
+        val step =
+            next(DevicePort.SNAPSHOT) { recorded ->
+                val read = (recorded.result as? DeviceResult.Snapshot)?.snapshot?.detail
+                "the recording read ${read?.name} detail, replay ${options.detail.name}"
+                    .takeIf { read != null && read != options.detail }
+            }
+        return finish(step) { analyzer.analyzed((it as DeviceResult.Snapshot).snapshot) }
     }
 
     override suspend fun act(
@@ -59,7 +70,7 @@ class ReplayScreen(
                 "the recording did ${recorded.action} on ${recorded.on?.value}, replay $action on ${on?.value}"
                     .takeIf { recorded.action != action || recorded.on != on }
             }
-        return finish(step) { analyzed((it as DeviceResult.Outcome).outcome) }
+        return finish(step) { analyzer.analyzed((it as DeviceResult.Outcome).outcome) }
     }
 
     override suspend fun launch(target: LaunchTarget): ActionOutcome {
@@ -67,7 +78,7 @@ class ReplayScreen(
             next(DevicePort.LAUNCH) { recorded ->
                 "the recording launched ${recorded.target}, replay $target".takeIf { recorded.target != target }
             }
-        return finish(step) { analyzed((it as DeviceResult.Outcome).outcome) }
+        return finish(step) { analyzer.analyzed((it as DeviceResult.Outcome).outcome) }
     }
 
     override suspend fun frame(
@@ -116,7 +127,7 @@ class ReplayScreen(
         if (all.isNotEmpty()) throw AssertionError("device replay:\n" + all.joinToString("\n"))
     }
 
-    private fun next(
+    private suspend fun next(
         port: DevicePort,
         mismatch: (DeviceStep) -> String?,
     ): DeviceStep {
@@ -140,14 +151,6 @@ class ReplayScreen(
         }
     }
 
-    private fun analyzed(snapshot: ScreenSnapshot): ScreenSnapshot =
-        snapshot.copy(
-            fingerprint = analyzer.fingerprint(snapshot.pkg, snapshot.activity, snapshot.elements, snapshot.ocr),
-            quality = analyzer.quality(snapshot.elements, snapshot.surface, snapshot.flags),
-        )
-
-    private fun analyzed(outcome: ActionOutcome): ActionOutcome = outcome.copy(after = outcome.after?.let(::analyzed))
-
     private fun fail(problem: String): Nothing {
         failed += problem
         throw AssertionError("device replay: $problem")
@@ -158,7 +161,7 @@ class ReplayScreen(
         fun of(
             fixture: SessionFixture,
             analyzer: SnapshotAnalyzer,
-            currentCall: () -> ToolCallId?,
+            currentCall: suspend () -> ToolCallId?,
         ): ReplayScreen =
             ReplayScreen(
                 fixture.scenario.device.surface,
@@ -169,3 +172,18 @@ class ReplayScreen(
             )
     }
 }
+
+/**
+ * [snapshot] as a real port returns it: fingerprint and quality from this analyzer. Recording
+ * (`SessionRecorder`) and replay ([ReplayScreen]) both pass the device's snapshots through it, so
+ * the log holds the current analysis and a change of it shows in replay.
+ */
+fun SnapshotAnalyzer.analyzed(snapshot: ScreenSnapshot): ScreenSnapshot =
+    snapshot.copy(
+        fingerprint = fingerprint(snapshot.pkg, snapshot.activity, snapshot.elements, snapshot.ocr),
+        quality = quality(snapshot.elements, snapshot.surface, snapshot.flags),
+    )
+
+/** [outcome] with its `after` analyzed like a read ([analyzed]); the diff is kept as given. */
+fun SnapshotAnalyzer.analyzed(outcome: ActionOutcome): ActionOutcome =
+    outcome.copy(after = outcome.after?.let { analyzed(it) })
