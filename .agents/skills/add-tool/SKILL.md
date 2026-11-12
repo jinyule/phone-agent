@@ -5,8 +5,6 @@ description: Use when adding or changing a model-facing tool in phone-agent core
 
 # Add a tool
 
-> 草稿（WP08 2a）。第 5 步的 authored 场景在 WP08 2b 合入后可用。
-
 按顺序做；每一步都有测试义务（AGENTS.md §5）。
 
 ## 1. Schema 和参数
@@ -18,7 +16,7 @@ description: Use when adding or changing a model-facing tool in phone-agent core
 
 ## 2. 风险分类和安全判定
 
-- 给出 `RiskClass`；动作类工具还要在 `IntentResolver` 里写出 intent 的推导，判定只在 `PolicyEngine`。
+- 给出 `RiskClass`；动作类工具还要写出 intent 的推导：`IntentResolver` 的实现是 `core.policy.rules` 里的 `RulesResolver`（规则见 `docs/design/policy-rules.md` §2），判定只在 `PolicyEngine`。产品和回放都经 `PolicyRules` 装配这三样（lexicon、resolver、engine），不要另起一份。
 - 测试：intent 推导的每个分支一个测试；改了 `core.policy` 就要保持分支覆盖 100%（`koverVerifyCritical`）；规则或判定变了要升 `RULES_VERSION`。
 
 ## 3. 展示
@@ -33,8 +31,8 @@ description: Use when adding or changing a model-facing tool in phone-agent core
 
 ## 5. 回放
 
-- 在 `AuthoredScenarios.kt` 里加一个用到这个工具的场景（或者扩展已有场景），用 `-PsessionSnapshot=record` 写出 fixture。
-- 然后对全部 fixture 跑 `-PsessionSnapshot=refresh`：工具清单变了，所有请求都变了。
+- 在 `AuthoredScenarios.kt` 里加一个用到这个工具的场景（或者扩展已有场景），加进 `ALL`，用 `-PsessionSnapshot=record` 写出 fixture，做隐私审查。
+- 然后对全部 fixture 跑 `-PsessionSnapshot=refresh`：工具清单变了，所有请求和边车都变了。
 - 命令清单和审阅方法见 `record-session` 技能第 2 节；fixture 和代码放在同一个 PR。
 
 ## 6. 提交前
