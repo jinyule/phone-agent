@@ -16,8 +16,10 @@ import org.junit.jupiter.api.Test
  *   `policy.rules`) or another top-level package (`storage`, `screen`, `tools`). Its id is its first
  *   two segments under a contract package, else its first segment; deeper packages belong to it.
  * - Contract packages never reference capabilities (so `agent` does not know concrete capabilities),
- *   and capabilities reference only contracts and themselves, never each other. Only the app wires
- *   capabilities together.
+ *   and capabilities reference only contracts and themselves, never each other.
+ * - The [ASSEMBLY] package wires capabilities together: the product assembly the app and session
+ *   replay share (phase1 §2.1). It may reference every contract and every capability but the
+ *   isolated ones, and no other core package references it.
  * - The capabilities in [ISOLATED] reference no other core package at all, contracts included: the
  *   built-in adb client (`adb`, phase1 §2.1) is app setup code that must never become a tool
  *   (AGENTS.md §3.4), so it may not even implement a tool contract.
@@ -46,7 +48,9 @@ class PackageDependencyTest {
                 "NoPackage.kt: no package declaration",
                 "adb/ImplementsTool.kt: isolated capability adb must not use contract tool",
                 "agent/KnowsAdapter.kt: contract agent must not use capability model.openai",
+                "agent/KnowsAssembly.kt: contract agent must not use the assembly",
                 "agent/TemplateBypass.kt: contract agent must not use capability storage",
+                "assembly/RunsAdb.kt: the assembly must not use isolated capability adb",
                 "model/openai/KnowsScreen.kt: capability model.openai must not use capability screen",
                 "ports/KnowsSession.kt: contract ports (layer 1) must not use session (layer 4)",
                 "screen/MarksRisk.kt: capability screen must not use capability policy.rules",
@@ -54,6 +58,7 @@ class PackageDependencyTest {
                 "tools/FullyQualified.kt: capability tools must not use capability policy.rules",
                 "tools/FunctionCall.kt: capability tools must not use capability policy.rules",
                 "tools/GenericCall.kt: capability tools must not use capability policy.rules",
+                "tools/KnowsAssembly.kt: capability tools must not use the assembly",
                 "tools/RawTemplate.kt: capability tools must not use capability storage",
                 "tools/RunsAdb.kt: capability tools must not use capability adb",
             ),
@@ -84,6 +89,8 @@ class PackageDependencyTest {
         assertEquals(Unit.Contract("session"), Unit.of("$BASE.session"))
         assertEquals(Unit.Capability("model.openai"), Unit.of("$BASE.model.openai.sse"))
         assertEquals(Unit.Capability("storage"), Unit.of("$BASE.storage"))
+        assertEquals(Unit.Assembly, Unit.of("$BASE.assembly"))
+        assertEquals(Unit.Assembly, Unit.of("$BASE.assembly.parts"))
         assertEquals(null, Unit.of("kotlinx.serialization"))
         assertEquals("$BASE.model", packageOfImport("$BASE.model.Part.Text", wildcard = false))
         assertEquals("$BASE.model", packageOfImport("$BASE.model.Part", wildcard = true))
@@ -132,6 +139,8 @@ class PackageDependencyTest {
             val id: String,
         ) : Unit
 
+        data object Assembly : Unit
+
         companion object {
             fun of(pkg: String): Unit? {
                 val segments =
@@ -144,6 +153,7 @@ class PackageDependencyTest {
                 return when {
                     pkg != BASE && !pkg.startsWith("$BASE.") -> null
                     first == null -> Contract("")
+                    first == ASSEMBLY -> Assembly
                     first !in CONTRACT_LAYERS -> Capability(first)
                     segments.size == 1 -> Contract(first)
                     else -> Capability("$first.${segments[1]}")
@@ -176,9 +186,12 @@ class PackageDependencyTest {
         own: Unit,
         used: Unit,
     ): String? =
-        when (own) {
-            is Unit.Contract -> contractProblem(own, used)
-            is Unit.Capability -> capabilityProblem(own, used)
+        when {
+            used == Unit.Assembly && own != Unit.Assembly -> "${own.description} must not use the assembly"
+            own is Unit.Contract -> contractProblem(own, used)
+            own is Unit.Capability -> capabilityProblem(own, used)
+            used is Unit.Capability && used.id in ISOLATED -> "the assembly must not use isolated capability ${used.id}"
+            else -> null
         }
 
     private fun contractProblem(
@@ -186,6 +199,10 @@ class PackageDependencyTest {
         used: Unit,
     ): String? =
         when (used) {
+            is Unit.Assembly -> {
+                null // Reported by problem().
+            }
+
             is Unit.Capability -> {
                 "contract ${own.label} must not use capability ${used.id}"
             }
@@ -212,6 +229,7 @@ class PackageDependencyTest {
             when (this) {
                 is Unit.Contract -> "contract $label"
                 is Unit.Capability -> "capability $id"
+                is Unit.Assembly -> "the assembly"
             }
 
     private val Unit.Contract.label: String get() = name.ifEmpty { "core" }
@@ -224,6 +242,9 @@ class PackageDependencyTest {
 
         /** Capabilities that use no other core package (see the class comment). */
         val ISOLATED = setOf("adb")
+
+        /** The package that wires capabilities together (see the class comment). */
+        const val ASSEMBLY = "assembly"
 
         /** Contract packages and their layer; a package may only use strictly lower layers. */
         val CONTRACT_LAYERS =

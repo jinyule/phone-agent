@@ -56,6 +56,7 @@ phone-agent/
 │   guard/       LoopGuard、OutwardPacing、效果判定
 │   ports/       ScreenPort / SurfaceManager / StoragePort / Clock 等接口
 │   adb/         无线调试配对与 ADB 连接，只跑 App 写死的命令（纯 Kotlin，可 JVM 测；隔离，见下）
+│   assembly/    产品装配：`assemble(model, ProductConfig)` 把各能力装成一个会话的 AgentSetup，App 和会话回放共用（见下）
 │   protocol/    MCP / JSON-RPC 类型
 │   testFixtures FakeChatModel、ScriptedScreen、ReplayChatModel/ReplayScreen、金样工具
 ├─ privileged/   shell 助手：PrivilegedCore + HelperMain（经 app_process 加载，依赖尽量少）
@@ -70,10 +71,11 @@ phone-agent/
 └─ eval/         任务集（YAML）、设备端 instrumentation runner、PC 端 harness（经 MCP 驱动）
 ```
 
-依赖方向：`app → core`、`app → privileged`、`privileged → (无)`。`core` 内部用一个依赖测试（Konsist 写的 `PackageDependencyTest`）守住两条规则：`agent` 不认识具体能力，能力之间不互相引用。core 的包分为两类：
+依赖方向：`app → core`、`app → privileged`、`privileged → (无)`。`core` 内部用一个依赖测试（Konsist 写的 `PackageDependencyTest`）守住两条规则：`agent` 不认识具体能力，能力之间不互相引用。core 的包分为契约包、能力包和装配包：
 
 - **契约包**：`ids`、`model`、`ports`、`tool`、`policy`、`session`、`agent`，分层排列，只能引用更低的层；
 - **能力包**：其余所有包，例如 `model.openai`、`model.anthropic`、`policy.rules`、`screen`、`tools`、`storage`。能力包只引用契约包和自己。
+- **装配包**：`assembly`。它是唯一把能力装在一起的地方：可以引用所有契约包和所有能力包（隔离能力包除外），core 里别的包都不能引用它。`assemble(model, config)` 是纯函数（没有 I/O），输入是会话的主模型（vision 只从它的能力来）和 `ProductConfig`（本 App 的包名和名称、`PolicyTuning`、`ScreenFormatConfig`、`TreeQualityConfig`、`DiffConfig`、`ToolsConfig`、`LoopConfig`），输出 ScreenPort 要用的 analyzer、policy、intents、PHONE 和 GENERAL 两组的工具、`SystemPrompt.BLOCKS`、默认拦截器和每次运行要记的 `policy/rules`；`setup(taskId, files, screen, surfaces, apps, …)` 再补上任务和设备的部分，得到 `AgentSetup`。理由见 ADR `2026-11-13-product-assembly`。
 - **隔离能力包**：`adb`（内置无线 ADB 客户端）。它是 App 的设置代码，只用来配对、连接，并运行 App 写死的命令（拉起助手、自检），永远不是工具（AGENTS.md §3.4）。所以它和别的包互不引用：core 里其他包都不能用它，它自己也不引用任何契约包（包括 `tool`，免得被实现成工具）。公开 API 里没有交互式 shell，也没有任意 adb 服务，只有 `AdbSession.run(AdbCommand)`：跑完一条命令，返回输出和退出码。`PackageDependencyTest` 守住这两个方向，并带反例。
 
 分层和理由见 ADR `2026-11-01-core-contracts`。

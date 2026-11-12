@@ -92,7 +92,7 @@ M1/M2 的主循环、OpenAI 系适配器、Anthropic 适配器、PolicyEngine、
   - 契约包的子包，按前两段算作一个能力：`model.openai`、`model.anthropic`、`policy.rules`；
   - 其他顶层包：`storage`、`screen`、`tools`。
 
-  能力包只引用契约包和自己，能力之间互不引用，由 app 负责组装。
+  能力包只引用契约包和自己，能力之间互不引用，由装配包 `assembly` 组装（2026-11-13 修订，见 ADR `2026-11-13-product-assembly`；原来写的是由 app 组装）。
 - 规则写在 `core/src/test/kotlin/dev/phoneagent/core/architecture/PackageDependencyTest.kt`，用 **Konsist** 检查 import（含通配符），以及代码里的全限定类名和全限定函数调用。注释和字符串、字符字面量的文字不算，但字符串模板 `${…}` 里的代码照样检查（含原始字符串和模板里嵌套的字符串）。没有 package 声明的文件直接算违规。
 - `core/src/test/resources/architecture/counterexample/` 里放了九个会被拒绝的反例：契约用了能力、契约向上引用、能力互相引用（import、全限定类名、全限定函数调用、引用词表的实现）、藏在字符串模板和原始字符串模板里的引用，以及没有 package 声明的文件。两个模板反例作为生产代码能编译通过。其中 `screen/MarksRisk.kt` 演示第 9 节的词表用法：引用契约 `policy.RiskLexicon` 是允许的，引用实现 `policy.rules` 会被拒绝。
 
