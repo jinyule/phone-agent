@@ -39,7 +39,8 @@ import java.io.File
  *
  * [reload], [reset] and [testAndSave] hold one [lock] from start to end, the state they publish
  * included: a load can never delete a key that a save running beside it has just written, and
- * the UI and the debug injection cannot interleave saves.
+ * the UI and the debug injection cannot interleave saves. A save publishes its settings as part
+ * of its writes ([ModelSetup]), so cancelling it never leaves [state] behind what is on disk.
  */
 internal class ModelServices(
     filesDir: File,
@@ -85,9 +86,9 @@ internal class ModelServices(
         lock.withLock {
             val now = current.value.takeUnless { it == SettingsState.Loading } ?: load()
             if (now is SettingsState.Broken) return@withLock SetupOutcome.SettingsBroken
-            val outcome = setup.testAndSave(form, (now as? SettingsState.Ready)?.settings, onModel)
-            if (outcome is SetupOutcome.Saved) current.value = withContext(io) { ready(outcome.settings) }
-            outcome
+            setup.testAndSave(form, (now as? SettingsState.Ready)?.settings, onModel) { saved ->
+                current.value = ready(saved)
+            }
         }
 
     /** Deletes the settings and every key, then loads (finding none): the only way out of broken settings. */

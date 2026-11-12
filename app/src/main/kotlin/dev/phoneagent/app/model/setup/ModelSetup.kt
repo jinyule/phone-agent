@@ -20,6 +20,7 @@ import dev.phoneagent.core.model.openai.ProviderProbe
 import dev.phoneagent.core.model.openai.WireOptions
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.security.GeneralSecurityException
@@ -31,8 +32,13 @@ import java.util.UUID
  * with core's [ProviderProbe] (list the models, then a real trial tool call), main model first,
  * each starting from the request options the previous one passed with. Only when all pass is
  * anything written, in this order: the new key, then the settings (atomically), then the keys
- * no saved provider uses any more. A crash in between leaves only keys nobody references, which
- * the next successful load deletes ([CredentialStore.retainOnly]). A failure writes nothing.
+ * no saved provider uses any more, then the caller is told what was saved. A crash in between
+ * leaves only keys nobody references, which the next successful load deletes
+ * ([CredentialStore.retainOnly]). A failure writes nothing.
+ *
+ * The checks can be cancelled at any point and then write nothing. The writes cannot: once begun,
+ * they run to the end, so what is on disk and what the caller publishes never disagree, and a
+ * cancellation that arrived meanwhile ends the caller's job afterwards (it is not swallowed).
  *
  * The probe sees the typed key through a resolver of its own, which knows only this run's ref:
  * nothing reaches the credential store before the trial passed. Not safe to run concurrently with
@@ -50,12 +56,14 @@ internal class ModelSetup(
      * Tests [form] and saves it as the only provider, replacing [current] (the loaded settings, or
      * `null`). A blank key keeps the stored key of the same provider when it is readable and the
      * address is on the origin it was saved for ([storedKeyRef]). [onModel] is told which model is
-     * being checked.
+     * being checked; [onSaved] gets the saved settings as the last step of the writes, before
+     * anything else can run, cancellation included.
      */
     suspend fun testAndSave(
         form: ProviderForm,
         current: ModelSettings?,
-        onModel: (ModelId) -> Unit = {},
+        onModel: (ModelId) -> Unit,
+        onSaved: (ModelSettings) -> Unit,
     ): SetupOutcome {
         val kept = withContext(io) { keptRef(form, current) }
         val problems = FormCheck.problems(form, hasStoredKey = kept != null)
@@ -77,7 +85,7 @@ internal class ModelSetup(
         return when (run) {
             null -> SetupOutcome.Invalid(listOf(FormProblem.NOT_SENDABLE))
             is TrialRun.Failed -> SetupOutcome.Failed(run.checks)
-            is TrialRun.Passed -> save(form, profile, run, typed?.let { checkNotNull(ref) to it })
+            is TrialRun.Passed -> save(form, profile, run, typed?.let { checkNotNull(ref) to it }, onSaved)
         }
     }
 
@@ -90,14 +98,16 @@ internal class ModelSetup(
             form.typedKey.isEmpty() && credentials.status(it) == CredentialStatus.PRESENT
         }
 
+    /** The writes of a passed [run], as one step that cancellation does not cut short. */
     private suspend fun save(
         form: ProviderForm,
         profile: ProviderProfile,
         run: TrialRun.Passed,
         newKey: Pair<SecretRef, String>?,
+        onSaved: (ModelSettings) -> Unit,
     ): SetupOutcome {
         val settings = settingsOf(form, profile, run)
-        return withContext(io) {
+        return withContext(io + NonCancellable) {
             when {
                 newKey != null && !attempt { credentials.put(newKey.first, newKey.second) } -> {
                     SetupOutcome.NotSaved(run.checks, SaveFailure.KEY)
@@ -109,6 +119,7 @@ internal class ModelSetup(
 
                 else -> {
                     credentials.retainOnly(settings.refs())
+                    onSaved(settings)
                     SetupOutcome.Saved(settings, run.checks)
                 }
             }
