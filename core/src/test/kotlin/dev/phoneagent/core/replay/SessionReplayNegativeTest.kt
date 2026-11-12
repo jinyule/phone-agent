@@ -92,28 +92,64 @@ class SessionReplayNegativeTest {
         )
     }
 
+    /** [fixture] with its scenario passed through [change]; the files stay as committed. */
+    private fun withScenario(
+        fixture: SessionFixture,
+        change: (Scenario) -> Scenario,
+    ) = SessionFixture(
+        fixture.name,
+        change(fixture.scenario),
+        fixture.session,
+        fixture.requestFile,
+        fixture.override,
+        fixture.blobs,
+    )
+
+    /** The scenario run with `maxElements = 1`, at which a chat page is too big to read, and pinned so. */
+    private fun tooBigToRead(scenario: Scenario) =
+        scenario.copy(
+            assembly = scenario.assembly.copy(tuning = mapOf("maxElements" to 1)),
+            policy = scenario.policy.copy(tuning = scenario.policy.tuning + ("maxElements" to 1)),
+        )
+
     @Test
     fun `a verdict the rules now give otherwise fails and asks for the rules version`() {
-        // The rules judge differently at the same version: a chat page is too big to read.
+        // The rules judge differently at the same version.
         val dir = copy("confirm-send-approved")
-        val fixture = ReplayFiles.load(dir)
-        val scenario = fixture.scenario
-        val changed =
-            SessionFixture(
-                fixture.name,
-                scenario.copy(
-                    assembly = scenario.assembly.copy(tuning = mapOf("maxElements" to 1)),
-                    policy = scenario.policy.copy(tuning = scenario.policy.tuning + ("maxElements" to 1)),
-                ),
-                fixture.session,
-                fixture.requestFile,
-                fixture.override,
-                fixture.blobs,
-            )
-        val failed = failures(changed, dir)
+        val failed = failures(withScenario(ReplayFiles.load(dir), ::tooBigToRead), dir)
         assertTrue(failed.anyHas("policy/verdict, one line per verdict"), "$failed")
         assertTrue(failed.anyHas("verdicts changed while RULES_VERSION is still"), "$failed")
         assertTrue(failed.none { it.startsWith("policy.") }, "the pin itself matches: $failed")
+    }
+
+    @Test
+    fun `verdicts of other rules fail on the pin without asking for the rules version`() {
+        val dir = copy("confirm-send-approved")
+        val fixture =
+            withScenario(ReplayFiles.load(dir)) { scenario ->
+                tooBigToRead(
+                    scenario,
+                ).let { it.copy(policy = it.policy.copy(rulesVersion = it.policy.rulesVersion + 1)) }
+            }
+        val failed = failures(fixture, dir)
+        assertTrue(failed.anyHas("policy/verdict, one line per verdict"), "$failed")
+        assertTrue(failed.any { it.startsWith("policy.rulesVersion: the fixture was judged by rules") }, "$failed")
+        assertTrue(failed.none { "RULES_VERSION is still" in it }, "the version moved: $failed")
+    }
+
+    @Test
+    fun `a pinned tuning value the replay does not run with fails on the pin alone`() {
+        val dir = copy("observe-tap")
+        val fixture =
+            withScenario(ReplayFiles.load(dir)) { scenario ->
+                scenario.copy(policy = scenario.policy.copy(tuning = scenario.policy.tuning + ("labelMax" to 1)))
+            }
+        val failed = failures(fixture, dir)
+        assertEquals(1, failed.size, "$failed")
+        assertTrue(
+            failed.single().startsWith("policy.tuning.labelMax: the fixture was judged with 1, "),
+            failed.single(),
+        )
     }
 
     @Test
