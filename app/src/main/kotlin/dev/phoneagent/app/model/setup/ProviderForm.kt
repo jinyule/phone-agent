@@ -30,8 +30,10 @@ import java.net.URISyntaxException
  * @property visionModel the model that reads screenshots; blank follows the main model.
  * @property visionImages whether [visionModel] (or, when blank, the main model) accepts images,
  *   when the provider's model list does not say.
- * @property contextTokens the context window when the provider's model list does not say; `null`
- *   for [DEFAULT_CONTEXT_TOKENS].
+ * @property contextTokens the main model's context window, `null` when not given. It wins over the
+ *   provider's model list and applies to the main model only: the light and vision models (when
+ *   they are other models) take the list's value, else the one stored for them, else
+ *   [DEFAULT_CONTEXT_TOKENS]. Editing saved settings starts with the main model's stored value.
  */
 internal data class ProviderForm(
     val presetId: String?,
@@ -100,7 +102,8 @@ internal data class ProviderForm(
 
         /**
          * The form that edits [settings]' main provider, with an empty key field (keeping the stored
-         * key), or a new custom form when there are none.
+         * key) and the main model's stored context window, or a new custom form when there are none.
+         * Saving it unchanged saves the same capabilities again.
          */
         fun of(settings: ModelSettings?): ProviderForm {
             val main = settings?.binding(ModelRole.MAIN)
@@ -127,6 +130,8 @@ internal data class ProviderForm(
                     ?.model
                     ?.value
                     .orEmpty()
+
+            fun stored(model: String) = provider.models.firstOrNull { it.id.value == model }?.capabilities
             val vision = role(ModelRole.VISION).ifEmpty { main.model.value }
             return ProviderForm(
                 presetId = profile.preset?.takeIf { it == profile.id.value },
@@ -137,11 +142,8 @@ internal data class ProviderForm(
                 mainModel = main.model.value,
                 lightModel = role(ModelRole.LIGHT),
                 visionModel = role(ModelRole.VISION),
-                visionImages =
-                    provider.models
-                        .firstOrNull { it.id.value == vision }
-                        ?.capabilities
-                        ?.vision == true,
+                visionImages = stored(vision)?.vision == true,
+                contextTokens = stored(main.model.value)?.contextTokens,
             )
         }
 

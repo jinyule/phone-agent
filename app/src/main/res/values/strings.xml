@@ -57,7 +57,7 @@
     <string name="form_light_model">Light model (optional)</string>
     <string name="form_vision_model">Vision model (optional)</string>
     <string name="form_vision_images">The vision model accepts images</string>
-    <string name="form_context">Context window in tokens (optional)</string>
+    <string name="form_context">Context window of the main model, in tokens (optional)</string>
     <string name="form_test_and_save">Test and save</string>
     <string name="form_testing">Testing %1$s…</string>
     <string name="hint_short_key">A key this short makes replies get rejected often. If the local service needs no authentication, choose None.</string>

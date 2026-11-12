@@ -294,6 +294,54 @@ class ModelSetupTest {
     private fun outcomeOrThrown(form: ProviderForm): Any =
         runCatching { save(form) }.getOrElse { it.javaClass.simpleName }
 
+    @Test
+    fun savingWhatTheFormShowsAgainKeepsEveryCapability() {
+        val first =
+            save(
+                form.copy(
+                    contextTokens = 16_000,
+                    lightModel = "small",
+                    visionModel = "seeing",
+                    visionImages = true,
+                ),
+            ) as SetupOutcome.Saved
+        val edited = ProviderForm.of(first.settings)
+        val second = save(edited) as SetupOutcome.Saved
+        assertEquals(capabilities(first), capabilities(second))
+        assertEquals(16_000, edited.contextTokens)
+        // The form's value is the main model's; the others keep the listing's, or the default.
+        assertEquals(
+            mapOf(
+                "main-model" to 16_000,
+                "small" to ProviderForm.DEFAULT_CONTEXT_TOKENS,
+                "seeing" to ProviderForm.DEFAULT_CONTEXT_TOKENS,
+            ),
+            capabilities(second).mapValues { it.value.contextTokens },
+        )
+    }
+
+    @Test
+    fun aModelTheListingNoLongerNamesKeepsItsStoredContextWindow() {
+        provider.listing =
+            """{"object":"list","data":[{"id":"main-model","context_length":32768},""" +
+            """{"id":"small","context_length":8000}]}"""
+        save(form.copy(lightModel = "small")) as SetupOutcome.Saved
+        provider.listing = """{"object":"list","data":[{"id":"main-model","context_length":32768}]}"""
+        val again = save(ProviderForm.of(services.settingsNow())) as SetupOutcome.Saved
+        assertEquals(
+            mapOf("main-model" to 32768, "small" to 8000),
+            capabilities(again).mapValues { it.value.contextTokens },
+        )
+    }
+
+    private fun ModelServices.settingsNow() = checkNotNull((state.value as SettingsState.Ready).settings)
+
+    private fun capabilities(saved: SetupOutcome.Saved) =
+        saved.settings.providers
+            .single()
+            .models
+            .associate { it.id.value to it.capabilities }
+
     private fun assertNothingWritten() {
         assertFalse(settingsFile.exists())
         assertEquals(emptyList<File>(), keyFiles)

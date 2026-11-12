@@ -55,7 +55,7 @@
     <string name="form_light_model">轻量模型（可选）</string>
     <string name="form_vision_model">看图模型（可选）</string>
     <string name="form_vision_images">看图模型能接收图片</string>
-    <string name="form_context">上下文长度（token，可选）</string>
+    <string name="form_context">主模型的上下文长度（token，可选）</string>
     <string name="form_test_and_save">测试并保存</string>
     <string name="form_testing">正在测试 %1$s…</string>
     <string name="hint_short_key">这么短的 key 会让回复常被误拒；本地服务不需要认证时请选“无”。</string>

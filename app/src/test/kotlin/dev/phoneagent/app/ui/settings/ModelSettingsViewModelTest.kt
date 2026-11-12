@@ -77,6 +77,14 @@ class ModelSettingsViewModelTest {
     }
 
     @Test
+    fun aSavedFormShowsTheContextWindowItSaved() {
+        val (end, model) = run(form.copy(contextTokens = 16_000))
+        assertTrue(end.toString(), (end as RunState.Done).outcome is SetupOutcome.Saved)
+        assertEquals(16_000, model.form.value.contextTokens)
+        assertEquals(16_000, ModelSettingsViewModel(services).form.value.contextTokens)
+    }
+
+    @Test
     fun anUnexpectedFailureEndsTheRunAsAnErrorAndTheNextRunWorks() {
         cipher.sealFailure = IllegalStateException("not a real failure")
         val (end, model) = run(form)

@@ -68,9 +68,10 @@ internal class ModelSetup(
             val credential = ref?.let { Credential.ApiKey(it) } ?: Credential.None
             val profile = form.profile(credential)
             val probe = probeWith(TrialCredentials(ref, typed, credentials))
+            val stored = current?.providers?.firstOrNull { it.profile.id == form.providerId }
             val run =
                 try {
-                    Trials(form, profile, probe, onModel).run()
+                    Trials(form, profile, probe, onModel, stored).run()
                 } catch (ignoredUnsendable: IllegalArgumentException) {
                     // The HTTP client refused the address or a header the profile accepted (core checks
                     // both like the client does, so this is a disagreement): a form problem, not a crash.
@@ -162,12 +163,16 @@ internal class ModelSetup(
         }
 }
 
-/** The checks of one form, model by model; stops at the first failure. */
+/**
+ * The checks of one form, model by model; stops at the first failure. [stored] is the provider as
+ * saved before, whose models' context windows are kept when nothing newer names them.
+ */
 private class Trials(
     private val form: ProviderForm,
     private val profile: ProviderProfile,
     private val probe: ProviderProbe,
     private val onModel: (ModelId) -> Unit,
+    private val stored: StoredProvider?,
 ) {
     suspend fun run(): TrialRun {
         var wire = WireOptions.defaultsFor(profile)
@@ -195,7 +200,7 @@ private class Trials(
         ModelCapabilities(
             tools = true,
             vision = name == visionTarget() && form.visionImages,
-            contextTokens = form.contextTokens ?: ProviderForm.DEFAULT_CONTEXT_TOKENS,
+            contextTokens = contextTokens(name, listed = null),
         )
 
     /** The verified capabilities, with what the listing says about the model where the form did not. */
@@ -206,11 +211,26 @@ private class Trials(
         val entry = passed.models?.firstOrNull { it.id.value == name }
         val vision =
             if (name == visionTarget()) form.visionImages || entry?.vision == true else entry?.vision ?: false
-        return passed.capabilities.copy(
-            vision = vision,
-            contextTokens = form.contextTokens ?: entry?.contextTokens ?: ProviderForm.DEFAULT_CONTEXT_TOKENS,
-        )
+        return passed.capabilities.copy(vision = vision, contextTokens = contextTokens(name, entry?.contextTokens))
     }
+
+    /**
+     * The context window saved for [name] (the rule of [ProviderForm.contextTokens]): the form's
+     * value for the main model, else the provider's [listed] value, else the stored one, else the
+     * default.
+     */
+    private fun contextTokens(
+        name: String,
+        listed: Int?,
+    ): Int =
+        form.contextTokens.takeIf { name == form.mainModel.trim() }
+            ?: listed
+            ?: stored
+                ?.models
+                ?.firstOrNull { it.id.value == name }
+                ?.capabilities
+                ?.contextTokens
+            ?: ProviderForm.DEFAULT_CONTEXT_TOKENS
 
     private fun visionTarget(): String = form.visionModel.trim().ifEmpty { form.mainModel.trim() }
 
