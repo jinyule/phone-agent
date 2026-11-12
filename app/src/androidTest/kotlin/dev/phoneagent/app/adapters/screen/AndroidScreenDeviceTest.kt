@@ -10,7 +10,6 @@ import android.view.Display
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import dev.phoneagent.app.debug.TemporarySnapshotAnalyzer
 import dev.phoneagent.app.service.AgentAccessibility
 import dev.phoneagent.core.ports.ActionOutcome
 import dev.phoneagent.core.ports.Direction
@@ -66,7 +65,7 @@ class AndroidScreenDeviceTest {
             surface = SurfaceRef(Display.DEFAULT_DISPLAY, SurfaceKind.MAIN),
             connection = { AgentAccessibility.host.value },
             system = system,
-            analyzer = TemporarySnapshotAnalyzer,
+            analyzer = productAnalyzer(context),
         )
 
     private fun describe(snapshot: ScreenSnapshot?): String =
