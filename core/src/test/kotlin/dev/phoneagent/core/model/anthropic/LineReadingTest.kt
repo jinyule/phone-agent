@@ -106,6 +106,7 @@ class LineReadingTest {
                     listOf("a\r") to listOf(listOf("a")),
                     listOf("\r", "\r\n", "\n") to listOf(listOf(""), listOf(""), listOf("")),
                     listOf("ab", "c", "d\ne") to listOf(listOf("abcd"), listOf("e")),
+                    listOf("ab", "c\nd\ne") to listOf(listOf("abc", "d"), listOf("e")),
                 )
             assertAll(
                 cells.flatMap { (pieces, calls) ->
