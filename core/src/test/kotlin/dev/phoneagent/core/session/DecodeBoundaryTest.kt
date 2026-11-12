@@ -138,8 +138,27 @@ class DecodeBoundaryTest {
         assertAll(cells)
     }
 
+    @Test
+    fun `an event type of any length is read, or is corruption of its line`() {
+        // FWD-B1 sweep: types were checked by a regex repeating a group, which overflowed the stack.
+        val type = "a/a" + "-a".repeat(REPEATS)
+        val skipped = """{"seq":${prefix.size + 1},"time":0,"type":"$type","ignorable":true,"data":{}}"""
+        val cells =
+            listOf(
+                Executable { assertEquals(listOf(type), read(skipped).skipped.map { it.type }) },
+                Executable {
+                    val error = runCatching { read(envelope("$type-", "{}")) }.exceptionOrNull()
+                    assertTrue(error is SessionCorruptedException && error.line == prefix.size + 2, "$error")
+                },
+            )
+        assertAll(cells)
+    }
+
     private companion object {
-        /** Segments in the long package name: far more than the stack holds repetitions of a regex group. */
+        /**
+         * Segments in the long package name and words in the long type: far more than the stack
+         * holds repetitions of a regex group.
+         */
         const val REPEATS = 32_000
 
         val tapDef: String =
