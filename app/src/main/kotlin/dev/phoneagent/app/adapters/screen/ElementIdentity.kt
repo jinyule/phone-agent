@@ -19,7 +19,8 @@ import java.security.MessageDigest
  * The [lineage] holds the nodes the read leaves out between the element and the nearest node it
  * keeps above (fix list fwd B1b), with the identities they would have had kept: the element is
  * paired only while each of them has the identity it had, as were they kept it would be paired
- * only below them.
+ * only below them; a change that leaves a kept node its ref (of states, of bounds) leaves them
+ * theirs ([Lineage]).
  *
  * Used by [RefCarrier] for both carrying refs to the next screen and finding a planned element
  * again before an action ([RefMatcher]); there is no second notion of identity.
@@ -37,9 +38,16 @@ internal data class ElementIdentity(
 /**
  * The nodes a read leaves out (out of view, too small, or alike to a node it keeps) between an
  * element and the nearest node kept above it: [node], the one nearest the element, and [outer], the
- * rest (`null`: none). Each is the identity the node would have had kept, with its context and
- * reliability (which the element takes on: [ElementIdentity.reliable]); not its bounds, which
- * pairing a kept node does not need either. Equal when all nodes are, in order.
+ * rest (`null`: none). Equal when all nodes are, in order.
+ *
+ * Each node is the identity [Identities.of] would give it were it kept: the same fields, its
+ * context and its reliability (which the element takes on: [ElementIdentity.reliable]). So the
+ * element is paired ([RefCarrier.pair]) as it would be below those nodes kept: a change of one of
+ * them that would renumber it kept (of its name, its context, its window) renumbers the element,
+ * and one that would not (of its states: selected, focused, checked; of its bounds, unless it is
+ * alike to another) does not either. Not taken over: kept nodes alike under one parent are told
+ * apart by their bounds; nodes left out are not, the element is told apart by its own
+ * (phase1 §3.3 "已知缺口").
  *
  * At most [MAX] nodes, as a read walks no deeper. A lineage is the [outer] of those of the nodes
  * below, not copied into them: a read makes one per node it walks, and each in constant time.
