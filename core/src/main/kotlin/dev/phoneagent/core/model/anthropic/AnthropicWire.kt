@@ -335,7 +335,11 @@ internal data class WireRules(
             return expected
         }
 
-        /** Extra headers as HTTP headers; the adapter's own headers cannot be overridden. Values are never echoed. */
+        /**
+         * Extra headers as HTTP headers; the adapter's own headers cannot be overridden. A
+         * [WireProfile] already refuses values HTTP cannot carry; should OkHttp still refuse one,
+         * the error names the kind of problem, never the value.
+         */
         private fun headers(extra: Map<String, String>): Headers {
             val reserved = extra.keys.filter { it.lowercase(Locale.ROOT) in RESERVED_HEADERS }
             if (reserved.isNotEmpty()) invalid("wire.headers", "headers $reserved are set by the adapter")

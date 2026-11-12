@@ -144,8 +144,9 @@ class WireRulesTest {
         listOf("anthropic-version", "Anthropic-Beta", "Content-Type", "accept").forEach { name ->
             assertEquals("wire.headers", refused(wire.copy(headers = mapOf(name to "x"))).param, name)
         }
-        val error = refused(wire.copy(headers = mapOf("X-Trace" to "secret-ish\nvalue")))
-        assertEquals("wire.headers", error.param)
+        // A value HTTP cannot carry cannot even be recorded in a snapshot (WireProfileTest).
+        val badValue = mapOf("X-Trace" to "secret-ish\nvalue")
+        val error = assertThrows<IllegalArgumentException> { wire.copy(headers = badValue) }
         assertFalse(error.message!!.contains("secret-ish"), error.message)
         assertEquals("1", rules(wire.copy(headers = mapOf("X-Trace" to "1"))).headers["x-trace"])
     }
