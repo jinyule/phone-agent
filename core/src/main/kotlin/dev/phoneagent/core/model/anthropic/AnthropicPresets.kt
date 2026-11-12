@@ -42,6 +42,9 @@ public object AnthropicPresets {
     private val LEVELS =
         listOf(ReasoningLevel.LOW, ReasoningLevel.MEDIUM, ReasoningLevel.HIGH, ReasoningLevel.XHIGH, ReasoningLevel.MAX)
 
+    /** The models whose facts this preset knows. */
+    private val KNOWN = setOf(MAIN_MODEL, SONNET_MODEL, LIGHT_MODEL)
+
     /** Models with a server-side refusal fallback (`fallbacks: "default"`); Claude Haiku 5.5 has none. */
     private val SERVER_FALLBACK = setOf(MAIN_MODEL, SONNET_MODEL)
 
@@ -65,7 +68,7 @@ public object AnthropicPresets {
      * own name, an older Claude): then "test and save" has to find them out.
      */
     public fun capabilities(model: ModelId): ModelCapabilities? =
-        if (model in setOf(MAIN_MODEL, SONNET_MODEL, LIGHT_MODEL)) {
+        if (model in KNOWN) {
             ModelCapabilities(
                 tools = true,
                 vision = true,
@@ -100,4 +103,12 @@ public object AnthropicPresets {
 
     /** Whether [model] has a server-side refusal fallback on the Claude API. */
     public fun hasServerFallback(model: ModelId): Boolean = model in SERVER_FALLBACK
+
+    /**
+     * Whether [model] takes server-side context management on the Claude API: context editing
+     * (`clear_tool_uses_20250919`) and compaction at a token threshold (`compact_20260112`), both
+     * listed for the models of this preset in the Claude API docs. Unknown models get neither: an
+     * older one would refuse the request.
+     */
+    public fun hasServerContext(model: ModelId): Boolean = model in KNOWN
 }

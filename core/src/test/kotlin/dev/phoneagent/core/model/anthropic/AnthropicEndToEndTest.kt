@@ -80,8 +80,19 @@ class AnthropicEndToEndTest {
 
     private val profile = Kit.profile(checkNotNull(env["PA_E2E_ANTHROPIC_BASE_URL"]).removeSuffix("/"))
     private val modelId = ModelId(env.getValue("PA_E2E_ANTHROPIC_MODEL"))
+
+    /**
+     * The preset's facts for a model it knows (the default compaction trigger must lie below the
+     * window), else a small window.
+     */
     private val capabilities =
-        ModelCapabilities(tools = true, vision = true, contextTokens = 128_000, promptCaching = PromptCaching.EXPLICIT)
+        AnthropicPresets.capabilities(modelId)
+            ?: ModelCapabilities(
+                tools = true,
+                vision = true,
+                contextTokens = 128_000,
+                promptCaching = PromptCaching.EXPLICIT,
+            )
 
     /**
      * The recommended settings; on the Claude API itself a stale signature is an error instead of

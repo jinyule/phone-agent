@@ -111,8 +111,14 @@ class WireGoldenTest {
         )
 
     @Test
-    fun `official defaults with tools, effort and every breakpoint`() =
-        golden("official-defaults", Kit.request(wire = Kit.wire()))
+    fun `official defaults with tools, effort, every breakpoint and compaction`() =
+        golden(
+            "official-defaults",
+            Kit.request(
+                wire = Kit.wire(),
+                contextEdits = checkNotNull(AnthropicSettings.defaultsFor(Kit.profile(), Kit.MODEL).serverContext),
+            ),
+        )
 
     @Test
     fun `thinking is echoed verbatim and only to its own provider`() =

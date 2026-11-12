@@ -140,7 +140,11 @@ class WireSnapshotTest {
         for (baseUrl in listOf("https://api.anthropic.com:8443", "https://api.anthropic.com/proxy")) {
             val other = Kit.profile(baseUrl)
             val defaults = AnthropicSettings.defaultsFor(other, AnthropicPresets.MAIN_MODEL)
-            assertEquals(AnthropicSettings(), defaults, "$baseUrl: no fallback, no prefix mismatch behavior")
+            assertEquals(
+                AnthropicSettings(),
+                defaults,
+                "$baseUrl: no fallback, prefix mismatch behavior or server context",
+            )
             val error =
                 assertThrows<ModelError.InvalidRequest> {
                     AnthropicWire.snapshot(
@@ -169,7 +173,10 @@ class WireSnapshotTest {
         assertFalse(AnthropicWire.OPT_FALLBACKS in wire.options, "the snapshot records what is sent")
         assertEquals(
             AnthropicSettings.defaultsFor(official, AnthropicPresets.LIGHT_MODEL),
-            AnthropicSettings(prefixMismatch = PrefixMismatch.DROP_BLOCK),
+            AnthropicSettings(
+                prefixMismatch = PrefixMismatch.DROP_BLOCK,
+                serverContext = AnthropicSettings.defaultsFor(official, AnthropicPresets.MAIN_MODEL).serverContext,
+            ),
         )
     }
 
