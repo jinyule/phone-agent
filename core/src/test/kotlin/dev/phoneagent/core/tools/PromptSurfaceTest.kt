@@ -1,5 +1,6 @@
 package dev.phoneagent.core.tools
 
+import dev.phoneagent.core.agent.withheld
 import dev.phoneagent.core.ids.SnapshotId
 import dev.phoneagent.core.model.ToolDef
 import dev.phoneagent.core.ports.ActionOutcome
@@ -398,6 +399,65 @@ class PromptSurfaceTest {
                         FakeContext(screen),
                     )
             Golden.assertMatches("results/wait-timeout.expected.txt", result.text())
+        }
+
+    @Test
+    fun `screens - a withheld screen`() {
+        Golden.assertMatches(
+            "screens/withheld.expected.txt",
+            formatter.page(Samples.chatWith("s13", sent = "张三：在吗").withheld(), SnapshotDetail.BRIEF),
+        )
+    }
+
+    @Test
+    fun `results - a withheld screen after observe, tap, launch, a stale ref and a wait`() =
+        runTest {
+            val hidden = Samples.chatWith("s13", sent = "张三：在吗").withheld()
+            val observed =
+                tools
+                    .getValue("phone_observe")
+                    .execute(call("phone_observe", """{"image":true}"""), FakeContext(FakeScreen(hidden)))
+                    .text()
+            val diff = ScreenDiffer().diff(Screens.CHAT, Samples.chatWith("s13", sent = "张三：在吗"))
+            val tapped =
+                run(
+                    "phone_tap",
+                    """{"screen":"s12","ref":"e10"}""",
+                    ActionOutcome(ActionOutcome.Status.Ok, ActionOutcome.Effect.CHANGED, hidden, diff),
+                )
+            val screen =
+                FakeScreen(hidden).apply {
+                    onLaunch =
+                        { ActionOutcome(ActionOutcome.Status.Ok, ActionOutcome.Effect.NEW_APP, hidden) }
+                }
+            val launched =
+                tools
+                    .getValue("phone_launch")
+                    .execute(
+                        call("phone_launch", """{"app":"com.tencent.mm"}"""),
+                        FakeContext(screen, apps = FakeCatalog(Samples.apps)),
+                    ).text()
+            val stale =
+                run(
+                    "phone_tap",
+                    """{"screen":"s12","ref":"e7"}""",
+                    ActionOutcome(
+                        ActionOutcome.Status.StaleRef(ActionOutcome.StaleReason.WINDOW_CHANGED),
+                        ActionOutcome.Effect.UNKNOWN,
+                        hidden,
+                    ),
+                )
+            val waited =
+                tools
+                    .getValue("phone_wait")
+                    .execute(
+                        call("phone_wait", """{"condition":"appear","text":"在吗","timeoutMs":1000}"""),
+                        FakeContext(FakeScreen(hidden)),
+                    ).text()
+            Golden.assertMatches(
+                "results/withheld.expected.txt",
+                listOf(observed, tapped, launched, stale, waited).joinToString("\n\n=====\n\n"),
+            )
         }
 
     @Test

@@ -82,9 +82,15 @@ internal class PhoneObserveTool(
         val wanted = image ?: (snapshot.quality != TreeQuality.GOOD)
         val skipped =
             when {
+                // Nothing of a withheld screen is shown, not even whether a frame was taken.
+                ScreenFlag.WITHHELD in snapshot.flags -> ""
+
                 !wanted -> ""
+
                 !presenter.vision -> "\n（当前模型不看图，没有附截图）"
+
                 ScreenFlag.SECURE in snapshot.flags -> "\n（这一页禁止截屏，没有附截图）"
+
                 else -> null
             }
         val frame = if (skipped == null) screenCall { screen.frame(som = true) } else null

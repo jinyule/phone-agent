@@ -122,6 +122,22 @@ class ObserveAndWaitTest {
             }
 
         @Test
+        fun `a withheld screen gets no frame and no word about one`() =
+            runTest {
+                val withheld = FakeScreen(sparse.copy(quality = TreeQuality.EMPTY, flags = setOf(ScreenFlag.WITHHELD)))
+                for (args in listOf("{}", """{"image":true}""")) {
+                    val (result, _) = observe(args, withheld)
+                    assertEquals(
+                        listOf(Part.Text(formatter.page(withheld.current, SnapshotDetail.BRIEF))),
+                        result.content,
+                    )
+                    assertEquals("false", result.detail("imageAttached"))
+                    assertEquals(withheld.current.id.value, result.detail("screen"))
+                }
+                assertTrue(withheld.frames.isEmpty())
+            }
+
+        @Test
         fun `reports frames that could not be attached`() =
             runTest {
                 val none = FakeScreen(sparse).apply { frame = null }
@@ -431,6 +447,53 @@ class ObserveAndWaitTest {
                 val result = wait("""{"condition":"appear","text":"已完成","timeoutMs":10000}""", screen)
                 assertEquals(ToolStatus.ERROR, result.status)
                 assertTrue(reads <= 10_000 / READ_INTERVAL_MS + 2, "$reads reads in 10 s")
+            }
+
+        /** [snapshot] withheld by the runtime: only the flag, so matching must look at the flag, not the content. */
+        private fun withheld(snapshot: ScreenSnapshot) = snapshot.copy(flags = setOf(ScreenFlag.WITHHELD))
+
+        @Test
+        fun `a withheld screen meets no condition, and the result says it cannot be checked`() =
+            runTest {
+                val stripped = withheld(loading).copy(elements = emptyList(), ocr = null)
+                val cases =
+                    listOf(
+                        """{"condition":"appear","text":"已完成","timeoutMs":1000}""" to withheld(loaded),
+                        """{"condition":"disappear","text":"加载中","timeoutMs":1000}""" to stripped,
+                        """{"condition":"stable","timeoutMs":1000}""" to withheld(loaded),
+                    )
+                val wrong =
+                    cases.mapNotNull { (args, snapshot) ->
+                        val result = wait(args, FakeScreen(snapshot))
+                        val expected = "这一屏不能显示，条件无法核实。\n" + formatter.page(snapshot, SnapshotDetail.BRIEF)
+                        val right =
+                            result.status == ToolStatus.ERROR && result.text() == expected &&
+                                result.detail("met") == "false"
+                        if (right) null else "$args: ${result.status} ${result.detail("met")} ${result.text()}"
+                    }
+                assertEquals(emptyList<String>(), wrong)
+            }
+
+        @Test
+        fun `a withheld screen in between is waited past, whatever it holds`() =
+            runTest {
+                val appeared =
+                    wait(
+                        """{"condition":"appear","text":"已完成"}""",
+                        switching(withheld(loaded).copy(id = loading.id), loaded, at = 1_000) { currentTime },
+                    )
+                assertEquals(1_000, currentTime)
+                assertEquals(ToolStatus.OK, appeared.status)
+                assertEquals("s21", appeared.detail("screen"))
+                val stripped = withheld(loading).copy(elements = emptyList(), ocr = null)
+                val gone =
+                    wait(
+                        """{"condition":"disappear","text":"加载中"}""",
+                        switching(stripped, loaded, at = 2_000) { currentTime },
+                    )
+                assertEquals(2_000, currentTime)
+                assertEquals(ToolStatus.OK, gone.status)
+                assertEquals("s21", gone.detail("screen"))
             }
 
         @Test

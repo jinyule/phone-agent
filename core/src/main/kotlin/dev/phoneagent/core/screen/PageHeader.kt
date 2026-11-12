@@ -21,6 +21,13 @@ internal class PageHeader(
         extra: List<String>,
     ): List<String> = listOf(title(snapshot)) + notes(snapshot) + extra
 
+    /**
+     * The whole page of a withheld [snapshot]: its header without the activity, then a state line
+     * that says it is withheld, and nothing of its content, notes or other flags.
+     */
+    fun withheld(snapshot: ScreenSnapshot): List<String> =
+        listOf(title(snapshot.copy(activity = null)), "状态：${flagWord(ScreenFlag.WITHHELD)}")
+
     /** The page-state line (flags) and the tree-quality note, each only when there is something to say. */
     fun notes(snapshot: ScreenSnapshot): List<String> {
         val flags = ScreenFlag.entries.filter { it in snapshot.flags }.map(::flagWord)

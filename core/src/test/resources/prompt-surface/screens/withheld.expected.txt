@@ -1,0 +1,2 @@
+screen s13 · com.tencent.mm · agent 屏 · 坐标 0–999
+状态：按安全规则不显示这一屏的内容

@@ -66,15 +66,35 @@ class ScreenFormatterTest {
         fun `lists every page flag in a fixed order`() {
             val all =
                 formatter.page(
-                    snapshot("s3", emptyList()).copy(flags = ScreenFlag.entries.reversed().toSet()),
+                    snapshot(
+                        "s3",
+                        emptyList(),
+                    ).copy(flags = (ScreenFlag.entries - ScreenFlag.WITHHELD).reversed().toSet()),
                     SnapshotDetail.BRIEF,
                 )
             assertEquals(
-                "状态：禁止截屏 · 键盘已弹出 · 系统选择框在前面 · 登录页 · 人机验证 · 支付页 · App 提示操作太频繁 · 手机已锁屏 · " +
-                    "按安全规则不显示这一屏的内容",
+                "状态：禁止截屏 · 键盘已弹出 · 系统选择框在前面 · 登录页 · 人机验证 · 支付页 · App 提示操作太频繁 · 手机已锁屏",
                 all.lines()[1],
             )
             assertFalse(page().contains("状态："))
+        }
+
+        @Test
+        fun `a withheld screen shows only its id, package and surface, and that it is withheld`() {
+            // Content left on the snapshot, other flags and the activity: none of it may show.
+            val withheld =
+                Screens.CHAT.copy(
+                    ocr = listOf(OcrLine("PRIVATE_OCR", box(0, 0, 99, 20))),
+                    flags = setOf(ScreenFlag.WITHHELD, ScreenFlag.PAYMENT, ScreenFlag.KEYBOARD),
+                    quality = TreeQuality.EMPTY,
+                    surface = SurfaceRef(7, SurfaceKind.MAIN),
+                )
+            val expected = "screen s12 · com.tencent.mm · 主屏 · 坐标 0–999\n状态：按安全规则不显示这一屏的内容"
+            val blind = ScreenFormatter(lexicon = Screens.LEXICON, vision = false)
+            for (detail in SnapshotDetail.entries) {
+                assertEquals(expected, formatter.page(withheld, detail), "$detail")
+                assertEquals(expected, blind.page(withheld, detail), "$detail without vision")
+            }
         }
 
         @Test
@@ -510,6 +530,18 @@ class ScreenFormatterTest {
                 page,
                 after(ActionOutcome(Status.Ok, Effect.NEW_APP, now, ScreenDiff(removed = listOf(ElementRef("e6"))))),
             )
+        }
+
+        @Test
+        fun `after an action onto a withheld screen only the withheld page shows, whatever the diff`() {
+            val now = before.copy(id = SnapshotId("s13"), flags = setOf(ScreenFlag.WITHHELD))
+            val page = formatter.page(now, SnapshotDetail.BRIEF)
+            assertEquals("screen s13 · com.tencent.mm · agent 屏 · 坐标 0–999\n状态：按安全规则不显示这一屏的内容", page)
+            val diff = ScreenDiff(added = listOf(sent), ocrRemoved = listOf(OcrLine("PRIVATE_OCR", box(0, 0, 99, 20))))
+            for (effect in listOf(Effect.CHANGED, Effect.NO_CHANGE, Effect.NEW_APP)) {
+                assertEquals(page, after(ActionOutcome(Status.Ok, effect, now, diff)), "$effect")
+            }
+            assertEquals(page, after(ActionOutcome(Status.Ok, Effect.CHANGED, now)))
         }
 
         @Test

@@ -19,7 +19,12 @@ public interface ScreenPresenter {
      */
     public val vision: Boolean
 
-    /** [snapshot] as one page at [detail] (header, zones, OCR text; folded to the format's budget). */
+    /**
+     * [snapshot] as one page at [detail] (header, zones, OCR text; folded to the format's budget).
+     * A snapshot flagged [dev.phoneagent.core.ports.ScreenFlag.WITHHELD] reads as its header with
+     * the id, package and surface only, and a state line saying it is withheld, at any detail:
+     * none of its elements, OCR, activity or other flags, whatever the snapshot still holds.
+     */
     public fun page(
         snapshot: ScreenSnapshot,
         detail: SnapshotDetail,
@@ -30,6 +35,7 @@ public interface ScreenPresenter {
      * action names no snapshot, e.g. a swipe or a key). The tool adds its status line before it.
      *
      * - [ActionOutcome.after] is `null`: a one-line note telling the model to observe.
+     * - `after` is withheld: its page as [page] gives it, whatever the diff and the effect.
      * - The full page of `after` (as [page] at `BRIEF`; with a diff and the same app, elements new
      *   since the earlier snapshot marked `+`) when [ActionOutcome.diff] is `null`, the effect is
      *   `NEW_APP`, more than a configured share (by default half) of the page's lines were added,

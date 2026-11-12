@@ -1,6 +1,7 @@
 package dev.phoneagent.core.tools
 
 import dev.phoneagent.core.model.Part
+import dev.phoneagent.core.ports.ScreenFlag
 import dev.phoneagent.core.ports.ScreenPort
 import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.ports.SnapshotDetail
@@ -37,6 +38,11 @@ import kotlinx.serialization.json.put
  * - **stable**: [ScreenPort.awaitChange] until a quiet period of [stableQuietMs]; each look after
  *   a change takes at least [readIntervalMs], so a port that reports changes without suspending
  *   cannot spin the loop or hold off cancellation.
+ *
+ * A withheld screen ([ScreenFlag.WITHHELD], policy-rules §6.4) meets no condition: its text is not
+ * there to check, which is neither "appeared" nor "gone". The wait goes on past it; when the last
+ * screen is withheld, the result says the condition could not be checked, as an error, whatever
+ * the condition.
  */
 internal class PhoneWaitTool(
     private val presenter: ScreenPresenter,
@@ -131,24 +137,20 @@ internal class PhoneWaitTool(
             changed
         }
 
+    /** Whether [snapshot] meets [wait]; a withheld one never does, it cannot be checked. */
     private fun matches(
         snapshot: ScreenSnapshot,
         wait: Wait,
-    ): Boolean = shows(snapshot, wait.needle) == (wait.condition == Condition.APPEAR)
+    ): Boolean = !withheld(snapshot) && shows(snapshot, wait.needle) == (wait.condition == Condition.APPEAR)
 
     private fun report(
         wait: Wait,
         result: Pair<Boolean, ScreenSnapshot>,
     ): ToolResult {
-        val (met, snapshot) = result
-        val shown = wait.text?.let { "「${presenter.mask(it)}」" }.orEmpty()
-        val seconds = seconds(wait.timeoutMs)
-        val line =
-            when (wait.condition) {
-                Condition.APPEAR -> if (met) "等到了：${shown}出现了。" else "等了 $seconds 秒，${shown}还没有出现。"
-                Condition.DISAPPEAR -> if (met) "等到了：${shown}消失了。" else "等了 $seconds 秒，${shown}还在。"
-                Condition.STABLE -> if (met) "画面已经稳定。" else "等了 $seconds 秒，画面一直在变。"
-            }
+        val (waited, snapshot) = result
+        // A withheld last screen says nothing about the condition, not even that it is stable.
+        val met = waited && !withheld(snapshot)
+        val line = if (withheld(snapshot)) UNCHECKED else conditionLine(wait, met)
         val details =
             buildJsonObject {
                 put("met", met)
@@ -156,6 +158,19 @@ internal class PhoneWaitTool(
             }
         val text = line + "\n" + presenter.page(snapshot, SnapshotDetail.BRIEF)
         return ToolResult(if (met) ToolStatus.OK else ToolStatus.ERROR, listOf(Part.Text(text)), details)
+    }
+
+    private fun conditionLine(
+        wait: Wait,
+        met: Boolean,
+    ): String {
+        val shown = wait.text?.let { "「${presenter.mask(it)}」" }.orEmpty()
+        val seconds = seconds(wait.timeoutMs)
+        return when (wait.condition) {
+            Condition.APPEAR -> if (met) "等到了：${shown}出现了。" else "等了 $seconds 秒，${shown}还没有出现。"
+            Condition.DISAPPEAR -> if (met) "等到了：${shown}消失了。" else "等了 $seconds 秒，${shown}还在。"
+            Condition.STABLE -> if (met) "画面已经稳定。" else "等了 $seconds 秒，画面一直在变。"
+        }
     }
 
     /** [ms] as seconds with at most one decimal, e.g. `2`, `0.5`. */
@@ -202,5 +217,9 @@ internal class PhoneWaitTool(
         private const val MAX_TEXT = 200
         private const val USAGE = "phone_wait(condition=appear/disappear/stable, text?, timeoutMs?)"
         private val CONDITIONS = Condition.entries.associateBy { it.wire }
+        private const val UNCHECKED = "这一屏不能显示，条件无法核实。"
     }
 }
+
+/** Whether the runtime withheld [snapshot] (policy-rules §6.4). */
+private fun withheld(snapshot: ScreenSnapshot): Boolean = ScreenFlag.WITHHELD in snapshot.flags

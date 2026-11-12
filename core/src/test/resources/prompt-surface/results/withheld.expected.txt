@@ -1,0 +1,26 @@
+screen s13 · com.tencent.mm · agent 屏 · 坐标 0–999
+状态：按安全规则不显示这一屏的内容
+
+=====
+
+已点击 @e10。
+screen s13 · com.tencent.mm · agent 屏 · 坐标 0–999
+状态：按安全规则不显示这一屏的内容
+
+=====
+
+已打开 微信（com.tencent.mm），前台换成了另一个 App。
+screen s13 · com.tencent.mm · agent 屏 · 坐标 0–999
+状态：按安全规则不显示这一屏的内容
+
+=====
+
+编号过期了（the screen around it changed since it was planned），这一步没有执行。下面是最新一屏，请用它的 screen 和编号：
+screen s13 · com.tencent.mm · agent 屏 · 坐标 0–999
+状态：按安全规则不显示这一屏的内容
+
+=====
+
+这一屏不能显示，条件无法核实。
+screen s13 · com.tencent.mm · agent 屏 · 坐标 0–999
+状态：按安全规则不显示这一屏的内容
