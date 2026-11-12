@@ -9,5 +9,10 @@
         <activity
             android:name="dev.phoneagent.app.adapters.screen.FieldActivity"
             android:exported="true" />
+        <!-- singleTop: a second intent reaches the open page (onNewIntent) instead of opening another. -->
+        <activity
+            android:name="dev.phoneagent.app.adapters.screen.PressActivity"
+            android:exported="true"
+            android:launchMode="singleTop" />
     </application>
 </manifest>
