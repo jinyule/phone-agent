@@ -51,8 +51,9 @@ internal class ModelSetup(
 
     /**
      * Tests [form] and saves it as the only provider, replacing [current] (the loaded settings, or
-     * `null`). A blank key keeps the stored key of the same provider when it is readable.
-     * [onModel] is told which model is being checked.
+     * `null`). A blank key keeps the stored key of the same provider when it is readable and the
+     * address is on the origin it was saved for ([storedKeyRef]). [onModel] is told which model is
+     * being checked.
      */
     suspend fun testAndSave(
         form: ProviderForm,
@@ -84,16 +85,14 @@ internal class ModelSetup(
             }
         }
 
-    /** The ref of the stored key [form] keeps when its key field is blank, or `null`. */
+    /** The ref of the stored key [form] keeps when its key field is blank and the key is readable, or `null`. */
     private fun keptRef(
         form: ProviderForm,
         current: ModelSettings?,
-    ): SecretRef? {
-        val provider = current?.providers?.firstOrNull { it.profile.id == form.providerId }
-        val ref = (provider?.profile?.credential as? Credential.ApiKey)?.secretRef
-        val keeps = form.auth == AuthChoice.API_KEY && form.typedKey.isEmpty()
-        return ref?.takeIf { keeps && credentials.status(it) == CredentialStatus.PRESENT }
-    }
+    ): SecretRef? =
+        storedKeyRef(form, current)?.takeIf {
+            form.typedKey.isEmpty() && credentials.status(it) == CredentialStatus.PRESENT
+        }
 
     private suspend fun save(
         form: ProviderForm,

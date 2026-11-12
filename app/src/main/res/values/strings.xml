@@ -48,7 +48,7 @@
     <string name="form_auth_none">None (local service)</string>
     <string name="form_auth_key">API key</string>
     <string name="form_key">API key</string>
-    <string name="form_key_keep">Leave empty to keep the saved key.</string>
+    <string name="form_key_keep">Leave empty to keep the key saved for this address.</string>
     <string name="form_base_url">Address (base URL)</string>
     <string name="form_protocol">Protocol</string>
     <string name="form_protocol_chat">Chat Completions</string>

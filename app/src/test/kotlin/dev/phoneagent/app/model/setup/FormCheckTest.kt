@@ -113,6 +113,26 @@ class FormCheckTest {
     }
 
     @Test
+    fun anotherPresetDropsTheTypedKey() {
+        val kimi = deepseek.switchedTo(ProviderPresets.KIMI)
+        assertEquals(ProviderPresets.KIMI.baseUrl, kimi.baseUrl)
+        assertEquals("", kimi.apiKey)
+        assertEquals("deepseek-chat", kimi.mainModel)
+        // Custom keeps the address, and with it the key.
+        assertEquals(KEY, deepseek.switchedTo(null).apiKey)
+        assertEquals(KEY, deepseek.switchedTo(ProviderPresets.DEEPSEEK).apiKey)
+    }
+
+    @Test
+    fun theUsePresetHintKeepsTheTypedKey() {
+        val official = custom.copy(baseUrl = "https://api.deepseek.com", auth = AuthChoice.API_KEY, apiKey = KEY)
+        val hint = FormCheck.hints(official).single() as FormHint.UsePreset
+        val switched = official.switchedTo(hint.preset)
+        assertEquals("deepseek", switched.presetId)
+        assertEquals(KEY, switched.apiKey)
+    }
+
+    @Test
     fun otherProblems() {
         assertEquals(listOf(FormProblem.UNKNOWN_PRESET), problems(deepseek.copy(presetId = "nope")))
         assertEquals(

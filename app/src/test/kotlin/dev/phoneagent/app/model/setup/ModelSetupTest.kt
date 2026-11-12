@@ -342,6 +342,45 @@ class ModelSetupTest {
             .models
             .associate { it.id.value to it.capabilities }
 
+    @Test
+    fun aBlankKeyIsNotSentToAnotherHostPortOrScheme() {
+        save(form) as SetupOutcome.Saved
+        FakeProvider().use { other ->
+            // Each cell: the outcome, and how many requests carried the stored key to the new address.
+            val moved =
+                mapOf(
+                    "host" to otherLoopbackName(form.baseUrl),
+                    "port" to other.baseUrl,
+                    "scheme" to form.baseUrl.replace("http://", "https://"),
+                ).mapValues { (_, url) ->
+                    val seen = provider.requests.size + other.requests.size
+                    val outcome = outcomeOrThrown(form.copy(baseUrl = url, apiKey = ""))
+                    val sent = (provider.requests + other.requests).size - seen
+                    "${(outcome as? SetupOutcome.Invalid)?.problems ?: outcome.javaClass.simpleName}, $sent sent"
+                }
+            assertEquals(moved.mapValues { "[KEY_MISSING], 0 sent" }, moved)
+            assertEquals(emptyList<FakeProvider.Seen>(), other.requests)
+        }
+        assertEquals(2, provider.requests.size)
+        assertTrue(provider.requests.all { it.authorization == "Bearer $KEY" })
+    }
+
+    /** [url] with the other name of the loopback host: the same server under another origin. */
+    private fun otherLoopbackName(url: String) =
+        if ("127.0.0.1" in url) url.replace("127.0.0.1", "localhost") else url.replace("localhost", "127.0.0.1")
+
+    @Test
+    fun aBlankKeyIsKeptForAnotherModelOrPathOnTheSameServer() {
+        save(form) as SetupOutcome.Saved
+        val model = save(form.copy(apiKey = "", mainModel = "other-model"))
+        val path = save(form.copy(apiKey = "", baseUrl = form.baseUrl.replace("/v1", "/proxy/v1")))
+        assertTrue(model.toString(), model is SetupOutcome.Saved)
+        assertTrue(path.toString(), path is SetupOutcome.Saved)
+        assertEquals(6, provider.requests.size)
+        assertTrue(provider.requests.all { it.authorization == "Bearer $KEY" })
+        assertTrue(provider.requests.takeLast(2).all { it.path.startsWith("/proxy/v1/") })
+    }
+
     private fun assertNothingWritten() {
         assertFalse(settingsFile.exists())
         assertEquals(emptyList<File>(), keyFiles)

@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -128,6 +129,26 @@ class ModelSettingsResultTest {
         )
         compose.onNodeWithText(text(R.string.form_key_keep)).assertExists()
         compose.onNodeWithText(text(R.string.settings_key_again, "DeepSeek")).assertDoesNotExist()
+    }
+
+    @Test
+    fun theStoredKeyIsOfferedOnlyToTheOriginItWasSavedFor() {
+        val settings = SettingsFixtures.settings()
+        val screen =
+            FakeSettingsScreen(
+                compose,
+                ProviderForm.of(settings).copy(baseUrl = "https://api.deepseek.com/beta"),
+                settings = SettingsState.Ready(settings, mapOf(SettingsFixtures.DEEPSEEK to CredentialStatus.PRESENT)),
+            )
+        // Another path on the same server keeps it.
+        compose.onNodeWithText(text(R.string.form_key_keep)).assertExists()
+        val shown =
+            listOf("https://evil.example.com", "https://api.deepseek.com:8443", "http://localhost:8080").associateWith {
+                screen.form = screen.form.copy(baseUrl = it)
+                compose.waitForIdle()
+                compose.onAllNodesWithText(text(R.string.form_key_keep)).fetchSemanticsNodes().size
+            }
+        assertEquals(shown.mapValues { 0 }, shown)
     }
 
     @Test

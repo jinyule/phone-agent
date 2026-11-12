@@ -10,6 +10,7 @@ import dev.phoneagent.core.model.Credential
 import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.ModelRole
 import dev.phoneagent.core.model.ProviderProfile
+import dev.phoneagent.core.model.SecretRef
 import dev.phoneagent.core.model.openai.ProviderPreset
 import dev.phoneagent.core.model.openai.ProviderPresets
 import java.net.URI
@@ -23,7 +24,8 @@ import java.net.URISyntaxException
  * @property baseUrl the address; a preset starts with its own.
  * @property protocol a custom provider's protocol; a preset's is its own.
  * @property auth whether a key is sent.
- * @property apiKey the key typed in; blank keeps the stored key of the same provider, if any.
+ * @property apiKey the key typed in; blank keeps the stored key of the same provider while
+ *   [baseUrl] is on the origin it was saved for (see [storedKeyRef]).
  * @property headers extra non-secret headers.
  * @property mainModel the model that drives tasks (required).
  * @property lightModel the model for small judgments; blank follows the main model.
@@ -160,12 +162,18 @@ internal data class ProviderForm(
             )
     }
 
-    /** This form moved to [preset] (`null`: custom): its address and authentication, keeping what was typed. */
-    fun switchedTo(preset: ProviderPreset?): ProviderForm =
-        start(preset).copy(
-            baseUrl = preset?.baseUrl ?: baseUrl,
+    /**
+     * This form moved to [preset] (`null`: custom): its address and authentication, keeping what was
+     * typed. The typed key stays only when the address stays on the same origin (custom keeps the
+     * address; the "use the preset" hint moves to the same official address); another preset
+     * starts with an empty key, so a key typed for one provider is never sent to another.
+     */
+    fun switchedTo(preset: ProviderPreset?): ProviderForm {
+        val url = preset?.baseUrl ?: baseUrl
+        return start(preset).copy(
+            baseUrl = url,
             protocol = preset?.protocol ?: effectiveProtocol,
-            apiKey = apiKey,
+            apiKey = apiKey.takeIf { originOf(url) == originOf(baseUrl) }.orEmpty(),
             headers = headers,
             mainModel = mainModel,
             lightModel = lightModel,
@@ -173,6 +181,25 @@ internal data class ProviderForm(
             visionImages = visionImages,
             contextTokens = contextTokens,
         )
+    }
+}
+
+/**
+ * The ref of the key stored for [form]'s provider in [settings] that a blank key field keeps, or
+ * `null` when there is none to keep. A stored key is only ever sent to the origin (scheme, host and
+ * port) it was saved for: another path on the same server keeps it, another host, port or scheme
+ * does not, and the form then needs a key typed for the new address. Whether the stored key is
+ * still readable is the caller's check.
+ */
+internal fun storedKeyRef(
+    form: ProviderForm,
+    settings: ModelSettings?,
+): SecretRef? {
+    val profile = settings?.providers?.firstOrNull { it.profile.id == form.providerId }?.profile
+    val ref = (profile?.credential as? Credential.ApiKey)?.secretRef
+    val origin = originOf(form.baseUrl)
+    val sameOrigin = origin != null && profile != null && origin == originOf(profile.baseUrl)
+    return ref?.takeIf { form.auth == AuthChoice.API_KEY && sameOrigin }
 }
 
 /** How a provider authenticates, as the form offers it. */
@@ -311,6 +338,29 @@ internal object FormCheck {
             false
         }
 }
+
+/**
+ * The origin of [url]: scheme and host in lower case, and the port, the scheme's default when none
+ * is written. `null` when [url] has no scheme or host.
+ */
+private fun originOf(url: String): String? =
+    try {
+        val uri = URI(url.trim())
+        val scheme = uri.scheme?.lowercase()
+        val port =
+            when {
+                uri.port != -1 -> uri.port
+                scheme == "https" -> HTTPS_PORT
+                else -> HTTP_PORT
+            }
+        uri.host?.let { host -> scheme?.let { "$it://${host.lowercase()}:$port" } }
+    } catch (ignoredNotUri: URISyntaxException) {
+        // No origin: nothing stored is kept for it.
+        null
+    }
+
+private const val HTTP_PORT = 80
+private const val HTTPS_PORT = 443
 
 /** The host of [url] as a label, or `null` when it has none. */
 private fun hostOf(url: String): String? =

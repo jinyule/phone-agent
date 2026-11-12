@@ -34,6 +34,7 @@ import dev.phoneagent.app.model.setup.AuthChoice
 import dev.phoneagent.app.model.setup.FormCheck
 import dev.phoneagent.app.model.setup.FormHint
 import dev.phoneagent.app.model.setup.ProviderForm
+import dev.phoneagent.app.model.setup.storedKeyRef
 import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.ModelRole
 import dev.phoneagent.core.model.openai.ProviderPresets
@@ -139,7 +140,8 @@ private fun ProviderFormSection(
     PresetChoice(form, actions)
     // Right under the provider: "None" is offered first, so local services do not get a placeholder key.
     AuthChoiceRow(form, actions)
-    val keepsKey = ready.keys[form.providerId] == CredentialStatus.PRESENT
+    val keepsKey =
+        ready.keys[form.providerId] == CredentialStatus.PRESENT && storedKeyRef(form, ready.settings) != null
     if (form.auth == AuthChoice.API_KEY) KeyField(form, keepsKey, actions)
     Field(form.baseUrl, R.string.form_base_url, SettingsTags.BASE_URL) { actions.edit(form.copy(baseUrl = it)) }
     for (hint in FormCheck.hints(form)) {
