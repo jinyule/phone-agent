@@ -19,7 +19,7 @@ public interface ScreenPort {
     /** The display this port drives. */
     public val surface: SurfaceRef
 
-    /** Observes the surface now. */
+    /** Observes the surface now, at [SnapshotOptions.detail]; the snapshot's `detail` says so. */
     public suspend fun snapshot(options: SnapshotOptions = SnapshotOptions()): ScreenSnapshot
 
     /**

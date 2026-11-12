@@ -9,7 +9,8 @@ import kotlinx.serialization.Serializable
  *
  * @property status whether the action was performed.
  * @property effect what visibly happened afterwards.
- * @property after the snapshot read back after the screen settled; `null` when it could not be read.
+ * @property after the snapshot read back after the screen settled, its `detail` the one the port
+ *   read it at; `null` when it could not be read.
  * @property diff [after] compared with the snapshot the action was planned on; `null` when either is missing.
  */
 @Serializable

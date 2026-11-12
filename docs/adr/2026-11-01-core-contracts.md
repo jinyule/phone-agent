@@ -200,6 +200,13 @@ v1 仍未发布（冻结点是第一个 M1 PR）。`session/resumed` 和 `policy
 - **回复里出现密钥**（A11）：适配器不改写模型产生的任何内容，整条回复按 `BadResponse` 拒绝，返回固定文字。`ModelError` 加 `discardsStreamed`（只有这种 `BadResponse` 为 true）：runtime 不把已流出的前缀记成 interrupted 的 `assistant/message`，只记 `assistant/attempt`，UI 撤回或标记作废已显示的片段（预览 delta 照常即时发布，不为检测密钥扣住）。匹配只做精确匹配（含 JSON 转义形式），不设最短长度。没有选"加一种 ModelError"：它仍是一次违反约定的回复，分类还是 BAD_RESPONSE，只是已流出的内容不能留；也没有选"改写成 `***`"：会破坏 Anthropic 的推理绑定，改写调用参数还会改掉要执行的操作。
 - **外发免确认资格**（A2）：只认 `tool/started.verdictSeq` 那条 Allow 之前这个调用最后一张 APPROVED 的卡，并且要求它是 OUTWARD、pkg 等于那条 Allow 的 intent.pkg。
 
+### 14. 快照的详细度（WP02 合入前，协调者决定）
+
+v1 仍未发布。`ScreenSnapshot` 加 `detail: SnapshotDetail = BRIEF`：端口实际按什么详细度读的这一屏，由端口填写（`snapshot` 是请求的那一档，动作和启动之后的回读是端口回读用的那一档）。字段带 `@EncodeDefault(NEVER)`：BRIEF 不写进日志，v1 fixture 逐字节不变，没有这个字段的日志读出来是 BRIEF，所以不升版本、不重新生成 fixture；`format-names.txt` 加上 `SnapshotDetail`。
+
+- 用途：批准后复核读 S′ 时按计划屏（判定时的 `PolicyContext.screen`）的详细度读，和执行器对齐计划快照时数层用的详细度相同（phase1 §3.3"对齐的前提"、§3.8 批准后复核）。
+- 它是元数据：屏幕格式不打印它，不进模型请求。
+
 ## Alternatives considered
 
 - **id 用裸 `String` 或 typealias**：编译器分不清 `TaskId` 和 `SessionId`，传错参数只能靠测试发现。
@@ -240,6 +247,8 @@ v1 仍未发布（冻结点是第一个 M1 PR）。`session/resumed` 和 `policy
 - **密钥按最短长度兜底**（短于 8 个字符视为占位值、不匹配）：任何阈值都会让短的真实凭据漏出去。不需要认证的本地服务用 `Credential.None`。
 - **`turn/end(STOPPED)` 和 `task/stopped` 之间不许出现未知记录**：store 重新打开时看不到未知记录，读写两端的判断就会不一致，停在这个位置的日志也无法恢复。
 - **只在 `task/stopped` 检查未答复的调用**：崩溃修复不写 `task/stopped`，漏补结果的修复拦不住；所以 `step/end`、`turn/end`、`session/resumed` 上也检查。
+- **详细度记在 `screen/snapshot` 事件上，而不是快照里**（第 14 节的另一个选项）：动作和启动之后回读的屏不经过这条记录，它们的详细度由端口决定，runtime 只能猜，"在 FULL 屏上点一下、再在回读屏上按 ref 点要确认的控件"这条路径照样两边详细度不同。
+- **runtime 在内存里记每个快照的详细度**（第 14 节的另一个选项）：不进日志，要在 runtime 里复刻端口"回读按计划屏的详细度"的规则，进程重建后也没有了。
 - **截断的调用也写 `tool/call`**：`tool/call` 装的是校验过的 `ToolCall`，截断的参数可能根本不是 JSON；而且它们从未派发，写了反而让"有 `tool/call` = 派发过"不再成立。
 
 ## 后果

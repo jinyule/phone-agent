@@ -251,6 +251,7 @@ data class ScreenSnapshot(
     val quality: TreeQuality,           // GOOD / SPARSE / EMPTY → 决定要不要附图
     val flags: Set<ScreenFlag>,         // SECURE、KEYBOARD、SYSTEM_PICKER、LOGIN、CAPTCHA、PAYMENT、RATE_LIMIT …
     val fingerprint: String,            // 判断"有没有变化"
+    val detail: SnapshotDetail = BRIEF, // 端口实际按什么详细度读的这一屏，由端口填写；屏幕格式不打印，BRIEF 时不写进日志
 )
 
 data class ActionOutcome(

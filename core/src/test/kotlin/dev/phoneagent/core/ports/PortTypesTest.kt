@@ -120,6 +120,32 @@ class PortTypesTest {
     }
 
     @Test
+    fun `a snapshot's detail is left out when brief, round-trips when full, and is brief when absent`() {
+        // The session log encodes defaults; BRIEF must still write what it wrote before the field.
+        val withDefaults = Json { encodeDefaults = true }
+        val brief =
+            ScreenSnapshot(
+                SnapshotId("s1"),
+                SurfaceRef(0, SurfaceKind.MAIN),
+                "com.example",
+                null,
+                listOf(UiElement(ElementRef("e1"), ElementRole.TEXT, bounds = Bounds(0, 0, 1, 1))),
+                null,
+                TreeQuality.GOOD,
+                emptySet(),
+                "f",
+            )
+        val encoded = withDefaults.encodeToString(brief)
+        assertEquals(SnapshotDetail.BRIEF, brief.detail)
+        assertFalse("detail" in encoded, encoded)
+        assertEquals(brief, Json.decodeFromString<ScreenSnapshot>(encoded))
+        val full = brief.copy(detail = SnapshotDetail.FULL)
+        val fullEncoded = withDefaults.encodeToString(full)
+        assertEquals(encoded.dropLast(1) + ""","detail":"FULL"}""", fullEncoded)
+        assertEquals(full, withDefaults.decodeFromString<ScreenSnapshot>(fullEncoded))
+    }
+
+    @Test
     fun `a stale ref carries its reason, and every reason has an English hint of its own`() {
         val stale =
             ActionOutcome(
