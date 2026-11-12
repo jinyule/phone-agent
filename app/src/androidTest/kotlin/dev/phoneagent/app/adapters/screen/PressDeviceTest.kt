@@ -91,18 +91,33 @@ class PressDeviceTest {
 
     private fun ScreenSnapshot.label() = elements.single { it.resourceId == "press_label" }
 
-    /** Opens the page anew (all counts 0) with [extras], and its first snapshot at [detail] once it is in front. */
+    private var runs = 0
+
+    /**
+     * Opens the page anew (all counts 0) with [extras], and a snapshot at [detail] once it is in
+     * front, the page it replaced is gone (a snapshot of both would plan on the old one) and it is
+     * at rest (a late event of its window would count as the proof of a press answered `false`).
+     */
     private suspend fun open(
         detail: SnapshotDetail,
         vararg extras: Pair<String, Boolean>,
     ): ScreenSnapshot {
+        val run = "run ${++runs}"
         val intent =
             Intent()
                 .setClassName(testPackage, PressActivity::class.java.name)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                .putExtra(PressActivity.RUN, run)
         extras.forEach { (key, value) -> intent.putExtra(key, value) }
         context.startActivity(intent)
-        return until(detail) { it.pkg == testPackage && it.elements.any { e -> e.resourceId == "press_label" } }
+        val shown = { snapshot: ScreenSnapshot ->
+            snapshot.pkg == testPackage &&
+                snapshot.elements.count { it.resourceId == "press_label" } == 1 &&
+                snapshot.elements.any { it.resourceId == "press_run" && it.name == run }
+        }
+        until(detail, shown)
+        rest()
+        return until(detail, shown)
     }
 
     /** The first snapshot at [detail] for which [done] holds, reading again on each change. */
@@ -134,14 +149,19 @@ class PressDeviceTest {
             while (!enabled()) screen.awaitChange(CHANGE_TIMEOUT_MS)
         }
 
-    /** The counts once the page shows no change for [REST_MS]. */
-    private suspend fun countsAtRest(): Counts =
+    /** Returns once the page shows no change for [REST_MS]. */
+    private suspend fun rest() =
         withTimeout(CHANGE_TIMEOUT_MS) {
             while (screen.awaitChange(REST_MS)) {
                 log("  waiting for the page to rest")
             }
-            screen.snapshot(SnapshotOptions(detail = SnapshotDetail.FULL)).counts()
         }
+
+    /** The counts once the page is at rest. */
+    private suspend fun countsAtRest(): Counts {
+        rest()
+        return screen.snapshot(SnapshotOptions(detail = SnapshotDetail.FULL)).counts()
+    }
 
     /** Taps the label planned on [planned] in [cell]; logs and returns the outcome and the counts at rest. */
     private suspend fun press(

@@ -21,12 +21,17 @@ import dev.phoneagent.app.test.R
  * count their clicks and long clicks, whatever made them (an accessibility action or a touch), in
  * texts above them (`parent_clicks`, `parent_long_clicks`, `child_clicks`, `child_long_clicks`).
  *
- * Extras: [CHILD_ENABLED] (default `true`); [CHILD_REFUSES], the child answers the accessibility
- * click and long click `false` without making them, as a view that takes only touches does. A
- * new intent with [ENABLE_CHILD] `true` enables the child.
+ * Extras: [RUN], a text the page shows (`press_run`) to tell it from the page it replaced;
+ * [CHILD_ENABLED] (default `true`); [CHILD_REFUSES], the child answers the accessibility click and
+ * long click `false` without making them, as a view that takes only touches does. A new intent
+ * with [ENABLE_CHILD] `true` enables the child.
+ *
+ * It runs in the test APK's own process, and the test APK carries no Kotlin standard library (the
+ * app's is left out of it): nothing here calls into it, so no `lateinit`, no `listOf`, and
+ * parameters of non-private functions nullable (no null checks generated), as in [FieldActivity].
  */
 class PressActivity : Activity() {
-    private lateinit var child: RefusingLayout
+    private var child: RefusingLayout? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -34,13 +39,18 @@ class PressActivity : Activity() {
         val parentLongClicks = counter(R.id.parent_long_clicks)
         val childClicks = counter(R.id.child_clicks)
         val childLongClicks = counter(R.id.child_long_clicks)
+        val run =
+            TextView(this).apply {
+                id = R.id.press_run
+                text = intent.getStringExtra(RUN)
+            }
         val label =
             TextView(this).apply {
                 id = R.id.press_label
                 text = LABEL
                 textSize = LABEL_SP
             }
-        child =
+        val child =
             RefusingLayout(this).apply {
                 id = R.id.press_child
                 gravity = Gravity.CENTER
@@ -49,6 +59,7 @@ class PressActivity : Activity() {
                 refuses = intent.getBooleanExtra(CHILD_REFUSES, false)
                 addView(label, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
             }
+        this.child = child
         val wrapper =
             FrameLayout(this).apply {
                 id = R.id.press_wrapper
@@ -65,17 +76,19 @@ class PressActivity : Activity() {
         val page =
             LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                listOf(parentClicks, parentLongClicks, childClicks, childLongClicks).forEach {
-                    addView(it, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+                // Drawn edge to edge: kept clear of the status bar, or the reader leaves the counts under it out.
+                fitsSystemWindows = true
+                for (counter in arrayOf(run, parentClicks, parentLongClicks, childClicks, childLongClicks)) {
+                    addView(counter, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
                 }
                 addView(parent, LinearLayout.LayoutParams(MATCH_PARENT, BOX_PX))
             }
         setContentView(page)
     }
 
-    override fun onNewIntent(intent: Intent) {
+    override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
-        if (intent.getBooleanExtra(ENABLE_CHILD, false)) child.isEnabled = true
+        if (intent != null && intent.getBooleanExtra(ENABLE_CHILD, false)) child?.isEnabled = true
     }
 
     private fun counter(viewId: Int): TextView =
@@ -98,7 +111,7 @@ class PressActivity : Activity() {
 
     /** A layout that, when it [refuses], answers the accessibility click and long click `false` without making them. */
     private class RefusingLayout(
-        context: Context,
+        context: Context?,
     ) : LinearLayout(context) {
         var refuses = false
 
@@ -121,6 +134,9 @@ class PressActivity : Activity() {
 
         /** Boolean extra: the child answers the accessibility click and long click `false`. */
         const val CHILD_REFUSES: String = "childRefuses"
+
+        /** String extra: the text of `press_run`. */
+        const val RUN: String = "run"
 
         /** Boolean extra of a new intent: enable the child. */
         const val ENABLE_CHILD: String = "enableChild"
