@@ -2,7 +2,6 @@ package dev.phoneagent.core.tools
 
 import dev.phoneagent.core.agent.withheld
 import dev.phoneagent.core.ids.SnapshotId
-import dev.phoneagent.core.model.ToolDef
 import dev.phoneagent.core.ports.ActionOutcome
 import dev.phoneagent.core.ports.AppEntry
 import dev.phoneagent.core.ports.ElementRef
@@ -24,6 +23,7 @@ import dev.phoneagent.core.testing.FakeContext
 import dev.phoneagent.core.testing.FakeInteraction
 import dev.phoneagent.core.testing.FakeScreen
 import dev.phoneagent.core.testing.Golden
+import dev.phoneagent.core.testing.PromptSurfaces
 import dev.phoneagent.core.testing.Screens
 import dev.phoneagent.core.testing.Screens.box
 import dev.phoneagent.core.testing.Screens.el
@@ -34,9 +34,6 @@ import dev.phoneagent.core.testing.text
 import dev.phoneagent.core.tool.ToolContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.ExperimentalSerializationApi
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.serializer
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 
@@ -70,20 +67,13 @@ class PromptSurfaceTest {
 
     @Test
     fun `system prompt`() {
-        val text = SystemPrompt.BLOCKS.joinToString("\n\n") { "<!-- block: ${it.id} -->\n${it.text}" }
-        Golden.assertMatches("system-prompt.expected.md", text)
+        Golden.assertMatches("system-prompt.expected.md", PromptSurfaces.systemPrompt(SystemPrompt.BLOCKS))
     }
 
-    @OptIn(ExperimentalSerializationApi::class)
     @Test
     fun `tool schemas`() {
-        val json =
-            Json {
-                prettyPrint = true
-                prettyPrintIndent = "  "
-            }
         val defs = PhaseOneTools.create(formatter).map { it.def }
-        Golden.assertMatches("tool-schemas.expected.json", json.encodeToString(serializer<List<ToolDef>>(), defs))
+        Golden.assertMatches("tool-schemas.expected.json", PromptSurfaces.toolSchemas(defs))
     }
 
     @Test
