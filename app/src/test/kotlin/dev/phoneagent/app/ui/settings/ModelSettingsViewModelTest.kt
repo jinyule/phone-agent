@@ -149,6 +149,8 @@ class ModelSettingsViewModelTest {
                 "window typed, main model kept" to after(typed),
                 "window typed, then the light model changed" to after(typed, { copy(lightModel = "") }),
                 "window typed, then the main model changed" to after(typed, { copy(mainModel = "small") }),
+                "another provider, then a model stored for the old one" to
+                    after({ switchedTo(ProviderPresets.DEEPSEEK) }, { copy(mainModel = "small") }),
             )
         assertEquals(
             mapOf(
@@ -159,6 +161,7 @@ class ModelSettingsViewModelTest {
                 "window typed, main model kept" to 20_000,
                 "window typed, then the light model changed" to 20_000,
                 "window typed, then the main model changed" to 8_192,
+                "another provider, then a model stored for the old one" to null,
             ),
             seen,
         )
