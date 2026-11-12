@@ -3,7 +3,6 @@ package dev.phoneagent.core.agent
 import dev.phoneagent.core.ids.TaskId
 import dev.phoneagent.core.model.CacheLayout
 import dev.phoneagent.core.model.ChatModel
-import dev.phoneagent.core.model.ContextEditPolicy
 import dev.phoneagent.core.model.ModelError
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.PromptBlock
@@ -109,8 +108,9 @@ public sealed interface PreStepResult {
  * Everything of one attempt's request except the messages and the wire settings (`request`).
  * After the chain, the loop calls `model.prepare(reasoning)` and the result becomes the
  * `request/header` (written only when it changed) plus `deriveMessages(log)`: the header records
- * the wire snapshot and the effective level prepare gives, never [reasoning] as asked. A chain that
- * changes the model or the level is prepared for what it gives.
+ * the wire snapshot, the effective level and the context edits prepare gives, never [reasoning]
+ * as asked. A chain that changes the model or the level is prepared for what it gives, so the
+ * edits follow the model chosen (server-side context management is a setting of the model).
  *
  * The plan serves the main conversation only: vision and light requests are side requests
  * (`side/request`), never built from it.
@@ -120,7 +120,6 @@ public sealed interface PreStepResult {
  * @property system system prompt blocks.
  * @property tools tool definitions, normally the registry's manifest.
  * @property cache explicit cache breakpoints.
- * @property contextEdits who trims old context.
  * @property maxOutputTokens output cap, or `null` for the adapter's default.
  * @property reasoning reasoning level asked for, or `null` for the provider default; `prepare`
  *   clamps it to what [model] supports.
@@ -130,7 +129,6 @@ public data class RequestPlan(
     val system: List<PromptBlock>,
     val tools: List<ToolDef>,
     val cache: CacheLayout = CacheLayout.DEFAULT,
-    val contextEdits: ContextEditPolicy = ContextEditPolicy.ClientSide,
     val maxOutputTokens: Int? = null,
     val reasoning: ReasoningLevel? = null,
 )

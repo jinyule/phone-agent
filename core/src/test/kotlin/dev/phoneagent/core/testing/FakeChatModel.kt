@@ -6,6 +6,7 @@ import dev.phoneagent.core.ids.ToolCallId
 import dev.phoneagent.core.model.ChatModel
 import dev.phoneagent.core.model.ChatRequest
 import dev.phoneagent.core.model.ChatResponse
+import dev.phoneagent.core.model.ContextEditPolicy
 import dev.phoneagent.core.model.Delta
 import dev.phoneagent.core.model.ModelCapabilities
 import dev.phoneagent.core.model.ModelError
@@ -36,6 +37,7 @@ import kotlinx.coroutines.flow.first
 class FakeChatModel(
     override val info: ModelInfo = INFO,
     private val wire: WireProfile = TEST_WIRE,
+    private val contextEdits: ContextEditPolicy = ContextEditPolicy.ClientSide,
 ) : ChatModel {
     /** What one request does. */
     fun interface Script {
@@ -60,10 +62,10 @@ class FakeChatModel(
     /** Every level [prepare] was called with, in order. */
     val prepared = mutableListOf<ReasoningLevel?>()
 
-    /** The level clamped to the model's levels, with [wire] as given. */
+    /** The level clamped to the model's levels, with [wire] and [contextEdits] as given. */
     override fun prepare(reasoning: ReasoningLevel?): RequestSettings {
         prepared += reasoning
-        return RequestSettings(reasoning?.clampTo(info.capabilities.reasoningLevels), wire)
+        return RequestSettings(reasoning?.clampTo(info.capabilities.reasoningLevels), wire, contextEdits)
     }
 
     fun then(next: Script): FakeChatModel = apply { script.addLast(next) }

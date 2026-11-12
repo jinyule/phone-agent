@@ -136,17 +136,17 @@ phone-agent/
 ```kotlin
 interface ChatModel {
     val info: ModelInfo          // provider、id、protocol、supportsTools、supportsImages、contextWindow
-    fun prepare(reasoning: ReasoningLevel?): RequestSettings   // 钳制后的档位 + 线路快照；唯一生成入口（model-layer §2）
+    fun prepare(reasoning: ReasoningLevel?): RequestSettings   // 钳制后的档位 + 线路快照 + 上下文编辑；唯一生成入口（model-layer §2）
     suspend fun complete(req: ChatRequest, onDelta: (Delta) -> Unit = {}): ChatResponse
 }
-data class RequestSettings(val reasoning: ReasoningLevel?, val wire: WireProfile)
+data class RequestSettings(val reasoning: ReasoningLevel?, val wire: WireProfile, val contextEdits: ContextEditPolicy)
 
 data class ChatRequest(
     val system: List<PromptBlock>,      // 静态：身份、准则、能力段（缓存分区 1）
     val tools: List<ToolDef>,           // 静态 schema；只追加已展开的组
     val messages: List<Message>,        // 只追加；runtime-context 变化时作为新内容追加，发过的消息不回改
     val cache: CacheLayout,             // 断点位置（Anthropic 用 cache_control；其余靠前缀稳定）
-    val contextEdits: ContextEditPolicy, // 按协议区分：Anthropic 走服务端 context editing / compaction，其余在客户端裁剪
+    val contextEdits: ContextEditPolicy, // 取自 prepare(...).contextEdits：Anthropic 官方端点走服务端 compaction（model-layer §5），其余在客户端裁剪
     val maxOutputTokens: Int? = null,
     val reasoning: ReasoningLevel? = null,   // 取自 prepare(...).reasoning
     val wire: WireProfile,                   // 取自 prepare(...).wire，冻结在 request/header 或 side/request；字段和生成规则见 model-layer §2
@@ -498,7 +498,7 @@ fun interface Chain<I, O> { suspend fun proceed(input: I): O }   // 不调用 pr
 | 拦截点 | 时机 | 输入 → 输出 | 能做什么 | 第一阶段的使用者 |
 |---|---|---|---|---|
 | `preStep` | 每个 step 之前（本 step 的输入已写入日志） | `PreStepInput(turn, step, log)` → `Proceed` / `Refuse(detail)` | **拒绝本 step**；追加 runtime-context（前台 App、时间、知识提示）；压缩。`log` 只能写上下文事件（`compaction/*`、`context/reasoning-dropped`、runtime-context），其他事件在写入之前抛 `IllegalArgumentException` | RuntimeContext、Compaction |
-| `request` | 每次 attempt 之前 | `RequestPlan` → `RequestPlan` | 为主请求选模型、推理档位、缓存断点（线路快照不在计划里：链之后由 runtime 调 `model.prepare(reasoning)` 生成，头里记它给的快照和钳制后的档位）；`RequestPlan` 只服务主对话，看图和轻量请求走旁路（`side/*`）；**不能改消息** | ModelRouter |
+| `request` | 每次 attempt 之前 | `RequestPlan` → `RequestPlan` | 为主请求选模型、推理档位、缓存断点（线路快照和上下文编辑都不在计划里：链之后由 runtime 调 `model.prepare(reasoning)` 生成，头里记它给的快照、钳制后的档位和 `contextEdits`，所以换了模型，服务端上下文管理也跟着换；model-layer §3.3）；`RequestPlan` 只服务主对话，看图和轻量请求走旁路（`side/*`）；**不能改消息** | ModelRouter |
 | `requestError` | attempt 失败后（step 仍打开；回复没过边界校验也算，按 `BadResponse`） | `RequestFailure(error, attempt, retries, log)` → `Retry(delayMs)` / `Fail` | 决定是否重试；每次重试记 `request/retry`。`log` 和 `preStep` 的是同一份允许清单，例如签名失效时先写 `context/reasoning-dropped` 再重试，下一次 attempt 按写入后的日志组装 | `RetryInterceptor`（默认）、OverflowCompaction、ImageOffload |
 | `toolPreExecute` | 每个通过校验的调用，已写 `tool/call` | `PreExecuteInput(call, tool)` → `Verdict` | allow / refuse / confirm / handoff | **PolicyEngine**（固定排在链后，不可重排、无法绕过） |
 | `toolExecute` | 包住执行体，在工具超时之内 | `ExecuteInput(call, tool, context)` → `ToolResult` | 包装、延后或短路这个调用，spill-back 检测；**不能替换调用**：`proceed` 只接受判定过的那一组 call、tool、context，而且只能调一次，否则什么都不执行，调用记 `ERROR`。链的最内层由运行时写 `tool/started`（刷盘后再调 `Tool.execute`；刷盘期间来的停止或超时，什么都不执行）和 `tool/executed`，拦截器短路不产生这两条 | MainScreenWatch |
