@@ -7,6 +7,7 @@ import dev.phoneagent.core.ports.ConfirmResult
 import dev.phoneagent.core.ports.HandoffResult
 import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.ports.ScreenUnavailableException
+import dev.phoneagent.core.ports.SnapshotOptions
 import dev.phoneagent.core.ports.UserInteraction
 import dev.phoneagent.core.session.PolicyVerdictRecorded
 import dev.phoneagent.core.session.ScreenObserved
@@ -25,7 +26,8 @@ import kotlinx.coroutines.withTimeoutOrNull
  * it. Every policy verdict is logged.
  *
  * An approved card is not enough to run (contracts addendum §8, §14): the runtime always tries to
- * observe a fresh screen S' ([freshScreen]) and records it under the call (`screen/snapshot`
+ * observe a fresh screen S' ([freshScreen]), at the detail of the screen the call was first judged
+ * on (its plan screen; with none, the default options), and records it under the call (`screen/snapshot`
  * with its callId, so once the call has its result S' is the screen later calls are judged on,
  * unless the call started a non-READ execution after it or another boundary of [latestSnapshot]
  * followed); the policy then resolves and judges the call again with the card as
@@ -36,6 +38,13 @@ import kotlinx.coroutines.withTimeoutOrNull
  * Confirm (the screen changed under the approval) is shown again, at most
  * [LoopConfig.maxReconfirmations] times per call, after which the call is refused and the model
  * told to observe and try again.
+ *
+ * S' is read at the plan screen's detail so that the policy counts elements on S' as the executor
+ * counts them on the screen the call names. A call by ref names the plan screen: the rules refuse,
+ * before approval, a ref from any screen but the newest recorded one (`call.stale_screen`), and the
+ * executor finds the ref again among that screen's elements as it was read. A call by coordinates,
+ * or with no target, is pressed on the live display whatever screen it names, counting on no
+ * recorded one, so the newest screen serves it as well.
  */
 internal class Gate(
     private val loop: LoopContext,
@@ -51,17 +60,19 @@ internal class Gate(
         interaction: UserInteraction,
     ): Ruling {
         val requested = chain.proceed(PreExecuteInput(call, tool))
-        val judged = judge(call, tool, latestSnapshot(loop.log.records()), approved = null, requested)
-        return decided(call, tool, judged, interaction, reconfirmed = 0)
+        val planned = latestSnapshot(loop.log.records())
+        val judged = judge(call, tool, planned, approved = null, requested)
+        val read = planned?.let { SnapshotOptions(detail = it.detail) } ?: SnapshotOptions()
+        return decided(call, tool, judged, interaction, Rechecks(read, reconfirmed = 0))
     }
 
-    /** Carries out [judged]; [reconfirmed] counts the confirmations asked again for this call. */
+    /** Carries out [judged], with the call's [rechecks] so far. */
     private suspend fun decided(
         call: ToolCall,
         tool: Tool,
         judged: Judged,
         interaction: UserInteraction,
-        reconfirmed: Int,
+        rechecks: Rechecks,
     ): Ruling =
         when (val verdict = judged.verdict) {
             Verdict.Allow -> {
@@ -78,7 +89,7 @@ internal class Gate(
 
             is Verdict.Confirm -> {
                 when (interaction.confirm(verdict.card)) {
-                    ConfirmResult.APPROVED -> recheck(call, tool, verdict.card, interaction, reconfirmed)
+                    ConfirmResult.APPROVED -> recheck(call, tool, verdict.card, interaction, rechecks)
                     ConfirmResult.REJECTED -> refused(loop.texts.rejected)
                     ConfirmResult.EXPIRED -> refused(loop.texts.confirmExpired)
                     ConfirmResult.UNAVAILABLE -> refused(loop.texts.confirmUnavailable)
@@ -91,11 +102,11 @@ internal class Gate(
         tool: Tool,
         card: ConfirmCard,
         interaction: UserInteraction,
-        reconfirmed: Int,
+        rechecks: Rechecks,
     ): Ruling {
-        val screen = freshScreen(loop, call.id)
+        val screen = freshScreen(loop, call.id, rechecks.read)
         val judged = judge(call, tool, screen, card, Verdict.Allow)
-        val exhausted = judged.verdict is Verdict.Confirm && reconfirmed >= loop.config.maxReconfirmations
+        val exhausted = judged.verdict is Verdict.Confirm && rechecks.reconfirmed >= loop.config.maxReconfirmations
         return if (exhausted) {
             refused(loop.texts.changedSinceApproval)
         } else {
@@ -104,10 +115,19 @@ internal class Gate(
                 tool,
                 judged,
                 interaction,
-                reconfirmed + 1,
+                Rechecks(rechecks.read, rechecks.reconfirmed + 1),
             )
         }
     }
+
+    /**
+     * What the re-checks of one call share: every S' is read with [read], from the plan screen,
+     * and [reconfirmed] confirmations were asked again so far.
+     */
+    private class Rechecks(
+        val read: SnapshotOptions,
+        val reconfirmed: Int,
+    )
 
     /**
      * Records the policy's verdict on [call] and returns the stricter of it and [requested] with
@@ -188,8 +208,8 @@ internal sealed interface Ruling {
 }
 
 /**
- * A screen the runtime reads on its own for call [callId] (the re-check after its approval, or
- * the look after its handoff), recorded as `screen/snapshot` under [callId], so it is
+ * A screen the runtime reads on its own for call [callId] with [options] (the re-check after its
+ * approval, or the look after its handoff), recorded as `screen/snapshot` under [callId], so it is
  * `PolicyContext.screen` once that call has its result. Returns `null`, recording nothing, when
  * there is no screen port, the surface is unusable, or the read takes longer than
  * [LoopConfig.recheckScreenTimeoutMs].
@@ -197,11 +217,12 @@ internal sealed interface Ruling {
 internal suspend fun freshScreen(
     loop: LoopContext,
     callId: ToolCallId,
+    options: SnapshotOptions,
 ): ScreenSnapshot? {
     val port = loop.setup.screen ?: return null
     val screen =
         try {
-            withTimeoutOrNull(loop.config.recheckScreenTimeoutMs) { port.snapshot() }
+            withTimeoutOrNull(loop.config.recheckScreenTimeoutMs) { port.snapshot(options) }
         } catch (ignored: ScreenUnavailableException) {
             // An unusable surface is no screen; the policy decides what may run without one.
             null

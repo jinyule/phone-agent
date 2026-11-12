@@ -18,9 +18,10 @@ import dev.phoneagent.core.ports.UiElement
 
 /**
  * A [ScreenPort] that plays a script: [snapshot] returns the queued snapshots in order and then
- * keeps returning the last one; actions and launches are recorded and answered with the queued
- * outcomes, else "performed, changed" with the next snapshot as `after`. Shared by all core tests;
- * the replay screen of the regression harness builds on it.
+ * keeps returning the last one, each with the detail it was asked for (`ScreenSnapshot.detail`);
+ * actions and launches are recorded and answered with the queued outcomes, else "performed,
+ * changed" with the next snapshot, as queued, as `after`. Shared by all core tests; the replay
+ * screen of the regression harness builds on it.
  */
 class ScriptedScreen(
     vararg snapshots: ScreenSnapshot,
@@ -35,6 +36,9 @@ class ScriptedScreen(
     /** Every launch. */
     val launches = mutableListOf<LaunchTarget>()
 
+    /** The options of every [snapshot] call, in order (also those that threw). */
+    val snapshotOptions = mutableListOf<SnapshotOptions>()
+
     /** Returned by [frame]. */
     var frame: Frame? = null
 
@@ -48,8 +52,9 @@ class ScriptedScreen(
     fun answers(outcome: ActionOutcome): ScriptedScreen = apply { outcomes.addLast(outcome) }
 
     override suspend fun snapshot(options: SnapshotOptions): ScreenSnapshot {
+        snapshotOptions += options
         unavailable?.let { throw ScreenUnavailableException(it) }
-        return next()
+        return next().copy(detail = options.detail)
     }
 
     override suspend fun act(

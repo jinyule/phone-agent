@@ -25,6 +25,7 @@ import dev.phoneagent.core.ports.HandoffTicket
 import dev.phoneagent.core.ports.Question
 import dev.phoneagent.core.ports.ScreenPort
 import dev.phoneagent.core.ports.ScreenSnapshot
+import dev.phoneagent.core.ports.SnapshotDetail
 import dev.phoneagent.core.ports.SnapshotOptions
 import dev.phoneagent.core.ports.SurfaceAllocation
 import dev.phoneagent.core.ports.SurfaceCapability
@@ -293,6 +294,47 @@ class AgentLoopRecheckTest {
             run.loop.answer(run.loop.awaitPrompt().promptId!!, UserReply.Approve)
             run.loop.awaitPhase(Phase.Done)
             assertEquals(refuse.hintForModel, run.result().text())
+        }
+
+    @Test
+    fun `the re-check reads its screen at the detail of the screen the call was judged on`() =
+        runTest {
+            // The executor counts a press by ref on the planned screen at that screen's detail;
+            // the policy's re-check must count on S' the same way. No screen judged on: the default.
+            val read =
+                listOf(null, SnapshotDetail.BRIEF, SnapshotDetail.FULL).associateWith { planned ->
+                    val screen = ScriptedScreen(ScriptedScreen.snapshotOf("s1"))
+                    val look =
+                        FakeTool("look") { _, ctx ->
+                            ctx.screen!!.snapshot(SnapshotOptions(detail = planned!!))
+                            ToolResult.ok("看过了")
+                        }
+                    val send = FakeTool("send", risk = RiskClass.OUTWARD)
+                    val calls = listOfNotNull(planned?.let { call("c0", "look") }, call("c1", "send"))
+                    val model = calls.fold(FakeChatModel()) { script, part -> script.calls(part) }.answers("ok")
+                    val firstVerdicts = listOfNotNull(planned?.let { Verdict.Allow }, Verdict.Confirm(sendCard))
+                    val policy = ScriptedPolicy(*firstVerdicts.toTypedArray(), Verdict.Allow)
+                    val harness =
+                        LoopHarness(this, model, tools = listOf(look, send), policy = policy, screen = screen)
+                    val loop = harness.start()
+                    loop.followup(text("给小王发消息"))
+                    loop.approveNext()
+                    loop.awaitPhase(Phase.Done)
+                    val judgedOn = policy.contexts[firstVerdicts.size - 1].screen?.detail
+                    Triple(judgedOn, send.calls.size, screen.snapshotOptions.toList())
+                }
+
+            val brief = SnapshotOptions(detail = SnapshotDetail.BRIEF)
+            val full = SnapshotOptions(detail = SnapshotDetail.FULL)
+            assertEquals(
+                mapOf(
+                    null to Triple(null, 1, listOf(SnapshotOptions())),
+                    SnapshotDetail.BRIEF to Triple(SnapshotDetail.BRIEF, 1, listOf(brief, brief)),
+                    SnapshotDetail.FULL to Triple(SnapshotDetail.FULL, 1, listOf(full, full)),
+                ),
+                read,
+                "the detail send was judged on, sends run, and look's read then the re-check's",
+            )
         }
 
     /**

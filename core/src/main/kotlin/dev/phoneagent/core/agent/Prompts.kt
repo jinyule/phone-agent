@@ -10,6 +10,7 @@ import dev.phoneagent.core.ports.HandoffResult
 import dev.phoneagent.core.ports.HandoffTicket
 import dev.phoneagent.core.ports.Question
 import dev.phoneagent.core.ports.ScreenUnavailableException
+import dev.phoneagent.core.ports.SnapshotOptions
 import dev.phoneagent.core.ports.SurfaceManager
 import dev.phoneagent.core.ports.SurfaceRef
 import dev.phoneagent.core.ports.UserInteraction
@@ -143,7 +144,7 @@ internal class Prompts(
                     loop.log.append(HandoffEnded(id, result, detail))
                     // The user may have changed the screen: look again before the model's next request,
                     // unless the app may still be with the user (then closing throws, see [Moves.giveBack]).
-                    if (moves?.unsettled != true) freshScreen(loop, callId)
+                    if (moves?.unsettled != true) freshScreen(loop, callId, SnapshotOptions())
                     result
                 }
             }
