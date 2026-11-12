@@ -144,7 +144,7 @@ class ModelSettingsViewModelTest {
             mapOf(
                 "main model changed to one the settings store" to after({ copy(mainModel = "small") }),
                 "main model changed to one they do not store" to after({ copy(mainModel = "fresh-model") }),
-                "main model changed only by spaces" to after({ copy(mainModel = "main-model ") }),
+                "window typed, then spaces around the main model" to after(typed, { copy(mainModel = " main-model ") }),
                 "main model and window changed at once" to after({ copy(mainModel = "small", contextTokens = 20_000) }),
                 "window typed, main model kept" to after(typed),
                 "window typed, then the light model changed" to after(typed, { copy(lightModel = "") }),
@@ -156,7 +156,7 @@ class ModelSettingsViewModelTest {
             mapOf(
                 "main model changed to one the settings store" to 8_192,
                 "main model changed to one they do not store" to null,
-                "main model changed only by spaces" to 16_000,
+                "window typed, then spaces around the main model" to 20_000,
                 "main model and window changed at once" to 20_000,
                 "window typed, main model kept" to 20_000,
                 "window typed, then the light model changed" to 20_000,
