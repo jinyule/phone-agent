@@ -176,13 +176,16 @@ class ResolverCoverageTest {
         ): IntentKind = intentOf(name, args, checkNotNull(assembly.registry[name]).risk).kind
 
         fun tap(long: Boolean) = """{"screen":"s30","ref":"e1","long":$long}"""
-        assertNotEquals(kind("phone_tap", tap(true)), kind("phone_tap", tap(false)), "long")
+        assertEquals(IntentKind.DELETE, kind("phone_tap", tap(true)), "a long press also reaches 删除")
+        assertEquals(IntentKind.NAVIGATE, kind("phone_tap", tap(false)), "a short press only 返回")
 
         fun point(long: Boolean) = """{"screen":"s30","x":100,"y":100,"long":$long}"""
-        assertNotEquals(kind("phone_tap", point(true)), kind("phone_tap", point(false)), "long at a point")
+        assertEquals(IntentKind.DELETE, kind("phone_tap", point(true)), "long at a point")
+        assertEquals(IntentKind.NAVIGATE, kind("phone_tap", point(false)), "short at a point")
 
         fun type(submit: Boolean) = """{"screen":"s30","ref":"e3","text":"买菜","submit":$submit}"""
-        assertNotEquals(kind("phone_type", type(true)), kind("phone_type", type(false)), "submit")
+        assertEquals(IntentKind.OUTWARD, kind("phone_type", type(true)), "submit")
+        assertEquals(IntentKind.INPUT, kind("phone_type", type(false)), "no submit")
         assertNotEquals(
             intentOf("phone_tap", """{"screen":"s30","ref":"e1"}""", RiskClass.WRITE),
             intentOf("phone_tap", """{"screen":"s30","ref":"e3"}""", RiskClass.WRITE),
