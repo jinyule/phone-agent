@@ -78,7 +78,8 @@ object SessionSamples {
     val call = ToolCallId("call-1")
     val prompt = PromptId("prompt-1")
     val blob = BlobRef("a".repeat(64))
-    val header = SessionHeader(version = 1, sessionId = session, taskId = task, createdAt = 1_000)
+    val header =
+        SessionHeader(version = SessionFormat.CURRENT_VERSION, sessionId = session, taskId = task, createdAt = 1_000)
     val start = TaskStarted(SecurityLevel.STANDARD, unattended = false)
 
     /** A wire snapshot with every field set away from its default. */
@@ -210,7 +211,14 @@ object SessionSamples {
                 system = listOf(PromptBlock("identity", "You operate a phone.")),
                 tools = listOf(ToolDef("phone_tap", "Tap an element.", schema)),
                 cache = CacheLayout.DEFAULT,
-                contextEdits = ContextEditPolicy.ServerSide(100_000, keepToolUses = 3, compactAboveTokens = 150_000),
+                contextEdits =
+                    ContextEditPolicy.ServerSide(
+                        clearToolUsesAboveTokens = 100_000,
+                        keepToolUses = 3,
+                        compactAboveTokens = 150_000,
+                        clearAtLeastTokens = 20_000,
+                        compactInstructions = "Summarize the task so far.",
+                    ),
                 maxOutputTokens = 64_000,
                 reasoning = ReasoningLevel.HIGH,
             ),

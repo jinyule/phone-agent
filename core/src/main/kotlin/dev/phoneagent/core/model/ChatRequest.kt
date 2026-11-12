@@ -94,11 +94,19 @@ public sealed interface ContextEditPolicy {
     public data object ClientSide : ContextEditPolicy
 
     /**
-     * Server-side context editing and compaction (Anthropic only; other adapters reject it).
+     * Server-side context editing and compaction (Anthropic only; other adapters reject it), as
+     * sent: `clear_tool_uses_20250919` and `compact_20260112` edits (model-layer §5). Validated
+     * against the API's limits; which edits a profile turns on is its settings' decision
+     * (`AnthropicSettings.serverContext`).
      *
      * @property clearToolUsesAboveTokens clear old tool results once input exceeds this; `null` disables.
      * @property keepToolUses how many recent tool uses survive clearing.
-     * @property compactAboveTokens server compaction trigger; `null` disables.
+     * @property compactAboveTokens server compaction trigger, >= [MIN_COMPACT_ABOVE_TOKENS]; `null` disables.
+     * @property clearAtLeastTokens clearing happens only when it frees at least this many tokens
+     *   (`clear_at_least`), > 0; `null` sends none. Only with [clearToolUsesAboveTokens].
+     * @property compactInstructions the summarization prompt (`instructions`), which replaces the
+     *   server's default prompt whole; model-visible. Not blank; `null` keeps the default. Only with
+     *   [compactAboveTokens].
      */
     @Serializable
     @SerialName("server")
@@ -106,11 +114,34 @@ public sealed interface ContextEditPolicy {
         val clearToolUsesAboveTokens: Int?,
         val keepToolUses: Int,
         val compactAboveTokens: Int?,
+        val clearAtLeastTokens: Int? = null,
+        val compactInstructions: String? = null,
     ) : ContextEditPolicy {
         init {
             require(clearToolUsesAboveTokens == null || clearToolUsesAboveTokens > 0) { "clear trigger must be > 0" }
             require(keepToolUses >= 0) { "keepToolUses must be >= 0" }
-            require(compactAboveTokens == null || compactAboveTokens > 0) { "compaction trigger must be > 0" }
+            require(compactAboveTokens == null || compactAboveTokens >= MIN_COMPACT_ABOVE_TOKENS) {
+                "compaction trigger must be >= $MIN_COMPACT_ABOVE_TOKENS, got $compactAboveTokens"
+            }
+            require(clearAtLeastTokens == null || clearAtLeastTokens > 0) { "clearAtLeastTokens must be > 0" }
+            require(clearAtLeastTokens == null || clearToolUsesAboveTokens != null) {
+                "clearAtLeastTokens needs clearToolUsesAboveTokens"
+            }
+            require(compactInstructions == null || compactInstructions.isNotBlank()) {
+                "compactInstructions must not be blank"
+            }
+            require(compactInstructions == null || compactAboveTokens != null) {
+                "compactInstructions needs compactAboveTokens"
+            }
+        }
+
+        /** Limits of the API. */
+        public companion object {
+            /**
+             * The lowest compaction trigger the API takes (`trigger.value` "must be at least 50,000
+             * tokens", Claude API docs, compaction at a token threshold; its default is 150,000).
+             */
+            public const val MIN_COMPACT_ABOVE_TOKENS: Int = 50_000
         }
     }
 }

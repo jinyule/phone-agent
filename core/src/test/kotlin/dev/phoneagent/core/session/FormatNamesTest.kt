@@ -21,7 +21,7 @@ import java.nio.file.Path
 
 /**
  * S1: every name that reaches disk through an enum value or a sealed discriminator, and every
- * event type with its ignorable flag, is listed in `session-format/format-names.txt`. The v1
+ * event type with its ignorable flag, is listed in `session-format/format-names.txt`. A version's
  * fixture only shows the values the samples happen to use; this list locks the rest.
  *
  * A renamed or removed name needs a new format version with a migration; an added name is

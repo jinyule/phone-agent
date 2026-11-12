@@ -209,7 +209,7 @@ class WireGoldenTest {
         )
 
     @Test
-    fun `server-side clearing and compaction`() =
+    fun `server-side clearing with clear_at_least and compaction with instructions`() =
         golden(
             "server-context-edits",
             Kit.request(
@@ -218,6 +218,8 @@ class WireGoldenTest {
                         clearToolUsesAboveTokens = 100_000,
                         keepToolUses = 3,
                         compactAboveTokens = 150_000,
+                        clearAtLeastTokens = 40_000,
+                        compactInstructions = "只写摘要，不要调用工具。",
                     ),
                 reasoning = ReasoningLevel.MINIMAL,
                 wire = Kit.wire(reasoning = ReasoningLevel.MINIMAL),

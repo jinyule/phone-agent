@@ -20,10 +20,11 @@ import java.nio.charset.CodingErrorAction
  * the migration chain.
  *
  * @param migrations one per version step; they must form a contiguous chain up to [currentVersion].
+ *   By default this build's chain ([SessionFormat.MIGRATIONS]).
  * @property currentVersion the version this codec writes and migrates to.
  */
 public class SessionCodec(
-    migrations: List<SessionMigration> = emptyList(),
+    migrations: List<SessionMigration> = SessionFormat.MIGRATIONS,
     public val currentVersion: Int = SessionFormat.CURRENT_VERSION,
 ) {
     private val migrationFrom: Map<Int, SessionMigration> = migrations.associateBy { it.fromVersion }

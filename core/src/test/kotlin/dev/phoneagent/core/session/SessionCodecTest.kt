@@ -1,5 +1,6 @@
 package dev.phoneagent.core.session
 
+import dev.phoneagent.core.model.ContextEditPolicy
 import dev.phoneagent.core.model.ModelErrorKind
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -45,24 +46,43 @@ class SessionCodecTest {
             line(1, SessionResumed(0)),
         )
         assertEquals(
-            """{"format":"phoneagent.session","version":1,""" +
+            """{"format":"phoneagent.session","version":2,""" +
                 """"sessionId":"session-1","taskId":"task-1","createdAt":1000}""",
             headerLine,
         )
     }
 
     @Test
-    fun `the committed v1 log decodes to the samples and the samples encode to it byte for byte`() {
-        val fixture = File("src/test/resources/session-format/v1/${FormatFixture.FILE}")
-        val expected = FormatFixture.text(codec)
+    fun `the committed log of the current version decodes to the samples and they encode to it byte for byte`() {
+        val fixture = File("src/test/resources/session-format/v${codec.currentVersion}/${FormatFixture.FILE}")
         val read = codec.read(fixture.readBytes())
         assertEquals(SessionSamples.header, read.header)
         assertEquals(SessionSamples.records, read.records)
         assertEquals(
-            expected,
+            FormatFixture.text(codec),
             fixture.readText(),
-            "v1 fixtures are never rewritten; a format change needs a new version",
+            "published fixtures are never rewritten; a format change needs a new version",
         )
+    }
+
+    @Test
+    fun `the committed v1 log reads through the migrations to the samples as v1 sent them`() {
+        val read = codec.read(File("src/test/resources/session-format/v1/${FormatFixture.FILE}").readBytes())
+        assertEquals(SessionSamples.header.copy(version = 1), read.header)
+        // v1 had no clear_at_least and no compaction instructions: its server edits sent neither.
+        val asSent =
+            SessionSamples.records.map { record ->
+                val header = record.event as? RequestHeader
+                val edits = header?.contextEdits as? ContextEditPolicy.ServerSide
+                if (edits == null) {
+                    record
+                } else {
+                    val v1 = edits.copy(clearAtLeastTokens = null, compactInstructions = null)
+                    record.copy(event = header.copy(contextEdits = v1))
+                }
+            }
+        assertTrue(asSent != SessionSamples.records, "the samples use the fields v2 added")
+        assertEquals(asSent, read.records)
     }
 
     @Test
@@ -151,10 +171,11 @@ class SessionCodecTest {
                 codec.read(log("""{"format":"other","version":1,"sessionId":"s","taskId":"t","createdAt":0}"""))
             }.line,
         )
-        val newer = headerLine.replace("\"version\":1", "\"version\":2")
+        val next = codec.currentVersion + 1
+        val newer = codec.encodeHeader(SessionSamples.header.copy(version = next))
         val error = assertThrows<UnsupportedSessionVersionException> { codec.read(log(newer)) }
-        assertEquals(2, error.version)
-        assertEquals(1..1, error.supported)
+        assertEquals(next, error.version)
+        assertEquals(1..codec.currentVersion, error.supported)
     }
 
     /** Pretends v1 called the turn number `n` and v2 renamed it; shows how a version step is added. */
@@ -173,8 +194,9 @@ class SessionCodecTest {
     fun `older versions are read through the migration chain`() {
         val migrating = SessionCodec(listOf(RenameTurnField), currentVersion = 2)
         assertEquals(1, migrating.oldestReadableVersion)
+        val v1Header = migrating.encodeHeader(SessionSamples.header.copy(version = 1))
         val oldLine = """{"seq":2,"time":5,"type":"turn/start","data":{"n":4}}"""
-        val read = migrating.read(log(headerLine, line(1), oldLine, line(3, TurnEnded(4, TurnEndReason.STOPPED))))
+        val read = migrating.read(log(v1Header, line(1), oldLine, line(3, TurnEnded(4, TurnEndReason.STOPPED))))
         assertEquals(1, read.header.version)
         assertEquals(
             listOf(
@@ -185,9 +207,10 @@ class SessionCodecTest {
             read.records,
         )
         // Without the migration the same file is refused, and a v2 file is too new for a v1 codec.
-        assertThrows<SessionCorruptedException> { codec.read(log(headerLine, line(1), oldLine)) }
+        val v1Only = SessionCodec(emptyList(), currentVersion = 1)
+        assertThrows<SessionCorruptedException> { v1Only.read(log(v1Header, line(1), oldLine)) }
         val v2Header = migrating.encodeHeader(SessionSamples.header.copy(version = 2))
-        assertThrows<UnsupportedSessionVersionException> { codec.read(log(v2Header)) }
+        assertThrows<UnsupportedSessionVersionException> { v1Only.read(log(v2Header)) }
     }
 
     @Test

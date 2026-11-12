@@ -7,11 +7,21 @@ import kotlinx.serialization.json.JsonObject
 
 /** Format constants of `session.jsonl`. */
 public object SessionFormat {
-    /** Version written by this build. Bump it together with a [SessionMigration] from the previous one. */
-    public const val CURRENT_VERSION: Int = 1
+    /**
+     * Version written by this build. Bump it together with a [SessionMigration] from the previous
+     * one, added to [MIGRATIONS]. History: 1, the first; 2, server-side context edits with
+     * `clearAtLeastTokens` and `compactInstructions` (WP17).
+     */
+    public const val CURRENT_VERSION: Int = 2
 
     /** Value of [SessionHeader.format]. */
     public const val FORMAT_ID: String = "phoneagent.session"
+
+    /**
+     * This build's migration chain, oldest first, up to [CURRENT_VERSION]: what [SessionCodec]
+     * reads with by default.
+     */
+    public val MIGRATIONS: List<SessionMigration> = listOf(ServerEditFieldsMigration)
 }
 
 /**
