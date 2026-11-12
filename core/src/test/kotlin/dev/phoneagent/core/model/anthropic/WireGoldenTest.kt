@@ -1,5 +1,6 @@
 package dev.phoneagent.core.model.anthropic
 
+import dev.phoneagent.core.agent.LoopTexts
 import dev.phoneagent.core.ids.ModelId
 import dev.phoneagent.core.ids.ProviderId
 import dev.phoneagent.core.ids.ToolCallId
@@ -160,7 +161,7 @@ class WireGoldenTest {
             Kit.request(
                 Kit.user("巴黎天气怎么样？"),
                 Kit.assistant(Part.Text("我来查一下。"), Kit.call("toolu_01", """{"city":"巴""")),
-                Kit.tool(ToolResult.failure(ToolStatus.SKIPPED, SKIPPED_TEXT).toPart(ToolCallId("toolu_01"))),
+                Kit.tool(ToolResult.failure(ToolStatus.SKIPPED, LoopTexts().maxTokens).toPart(ToolCallId("toolu_01"))),
                 Kit.user("继续"),
                 wire = Kit.wire(),
                 cache = CacheLayout(tools = false, system = false, recentMessages = 1),
@@ -279,10 +280,4 @@ class WireGoldenTest {
                 put("additionalProperties", false)
             },
         )
-
-    private companion object {
-        /** A stand-in for the loop's fixed SKIPPED text (WP02 writes the real one; phase1 §3.7). */
-        const val SKIPPED_TEXT =
-            "未执行：回复在输出上限处被截断，你看到的参数（可能是 {}）不完整，不是你想发的。请重新发起这个调用。"
-    }
 }
