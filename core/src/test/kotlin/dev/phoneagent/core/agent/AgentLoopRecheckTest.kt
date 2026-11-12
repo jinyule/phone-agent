@@ -300,9 +300,14 @@ class AgentLoopRecheckTest {
     fun `the re-check reads its screen at the detail of the screen the call was judged on`() =
         runTest {
             // The executor counts a press by ref on the planned screen at that screen's detail;
-            // the policy's re-check must count on S' the same way. No screen judged on: the default.
+            // the policy's re-check must count on S' the same way, also after a confirmation asked
+            // again. No screen judged on: the default.
+            val changed = sendCard.copy(target = "小王 (新)")
+            val cases =
+                listOf(null to false, SnapshotDetail.BRIEF to false, SnapshotDetail.FULL to false)
+                    .plus(SnapshotDetail.FULL to true)
             val read =
-                listOf(null, SnapshotDetail.BRIEF, SnapshotDetail.FULL).associateWith { planned ->
+                cases.associateWith { (planned, again) ->
                     val screen = ScriptedScreen(ScriptedScreen.snapshotOf("s1"))
                     val look =
                         FakeTool("look") { _, ctx ->
@@ -312,15 +317,17 @@ class AgentLoopRecheckTest {
                     val send = FakeTool("send", risk = RiskClass.OUTWARD)
                     val calls = listOfNotNull(planned?.let { call("c0", "look") }, call("c1", "send"))
                     val model = calls.fold(FakeChatModel()) { script, part -> script.calls(part) }.answers("ok")
-                    val firstVerdicts = listOfNotNull(planned?.let { Verdict.Allow }, Verdict.Confirm(sendCard))
-                    val policy = ScriptedPolicy(*firstVerdicts.toTypedArray(), Verdict.Allow)
+                    val judgedFirst = listOfNotNull(planned?.let { Verdict.Allow }, Verdict.Confirm(sendCard))
+                    val rechecked = listOfNotNull(Verdict.Confirm(changed).takeIf { again }, Verdict.Allow)
+                    val policy = ScriptedPolicy(*(judgedFirst + rechecked).toTypedArray())
                     val harness =
                         LoopHarness(this, model, tools = listOf(look, send), policy = policy, screen = screen)
                     val loop = harness.start()
                     loop.followup(text("给小王发消息"))
-                    loop.approveNext()
+                    val first = loop.approveNext()
+                    if (again) loop.approveNext(after = first)
                     loop.awaitPhase(Phase.Done)
-                    val judgedOn = policy.contexts[firstVerdicts.size - 1].screen?.detail
+                    val judgedOn = policy.contexts[judgedFirst.size - 1].screen?.detail
                     Triple(judgedOn, send.calls.size, screen.snapshotOptions.toList())
                 }
 
@@ -328,12 +335,13 @@ class AgentLoopRecheckTest {
             val full = SnapshotOptions(detail = SnapshotDetail.FULL)
             assertEquals(
                 mapOf(
-                    null to Triple(null, 1, listOf(SnapshotOptions())),
-                    SnapshotDetail.BRIEF to Triple(SnapshotDetail.BRIEF, 1, listOf(brief, brief)),
-                    SnapshotDetail.FULL to Triple(SnapshotDetail.FULL, 1, listOf(full, full)),
+                    (null to false) to Triple(null, 1, listOf(SnapshotOptions())),
+                    (SnapshotDetail.BRIEF to false) to Triple(SnapshotDetail.BRIEF, 1, listOf(brief, brief)),
+                    (SnapshotDetail.FULL to false) to Triple(SnapshotDetail.FULL, 1, listOf(full, full)),
+                    (SnapshotDetail.FULL to true) to Triple(SnapshotDetail.FULL, 1, listOf(full, full, full)),
                 ),
                 read,
-                "the detail send was judged on, sends run, and look's read then the re-check's",
+                "the detail send was first judged on, sends run, and look's read then each re-check's",
             )
         }
 
