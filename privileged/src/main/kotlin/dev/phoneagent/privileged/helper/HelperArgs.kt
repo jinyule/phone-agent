@@ -1,5 +1,7 @@
 package dev.phoneagent.privileged.helper
 
+import dev.phoneagent.privileged.isPackageName
+
 /**
  * Command line of [HelperMain]: `<package> [--orphan-grace-ms=<ms>] [--package-check-ms=<ms>]`.
  * The nonce is not an argument: it arrives on stdin.
@@ -22,13 +24,12 @@ internal data class HelperArgs(
         private const val CHECK_FLAG = "--package-check-ms="
         private val GRACE_RANGE = 1L..600_000L
         private val CHECK_RANGE = 1_000L..600_000L
-        private val PACKAGE_NAME = Regex("""[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+""")
 
         /** Parses [args]; throws [IllegalArgumentException] naming the offending value. */
         fun parse(args: Array<String>): HelperArgs {
             require(args.isNotEmpty()) { "missing <package>" }
             val packageName = args[0]
-            require(PACKAGE_NAME.matches(packageName)) { "invalid package name '$packageName'" }
+            require(isPackageName(packageName)) { "invalid package name '$packageName'" }
             var parsed = HelperArgs(packageName)
             for (arg in args.drop(1)) {
                 parsed =
