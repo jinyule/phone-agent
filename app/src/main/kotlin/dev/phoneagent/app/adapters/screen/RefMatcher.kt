@@ -15,7 +15,7 @@ import dev.phoneagent.core.ports.SnapshotDetail
 
 /**
  * A snapshot the port showed, with the [detail] it was shown in and the [tree] behind it (every
- * visible node with its ref, shown or not).
+ * node walked: each visible node with its ref, shown or not, and the nodes the read left out).
  */
 internal class Observed(
     val snapshot: ScreenSnapshot,
@@ -87,72 +87,91 @@ internal object RefMatcher {
         fresh: TreeRead,
     ): Match {
         if (planned.snapshot.elements.none { it.ref == ref }) return Match.UnknownRef
-        val entry = planned.tree.first { it.ref == ref }
-        val paired = RefCarrier.pair(planned.tree, fresh.elements)
-        val element = fresh.elements.getOrNull(paired.indexOf(ref))
+        val entry = planned.tree.indices.first { planned.tree[it].ref == ref }
+        val paired = RefCarrier.pair(planned.tree, fresh.nodes)
+        val element =
+            fresh.nodes
+                .getOrNull(paired.indexOf(entry))
+                ?.element
+                ?.let(fresh.elements::get)
         return when {
-            element == null -> Match.Stale(StaleReasons.of(entry, planned.tree, fresh.elements, paired.toSet()))
-            element.element.bounds == entry.bounds -> Match.Found(element, paired)
-            else -> Match.Stale(StaleReason.MOVED)
+            element == null -> {
+                Match.Stale(StaleReasons.of(entry, planned.tree, fresh.nodes, paired))
+            }
+
+            element.element.bounds == planned.tree[entry].bounds -> {
+                Match.Found(element, RefCarrier.refsOf(planned.tree, fresh.nodes, paired))
+            }
+
+            else -> {
+                Match.Stale(StaleReason.MOVED)
+            }
         }
     }
 }
 
 /**
- * Explains why [RefCarrier.pair] paired a planned element with nothing; it decides nothing itself.
- * The nodes of an element's [ElementIdentity.lineage] count as the nodes they would be had the
- * reads kept them, between the element and its parent: in the planned screen, they are looked at
- * after the element and before its parent; in the fresh read, with the nodes kept.
+ * Explains why [RefCarrier.pair] paired a planned element with no element of a fresh read; it
+ * decides nothing itself. The nodes the reads left out count as kept ones: a node above the
+ * element that was paired with nothing gives its own reason.
  */
 internal object StaleReasons {
-    /** Why [entry] of [tree] is not among the [paired] refs of [fresh]. */
+    /**
+     * Why [entry] (an index in [tree]) is paired ([paired], as [RefCarrier.pair] gives it) with no element of
+     * [fresh].
+     */
     fun of(
-        entry: TreeEntry,
+        entry: Int,
         tree: List<TreeEntry>,
-        fresh: List<ReadElement>,
-        paired: Set<ElementRef?>,
-    ): StaleReason = of(entry, tree, fresh, paired, Read(fresh))
+        fresh: List<ReadNode>,
+        paired: IntArray,
+    ): StaleReason {
+        val pairedOld = BooleanArray(tree.size)
+        paired.filter { it != RefCarrier.NONE }.forEach { pairedOld[it] = true }
+        return of(entry, tree, pairedOld, Read(tree, fresh))
+    }
 
     /**
-     * Of the fresh read's kept nodes and the nodes in their lineages: their contexts, and the
-     * windows where any of them outside lists is unreliable.
+     * Of the fresh read's nodes, kept or not: their contexts, the windows where any of them
+     * outside lists is unreliable, and the nodes alike ([alikeKey]); of the planned [tree], how
+     * many nodes have each identity under each parent.
      */
     private class Read(
-        fresh: List<ReadElement>,
+        tree: List<TreeEntry>,
+        fresh: List<ReadNode>,
     ) {
         val contexts = HashSet<Pair<Int, IdentityContext?>>()
         val unreliableWindows = HashSet<Int>()
+        val alike: Map<ElementIdentity, List<ReadNode>> = fresh.groupBy { alikeKey(it.identity) }
+        val before: Map<Pair<ElementIdentity, Int?>, Int> = tree.groupingBy { it.identity to it.parent }.eachCount()
 
         init {
-            for (element in fresh) {
-                val identity = element.identity
-                for (node in sequenceOf(identity) + identity.lineage?.nodes().orEmpty()) {
-                    contexts += node.window to node.context
-                    val windowScope = node.context?.scope == IdentityContext.Scope.WINDOW
-                    if (windowScope && !node.reliable) unreliableWindows += node.window
-                }
+            for (node in fresh) {
+                val identity = node.identity
+                contexts += identity.window to identity.context
+                val windowScope = identity.context?.scope == IdentityContext.Scope.WINDOW
+                if (windowScope && !identity.reliable) unreliableWindows += identity.window
             }
         }
     }
 
+    /** Alike: the same identity, reliable or not. */
+    private fun alikeKey(identity: ElementIdentity): ElementIdentity = identity.copy(reliable = true)
+
     private fun of(
-        entry: TreeEntry,
+        entry: Int,
         tree: List<TreeEntry>,
-        fresh: List<ReadElement>,
-        paired: Set<ElementRef?>,
+        paired: BooleanArray,
         read: Read,
     ): StaleReason {
-        val identity = entry.identity
+        val node = tree[entry]
+        val identity = node.identity
         if (!identity.reliable) return StaleReason.UNRELIABLE
-        val parent = entry.parent?.takeIf { it !in paired }?.let { ref -> tree.first { it.ref == ref } }
-        // Alike as kept nodes would be: what the nodes between lack shows in the element's reliability.
-        val bare = identity.copy(reliable = true, lineage = null)
-        val alike = fresh.filter { it.identity.copy(reliable = true, lineage = null) == bare }
-        val alikeBefore = tree.count { it.identity == identity && it.parent == entry.parent }
-        // The element, then the nodes left out above it, nearest first, up to its parent.
-        val upward = sequenceOf(identity) + identity.lineage?.nodes().orEmpty()
-        return upward.firstNotNullOfOrNull { contextReason(it, read) } ?: when {
-            parent != null -> of(parent, tree, fresh, paired, read)
+        val parent = node.parent?.takeUnless { paired[it] }
+        val alike = read.alike[alikeKey(identity)].orEmpty()
+        val alikeBefore = read.before[identity to node.parent] ?: 0
+        return contextReason(identity, read) ?: when {
+            parent != null -> of(parent, tree, paired, read)
             alike.any { !it.identity.reliable } -> StaleReason.UNRELIABLE
             alike.size > 1 || alikeBefore > 1 -> StaleReason.AMBIGUOUS
             else -> StaleReason.NOT_FOUND

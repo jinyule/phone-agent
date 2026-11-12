@@ -18,8 +18,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
-import java.util.Collections
-import java.util.IdentityHashMap
 
 private const val LIST = "androidx.recyclerview.widget.RecyclerView"
 private const val LAYOUT = "android.widget.LinearLayout"
@@ -385,11 +383,11 @@ class LeftOutAncestorTest {
         }
 
     @Test
-    fun aReadMakesOneLineagePerNodeItWalksSharingTheNodesAboveHoweverDeepTheyAre() {
+    fun aReadPairsEachNodeItWalksOnceHoweverManyAreLeftOut() {
         // [levels] nodes out of view, one in the other, the topmost the root of the window, each
-        // holding [wide] buttons: those of a level have every level above them in their lineage,
-        // which copied into each would make 40 * (1 + 2 + ... + 80) = 129600 nodes.
-        val levels = Lineage.MAX
+        // holding [wide] buttons: 3280 nodes, 80 of them left out. The tree remembers each node
+        // once, and pairing a read with the same screen pairs each node with itself.
+        val levels = ScreenReader.MAX_DEPTH
         val wide = 40
         val nested = List(levels) { node(LAYOUT, GEOMETRY.pixels) { isVisibleToUser = false } }
         nested.forEachIndexed { level, layout ->
@@ -397,39 +395,45 @@ class LeftOutAncestorTest {
             nested.getOrNull(level + 1)?.let { layout.with(it) }
         }
         val host = FakeHost().apply { windows = mapOf(0 to listOf(window(nested.first(), id = 1, layer = 1))) }
+        val read = { ScreenReader.read(host.windowsOn(0), GEOMETRY, OWN) }
 
-        val elements = ScreenReader.read(host.windowsOn(0), GEOMETRY, OWN).elements
+        val first = read()
+        val carried = RefCarrier.carry(null, first.nodes, lastUsed = 0)
+        val paired = RefCarrier.pair(carried.tree, read().nodes)
 
-        val made = Collections.newSetFromMap(IdentityHashMap<Lineage, Boolean>())
-        elements.forEach { element -> made += generateSequence(element.identity.lineage) { it.outer } }
-        assertEquals(levels * wide, elements.size)
-        assertEquals((1..levels).associateWith { wide }, elements.groupingBy { it.identity.lineage?.size }.eachCount())
-        assertEquals("one per node walked below one left out", levels * (wide + 1) - 1, made.size)
+        assertEquals(levels * wide, first.elements.size)
+        assertEquals(levels * (wide + 1), first.nodes.size)
+        assertEquals("one entry per node walked", first.nodes.size, carried.tree.size)
+        assertEquals("one ref per element", (1..levels * wide).map { "e$it" }, carried.refs.map { it.value })
+        assertEquals(first.nodes.indices.toList(), paired.toList())
     }
 
     @Test
-    fun theLineageOfTheDeepestNodeReadHoldsEveryNodeAboveIt() {
-        // [depth] nodes out of view above the Like, the topmost the root of the window.
-        fun read(depth: Int): List<ReadElement> {
+    fun theDeepestNodeReadIsPairedBelowEveryNodeAboveIt() {
+        // [depth] nodes out of view above the Like, the topmost the root of the window, of view id [top].
+        fun read(
+            depth: Int,
+            top: String = "top",
+        ): TreeRead {
             val like = button("Like", Rect(700, 700, 1000, 800))
-            val top = node(LAYOUT, GEOMETRY.pixels) { isVisibleToUser = false }
+            val root = node(LAYOUT, GEOMETRY.pixels) { isVisibleToUser = false }
+            root.viewIdResourceName = "$APP:id/$top"
             (2..depth)
-                .fold(top) { parent, _ ->
+                .fold(root) { parent, _ ->
                     node(LAYOUT, GEOMETRY.pixels) { isVisibleToUser = false }.also { parent.with(it) }
                 }.with(like)
-            val host = FakeHost().apply { windows = mapOf(0 to listOf(window(top, id = 1, layer = 1))) }
-            return ScreenReader.read(host.windowsOn(0), GEOMETRY, OWN).elements
+            val host = FakeHost().apply { windows = mapOf(0 to listOf(window(root, id = 1, layer = 1))) }
+            return ScreenReader.read(host.windowsOn(0), GEOMETRY, OWN)
         }
+        val deepest = read(ScreenReader.MAX_DEPTH)
+        val carried = RefCarrier.carry(null, deepest.nodes, lastUsed = 0)
+        val again = RefCarrier.carry(carried.tree, read(ScreenReader.MAX_DEPTH).nodes, carried.lastUsed)
+        val topChanged = read(ScreenReader.MAX_DEPTH, top = "other").nodes
+        val topRenamed = RefCarrier.carry(carried.tree, topChanged, carried.lastUsed)
 
-        val deepest = read(ScreenReader.MAX_DEPTH).single().identity
-        assertEquals(Lineage.MAX, deepest.lineage?.size)
-        assertEquals(
-            List(Lineage.MAX) { ElementRole.CONTAINER },
-            deepest.lineage
-                ?.nodes()
-                ?.map { it.role }
-                ?.toList(),
-        )
-        assertTrue("below the deepest node walked", read(ScreenReader.MAX_DEPTH + 1).isEmpty())
+        assertEquals(ScreenReader.MAX_DEPTH, deepest.nodes.single { it.element != null }.depth)
+        assertEquals(listOf("e1"), again.refs.map { it.value })
+        assertEquals("the node 80 above changed", listOf("e2"), topRenamed.refs.map { it.value })
+        assertTrue("below the deepest node walked", read(ScreenReader.MAX_DEPTH + 1).elements.isEmpty())
     }
 }

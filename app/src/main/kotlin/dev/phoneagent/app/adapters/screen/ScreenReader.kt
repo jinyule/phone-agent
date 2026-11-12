@@ -11,6 +11,7 @@ import android.annotation.SuppressLint
 import android.graphics.Rect
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
+import dev.phoneagent.core.ports.Bounds
 import dev.phoneagent.core.ports.ElementRef
 import dev.phoneagent.core.ports.ElementRole
 import dev.phoneagent.core.ports.SnapshotDetail
@@ -66,6 +67,29 @@ internal class ReadElement(
 }
 
 /**
+ * One node a read walked, kept or not, as [RefCarrier] pairs it: a node the read leaves out (out
+ * of view, too small, alike to a kept one) is paired as it would be were it kept (fix list fwd2
+ * B1), so what is below it keeps its ref only below the very node it was below.
+ *
+ * @property identity the identity it has, or would have had kept ([Identities.of]).
+ * @property bounds where it is, as a kept node's [UiElement.bounds]; `null` when off the display.
+ * @property parent index in [TreeRead.nodes] of the node above it, or `null` for a window's root.
+ * @property depth how many nodes are above it in its window.
+ * @property element its index in [TreeRead.elements], or `null` when the read leaves it out.
+ */
+internal class ReadNode(
+    val identity: ElementIdentity,
+    val bounds: Bounds?,
+    val parent: Int?,
+    val depth: Int,
+    val element: Int?,
+)
+
+/** The nodes of a read that leaves out none of its nodes: [elements] themselves. */
+internal fun nodesOf(elements: List<ReadElement>): List<ReadNode> =
+    elements.mapIndexed { i, kept -> ReadNode(kept.identity, kept.element.bounds, kept.parent, kept.depth, i) }
+
+/**
  * What a read found about the windows of the display.
  *
  * @property packages package of each content window by window id (`null` when its root is
@@ -92,12 +116,14 @@ internal class WindowFacts(
  * @property pkg package of the top-most application window, or `null` when there is none.
  * @property keyboard a soft keyboard window is on the display.
  * @property windows what the read found about the windows.
+ * @property nodes every node walked, kept or not, in the same order: what refs are paired by.
  */
 internal class TreeRead(
     val elements: List<ReadElement>,
     val pkg: String?,
     val keyboard: Boolean,
     val windows: WindowFacts,
+    val nodes: List<ReadNode> = nodesOf(elements),
 ) {
     /** Package of each content window by window id, bars included. */
     val windowPackages: Map<Int, String?> get() = windows.packages
@@ -243,8 +269,10 @@ internal object ScreenReader {
                 walker.visit(root, NodePlace(window.id, windowPackage, parent = null, depth = 0), above = null)
             }
         }
+        val (elements, nodes) = walker.finish()
         return TreeRead(
-            elements = walker.finish(),
+            elements = elements,
+            nodes = nodes,
             pkg = pkg,
             keyboard = windows.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD },
             windows =
@@ -273,7 +301,7 @@ internal object ScreenReader {
         /**
          * A walked node, kept or not (children out of view still tell rows apart); [identity] is
          * its identity without a context, the one it has or would have had kept; [kept] indexes
-         * [Walker.kept]; [viewport] for a list.
+         * [Walker.kept]; [viewport] for a list; [bounds] and [depth] as [ReadNode] has them.
          */
         private class Walked(
             val identity: ElementIdentity,
@@ -283,6 +311,8 @@ internal object ScreenReader {
             val kept: Int?,
             val viewport: Viewport?,
         ) {
+            var bounds: Bounds? = null
+            var depth = 0
             var cut = false
 
             /** For a child of a list, as [Identities.Loss.clipped]. */
@@ -336,10 +366,12 @@ internal object ScreenReader {
             val shape = NodeFacts.shapeOf(node, role)
             val list = above?.let(walked::get)?.takeIf { it.shape.list }
             val viewport = if (shape.list) NodeFacts.viewportOf(node) else null
+            val rect = Rect().also(node::getBoundsInScreen)
             walked += Walked(identity, label, shape, above, index, viewport)
+            walked[me].bounds = geometry.clip(rect)?.let(geometry::normalize)
+            walked[me].depth = treeDepth
             list?.let {
-                val bounds = Rect().also(node::getBoundsInScreen)
-                walked[me].clipped = it.viewport?.clips(bounds, first = it.children == 0) == true
+                walked[me].clipped = it.viewport?.clips(rect, first = it.children == 0) == true
                 it.children++
                 walked[me].besideGap = it.gap
                 it.gap = false
@@ -383,14 +415,13 @@ internal object ScreenReader {
             node.gap = true
         }
 
-        /** The kept nodes with their identities. */
-        fun finish(): List<ReadElement> {
+        /** The kept nodes with their identities, and every node walked ([TreeRead.nodes]). */
+        fun finish(): Pair<List<ReadElement>, List<ReadNode>> {
             val identities =
                 Identities.of(
                     walked.map {
                         Identities.Facts(
                             it.identity,
-                            it.kept != null,
                             it.label,
                             it.shape,
                             it.parent,
@@ -400,12 +431,12 @@ internal object ScreenReader {
                 )
             val ofKept = arrayOfNulls<ElementIdentity>(kept.size)
             walked.forEachIndexed { i, node -> node.kept?.let { ofKept[it] = identities[i] } }
-            return kept.mapIndexed {
-                i,
-                k,
-                ->
-                ReadElement(k.element, k.target, k.place, k.brief, checkNotNull(ofKept[i]))
-            }
+            val elements =
+                kept.mapIndexed { i, k ->
+                    ReadElement(k.element, k.target, k.place, k.brief, checkNotNull(ofKept[i]))
+                }
+            val nodes = walked.mapIndexed { i, w -> ReadNode(identities[i], w.bounds, w.parent, w.depth, w.kept) }
+            return elements to nodes
         }
 
         private fun keep(

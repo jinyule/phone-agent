@@ -37,7 +37,7 @@ internal class ScreenObserver(
         val read = ScreenReader.read(windows, geometry, system.ownPackage)
         // A consumer may skip frames of SECURE screens, so the mark is checked here, not only by frame().
         if (read.topWindow?.let { it in secure } == true) secure.probe(host, windows)
-        val carried = RefCarrier.carry(history.newest()?.tree, read.elements, lastRef)
+        val carried = RefCarrier.carry(history.newest()?.tree, read.nodes, lastRef)
         lastRef = carried.lastUsed
         val elements = read.project(carried.refs, detail)
         val activity = activityOf(host, read.pkg)

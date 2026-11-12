@@ -17,11 +17,14 @@ class RefCarrierTest {
         name: String,
     ): String = refs[read.elements.indexOfFirst { it.element.name == name }].value
 
+    /** The ref of the node above the node [index] of the tree. */
+    private fun RefCarrier.Carried.parentOf(index: Int): ElementRef? = tree[index].parent?.let { tree[it].ref }
+
     private fun first(read: TreeBuilder): RefCarrier.Carried =
-        RefCarrier.carry(previous = null, read.elements, lastUsed = 0)
+        RefCarrier.carry(previous = null, nodesOf(read.elements), lastUsed = 0)
 
     private fun RefCarrier.Carried.then(read: TreeBuilder): RefCarrier.Carried =
-        RefCarrier.carry(tree, read.elements, lastUsed)
+        RefCarrier.carry(tree, nodesOf(read.elements), lastUsed)
 
     /** A feed whose rows each have a "Like", told apart by the row's person. */
     private fun feed(vararg rows: Pair<String, Int>): TreeBuilder =
@@ -40,7 +43,10 @@ class RefCarrierTest {
 
         assertEquals(listOf("e1", "e2", "e3"), carried.refs.map { it.value })
         assertEquals(3, carried.lastUsed)
-        assertEquals(listOf(null, ElementRef("e1"), ElementRef("e1")), carried.tree.map { it.parent })
+        assertEquals(
+            listOf(null, ElementRef("e1"), ElementRef("e1")),
+            carried.tree.indices.map { carried.parentOf(it) },
+        )
     }
 
     @Test
@@ -90,7 +96,7 @@ class RefCarrierTest {
         val second = first(chats("Ada" to 100)).then(next)
 
         assertEquals(listOf("e3", "e1", "e2"), second.refs.map { it.value })
-        assertEquals(ElementRef("e1"), second.tree[2].parent)
+        assertEquals(ElementRef("e1"), second.parentOf(2))
     }
 
     @Test
@@ -162,7 +168,7 @@ class RefCarrierTest {
         val second = first(chats("Ada" to 100)).then(dialog)
 
         assertEquals(listOf("e3", "e4"), second.refs.map { it.value })
-        assertEquals(ElementRef("e3"), second.tree[1].parent)
+        assertEquals(ElementRef("e3"), second.parentOf(1))
     }
 
     /** An "OK" outside lists, in a window whose labels outside lists are [labels]. */
@@ -219,7 +225,7 @@ class RefCarrierTest {
 
     @Test
     fun newRefsStayAboveEverythingHandedOutBefore() {
-        val carried = RefCarrier.carry(previous = null, chats().elements, lastUsed = 41)
+        val carried = RefCarrier.carry(previous = null, nodesOf(chats().elements), lastUsed = 41)
 
         assertEquals(listOf("e42"), carried.refs.map { it.value })
     }
