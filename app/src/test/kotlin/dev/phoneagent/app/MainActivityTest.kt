@@ -25,11 +25,11 @@ class MainActivityTest {
     private val context = ApplicationProvider.getApplicationContext<Context>()
 
     @Test
-    fun opensOnTheModelSettingsWithAnEmptyChatTab() {
+    fun opensOnAnEmptyChatWithTheModelSettingsOneTabAway() {
         ActivityScenario.launch(MainActivity::class.java).use {
+            compose.onNodeWithText(context.getString(R.string.chat_empty)).assertExists()
+            compose.onNodeWithText(context.getString(R.string.nav_models)).performClick()
             compose.onNodeWithText(context.getString(R.string.settings_none)).assertExists()
-            compose.onNodeWithText(context.getString(R.string.nav_chat)).performClick()
-            compose.onNodeWithText(context.getString(R.string.chat_placeholder)).assertExists()
         }
     }
 
@@ -39,6 +39,7 @@ class MainActivityTest {
         File(context.filesDir, ModelSettingsFile.NAME)
             .writeText(Json.encodeToString(serializer<ModelSettings>(), SettingsFixtures.settings()))
         ActivityScenario.launch(MainActivity::class.java).use {
+            compose.onNodeWithText(context.getString(R.string.nav_models)).performClick()
             compose.onNodeWithText(context.getString(R.string.settings_key_again, "DeepSeek")).assertExists()
             compose.onNodeWithText(context.getString(R.string.settings_broken_title)).assertDoesNotExist()
         }
@@ -48,6 +49,7 @@ class MainActivityTest {
     fun aBrokenSettingsFileShowsTheResetPage() {
         File(context.filesDir, ModelSettingsFile.NAME).writeText("{ not json")
         ActivityScenario.launch(MainActivity::class.java).use {
+            compose.onNodeWithText(context.getString(R.string.nav_models)).performClick()
             compose.onNodeWithText(context.getString(R.string.settings_broken_title)).assertExists()
             compose.onNodeWithText(context.getString(R.string.settings_reset)).assertExists()
         }
