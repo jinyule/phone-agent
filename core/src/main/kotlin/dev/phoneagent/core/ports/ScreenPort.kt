@@ -43,8 +43,9 @@ public interface ScreenPort {
      * With [som], Set-of-Mark boxes are drawn for the elements of the latest snapshot this port
      * returned from [snapshot], labelled with their refs, so the labels match that snapshot's screen
      * format. Without such a snapshot, or when the boxes cannot be placed, the frame is returned
-     * without boxes and `Frame.som` is `false`. The caller records the snapshot's id in
-     * `screen/frame.snapshotId`.
+     * without boxes and `Frame.som` is `false`. Only the runtime captures, between two snapshots
+     * (`ToolContext.framedSnapshot`): it records the first one's id in `screen/frame.snapshotId`
+     * and keeps the frame only when the second one matches it.
      */
     public suspend fun frame(
         maxEdge: Int = DEFAULT_FRAME_EDGE,

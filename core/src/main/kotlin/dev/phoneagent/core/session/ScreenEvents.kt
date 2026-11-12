@@ -152,14 +152,18 @@ public data class ScreenLaunched(
 ) : SessionEvent
 
 /**
- * `screen/frame`: a captured frame stored as a blob.
+ * `screen/frame`: a captured frame stored as a blob, recorded only when it goes to the tool with
+ * the screen read after it (policy-rules §6.4): the port was asked for [snapshotId], then the
+ * frame, then [checkedOn], and both screens are recorded before this.
  *
  * @property blob the bytes.
  * @property mime one of `Part.IMAGE_MIMES`.
  * @property width pixel width, > 0.
  * @property height pixel height, > 0.
  * @property som whether Set-of-Mark boxes are drawn.
- * @property snapshotId the observation it belongs to, or `null`.
+ * @property snapshotId the screen read before the capture; any boxes label its elements.
+ * @property checkedOn the screen read after the capture, checked against [snapshotId] and shown
+ *   with the frame.
  */
 @Serializable
 @SerialName("screen/frame")
@@ -168,8 +172,9 @@ public data class ScreenFrame(
     val mime: String,
     val width: Int,
     val height: Int,
-    val som: Boolean = false,
-    val snapshotId: SnapshotId? = null,
+    val som: Boolean,
+    val snapshotId: SnapshotId,
+    val checkedOn: SnapshotId,
 ) : SessionEvent {
     init {
         require(mime in Part.IMAGE_MIMES) { "screen/frame mime '$mime' not in ${Part.IMAGE_MIMES}" }

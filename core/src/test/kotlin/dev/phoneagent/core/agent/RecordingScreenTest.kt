@@ -4,6 +4,7 @@ import dev.phoneagent.core.agent.LogRecords.answered
 import dev.phoneagent.core.agent.LogRecords.log
 import dev.phoneagent.core.ids.SnapshotId
 import dev.phoneagent.core.ids.ToolCallId
+import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.policy.ActionIntent
 import dev.phoneagent.core.policy.IntentKind
 import dev.phoneagent.core.policy.IntentResolver
@@ -14,6 +15,7 @@ import dev.phoneagent.core.ports.ActionOutcome
 import dev.phoneagent.core.ports.ActionOutcome.Effect
 import dev.phoneagent.core.ports.ActionOutcome.Status
 import dev.phoneagent.core.ports.Bounds
+import dev.phoneagent.core.ports.ElementRole
 import dev.phoneagent.core.ports.Frame
 import dev.phoneagent.core.ports.LaunchTarget
 import dev.phoneagent.core.ports.OcrLine
@@ -21,6 +23,7 @@ import dev.phoneagent.core.ports.ScreenDiff
 import dev.phoneagent.core.ports.ScreenPort
 import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.ports.ScreenUnavailableException
+import dev.phoneagent.core.ports.SnapshotDetail
 import dev.phoneagent.core.ports.SnapshotOptions
 import dev.phoneagent.core.ports.StoragePath
 import dev.phoneagent.core.ports.SystemKey
@@ -38,6 +41,7 @@ import dev.phoneagent.core.session.SessionFiles
 import dev.phoneagent.core.session.SessionRecord
 import dev.phoneagent.core.session.TaskStarted
 import dev.phoneagent.core.testing.InMemoryStoragePort
+import dev.phoneagent.core.testing.Screens.el
 import dev.phoneagent.core.testing.ScriptedScreen
 import dev.phoneagent.core.tool.ToolCall
 import dev.phoneagent.core.tool.ToolResult
@@ -96,7 +100,38 @@ class RecordingScreenTest {
         outcome: JudgmentOutcome = JudgmentOutcome.SHOWN,
         rule: String? = null,
         hint: String? = null,
-    ) = ScreenJudged(c1, SnapshotId(id), JudgmentPurpose.TOOL, outcome, rule, hint)
+        purpose: JudgmentPurpose = JudgmentPurpose.TOOL,
+    ) = ScreenJudged(c1, SnapshotId(id), purpose, outcome, rule, hint)
+
+    /** Screen [id] with one button [ref] at [e1], and [mark] read on it by OCR. */
+    private fun boxed(
+        id: String,
+        e1: Bounds,
+        ref: String = "e1",
+        mark: String? = null,
+    ) = ScriptedScreen.snapshotOf(
+        id,
+        elements = listOf(el(ref, ElementRole.BUTTON, "继续", e1)),
+        ocr = mark?.let { listOf(OcrLine(it, BOX)) },
+    )
+
+    /** Withholds the screens with [mark] in their OCR; allows the rest. */
+    private fun withholding(mark: String) =
+        PolicyEngine { _, _, ctx ->
+            if (ctx.screen
+                    ?.ocr
+                    .orEmpty()
+                    .any { it.text == mark }
+            ) {
+                refuse
+            } else {
+                Verdict.Allow
+            }
+        }
+
+    /** The screen an observation or a judgment is of. */
+    private fun SessionEvent.screenId(): SnapshotId? =
+        (this as? ScreenObserved)?.snapshot?.id ?: (this as? ScreenJudged)?.snapshot
 
     @Test
     fun `observations, actions and launches are recorded with the call, each read-back judged after it`() =
@@ -123,19 +158,31 @@ class RecordingScreenTest {
         }
 
     @Test
-    fun `a screen is judged on the log with its full record in it, as phone_observe of the call`() =
+    fun `a screen is judged on itself and the log with its full record in it, as phone_observe of the call`() =
         runTest {
+            val earlier = ScriptedScreen.snapshotOf("s0")
+            log.events += ScreenObserved(ToolCallId("c0"), earlier)
+            log.events += answered("c0", shows("s0"))
+            val resolvedOn = mutableListOf<ScreenSnapshot?>()
+            val resolver =
+                IntentResolver { _, _, seen ->
+                    ActionIntent(IntentKind.READ, seen?.pkg).also {
+                        resolvedOn +=
+                            seen
+                    }
+                }
             val asked = mutableListOf<Pair<String, List<SessionEvent>>>()
             val policy =
                 PolicyEngine { judgedCall, _, ctx ->
                     asked += judgedCall.name to log.events.toList()
-                    assertEquals(s1, ctx.screen)
+                    assertEquals(s1, ctx.screen, "not the earlier screen the policy judges calls on")
                     Verdict.Allow
                 }
 
-            val seen = screen(policy = policy).snapshot()
+            val seen = RecordingScreen(port, call, blobs, ScreenGate(resolver, policy), WITHHELD_TEXT, log).snapshot()
 
             assertEquals(s1, seen)
+            assertEquals(listOf<ScreenSnapshot?>(s1), resolvedOn)
             assertEquals("phone_observe", asked.single().first)
             assertEquals(
                 ScreenObserved(c1, s1),
@@ -308,7 +355,7 @@ class RecordingScreenTest {
                     "snapshot" to { screen.snapshot() },
                     "act" to { screen.act(UiAction.Key(SystemKey.BACK), SnapshotId("s1")) },
                     "launch" to { screen.launch(LaunchTarget.App("com.tencent.mm")) },
-                    "frame" to { screen.frame(maxEdge = 720, som = false) },
+                    "framedSnapshot" to { screen.framedSnapshot(SnapshotOptions(), maxEdge = 720, som = false) },
                     "awaitChange" to { screen.awaitChange(100) },
                 )
             val wrong = mutableListOf<String>()
@@ -364,19 +411,159 @@ class RecordingScreenTest {
         }
 
     @Test
-    fun `an image frame is stored as a blob and recorded, anything else only passed on`() =
+    fun `a frame goes with the screen read after it, stored and recorded after both screens`() =
         runTest {
-            assertEquals(null, screen.frame(maxEdge = 720, som = false))
-            port.frame = Frame(byteArrayOf(1, 2), "image/png", 10, 20, som = true)
-            val frame = screen.frame(maxEdge = 720, som = true)
-            val stored = recorded.single() as ScreenFrame
-            assertEquals(ScreenFrame(BlobStore.refOf(byteArrayOf(1, 2)), "image/png", 10, 20, som = true), stored)
-            assertArrayEquals(byteArrayOf(1, 2), blobs.get(stored.blob))
-            assertSame(port.frame, frame)
+            val first = boxed("s1", e1 = BOX)
+            val second = boxed("s2", e1 = BOX).copy(ocr = listOf(OcrLine("later", BOX)))
+            val port = ScriptedScreen(first, second).apply { frame = PNG }
 
-            port.frame = Frame(byteArrayOf(3), "image/gif", 10, 20, som = false)
-            assertSame(port.frame, screen.frame(maxEdge = 720, som = false))
-            assertEquals(1, recorded.size, "a mime the model cannot take is not recorded")
+            val framed = screen(port).framedSnapshot(SnapshotOptions(SnapshotDetail.FULL), maxEdge = 720, som = true)
+
+            assertEquals(second.copy(detail = SnapshotDetail.FULL), framed.snapshot)
+            assertSame(PNG, framed.frame)
+            assertEquals(listOf(720 to true), port.frameRequests)
+            val blob = BlobStore.refOf(PNG.bytes)
+            assertEquals(
+                listOf(
+                    ScreenObserved(c1, first.copy(detail = SnapshotDetail.FULL)),
+                    judged("s1", purpose = JudgmentPurpose.FRAME_PRECHECK),
+                    ScreenObserved(c1, second.copy(detail = SnapshotDetail.FULL)),
+                    judged("s2"),
+                    ScreenFrame(blob, "image/png", 10, 20, som = true, SnapshotId("s1"), checkedOn = SnapshotId("s2")),
+                ),
+                recorded,
+            )
+            assertArrayEquals(PNG.bytes, blobs.get(blob))
+        }
+
+    @Test
+    fun `a frame that does not fit the screen read after it is dropped, unstored and unrecorded`() =
+        runTest {
+            val first = boxed("s1", e1 = BOX)
+            val moved = Bounds(0, 20, 10, 30)
+            val cases =
+                listOf(
+                    Triple("another app", PNG, boxed("s2", e1 = BOX).copy(pkg = "com.tencent.mm")),
+                    Triple("withheld", PNG, boxed("s2", e1 = BOX, mark = "MARK_S2")),
+                    Triple("a box moved", PNG, boxed("s2", e1 = moved)),
+                    Triple("a box renamed", PNG, boxed("s2", e1 = BOX, ref = "e3")),
+                    Triple("an image the log does not take", frame(mime = "image/gif"), boxed("s2", e1 = BOX)),
+                    Triple("nothing captured", null, boxed("s2", e1 = BOX)),
+                )
+            val wrong = mutableListOf<String>()
+            for ((case, frame, second) in cases) {
+                val log = MemoryLog()
+                val files = SessionFiles(InMemoryStoragePort(), StoragePath("sessions/" + case.replace(' ', '-'))).blobs
+                val port = ScriptedScreen(first, second).apply { this.frame = frame }
+                val gate = ScreenGate(resolver, withholding("MARK_S2"))
+                val framed =
+                    RecordingScreen(port, call, files, gate, WITHHELD_TEXT, log)
+                        .framedSnapshot(SnapshotOptions(), maxEdge = 720, som = true)
+                val shown = if (case == "withheld") second.withheld() else second
+                val stored = frame?.let { files.get(BlobStore.refOf(it.bytes)) }
+                val dropped = framed.frame == null && stored == null && log.events.none { it is ScreenFrame }
+                if (framed.snapshot != shown ||
+                    !dropped
+                ) {
+                    wrong += "$case: ${framed.snapshot.id} ${framed.frame}, ${log.events}"
+                }
+            }
+            assertEquals(emptyList<String>(), wrong)
+        }
+
+    @Test
+    fun `a frame without boxes needs only the same app, and any image the log takes is kept`() =
+        runTest {
+            val wrong = mutableListOf<String>()
+            for (mime in Part.IMAGE_MIMES) {
+                val frame = frame(mime = mime, som = false)
+                val port = ScriptedScreen(boxed("s1", e1 = BOX), boxed("s2", e1 = Bounds(0, 20, 10, 30), ref = "e3"))
+                port.frame = frame
+                val framed = screen(port).framedSnapshot(SnapshotOptions(), maxEdge = 720, som = false)
+                if (framed.frame !== frame) wrong += "$mime: ${framed.frame}"
+            }
+            assertEquals(emptyList<String>(), wrong)
+        }
+
+    @Test
+    fun `a capture the port cannot make is no frame, and a cancellation goes on`() =
+        runTest {
+            val failing =
+                object : ScreenPort by port {
+                    override suspend fun frame(
+                        maxEdge: Int,
+                        som: Boolean,
+                    ): Frame = throw ScreenUnavailableException("MARK_CAPTURE")
+                }
+            val framed = screen(failing).framedSnapshot(SnapshotOptions(), maxEdge = 720, som = false)
+            assertEquals(s2, framed.snapshot)
+            assertNull(framed.frame)
+            assertEquals(listOf(s1.id, s1.id, s2.id, s2.id), recorded.map { it.screenId() })
+
+            val stopping =
+                object : ScreenPort by ScriptedScreen(s1, s2) {
+                    override suspend fun frame(
+                        maxEdge: Int,
+                        som: Boolean,
+                    ): Frame = throw CancellationException("stopped")
+                }
+            assertThrows<CancellationException> { screen(stopping).framedSnapshot(SnapshotOptions(), 720, false) }
+        }
+
+    @Test
+    fun `a withheld first screen captures nothing and reads nothing after it`() =
+        runTest {
+            port.frame = PNG
+
+            val framed =
+                screen(policy = withholding("MARK_S1")).framedSnapshot(SnapshotOptions(), maxEdge = 720, som = true)
+
+            assertEquals(s1.withheld(), framed.snapshot)
+            assertNull(framed.frame)
+            assertEquals(emptyList<Pair<Int, Boolean>>(), port.frameRequests)
+            assertEquals(1, port.snapshotOptions.size)
+            assertEquals(
+                listOf(
+                    ScreenObserved(c1, s1),
+                    judged(
+                        "s1",
+                        JudgmentOutcome.WITHHELD,
+                        refuse.reason,
+                        refuse.hintForModel,
+                        JudgmentPurpose.FRAME_PRECHECK,
+                    ),
+                ),
+                recorded,
+            )
+        }
+
+    @Test
+    fun `a second screen that cannot be read drops the frame and reaches the tool with a fixed message`() =
+        runTest {
+            var reads = 0
+            val cause = IllegalStateException("MARK_CAUSE")
+            val lost =
+                object : ScreenPort by port {
+                    override suspend fun snapshot(options: SnapshotOptions): ScreenSnapshot =
+                        if (reads++ == 0) port.snapshot(options) else throw ScreenUnavailableException("MARK_S2", cause)
+                }
+            port.frame = PNG
+
+            val thrown =
+                assertThrows<ScreenUnavailableException> { screen(lost).framedSnapshot(SnapshotOptions(), 720, true) }
+
+            assertEquals(WITHHELD_TEXT to null, thrown.message to thrown.cause)
+            assertNull(blobs.get(BlobStore.refOf(PNG.bytes)))
+            assertEquals(listOf(ScreenObserved::class, ScreenJudged::class), recorded.map { it::class })
+        }
+
+    @Test
+    fun `a tool's own frame call captures nothing`() =
+        runTest {
+            port.frame = PNG
+            assertNull(screen.frame(maxEdge = 720, som = true))
+            assertEquals(emptyList<Pair<Int, Boolean>>(), port.frameRequests)
+            assertEquals(emptyList<SessionEvent>(), recorded)
         }
 
     @Test
@@ -491,5 +678,11 @@ class RecordingScreenTest {
     private companion object {
         const val WITHHELD_TEXT = "（不显示）"
         val BOX = Bounds(0, 0, 10, 10)
+        val PNG = frame()
+
+        fun frame(
+            mime: String = "image/png",
+            som: Boolean = true,
+        ) = Frame(byteArrayOf(1, 2), mime, 10, 20, som)
     }
 }

@@ -351,11 +351,21 @@ class PromptSurfaceTest {
     @Test
     fun `results - observe attaches a frame for a sparse tree, never on a secure page`() =
         runTest {
+            // The page shown with a frame is the screen read after the capture (s41).
+            val reads = ArrayDeque(listOf(Samples.sparse, Samples.sparse.copy(id = SnapshotId("s41"))))
             val sparse =
                 tools
                     .getValue(
                         "phone_observe",
-                    ).execute(call("phone_observe"), FakeContext(FakeScreen(Samples.sparse)))
+                    ).execute(
+                        call("phone_observe"),
+                        FakeContext(
+                            FakeScreen().apply {
+                                onSnapshot =
+                                    { reads.removeFirst() }
+                            },
+                        ),
+                    )
             val secure = Samples.sparse.copy(id = SnapshotId("s31"), flags = setOf(ScreenFlag.SECURE))
             val refused =
                 tools
@@ -374,9 +384,14 @@ class PromptSurfaceTest {
                             },
                         ),
                     )
+            val none =
+                tools
+                    .getValue(
+                        "phone_observe",
+                    ).execute(call("phone_observe"), FakeContext(FakeScreen(Samples.sparse).apply { frame = null }))
             Golden.assertMatches(
                 "results/observe-images.expected.txt",
-                sparse.text() + "\n\n=====\n\n" + refused.text() + "\n\n=====\n\n" + unboxed.text(),
+                listOf(sparse, refused, unboxed, none).joinToString("\n\n=====\n\n") { it.text() },
             )
         }
 

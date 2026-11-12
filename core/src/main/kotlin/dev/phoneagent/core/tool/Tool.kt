@@ -6,7 +6,10 @@ import dev.phoneagent.core.ids.TaskId
 import dev.phoneagent.core.model.ToolDef
 import dev.phoneagent.core.ports.AppCatalog
 import dev.phoneagent.core.ports.Clock
+import dev.phoneagent.core.ports.Frame
 import dev.phoneagent.core.ports.ScreenPort
+import dev.phoneagent.core.ports.ScreenSnapshot
+import dev.phoneagent.core.ports.SnapshotOptions
 import dev.phoneagent.core.ports.ToolInteraction
 import kotlinx.serialization.Serializable
 
@@ -72,7 +75,8 @@ public interface ToolContext {
      * flagged `ScreenFlag.WITHHELD`, without content, and an outcome with it has no diff. A failed
      * or refused outcome keeps the port's reason only when its read-back was shown, else a fixed
      * text; a `ScreenUnavailableException` from it carries a fixed message and no cause. Any other
-     * exception reaches the model as its class only.
+     * exception reaches the model as its class only. Its [ScreenPort.frame] captures nothing and
+     * returns `null`: a frame comes only with [framedSnapshot].
      */
     public val screen: ScreenPort?
 
@@ -94,7 +98,39 @@ public interface ToolContext {
 
     /** Stores [bytes] in the session's blob store (deduplicated) and returns its reference. */
     public suspend fun storeBlob(bytes: ByteArray): BlobRef
+
+    /**
+     * Reads the screen at [options] with a frame of it, scaled to at most [maxEdge] pixels, with
+     * Set-of-Mark boxes when [som] (policy-rules §6.4). The runtime reads and judges a screen
+     * first; only when the model may see it does it capture a frame, then it reads and judges the
+     * screen again. That second screen is the one to show: the frame goes with it only when it is
+     * shown, in the same app as the first and, for a frame with boxes, with the same elements at
+     * the same places (the boxes label the first). A withheld first screen is returned withheld,
+     * with nothing captured or read after it.
+     *
+     * Only for a call with a [screen]; throws [IllegalStateException] without one. A screen that
+     * cannot be read throws `ScreenUnavailableException` with a fixed message; a capture that
+     * fails or yields no image the model can take only leaves out the frame.
+     */
+    public suspend fun framedSnapshot(
+        options: SnapshotOptions = SnapshotOptions(),
+        maxEdge: Int = ScreenPort.DEFAULT_FRAME_EDGE,
+        som: Boolean = false,
+    ): FramedSnapshot
 }
+
+/**
+ * A screen read for the model with a frame of it ([ToolContext.framedSnapshot]).
+ *
+ * @property snapshot the screen to show: the one read after the capture, or the first one when
+ *   that was withheld (then nothing was captured); withheld when the model may not see it.
+ * @property frame captured just before [snapshot] was read and checked against it, or `null` when
+ *   none may go with it.
+ */
+public class FramedSnapshot(
+    public val snapshot: ScreenSnapshot,
+    public val frame: Frame?,
+)
 
 /** Tool groups; collapsed groups are expanded by appending their tools (phase1 §3.2). */
 @Serializable

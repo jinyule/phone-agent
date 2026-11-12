@@ -274,8 +274,11 @@ class SessionCodecTest {
         assertThrows<IllegalArgumentException> { InboxEntry(InboxEntryKind.STEER, listOf(p.reasoning)) }
         assertThrows<IllegalArgumentException> { CompactionSummary(listOf(p.toolCallPart)) }
         assertThrows<IllegalArgumentException> { CompactionPrune(listOf(p.reasoning)) }
-        assertThrows<IllegalArgumentException> { ScreenFrame(p.blob, "image/gif", 1, 1) }
-        assertThrows<IllegalArgumentException> { ScreenFrame(p.blob, "image/png", 0, 1) }
+        val s1 =
+            dev.phoneagent.core.ids
+                .SnapshotId("s1")
+        assertThrows<IllegalArgumentException> { ScreenFrame(p.blob, "image/gif", 1, 1, som = false, s1, s1) }
+        assertThrows<IllegalArgumentException> { ScreenFrame(p.blob, "image/png", 0, 1, som = false, s1, s1) }
         assertThrows<IllegalArgumentException> {
             SessionHeader(version = 0, sessionId = p.session, taskId = p.task, createdAt = 0)
         }
@@ -309,6 +312,31 @@ class SessionCodecTest {
                 """"purpose":"TOOL","outcome":"WITHHELD","rule":null,"hint":null}}"""
         val error = assertThrows<SessionCorruptedException> { codec.read(log(headerLine, line(1), broken)) }
         assertEquals(3, error.line)
+    }
+
+    @Test
+    fun `a frame names the screen read before it and the one it was checked on, both required`() {
+        val frame = """"blob":"${"a".repeat(64)}","mime":"image/png","width":1,"height":1,"som":false"""
+        val head = """{"seq":2,"time":0,"type":"screen/frame","ignorable":true,"data":"""
+        val full = """$head{$frame,"snapshotId":"s1","checkedOn":"s2"}}"""
+        val read =
+            codec
+                .read(log(headerLine, line(1), full))
+                .records
+                .last()
+                .event as ScreenFrame
+        assertEquals("s1" to "s2", read.snapshotId.value to read.checkedOn.value)
+        val missing =
+            listOf(
+                "snapshotId" to """$head{$frame,"checkedOn":"s2"}}""",
+                "checkedOn" to """$head{$frame,"snapshotId":"s1"}}""",
+                "som" to full.replace(""","som":false""", ""),
+            )
+        val accepted =
+            missing.filter { (_, broken) ->
+                runCatching { codec.read(log(headerLine, line(1), broken)) }.isSuccess
+            }
+        assertEquals(emptyList<String>(), accepted.map { it.first }, "read without a required field")
     }
 
     @Test

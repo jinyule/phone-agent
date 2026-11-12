@@ -7,6 +7,7 @@ import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.ports.AppCatalog
 import dev.phoneagent.core.ports.Clock
 import dev.phoneagent.core.ports.ScreenPort
+import dev.phoneagent.core.ports.SnapshotOptions
 import dev.phoneagent.core.ports.ToolInteraction
 import dev.phoneagent.core.ports.forTools
 import dev.phoneagent.core.session.InboxEntry
@@ -18,6 +19,7 @@ import dev.phoneagent.core.session.ToolCallRecorded
 import dev.phoneagent.core.session.ToolExecuted
 import dev.phoneagent.core.session.ToolResultRecorded
 import dev.phoneagent.core.session.ToolStarted
+import dev.phoneagent.core.tool.FramedSnapshot
 import dev.phoneagent.core.tool.Tool
 import dev.phoneagent.core.tool.ToolArguments
 import dev.phoneagent.core.tool.ToolCall
@@ -230,7 +232,7 @@ internal class Calls(
         }
     }
 
-    private fun screenFor(call: ToolCall): ScreenPort? =
+    private fun screenFor(call: ToolCall): RecordingScreen? =
         loop.setup.screen?.let { port ->
             RecordingScreen(port, call, blobs, screenGate, loop.texts.reasonWithheld, screenLog)
         }
@@ -251,11 +253,21 @@ internal class Calls(
     ) : ToolContext {
         override val taskId: TaskId get() = loop.setup.taskId
         override val sessionId: SessionId get() = loop.sessionId
-        override val screen: ScreenPort? = screenFor(call)
+        private val recording = screenFor(call)
+        override val screen: ScreenPort? get() = recording
         override val clock: Clock get() = loop.setup.clock
         override val apps: AppCatalog? get() = loop.setup.apps
 
         override suspend fun storeBlob(bytes: ByteArray): BlobRef = blobs.put(bytes)
+
+        override suspend fun framedSnapshot(
+            options: SnapshotOptions,
+            maxEdge: Int,
+            som: Boolean,
+        ): FramedSnapshot {
+            val screen = checkNotNull(recording) { "framedSnapshot needs a screen" }
+            return screen.framedSnapshot(options, maxEdge, som)
+        }
     }
 
     private sealed interface Parsed {

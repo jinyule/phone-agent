@@ -342,7 +342,7 @@ object SessionSamples {
                 LaunchTarget.SystemIntent(SystemIntentKind.TIMER, mapOf("seconds" to "60")),
                 ActionOutcome(ActionOutcome.Status.Ok, ActionOutcome.Effect.CHANGED),
             ),
-            ScreenFrame(blob, "image/jpeg", 720, 1280, som = true, snapshotId = SnapshotId("s1")),
+            ScreenFrame(blob, "image/jpeg", 720, 1280, som = true, SnapshotId("s1"), checkedOn = SnapshotId("s2")),
             ScreenJudged(call, SnapshotId("s1"), JudgmentPurpose.TOOL, JudgmentOutcome.SHOWN),
             ScreenJudged(
                 call,

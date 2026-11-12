@@ -25,6 +25,7 @@ import dev.phoneagent.core.ports.SnapshotOptions
 import dev.phoneagent.core.ports.SurfaceRef
 import dev.phoneagent.core.ports.UiAction
 import dev.phoneagent.core.ports.UserInteraction
+import dev.phoneagent.core.tool.FramedSnapshot
 import dev.phoneagent.core.tool.ToolCall
 import dev.phoneagent.core.tool.ToolContext
 import dev.phoneagent.core.tool.ToolResult
@@ -143,10 +144,45 @@ class FakeContext(
     override val clock = Clock { 0 }
     val blobs = LinkedHashMap<BlobRef, ByteArray>()
 
+    /** The options, edge and `som` of every [framedSnapshot] call, in order. */
+    val framedCalls = mutableListOf<Triple<SnapshotOptions, Int, Boolean>>()
+
+    /**
+     * Answers [framedSnapshot]. By default, with none of the runtime's judgments or checks: captures
+     * from [screen], then reads it, and returns that read with the frame when it is an image of
+     * `Part.IMAGE_MIMES` (a capture that throws [ScreenUnavailableException] gives none).
+     */
+    var framed: suspend (SnapshotOptions, Int, Boolean) -> FramedSnapshot = { options, maxEdge, som ->
+        val port = checkNotNull(screen) { "framedSnapshot needs a screen" }
+        val frame = captured(port, maxEdge, som)
+        FramedSnapshot(port.snapshot(options), frame?.takeIf { it.mime in Part.IMAGE_MIMES })
+    }
+
     override suspend fun storeBlob(bytes: ByteArray): BlobRef {
         val hex = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes))
         return BlobRef(hex).also { blobs[it] = bytes }
     }
+
+    override suspend fun framedSnapshot(
+        options: SnapshotOptions,
+        maxEdge: Int,
+        som: Boolean,
+    ): FramedSnapshot {
+        framedCalls += Triple(options, maxEdge, som)
+        return framed(options, maxEdge, som)
+    }
+
+    @Suppress("SwallowedException") // A fake: a failed capture is no frame, as in the runtime.
+    private suspend fun captured(
+        port: ScreenPort,
+        maxEdge: Int,
+        som: Boolean,
+    ): Frame? =
+        try {
+            port.frame(maxEdge, som)
+        } catch (failed: ScreenUnavailableException) {
+            null
+        }
 }
 
 /** A call of [name] with [argsJson] (without `reason`). */

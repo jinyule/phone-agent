@@ -47,7 +47,7 @@
 {"seq":46,"time":460,"type":"screen/launch","ignorable":true,"data":{"callId":"call-1","target":{"type":"app","packageName":"com.example.chat","cold":true},"outcome":{"status":{"type":"ok"},"effect":"NEW_APP","after":null,"diff":null}}}
 {"seq":47,"time":470,"type":"screen/launch","ignorable":true,"data":{"callId":"call-1","target":{"type":"link","uri":"https://example.com/a"},"outcome":{"status":{"type":"ok"},"effect":"CHANGED","after":null,"diff":null}}}
 {"seq":48,"time":480,"type":"screen/launch","ignorable":true,"data":{"callId":"call-1","target":{"type":"system","kind":"TIMER","fields":{"seconds":"60"}},"outcome":{"status":{"type":"ok"},"effect":"CHANGED","after":null,"diff":null}}}
-{"seq":49,"time":490,"type":"screen/frame","ignorable":true,"data":{"blob":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","mime":"image/jpeg","width":720,"height":1280,"som":true,"snapshotId":"s1"}}
+{"seq":49,"time":490,"type":"screen/frame","ignorable":true,"data":{"blob":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","mime":"image/jpeg","width":720,"height":1280,"som":true,"snapshotId":"s1","checkedOn":"s2"}}
 {"seq":50,"time":500,"type":"screen/judged","data":{"callId":"call-1","snapshot":"s1","purpose":"TOOL","outcome":"SHOWN","rule":null,"hint":null}}
 {"seq":51,"time":510,"type":"screen/judged","data":{"callId":"call-1","snapshot":"s2","purpose":"FRAME_PRECHECK","outcome":"WITHHELD","rule":"hard.finance_app","hint":"this app is off limits"}}
 {"seq":52,"time":520,"type":"screen/judged","data":{"callId":"call-1","snapshot":"s2","purpose":"TOOL","outcome":"WITHHELD","rule":"hand_off","hint":null}}

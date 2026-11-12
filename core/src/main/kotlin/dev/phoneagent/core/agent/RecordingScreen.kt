@@ -6,6 +6,8 @@ import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.ports.ActionOutcome
 import dev.phoneagent.core.ports.ActionOutcome.Effect
 import dev.phoneagent.core.ports.ActionOutcome.Status.Failed
+import dev.phoneagent.core.ports.Bounds
+import dev.phoneagent.core.ports.ElementRef
 import dev.phoneagent.core.ports.Frame
 import dev.phoneagent.core.ports.LaunchTarget
 import dev.phoneagent.core.ports.ScreenPort
@@ -24,23 +26,24 @@ import dev.phoneagent.core.session.ScreenLaunched
 import dev.phoneagent.core.session.ScreenObserved
 import dev.phoneagent.core.session.SessionEvent
 import dev.phoneagent.core.session.SessionRecord
+import dev.phoneagent.core.tool.FramedSnapshot
 import dev.phoneagent.core.tool.ToolCall
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 
 /**
- * The [ScreenPort] a tool call gets: forwards to [port] and records each observation, action,
- * launch and frame as a `screen/…` event of [call] once it returned, so the policy context and
- * replay can be derived from the log. An observation, frame or wait that throws or is cancelled
- * records nothing. An action or launch that throws or is cancelled may still have reached the
- * device (ScreenPort contract), so it is recorded too, with [ActionOutcome.Effect.UNKNOWN] and no
- * read-back: as [ActionOutcome.Status.Failed] naming the exception's class only, or [UNFINISHED]
- * when a cancellation (or an [Error]) cut it off; one that returns after its call was cancelled
- * is recorded with what it returned. All under NonCancellable: the screen boundary is in the log
+ * The [ScreenPort] a tool call gets: forwards to [port] and records each observation, action and
+ * launch as a `screen/…` event of [call] once it returned, so the policy context and replay can be
+ * derived from the log. An observation or wait that throws or is cancelled records nothing. An
+ * action or launch that throws or is cancelled may still have reached the device (ScreenPort
+ * contract), so it is recorded too, with [ActionOutcome.Effect.UNKNOWN] and no read-back: as
+ * [ActionOutcome.Status.Failed] naming the exception's class only, or [UNFINISHED] when a
+ * cancellation (or an [Error]) cut it off; one that returns after its call was cancelled is
+ * recorded with what it returned. All under NonCancellable: the screen boundary is in the log
  * either way (phase1 §3.8). Then the exception goes on (a [ScreenUnavailableException] replaced,
  * below), unless recording fails: a failed log throws its own exception instead, and the task
- * stops with ERROR. Frames of a mime type the log does not accept pass unrecorded.
+ * stops with ERROR.
  *
  * Every screen read for the tool (an observation, an action's or a launch's read-back) is judged
  * by [gate] once its full `screen/…` event is recorded, the judgment recorded as `screen/judged`,
@@ -51,6 +54,9 @@ import kotlinx.coroutines.withContext
  * one with [reasonWithheld] and no cause. An outcome's diff reaches the tool only when its
  * read-back was shown and its base is a screen the model saw ([seenScreens]); a cancellation
  * between the two records leaves the tool without the screen.
+ *
+ * [frame] captures nothing: a frame comes only with [framedSnapshot], which checks it against the
+ * screen read after it.
  */
 internal class RecordingScreen(
     private val port: ScreenPort,
@@ -65,9 +71,40 @@ internal class RecordingScreen(
     override val surface: SurfaceRef get() = port.surface
 
     override suspend fun snapshot(options: SnapshotOptions): ScreenSnapshot {
-        val read = unavailable { port.snapshot(options) }
+        val read = observed(options)
+        return if (judge(read, JudgmentPurpose.TOOL)) read else read.withheld()
+    }
+
+    /**
+     * `ToolContext.framedSnapshot`: S, judged as the read before a capture; only when S is shown,
+     * the frame, then S2, judged for the tool. The frame goes with S2 only when S2 is shown, in
+     * S's app, and for a frame with boxes with S's element refs at S's places; it is then stored
+     * and recorded as `screen/frame` of S checked on S2, after both screens' records. A capture
+     * that throws [ScreenUnavailableException], returns nothing or an image the log does not take
+     * counts as no frame (its message is never shown); a failed read of S2 drops the frame.
+     */
+    suspend fun framedSnapshot(
+        options: SnapshotOptions,
+        maxEdge: Int,
+        som: Boolean,
+    ): FramedSnapshot {
+        val first = observed(options)
+        if (!judge(first, JudgmentPurpose.FRAME_PRECHECK)) return FramedSnapshot(first.withheld(), frame = null)
+        val frame = port.captured(maxEdge, som)
+        val second = observed(options)
+        val shown = judge(second, JudgmentPurpose.TOOL)
+        val kept = frame?.takeIf { shown && it.fits(first, second) }
+        if (kept != null) {
+            val blob = blobs.put(kept.bytes)
+            log.record(ScreenFrame(blob, kept.mime, kept.width, kept.height, kept.som, first.id, checkedOn = second.id))
+        }
+        return FramedSnapshot(if (shown) second else second.withheld(), kept)
+    }
+
+    private suspend fun observed(options: SnapshotOptions): ScreenSnapshot {
+        val read = unavailable(reasonWithheld) { port.snapshot(options) }
         log.record(ScreenObserved(callId, read))
-        return if (judge(read)) read else read.withheld()
+        return read
     }
 
     override suspend fun act(
@@ -75,52 +112,44 @@ internal class RecordingScreen(
         on: SnapshotId?,
     ): ActionOutcome =
         shown(
-            unavailable {
+            unavailable(reasonWithheld) {
                 moving({ port.act(action, on) }) { log.record(ScreenActed(callId, on, action, it)) }
             },
         )
 
     override suspend fun launch(target: LaunchTarget): ActionOutcome =
-        shown(unavailable { moving({ port.launch(target) }) { log.record(ScreenLaunched(callId, target, it)) } })
+        shown(
+            unavailable(reasonWithheld) {
+                moving({ port.launch(target) }) { log.record(ScreenLaunched(callId, target, it)) }
+            },
+        )
 
-    /** Judges [screen] for the tool and records the judgment; whether the tool may see it. */
-    private suspend fun judge(screen: ScreenSnapshot): Boolean {
+    /** Judges [screen], read for [purpose], and records the judgment; whether the tool may see it. */
+    private suspend fun judge(
+        screen: ScreenSnapshot,
+        purpose: JudgmentPurpose,
+    ): Boolean {
         val judgment = gate.judge(call, screen, log.records())
         val withheld = judgment as? ScreenJudgment.Withheld
         val outcome = if (withheld == null) JudgmentOutcome.SHOWN else JudgmentOutcome.WITHHELD
-        log.record(ScreenJudged(callId, screen.id, JudgmentPurpose.TOOL, outcome, withheld?.rule, withheld?.hint))
+        log.record(ScreenJudged(callId, screen.id, purpose, outcome, withheld?.rule, withheld?.hint))
         return withheld == null
     }
 
     /** [outcome] as the tool may see it: its read-back judged, its reason and diff only along with a shown one. */
     private suspend fun shown(outcome: ActionOutcome): ActionOutcome {
         val after = outcome.after
-        val withheld = outcome.copy(status = outcome.status.withheld(), after = after?.withheld(), diff = null)
+        val withheld =
+            outcome.copy(
+                status = outcome.status.withheld(reasonWithheld),
+                after = after?.withheld(),
+                diff = null,
+            )
         return when {
-            after == null || !judge(after) -> withheld
+            after == null || !judge(after, JudgmentPurpose.TOOL) -> withheld
             else -> outcome.copy(diff = outcome.diff?.takeIf { it.base in seenScreens(log.records()) })
         }
     }
-
-    /** This status with any reason the port wrote replaced by [reasonWithheld]. */
-    private fun ActionOutcome.Status.withheld(): ActionOutcome.Status =
-        when (this) {
-            is Failed -> Failed(reasonWithheld)
-            is ActionOutcome.Status.Refused -> ActionOutcome.Status.Refused(reasonWithheld)
-            ActionOutcome.Status.Ok, is ActionOutcome.Status.StaleRef -> this
-        }
-
-    /**
-     * Runs [read]; a [ScreenUnavailableException] it throws is replaced by one with
-     * [reasonWithheld] and no cause, as its message (or its cause's) may quote a screen nobody judged.
-     */
-    @Suppress("SwallowedException") // Dropped on purpose: neither its message nor its cause may reach the model.
-    private inline fun <T> unavailable(read: () -> T): T =
-        try {
-            read()
-        } catch (unjudged: ScreenUnavailableException) {
-            throw ScreenUnavailableException(reasonWithheld)
-        }
 
     /**
      * Runs [move] and records under NonCancellable what it returned, else [UNFINISHED] or, for an
@@ -151,24 +180,69 @@ internal class RecordingScreen(
         withContext(NonCancellable) { recorded(record ?: UNFINISHED) }
     }
 
+    /** Captures nothing: a frame comes only with [framedSnapshot], checked against a screen read after it. */
     override suspend fun frame(
         maxEdge: Int,
         som: Boolean,
-    ): Frame? {
-        val frame = unavailable { port.frame(maxEdge, som) }
-        if (frame != null && frame.mime in Part.IMAGE_MIMES) {
-            log.record(ScreenFrame(blobs.put(frame.bytes), frame.mime, frame.width, frame.height, frame.som))
-        }
-        return frame
-    }
+    ): Frame? = null
 
-    override suspend fun awaitChange(timeoutMs: Long): Boolean = unavailable { port.awaitChange(timeoutMs) }
+    override suspend fun awaitChange(timeoutMs: Long): Boolean =
+        unavailable(reasonWithheld) { port.awaitChange(timeoutMs) }
 
     private companion object {
         /** What an action or launch cut off by a cancellation is recorded as. */
         val UNFINISHED: ActionOutcome = ActionOutcome(Failed("did not finish"), Effect.UNKNOWN)
     }
 }
+
+/** This status with any reason the port wrote replaced by [reasonWithheld]. */
+private fun ActionOutcome.Status.withheld(reasonWithheld: String): ActionOutcome.Status =
+    when (this) {
+        is Failed -> Failed(reasonWithheld)
+        is ActionOutcome.Status.Refused -> ActionOutcome.Status.Refused(reasonWithheld)
+        ActionOutcome.Status.Ok, is ActionOutcome.Status.StaleRef -> this
+    }
+
+/**
+ * Runs [read]; a [ScreenUnavailableException] it throws is replaced by one with [reasonWithheld]
+ * and no cause, as its message (or its cause's) may quote a screen nobody judged.
+ */
+@Suppress("SwallowedException") // Dropped on purpose: neither its message nor its cause may reach the model.
+private inline fun <T> unavailable(
+    reasonWithheld: String,
+    read: () -> T,
+): T =
+    try {
+        read()
+    } catch (unjudged: ScreenUnavailableException) {
+        throw ScreenUnavailableException(reasonWithheld)
+    }
+
+/**
+ * A frame of this port, or `null` when it cannot capture: nothing returned, an image the log does
+ * not take, or a [ScreenUnavailableException] (its message is never shown). A cancellation goes on.
+ */
+@Suppress("SwallowedException") // No frame either way; the message may quote a screen nobody judged.
+private suspend fun ScreenPort.captured(
+    maxEdge: Int,
+    som: Boolean,
+): Frame? =
+    try {
+        frame(maxEdge, som)?.takeIf { it.mime in Part.IMAGE_MIMES }
+    } catch (unavailable: ScreenUnavailableException) {
+        null
+    }
+
+/**
+ * Whether this frame, captured between [first] and [second], may go with [second]: the same app,
+ * and for a frame with boxes (drawn for [first]) the same element refs at the same places.
+ */
+private fun Frame.fits(
+    first: ScreenSnapshot,
+    second: ScreenSnapshot,
+): Boolean = second.pkg == first.pkg && (!som || second.placed() == first.placed())
+
+private fun ScreenSnapshot.placed(): List<Pair<ElementRef, Bounds>> = elements.map { it.ref to it.bounds }
 
 /** The log a [RecordingScreen] writes to and judges on. */
 internal interface ScreenLog {

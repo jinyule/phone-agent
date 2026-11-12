@@ -1,10 +1,12 @@
 package dev.phoneagent.core.tools
 
+import dev.phoneagent.core.ids.SnapshotId
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.ports.ElementRole
 import dev.phoneagent.core.ports.Frame
 import dev.phoneagent.core.ports.OcrLine
 import dev.phoneagent.core.ports.ScreenFlag
+import dev.phoneagent.core.ports.ScreenPort
 import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.ports.ScreenUnavailableException
 import dev.phoneagent.core.ports.SnapshotDetail
@@ -20,6 +22,7 @@ import dev.phoneagent.core.testing.Screens.el
 import dev.phoneagent.core.testing.call
 import dev.phoneagent.core.testing.detail
 import dev.phoneagent.core.testing.text
+import dev.phoneagent.core.tool.FramedSnapshot
 import dev.phoneagent.core.tool.RiskClass
 import dev.phoneagent.core.tool.ToolResult
 import dev.phoneagent.core.tool.ToolStatus
@@ -66,8 +69,8 @@ class ObserveAndWaitTest {
             args: String = "{}",
             screen: FakeScreen = FakeScreen(),
             vision: Boolean = true,
+            ctx: FakeContext = FakeContext(screen),
         ): Pair<ToolResult, FakeContext> {
-            val ctx = FakeContext(screen)
             val presenter = ScreenFormatter(lexicon = Screens.LEXICON, vision = vision)
             val observe = PhaseOneTools.create(presenter).single { it.def.name == "phone_observe" }
             return observe.execute(call("phone_observe", args), ctx) to ctx
@@ -99,6 +102,7 @@ class ObserveAndWaitTest {
                 assertEquals(720 to 1280, image.width to image.height)
                 assertArrayEquals(byteArrayOf(1, 2, 3), ctx.blobs.getValue(image.blob))
                 assertEquals(listOf(true), screen.frames)
+                assertEquals(listOf(Triple(SnapshotOptions(), ScreenPort.DEFAULT_FRAME_EDGE, true)), ctx.framedCalls)
                 assertTrue(result.text().contains("附图：带编号框的截图"))
                 assertEquals("true", result.detail("imageAttached"))
 
@@ -138,18 +142,63 @@ class ObserveAndWaitTest {
             }
 
         @Test
-        fun `reports frames that could not be attached`() =
+        fun `the page shown with a frame is the screen read with it, at the detail asked for`() =
             runTest {
-                val none = FakeScreen(sparse).apply { frame = null }
-                assertTrue(observe(screen = none).first.text().endsWith("（截不到图）"))
-                val gif = FakeScreen(sparse).apply { frame = Frame(byteArrayOf(1), "image/gif", 10, 10, som = true) }
-                val (gifResult, gifCtx) = observe(screen = gif)
-                assertTrue(gifResult.text().endsWith("（截图格式 image/gif 不支持，没有附图）"))
-                assertTrue(gifCtx.blobs.isEmpty())
-                val failing = FakeScreen(sparse).apply { frameError = ScreenUnavailableException("截图服务断开") }
-                val failed = observe(screen = failing).first
-                assertEquals(ToolStatus.OK, failed.status)
-                assertTrue(failed.text().endsWith("（截图失败：截图服务断开）"))
+                val later =
+                    sparse.copy(
+                        id = SnapshotId("s99"),
+                        elements = listOf(el("e1", ElementRole.BUTTON, "再来一局", box(0, 0, 100, 100))),
+                    )
+                val frame = Frame(byteArrayOf(4), "image/png", 10, 20, som = true)
+                val ctx = FakeContext(FakeScreen(sparse)).apply { framed = { _, _, _ -> FramedSnapshot(later, frame) } }
+                val result = observe("""{"detail":"full"}""", ctx = ctx).first
+                val page = formatter.page(later, SnapshotDetail.FULL)
+                assertEquals(Part.Text("$page\n附图：带编号框的截图，框上的编号就是元素的 @e 编号。"), result.content.first())
+                assertEquals(Part.Image(ctx.blobs.keys.single(), "image/png", 10, 20), result.content[1])
+                assertEquals(listOf(SnapshotOptions(SnapshotDetail.FULL)), ctx.framedCalls.map { it.first })
+                assertEquals("s99", result.detail("screen"))
+                assertEquals("true", result.detail("imageAttached"))
+            }
+
+        @Test
+        fun `without a frame the page says so, and a withheld screen says nothing of one`() =
+            runTest {
+                val none = observe(screen = FakeScreen(sparse).apply { frame = null })
+                assertTrue(none.first.text().endsWith("\n（截不到图）"), none.first.text())
+                assertTrue(none.second.blobs.isEmpty())
+                assertEquals("false", none.first.detail("imageAttached"))
+                val failed = FakeScreen(sparse).apply { frameError = ScreenUnavailableException("截图服务断开") }
+                assertTrue(observe(screen = failed).first.text().endsWith("\n（截不到图）"))
+
+                val withheld =
+                    sparse.copy(
+                        id = SnapshotId("s98"),
+                        quality = TreeQuality.EMPTY,
+                        flags = setOf(ScreenFlag.WITHHELD),
+                    )
+                val ctx =
+                    FakeContext(FakeScreen(sparse)).apply {
+                        framed = {
+                            _,
+                            _,
+                            _,
+                            ->
+                            FramedSnapshot(withheld, null)
+                        }
+                    }
+                val result = observe(ctx = ctx).first
+                assertEquals(listOf(Part.Text(formatter.page(withheld, SnapshotDetail.BRIEF))), result.content)
+                assertEquals("s98", result.detail("screen"))
+            }
+
+        @Test
+        fun `a screen that cannot be read with the frame makes the observation unavailable`() =
+            runTest {
+                val gone = ScreenUnavailableException("固定的说法")
+                val ctx = FakeContext(FakeScreen(sparse)).apply { framed = { _, _, _ -> throw gone } }
+                val result = observe(ctx = ctx).first
+                assertEquals(ToolStatus.ERROR, result.status)
+                assertTrue(result.text().startsWith("屏幕暂时用不了（固定的说法）"), result.text())
             }
 
         @Test
