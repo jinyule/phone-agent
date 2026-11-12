@@ -8,7 +8,10 @@ import dev.phoneagent.core.tool.ToolCall
  * Works out what a call will do (phase1 §3.6, §5). Part of the policy, so a tool that
  * under-reports its effect cannot get around a rule (AGENTS.md §3.3). The runtime's policy guard
  * calls [resolve] and then [PolicyEngine.evaluate]; the implementation lives in the policy
- * capability and reads the tool names and argument names of phase1 §5.
+ * capability and reads the tool names and argument names of phase1 §5. The runtime's judgment of
+ * a screen a tool read (policy-rules §6.4) goes the same way: a [SCREEN_JUDGMENT_TOOL] call with
+ * no arguments, resolved as [RiskClass.READ] on that screen, which is also the evaluation's
+ * `PolicyContext.screen`.
  *
  * Pure, deterministic and never throws.
  */

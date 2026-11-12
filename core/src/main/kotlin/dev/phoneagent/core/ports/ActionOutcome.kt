@@ -33,7 +33,8 @@ public data class ActionOutcome(
          * Not done as requested: it may have partly happened, or whether it happened cannot be
          * told; [reason] says what is known, for the model, in English. It may quote the screen, so
          * the runtime passes it on only when this outcome's [after] was judged shown, and a fixed
-         * text otherwise (policy-rules §6.4).
+         * text otherwise (policy-rules §6.4). A typed reason code could later tell the model more
+         * without quoting the screen.
          */
         @Serializable
         @SerialName("failed")
