@@ -283,7 +283,7 @@ internal object Phrases {
      * word boundary (any non-Latin letter ends a word: "Send消息"), or is an [Words.ENGLISH_EXACT]
      * phrase. Letters written apart ("s e n d") are read together. Each part the label joins with
      * [Words.ENGLISH_JOINERS] ("Delete and send"), and with [pauses] [Words.ENGLISH_PAUSES] too,
-     * without a word left over from the joiner ([Words.ENGLISH_FILLERS]: "and also delete"), is
+     * without a word left over from the joiner ([Words.ENGLISH_FILLER]: "and also delete"), is
      * read by the phrase it starts with, the most severe deciding, and it sends when any part does;
      * an exact phrase is only ever the whole label ("Invite and earn" invites no one). The label is
      * split only where every part is at most [partMax] long ([length]; `null`: any length), else
@@ -304,7 +304,7 @@ internal object Phrases {
         val joined = spacedSigns(text).split(Words.ENGLISH_JOINERS)
         val pieces =
             (if (pauses) joined.flatMap { it.split(Words.ENGLISH_PAUSES) } else joined)
-                .map { trimmed(it).replace(Words.ENGLISH_FILLERS, "") }
+                .map { withoutFillers(trimmed(it)) }
         val split = pieces.size > 1 && (partMax == null || pieces.all { length(it) <= partMax })
         val read = if (split) pieces else listOf(text.trimStart { it in Words.ENGLISH_WORD_WRAPPERS })
         val vetoes = Vetoes(label)

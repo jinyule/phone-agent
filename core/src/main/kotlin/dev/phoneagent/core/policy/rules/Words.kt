@@ -177,10 +177,11 @@ internal object Words {
         setOf('.', ',', ';', ':', '!', '?', '…', '⋯', '。', '、', '，', '；', '：', '！', '？')
 
     /**
-     * A word left at the start of a part after a joiner ("Send and also delete"): taken off, so
-     * the part is read by the phrase after it. "and" and "then" are joiners themselves.
+     * A word left at the start of a part after a joiner ("Send and also delete"): taken off as
+     * many times as it is written there, so the part is read by the phrase after it
+     * ([withoutFillers]). "and" and "then" are joiners themselves.
      */
-    val ENGLISH_FILLERS: Regex = Regex("^(?:also\\b\\W*)+")
+    const val ENGLISH_FILLER: String = "also"
 
     /**
      * English (spaced form): only the whole label, as [EXACT] words ("Apply" alone is often a filter
