@@ -15,6 +15,7 @@ import dev.phoneagent.app.adb.HelperLauncher
 import dev.phoneagent.app.adb.LaunchConfig
 import dev.phoneagent.app.adb.LaunchOutcome
 import dev.phoneagent.app.adb.NsdAdbServiceFinder
+import dev.phoneagent.app.adb.loopbackScan
 import dev.phoneagent.app.helper.HelperClient
 import dev.phoneagent.core.adb.AdbClient
 import dev.phoneagent.core.adb.AdbCommand
@@ -48,7 +49,7 @@ import kotlin.concurrent.thread
  * key), `mdns` (the announced ports), `pair` (the code read from Settings; without `port`, the
  * pairing port comes from mDNS), `connect` (cached port, mDNS, scan; then `id`), `stdin` (`cat`
  * over the shell protocol: stdin must arrive and be closed), `unpaired` (a fresh key must get
- * UNAUTHORIZED), `scan` (the loopback scan alone) and `launch` (the helper, as the app launches it).
+ * UNAUTHORIZED), `scan` (the app's loopback scan alone) and `launch` (the helper, as the app launches it).
  * Logs each line under `PhoneAgentSelfCheck` and returns the verdict (`PASS` or `FAIL: …`) as the
  * broadcast's result data. The pairing code and the launch nonce are never logged.
  */
@@ -205,8 +206,8 @@ internal object AdbSelfCheck {
 
         private suspend fun scan() {
             val range = LocalPortScan.parseRange(readOrNull(File("/proc/sys/net/ipv4/ip_local_port_range"), steps))
-            val scan = LocalPortScan({ listOf(PortSearchConfig.LOOPBACK) }, range)
-            val (result, ms) = timed { scan.scan(emptySet()) }
+            // The app's own scan, as BuiltinAdb.search ends with.
+            val (result, ms) = timed { loopbackScan(range).scan(emptySet()) }
             steps.check("scan", result.found.isNotEmpty(), "$range in $ms ms: $result")
         }
 

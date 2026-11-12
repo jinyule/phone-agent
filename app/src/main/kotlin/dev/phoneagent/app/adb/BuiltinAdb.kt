@@ -143,14 +143,7 @@ internal class BuiltinAdb(
                         Executors.newSingleThreadExecutor(),
                     ),
                 identityName = "phoneagent@${Build.MODEL}",
-                // ownPorts: the app listens on no port yet; ToolServer (phase1 §8) adds its own.
-                scan = {
-                    LocalPortScan(
-                        { listOf(PortSearchConfig.LOOPBACK) },
-                        ephemeral.value,
-                        ownPorts = { emptySet() },
-                    )
-                },
+                scan = { loopbackScan(ephemeral.value) },
                 wirelessDebugging = { wirelessDebugging(app) },
             )
         }
@@ -183,3 +176,15 @@ internal class BuiltinAdb(
             }
     }
 }
+
+/**
+ * The scan [BuiltinAdb.search] ends with: [range] on loopback only, so no probe leaves the device
+ * (ADR 2026-11-03-adb-trust-model), skipping the ports this app listens on.
+ */
+internal fun loopbackScan(range: IntRange): LocalPortScan =
+    LocalPortScan(
+        { listOf(PortSearchConfig.LOOPBACK) },
+        range,
+        // The app listens on no port yet; ToolServer (phase1 §8) adds its own here.
+        ownPorts = { emptySet() },
+    )
