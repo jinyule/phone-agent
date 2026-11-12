@@ -20,7 +20,10 @@ import kotlinx.coroutines.launch
 
 /** What the settings screen can ask for. */
 internal interface SettingsActions {
-    /** The user changed the form (ignored while it is being tested). */
+    /**
+     * The user changed the form (ignored while it is being tested). Naming another main model
+     * replaces the context window with that model's ([ProviderForm.editedFrom]).
+     */
     fun edit(form: ProviderForm)
 
     /** The user picked [preset] (`null`: custom); what was typed stays (ignored while it is being tested). */
@@ -96,7 +99,8 @@ internal class ModelSettingsViewModel(
 
     override fun edit(form: ProviderForm) {
         if (currentRun.value is RunState.Testing) return
-        currentForm.value = form
+        val saved = (services.state.value as? SettingsState.Ready)?.settings
+        currentForm.value = form.editedFrom(currentForm.value, saved)
     }
 
     override fun choosePreset(preset: ProviderPreset?) {

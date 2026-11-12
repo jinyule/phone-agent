@@ -124,6 +124,86 @@ class ModelSettingsViewModelTest {
         )
     }
 
+    @Test
+    fun aNewMainModelTakesTheContextWindowStoredForIt() {
+        provider.listing =
+            """{"object":"list","data":[{"id":"main-model","context_length":32768},""" +
+            """{"id":"small","context_length":8192}]}"""
+        val (end, _) = run(form.copy(lightModel = "small", contextTokens = 16_000))
+        check((end as RunState.Done).outcome is SetupOutcome.Saved) { end }
+
+        /** The context window a view model on the saved settings shows after [edits], one by one. */
+        fun after(vararg edits: ProviderForm.() -> ProviderForm): Int? {
+            val model = ModelSettingsViewModel(services)
+            for (edit in edits) model.edit(model.form.value.edit())
+            return model.form.value.contextTokens
+        }
+        val typed: ProviderForm.() -> ProviderForm = { copy(contextTokens = 20_000) }
+        // Collected first, so each edit shows the window it leaves.
+        val seen =
+            mapOf(
+                "main model changed to one the settings store" to after({ copy(mainModel = "small") }),
+                "main model changed to one they do not store" to after({ copy(mainModel = "fresh-model") }),
+                "main model changed only by spaces" to after({ copy(mainModel = "main-model ") }),
+                "main model and window changed at once" to after({ copy(mainModel = "small", contextTokens = 20_000) }),
+                "window typed, main model kept" to after(typed),
+                "window typed, then the light model changed" to after(typed, { copy(lightModel = "") }),
+                "window typed, then the main model changed" to after(typed, { copy(mainModel = "small") }),
+            )
+        assertEquals(
+            mapOf(
+                "main model changed to one the settings store" to 8_192,
+                "main model changed to one they do not store" to null,
+                "main model changed only by spaces" to 16_000,
+                "main model and window changed at once" to 20_000,
+                "window typed, main model kept" to 20_000,
+                "window typed, then the light model changed" to 20_000,
+                "window typed, then the main model changed" to 8_192,
+            ),
+            seen,
+        )
+    }
+
+    @Test
+    fun aNewMainModelKeepsItsContextWindowThroughSaveAndReopen() {
+        provider.listing =
+            """{"object":"list","data":[{"id":"main-model","context_length":32768},""" +
+            """{"id":"small","context_length":8192}]}"""
+        val (end, _) = run(form.copy(lightModel = "small", contextTokens = 16_000))
+        check((end as RunState.Done).outcome is SetupOutcome.Saved) { end }
+
+        /** After the main model became [main] and the form was saved: stored, shown, and shown on reopening. */
+        fun saved(main: String): List<Int?> {
+            val model = ModelSettingsViewModel(services)
+            model.edit(model.form.value.copy(mainModel = main))
+            model.testAndSave()
+            val done = runBlocking { withTimeout(WAIT_MILLIS) { model.run.first { it is RunState.Done } } }
+            val settings = ((done as RunState.Done).outcome as? SetupOutcome.Saved)?.settings
+            val stored =
+                settings
+                    ?.providers
+                    ?.single()
+                    ?.models
+                    ?.firstOrNull { it.id.value == main }
+                    ?.capabilities
+                    ?.contextTokens
+            return listOf(
+                stored,
+                model.form.value.contextTokens,
+                ModelSettingsViewModel(services).form.value.contextTokens,
+            )
+        }
+        // Collected first; the second save starts from what the first one saved.
+        val seen = mapOf("small" to saved("small"), "fresh-model" to saved("fresh-model"))
+        assertEquals(
+            mapOf(
+                "small" to listOf(8_192, 8_192, 8_192),
+                "fresh-model" to List(3) { ProviderForm.DEFAULT_CONTEXT_TOKENS },
+            ),
+            seen,
+        )
+    }
+
     private companion object {
         const val KEY = "sk-test-not-a-real-key"
         const val WAIT_MILLIS = 10_000L

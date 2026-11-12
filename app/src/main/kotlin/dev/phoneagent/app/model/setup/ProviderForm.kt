@@ -35,7 +35,8 @@ import java.net.URISyntaxException
  * @property contextTokens the main model's context window, `null` when not given. It wins over the
  *   provider's model list and applies to the main model only: the light and vision models (when
  *   they are other models) take the list's value, else the one stored for them, else
- *   [DEFAULT_CONTEXT_TOKENS]. Editing saved settings starts with the main model's stored value.
+ *   [DEFAULT_CONTEXT_TOKENS]. Editing saved settings starts with the main model's stored value,
+ *   and naming another main model starts over from that model's ([editedFrom]).
  */
 internal data class ProviderForm(
     val presetId: String?,
@@ -160,6 +161,28 @@ internal data class ProviderForm(
                 protocol = preset?.protocol ?: ModelProtocol.OPENAI_CHAT_COMPLETIONS,
                 auth = if (preset?.needsKey == false) AuthChoice.NONE else AuthChoice.API_KEY,
             )
+    }
+
+    /**
+     * This form as an edit of [before] leaves it. When the edit names another main model (spaces
+     * around it aside) and leaves the context window as it was, the window becomes the one
+     * [settings] store for that model under this provider, or `null` when they store none (then
+     * the provider's model list, else [DEFAULT_CONTEXT_TOKENS], decides when saving): a window
+     * typed for the old model does not carry over. Any other edit keeps the window it gives.
+     */
+    fun editedFrom(
+        before: ProviderForm,
+        settings: ModelSettings?,
+    ): ProviderForm {
+        val model = mainModel.trim()
+        if (model == before.mainModel.trim() || contextTokens != before.contextTokens) return this
+        val stored =
+            settings
+                ?.providers
+                ?.firstOrNull { it.profile.id == providerId }
+                ?.models
+                ?.firstOrNull { it.id.value == model }
+        return copy(contextTokens = stored?.capabilities?.contextTokens)
     }
 
     /**
