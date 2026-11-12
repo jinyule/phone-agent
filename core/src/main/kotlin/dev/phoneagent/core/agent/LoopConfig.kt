@@ -117,6 +117,19 @@ public data class LoopTexts(
      * the handoff (it ended unreadable, or was stopped, timed out or broken).
      */
     val screenUnknown: String = "交接之后还没有读到屏幕：请先调用 phone_observe。",
+    /**
+     * Appended, on a line of its own, to a result whose shown screen (`ToolResult.SCREEN`) was
+     * withheld for its call by the policy (policy-rules §6.4); followed directly by the refusing
+     * rule's hint, when it gave one.
+     */
+    val screenWithheld: String = "按安全规则，这一屏的内容不能显示给你。",
+    /**
+     * Stands for the port's own words where they may quote a screen the model may not see
+     * (policy-rules §6.4): a failed or refused action's reason when its read-back was withheld or
+     * missing, and the message of a screen that could not be used. Tools put it inside their own
+     * sentences, so it has no punctuation of its own.
+     */
+    val reasonWithheld: String = "具体原因按安全规则不显示",
     /** The tool did not finish in time. */
     val timeout: String = "工具没有在限定时间内完成，已被取消。",
     /**

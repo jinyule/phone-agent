@@ -1,5 +1,7 @@
 package dev.phoneagent.core.agent
 
+import dev.phoneagent.core.ids.SnapshotId
+import dev.phoneagent.core.ids.ToolCallId
 import dev.phoneagent.core.policy.IntentResolver
 import dev.phoneagent.core.policy.PolicyEngine
 import dev.phoneagent.core.policy.SCREEN_JUDGMENT_TOOL
@@ -7,10 +9,16 @@ import dev.phoneagent.core.policy.Verdict
 import dev.phoneagent.core.ports.ScreenFlag
 import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.ports.TreeQuality
+import dev.phoneagent.core.session.JudgmentOutcome
+import dev.phoneagent.core.session.JudgmentPurpose
+import dev.phoneagent.core.session.ScreenJudged
 import dev.phoneagent.core.session.SessionRecord
+import dev.phoneagent.core.session.ToolResultRecorded
 import dev.phoneagent.core.tool.RiskClass
 import dev.phoneagent.core.tool.ToolCall
+import dev.phoneagent.core.tool.ToolResult
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * Judges a new screen a tool call read before the call's tool gets it (policy-rules §6.4): as a
@@ -38,8 +46,8 @@ internal class ScreenGate(
         return when (val verdict = policy.evaluate(observe, intent, context)) {
             Verdict.Allow -> ScreenJudgment.Shown
             is Verdict.Refuse -> ScreenJudgment.Withheld(verdict.reason, verdict.hintForModel)
-            is Verdict.Confirm -> ScreenJudgment.Withheld(CONFIRMED, hint = null)
-            is Verdict.HandOff -> ScreenJudgment.Withheld(HANDED_OFF, hint = null)
+            is Verdict.Confirm -> ScreenJudgment.Withheld(ScreenJudged.CONFIRM, hint = null)
+            is Verdict.HandOff -> ScreenJudgment.Withheld(ScreenJudged.HAND_OFF, hint = null)
         }
     }
 }
@@ -75,6 +83,42 @@ internal fun ScreenSnapshot.withheld(): ScreenSnapshot =
         fingerprint = WITHHELD_FINGERPRINT,
     )
 
-private const val CONFIRMED = "confirm"
-private const val HANDED_OFF = "hand_off"
+/**
+ * The screens the model saw (policy-rules §6.4): each judged shown for its call's tool
+ * (`screen/judged` TOOL, SHOWN) and named by the same call's `tool/result` as the screen it shows
+ * ([ToolResult.SCREEN]). Not seen: a withheld screen, one the runtime read itself (S' of a
+ * re-check, the look after a handoff or a resume), the read before a capture, a wait's screens
+ * before its last. Derived from the log alone, so a resumed task gets the same set.
+ */
+internal fun seenScreens(records: List<SessionRecord>): Set<SnapshotId> {
+    val shown =
+        records
+            .mapNotNull { it.event as? ScreenJudged }
+            .filter { it.purpose == JudgmentPurpose.TOOL && it.outcome == JudgmentOutcome.SHOWN }
+    val results = records.mapNotNull { it.event as? ToolResultRecorded }
+    val named = results.mapTo(HashSet()) { it.callId to shownBy(it.result) }
+    return shown.filter { (it.callId to it.snapshot.value) in named }.mapTo(HashSet()) { it.snapshot }
+}
+
+/**
+ * The withheld judgment, in [callId], of the screen [result] shows ([ToolResult.SCREEN]); `null`
+ * when it shows none or that screen was not withheld for the call.
+ */
+internal fun withheldShown(
+    records: List<SessionRecord>,
+    callId: ToolCallId,
+    result: ToolResult,
+): ScreenJudged? {
+    val screen = shownBy(result) ?: return null
+    return records.asReversed().firstNotNullOfOrNull { record ->
+        (record.event as? ScreenJudged)?.takeIf {
+            it.callId == callId && it.snapshot.value == screen && it.outcome == JudgmentOutcome.WITHHELD
+        }
+    }
+}
+
+/** The snapshot id [result] names as the screen it shows, as written; `null` when it names none. */
+private fun shownBy(result: ToolResult): String? =
+    (result.details?.get(ToolResult.SCREEN) as? JsonPrimitive)?.takeIf { it.isString }?.content
+
 private const val WITHHELD_FINGERPRINT = "withheld"

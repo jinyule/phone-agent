@@ -65,7 +65,15 @@ public interface ToolContext {
     /** The session it is recorded in. */
     public val sessionId: SessionId
 
-    /** The task's surface, or `null` when it has none yet (phone tools then return an error result). */
+    /**
+     * The task's surface, or `null` when it has none yet (phone tools then return an error result).
+     * The runtime judges every screen it returns for the model first (policy-rules §6.4): an
+     * observation, an action's or a launch's read-back. One the model may not see comes as a copy
+     * flagged `ScreenFlag.WITHHELD`, without content, and an outcome with it has no diff. A failed
+     * or refused outcome keeps the port's reason only when its read-back was shown, else a fixed
+     * text; a `ScreenUnavailableException` from it carries a fixed message and no cause. Any other
+     * exception reaches the model as its class only.
+     */
     public val screen: ScreenPort?
 
     /** Timestamp source. */
