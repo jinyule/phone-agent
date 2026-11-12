@@ -26,6 +26,8 @@
 2. **身份私钥封存在 App 私有存储里。** PKCS#8 私钥用 AndroidKeyStore 里的 AES-256-GCM 密钥加密（别名 `phoneagent_adb_key_wrap`），写进 `noBackupFilesDir/adb/adbkey.sealed`：
    - 文件格式是一个格式字节加上 IV 和密文，经 AtomicFile 写入；
    - 打不开（封存密钥丢了、文件坏了、格式未知）就当作不可用，`AdbIdentity.loadOrCreate` 会换新身份并报 `REPLACED`。
+   - 封存失败时 `write` 抛 IOException，旧文件不动；自动拉起记一笔日志，等下一次请求再试。
+   - Keystore 自己内部的失败是非检查型的 `ProviderException`，和检查型的 `GeneralSecurityException` 一样处理（凭据存储的 `KeystoreCipher` 也是这样）。
 3. **配对记录和端口缓存放在 SharedPreferences 里，用 `apply` 写**（`AdbPairingRecord`）。下面几种情况会清掉配对记录：
    - 新建或替换了身份；
    - 搜索以 UNAUTHORIZED 结束（`AdbConnectPort` 已经对同一个端点试过两次）。
@@ -46,7 +48,7 @@
    - 实测未配对的 key 收到的是 `SSLProtocolException`，消息里带着 `SSLV3_ALERT_CERTIFICATE_UNKNOWN`，而 A 段只看类型，会把它误判成 TLS；
    - 现在，消息里报的是对端 alert 的 `SSLProtocolException`，不再算我们自己的错误，在可能是拒绝的阶段归为 UNAUTHORIZED。JDK 收到的 alert 也按同一规则认，具体写法见 phase1 §7.1；
    - BoringSSL 把收到的 alert 记成原因码 1000 + alert 编号：有名字的写成 `SSLV3_*` / `TLSV1_*`（Android 12 起都带 `ALERT_`；Android 11 的表里 1110–1116 没有 `ALERT_`，例如 `TLSV1_CERTIFICATE_REQUIRED`），没有名字的写成 `reason(1NNN)`。它自己发现的错误都有自己的名字，没有以这两个前缀开头的（例如 `DECRYPTION_FAILED_OR_BAD_RECORD_MAC`、`BAD_ALERT`），仍然算 TLS。不按原因码的数值判断，因为它自己的原因也有 1000 以上的（1122 `PAKE_AND_KEY_SHARE_NOT_ALLOWED`）。
-8. **扫描范围**：App 读不到 `/proc/sys/net/ipv4/ip_local_port_range`（Android 16 上是 EACCES），就退回 `LocalPortScan.FALLBACK_RANGE`（30000..65535），覆盖 Linux 默认的 32768..60999。`ownPorts` 现在为空：App 还没监听任何端口；ToolServer（phase1 §8）落地时要把自己的端口加进去。
+8. **扫描范围**：App 读不到 `/proc/sys/net/ipv4/ip_local_port_range`（Android 16 上是 EACCES），就退回 `LocalPortScan.FALLBACK_RANGE`（30000..65535），覆盖 Linux 默认的 32768..60999。`ownPorts` 现在为空：App 还没监听任何端口；ToolServer（phase1 §8）落地时要把自己的端口加进去。扫描只由 `loopbackScan` 构造，`BuiltinAdb` 和 debug 自检的 scan 场景用的是同一个。
 9. **架构检查**：`CoreAdbBoundaryTest` 扫 `app/src/{main,debug,release}`，只允许 `dev.phoneagent.app.adb` 和 `dev.phoneagent.app.debug`（以及它们的子包）引用 `dev.phoneagent.core.adb`。检查覆盖 import、通配、别名，以及跨行的全限定名，并带反例。
 
 ## Alternatives considered
