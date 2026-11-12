@@ -35,14 +35,16 @@ import kotlinx.serialization.json.put
  *   The wait between reads is not raced against [ScreenPort.awaitChange] ("whichever comes
  *   first"): the minimum read interval is also the longest wait, so a change event could never
  *   bring a read forward; racing would only add one port call per round, with the same result.
- * - **stable**: [ScreenPort.awaitChange] until a quiet period of [stableQuietMs]; each look after
- *   a change takes at least [readIntervalMs], so a port that reports changes without suspending
- *   cannot spin the loop or hold off cancellation.
+ * - **stable**: [ScreenPort.awaitChange] until a quiet period of [stableQuietMs], then a read;
+ *   each look after a change takes at least [readIntervalMs], so a port that reports changes
+ *   without suspending cannot spin the loop or hold off cancellation. A withheld read after a
+ *   quiet period is waited past like a change: one [readIntervalMs] later, the wait for a quiet
+ *   period starts over.
  *
  * A withheld screen ([ScreenFlag.WITHHELD], policy-rules §6.4) meets no condition: its text is not
- * there to check, which is neither "appeared" nor "gone". The wait goes on past it; when the last
- * screen is withheld, the result says the condition could not be checked, as an error, whatever
- * the condition.
+ * there to check, which is neither "appeared" nor "gone", and it does not show that the screen
+ * settled. The wait goes on past it, whatever the condition; when the last screen is withheld,
+ * the result says the condition could not be checked, as an error.
  */
 internal class PhoneWaitTool(
     private val presenter: ScreenPresenter,
@@ -114,17 +116,26 @@ internal class PhoneWaitTool(
         screen: ScreenPort,
         wait: Wait,
     ): ScreenSnapshot {
-        if (wait.condition == Condition.STABLE) {
-            do {
-                val changed = changedWithin(screen)
-            } while (changed)
-            return screen.snapshot()
-        }
+        if (wait.condition == Condition.STABLE) return settled(screen)
         var snapshot = screen.snapshot()
         while (!matches(snapshot, wait)) {
             delay(readIntervalMs)
             snapshot = screen.snapshot()
         }
+        return snapshot
+    }
+
+    /** The first screen read after a quiet period that is not withheld (see the class comment). */
+    private suspend fun settled(screen: ScreenPort): ScreenSnapshot {
+        var snapshot: ScreenSnapshot
+        do {
+            do {
+                val changed = changedWithin(screen)
+            } while (changed)
+            snapshot = screen.snapshot()
+            val passed = withheld(snapshot)
+            if (passed) delay(readIntervalMs)
+        } while (passed)
         return snapshot
     }
 
@@ -189,8 +200,6 @@ internal class PhoneWaitTool(
         return needle != null && texts.any { normalize(it).contains(needle) }
     }
 
-    private fun normalize(text: String): String = text.filterNot(Char::isWhitespace).lowercase()
-
     private enum class Condition(
         val wire: String,
     ) {
@@ -220,6 +229,9 @@ internal class PhoneWaitTool(
         private const val UNCHECKED = "这一屏不能显示，条件无法核实。"
     }
 }
+
+/** [text] as it is matched: without whitespace, in lower case. */
+private fun normalize(text: String): String = text.filterNot(Char::isWhitespace).lowercase()
 
 /** Whether the runtime withheld [snapshot] (policy-rules §6.4). */
 private fun withheld(snapshot: ScreenSnapshot): Boolean = ScreenFlag.WITHHELD in snapshot.flags

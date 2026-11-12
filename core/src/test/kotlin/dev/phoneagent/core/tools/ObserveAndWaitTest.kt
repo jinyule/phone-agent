@@ -54,6 +54,9 @@ class ObserveAndWaitTest {
 
         /** A last read that takes a while (tree, OCR) but well within the margin after the longest wait. */
         const val SLOW_READ_MS = 10_000L
+
+        /** More looks than any wait in these tests takes; reaching it means the wait spins. */
+        const val SPIN_LIMIT = 100
     }
 
     private fun tools(config: ToolsConfig = ToolsConfig()) =
@@ -543,6 +546,82 @@ class ObserveAndWaitTest {
                 assertEquals(2_000, currentTime)
                 assertEquals(ToolStatus.OK, gone.status)
                 assertEquals("s21", gone.detail("screen"))
+            }
+
+        /**
+         * A screen that shows each phase's snapshot from its start (ms of virtual time) on, the
+         * first from 0; every switch is a change event.
+         */
+        private fun timeline(
+            clock: () -> Long,
+            vararg phases: Pair<Long, ScreenSnapshot>,
+        ) = FakeScreen().apply {
+            onSnapshot = { phases.last { (from, _) -> from <= clock() }.second }
+            onAwaitChange = { timeout ->
+                val now = clock()
+                val next = phases.map { it.first }.firstOrNull { it > now && it - now <= timeout }
+                delay((next ?: (now + timeout)) - now)
+                next != null
+            }
+        }
+
+        @Test
+        fun `stable waits past a withheld screen to the shown one that settles`() =
+            runTest {
+                // Quiet but withheld until 1000 ms; from then on the loaded page, quiet.
+                val screen = timeline({ currentTime }, 0L to withheld(loading), 1_000L to loaded)
+
+                val result = wait("""{"condition":"stable","timeoutMs":5000}""", screen)
+
+                assertEquals(ToolStatus.OK, result.status, result.text())
+                assertEquals("画面已经稳定。\n" + formatter.page(loaded, SnapshotDetail.BRIEF), result.text())
+                assertEquals("true", result.detail("met"))
+                assertEquals("s21", result.detail("screen"))
+                // 800 ms of quiet, the withheld read, one read interval, then 800 ms of quiet again.
+                assertEquals(800 + READ_INTERVAL_MS + 800, currentTime)
+            }
+
+        @Test
+        fun `a withheld quiet screen whose port answers at once is read once a read interval, not spun on`() =
+            runTest {
+                var looks = 0
+                val screen =
+                    FakeScreen(withheld(loaded)).apply {
+                        // No change, without waiting: a port that breaks the contract must not spin the wait.
+                        onAwaitChange = {
+                            check(++looks < SPIN_LIMIT) { "the wait spins on a withheld screen" }
+                            false
+                        }
+                    }
+
+                val result = wait("""{"condition":"stable","timeoutMs":1000}""", screen)
+
+                assertEquals(ToolStatus.ERROR, result.status)
+                assertTrue(result.text().startsWith("这一屏不能显示，条件无法核实。"), result.text())
+                assertEquals(1_000, currentTime)
+                assertTrue(looks <= 1_000 / READ_INTERVAL_MS + 1, "looks: $looks")
+            }
+
+        @Test
+        fun `stable cannot be checked when the screen is withheld at the deadline, shown in between or not`() =
+            runTest {
+                val cases =
+                    listOf(
+                        "withheld throughout" to arrayOf(0L to withheld(loaded)),
+                        // Shown for less than a quiet period, then withheld again to the deadline.
+                        "withheld, shown, withheld" to
+                            arrayOf(0L to withheld(loading), 1_000L to loaded, 1_500L to withheld(loaded)),
+                    )
+                val wrong = mutableListOf<String>()
+                for ((case, phases) in cases) {
+                    val result = wait("""{"condition":"stable","timeoutMs":3000}""", timeline({ currentTime }, *phases))
+                    val expected = "这一屏不能显示，条件无法核实。\n" + formatter.page(withheld(loaded), SnapshotDetail.BRIEF)
+                    val right =
+                        result.status == ToolStatus.ERROR && result.detail("met") == "false" &&
+                            result.text() == expected
+                    if (!right) wrong += "$case: ${result.status} ${result.detail("met")} ${result.text()}"
+                }
+                assertEquals(emptyList<String>(), wrong)
             }
 
         @Test
