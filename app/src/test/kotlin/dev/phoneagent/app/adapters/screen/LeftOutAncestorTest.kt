@@ -23,6 +23,24 @@ private const val LIST = "androidx.recyclerview.widget.RecyclerView"
 private const val LAYOUT = "android.widget.LinearLayout"
 private const val TEXT = "android.widget.TextView"
 
+/** How many buttons each layout of [LeftOutAncestorTest.deepAndWide] holds. */
+private const val WIDE = 40
+
+/** How many times pairing and explaining a stale ref may read each node of the two reads. */
+private const val READS_PER_NODE = 10
+
+/** [list], counting the [reads] of its items. */
+private class CountingList<T>(
+    private val list: List<T>,
+) : AbstractList<T>() {
+    var reads = 0
+        private set
+
+    override val size: Int get() = list.size
+
+    override fun get(index: Int): T = list[index].also { reads++ }
+}
+
 /**
  * A Like below nodes the read may leave out (out of view) whose context changes after the plan
  * (fix list fwd B1b): its ref is carried and matched as it would be were those nodes kept. Each
@@ -382,30 +400,57 @@ class LeftOutAncestorTest {
             assertEquals(emptyList<String>(), failures)
         }
 
-    @Test
-    fun aReadPairsEachNodeItWalksOnceHoweverManyAreLeftOut() {
-        // [levels] nodes out of view, one in the other, the topmost the root of the window, each
-        // holding [wide] buttons: 3280 nodes, 80 of them left out. The tree remembers each node
-        // once, and pairing a read with the same screen pairs each node with itself.
-        val levels = ScreenReader.MAX_DEPTH
-        val wide = 40
-        val nested = List(levels) { node(LAYOUT, GEOMETRY.pixels) { isVisibleToUser = false } }
+    /**
+     * [ScreenReader.MAX_DEPTH] layouts out of view, one in the other, the topmost (of view id [top])
+     * the root of the window, each holding [WIDE] buttons: 3280 nodes, 80 of them left out.
+     */
+    private fun deepAndWide(top: String = "top"): TreeRead {
+        val nested = List(ScreenReader.MAX_DEPTH) { node(LAYOUT, GEOMETRY.pixels) { isVisibleToUser = false } }
+        nested.first().viewIdResourceName = "$APP:id/$top"
         nested.forEachIndexed { level, layout ->
-            repeat(wide) { i -> layout.with(button("B$level-$i", Rect(0, 40 * i, 500, 40 * i + 30))) }
+            repeat(WIDE) { i -> layout.with(button("B$level-$i", Rect(0, 40 * i, 500, 40 * i + 30))) }
             nested.getOrNull(level + 1)?.let { layout.with(it) }
         }
         val host = FakeHost().apply { windows = mapOf(0 to listOf(window(nested.first(), id = 1, layer = 1))) }
-        val read = { ScreenReader.read(host.windowsOn(0), GEOMETRY, OWN) }
+        return ScreenReader.read(host.windowsOn(0), GEOMETRY, OWN)
+    }
 
-        val first = read()
+    @Test
+    fun aReadPairsEachNodeItWalksOnceHoweverManyAreLeftOut() {
+        // The tree remembers each node once, and pairing a read with the same screen pairs each
+        // node with itself.
+        val levels = ScreenReader.MAX_DEPTH
+        val first = deepAndWide()
         val carried = RefCarrier.carry(null, first.nodes, lastUsed = 0)
-        val paired = RefCarrier.pair(carried.tree, read().nodes)
+        val paired = RefCarrier.pair(carried.tree, deepAndWide().nodes)
 
-        assertEquals(levels * wide, first.elements.size)
-        assertEquals(levels * (wide + 1), first.nodes.size)
+        assertEquals(levels * WIDE, first.elements.size)
+        assertEquals(levels * (WIDE + 1), first.nodes.size)
         assertEquals("one entry per node walked", first.nodes.size, carried.tree.size)
-        assertEquals("one ref per element", (1..levels * wide).map { "e$it" }, carried.refs.map { it.value })
+        assertEquals("one ref per element", (1..levels * WIDE).map { "e$it" }, carried.refs.map { it.value })
         assertEquals(first.nodes.indices.toList(), paired.toList())
+    }
+
+    @Test
+    fun pairingAndExplainingAStaleRefReadEachNodeABoundedNumberOfTimes() {
+        // A count, not a clock (fix list fwd2 B1.5): pairing the 3280 nodes with those of the same
+        // screen, or of one whose root changed (nothing pairs), and then explaining why the deepest
+        // button is stale (80 nodes above it, none paired), read each node at most READS_PER_NODE
+        // times.
+        val planned = RefCarrier.carry(null, deepAndWide().nodes, lastUsed = 0).tree
+        val deepest = planned.indices.last { planned[it].ref != null }
+        val seen =
+            listOf("top", "other").associateWith { top ->
+                val tree = CountingList(planned)
+                val fresh = CountingList(deepAndWide(top).nodes)
+                val paired = RefCarrier.pair(tree, fresh)
+                val reason = if (deepest in paired) null else StaleReasons.of(deepest, tree, fresh, paired)
+                reason to tree.reads + fresh.reads
+            }
+        val bound = READS_PER_NODE * 2 * planned.size
+
+        assertEquals(mapOf("top" to null, "other" to StaleReason.NOT_FOUND), seen.mapValues { it.value.first })
+        assertEquals(emptyMap<String, Int>(), seen.mapValues { it.value.second }.filterValues { it > bound })
     }
 
     @Test
