@@ -97,7 +97,8 @@ internal class HttpReply(
      * straddles the limit is masked whole. When the body goes on past what was read, the code
      * point the read split and the [Redactor.openEnd] are dropped before the cut; when the cut
      * drops text, the [Redactor.openEnd] of what it kept is dropped too (a credential shape cut
-     * too short to be one). The cut never splits a surrogate pair.
+     * too short to be one). A secret written with other escapes and cut inside is not recognized
+     * (model-layer §2, known gaps). The cut never splits a surrogate pair.
      */
     suspend fun maskedText(limit: Int = ERROR_BODY_LIMIT): String =
         blocking(io) {

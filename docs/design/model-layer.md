@@ -146,6 +146,11 @@ fun interface BlobSource {              // 读当前会话 BlobStore 里 Part.Im
       - key 是短的纯数字时，含计数、块编号的元数据字段（`usage.iterations`、`context_management` 等）会经常整项省略：数字也按子串匹配，key 是 `1` 时，任何含数字 1 的计数都会命中。
       - 正文不做宽松解码：text、thinking 这类字面文字，下游不会把它们当 JSON 解码，字面的反斜杠写法不是密钥。所以正文里用转义、空格、编码等方式改写过的密钥不检测。检测只认三种形式：原样的，标准 JSON 转义的，以及调用参数宽松解码以后的。
 - **流式增量**：`Delta.Text` 依次拼起来一定是最终正文的前缀；推理和工具调用的预览不作保证，服务端降级时可能不出现在最终回复里，界面以最终的 `ChatResponse` 为准重新渲染。
+- **已知缺口：成功的流没有长度上限**（WP04 r11，两个适配器相同）：
+  - 成功的流整体没有长度上限，单行也没有。内存随服务端发来的内容增长：一行在读完之前一直留在读取缓冲里；整份 JSON 的回复要累积到 body 结束。
+  - 时间是线性的：找行尾时每个字节只看一次，服务端按单字节分片发送也一样（r11 修复）。
+  - 不能直接用错误体的 64 KiB 读取上限：Responses 的 `response.completed` 事件带着整份 response，是一整行 `data:`；忽略 `stream:true` 的端点会回一整份 JSON，紧凑写法也是一整行。这两种都可能正常地超过 64 KiB。
+  - M2 要给整条流和单行各定一个上限，同时定好超出时报哪种 `ModelError`，两个适配器一起实现。
 - blob 按会话存放：每个会话建一个 ChatModel，或者用会话感知的 `BlobSource`，组装时决定。
 
 **线路快照**（`core.model.WireProfile`，随 `ChatRequest.wire` 传给适配器，冻结在 `request/header` 和 `side/request` 里）：
