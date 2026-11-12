@@ -7,7 +7,8 @@
  * adapter assigns call ids from its id source, not from a hash); recovers only a text that is
  * nothing but complete calls of declared tools in one enabled format, and otherwise keeps the text
  * untouched instead of stripping markup; DSML only inside its function_calls wrapper; no pipe
- * variant of the tool_call tag; leaves reasoning text alone; English comments.
+ * variant of the tool_call tag; leaves reasoning text alone; pairs each open tag with the first
+ * close tag after it in one pass instead of a lazy pattern per block; English comments.
  */
 package dev.phoneagent.core.model.openai
 
@@ -34,33 +35,11 @@ internal object LeakedToolMarkup {
         val argsJson: String,
     )
 
-    /** Bars come full-width (`｜`) or ASCII (`|`), one or two of them. */
-    private const val BAR = "[｜|]"
-    private const val DSML = BAR + "{1,2}\\s*DSML\\s*" + BAR + "{1,2}"
-
-    private val DSML_BLOCK =
-        Regex(
-            "<" + DSML + "\\s*function_calls\\s*>(.*?)</" + DSML + "\\s*function_calls\\s*>",
-            RegexOption.DOT_MATCHES_ALL,
-        )
-    private val INVOKE =
-        Regex(
-            "<" + DSML + "\\s*invoke\\s+name\\s*=\\s*\"([^\"]*)\"\\s*>(.*?)</" + DSML + "\\s*invoke\\s*>",
-            RegexOption.DOT_MATCHES_ALL,
-        )
-    private val PARAM =
-        Regex(
-            "<" + DSML + "\\s*parameter\\s+name\\s*=\\s*\"([^\"]*)\"" +
-                "(?:\\s+string\\s*=\\s*\"(true|false)\")?\\s*>(.*?)</" + DSML + "\\s*parameter\\s*>",
-            RegexOption.DOT_MATCHES_ALL,
-        )
-    private val TOOL_CALL_BLOCK = Regex("<tool_call>(.*?)</tool_call>", RegexOption.DOT_MATCHES_ALL)
-
     /** The block of each format, and the calls a block holds (`null` when it is not wholly calls). */
-    private val BLOCKS: Map<LeakedCallFormat, Pair<Regex, (MatchResult) -> List<Invocation>?>> =
+    private val BLOCKS: Map<LeakedCallFormat, Pair<Tag, (Tagged) -> List<Invocation>?>> =
         mapOf(
-            LeakedCallFormat.DSML to (DSML_BLOCK to ::dsmlCalls),
-            LeakedCallFormat.TOOL_CALL_TAG to (TOOL_CALL_BLOCK to ::jsonCalls),
+            LeakedCallFormat.DSML to (Tag.FUNCTION_CALLS to ::dsmlCalls),
+            LeakedCallFormat.TOOL_CALL_TAG to (Tag.TOOL_CALL to ::jsonCalls),
         )
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -76,7 +55,7 @@ internal object LeakedToolMarkup {
      * holding anything else, is kept.
      */
     fun recover(
-        text: String,
+        text: CharSequence,
         tools: Set<String>,
         formats: Set<LeakedCallFormat>,
     ): List<Invocation>? =
@@ -86,11 +65,11 @@ internal object LeakedToolMarkup {
 
     /** The calls of [text] when it is nothing but whole blocks of [format] and whitespace, else `null`. */
     private fun callsIn(
-        text: String,
+        text: CharSequence,
         format: LeakedCallFormat,
     ): List<Invocation>? {
-        val (block, read) = BLOCKS.getValue(format)
-        val blocks = block.findAll(text).toList()
+        val (tag, read) = BLOCKS.getValue(format)
+        val blocks = pairs(text, tag)
         val calls = blocks.map(read)
         val whole = calls.all { it != null } && tiles(text, blocks.map { it.range })
         return if (whole) calls.flatMap { it.orEmpty() } else null
@@ -98,7 +77,7 @@ internal object LeakedToolMarkup {
 
     /** Whether sorted [ranges] cover [text] without overlapping, leaving only whitespace between and around them. */
     private fun tiles(
-        text: String,
+        text: CharSequence,
         ranges: List<IntRange>,
     ): Boolean {
         var at = 0
@@ -110,20 +89,20 @@ internal object LeakedToolMarkup {
     }
 
     /** A DSML `function_calls` block: one or more invocations and whitespace, each complete. */
-    private fun dsmlCalls(block: MatchResult): List<Invocation>? {
-        val body = block.groupValues[1]
-        val invokes = INVOKE.findAll(body).toList()
+    private fun dsmlCalls(block: Tagged): List<Invocation>? {
+        val body = block.body
+        val invokes = pairs(body, Tag.INVOKE)
         val calls = invokes.map(::dsmlCall)
         val whole = calls.isNotEmpty() && calls.all { it != null } && tiles(body, invokes.map { it.range })
         return if (whole) calls.filterNotNull() else null
     }
 
     /** One DSML invocation; its body must be nothing but distinct, named parameters. */
-    private fun dsmlCall(invoke: MatchResult): Invocation? {
-        val name = invoke.groupValues[1].trim()
-        val body = invoke.groupValues[2]
-        val params = PARAM.findAll(body).toList()
-        val names = params.map { it.groupValues[1].trim() }
+    private fun dsmlCall(invoke: Tagged): Invocation? {
+        val name = invoke.open.groupValues[1].trim()
+        val body = invoke.body
+        val params = pairs(body, Tag.PARAMETER)
+        val names = params.map { it.open.groupValues[1].trim() }
         val complete = name.isNotEmpty() && names.none { it.isEmpty() } && names.toSet().size == names.size
         return if (complete &&
             tiles(body, params.map { it.range })
@@ -135,22 +114,22 @@ internal object LeakedToolMarkup {
     }
 
     /** DSML parameters → arguments JSON; `string="false"` values are parsed as JSON (text when they are not). */
-    private fun paramsJson(params: List<MatchResult>): String =
+    private fun paramsJson(params: List<Tagged>): String =
         buildJsonObject {
             for (param in params) {
-                val raw = param.groupValues[3]
-                val isString = param.groupValues[2] != "false"
+                val raw = param.body.toString()
+                val isString = param.open.groupValues[2] != "false"
                 put(
-                    param.groupValues[1].trim(),
+                    param.open.groupValues[1].trim(),
                     if (isString) JsonPrimitive(raw) else parsed(raw) ?: JsonPrimitive(raw),
                 )
             }
         }.toString()
 
     /** A `<tool_call>` block: one call object or a non-empty array of them, each complete. */
-    private fun jsonCalls(block: MatchResult): List<Invocation>? {
+    private fun jsonCalls(block: Tagged): List<Invocation>? {
         val items =
-            when (val element = parsed(block.groupValues[1])) {
+            when (val element = parsed(block.body.toString())) {
                 is JsonArray -> element.toList()
                 is JsonObject -> listOf(element)
                 is JsonPrimitive, null -> emptyList()
@@ -192,4 +171,53 @@ internal object LeakedToolMarkup {
             // Not JSON is an answer for the callers (plain value, or not a call), not an error.
             null
         }
+}
+
+/** Bars come full-width (`｜`) or ASCII (`|`), one or two of them. */
+private const val BAR = "[｜|]"
+private const val DSML = BAR + "{1,2}\\s*DSML\\s*" + BAR + "{1,2}"
+
+/** A tag of the markup: the open tag (its attributes as groups) and the close tag. */
+internal enum class Tag(
+    val open: Regex,
+    val close: Regex,
+) {
+    FUNCTION_CALLS(Regex("<" + DSML + "\\s*function_calls\\s*>"), Regex("</" + DSML + "\\s*function_calls\\s*>")),
+    INVOKE(
+        Regex("<" + DSML + "\\s*invoke\\s+name\\s*=\\s*\"([^\"]*)\"\\s*>"),
+        Regex("</" + DSML + "\\s*invoke\\s*>"),
+    ),
+    PARAMETER(
+        Regex("<" + DSML + "\\s*parameter\\s+name\\s*=\\s*\"([^\"]*)\"(?:\\s+string\\s*=\\s*\"(true|false)\")?\\s*>"),
+        Regex("</" + DSML + "\\s*parameter\\s*>"),
+    ),
+    TOOL_CALL(Regex("<tool_call>"), Regex("</tool_call>")),
+}
+
+/** An [open] tag, what it holds ([body]) and its close tag; [range] covers all three. */
+internal class Tagged(
+    val open: MatchResult,
+    val body: CharSequence,
+    val range: IntRange,
+)
+
+/**
+ * Each [tag] in [text] from the left, as `<open>(.*?)</close>` finds them: an open tag and the
+ * first close tag after it, then the next open tag after that close tag. An open tag with no close
+ * tag after it ends the search, since no later open tag has one either. Each character is looked
+ * at a bounded number of times, however many open tags have no close tag.
+ */
+internal fun pairs(
+    text: CharSequence,
+    tag: Tag,
+): List<Tagged> {
+    val found = mutableListOf<Tagged>()
+    var opened = tag.open.find(text)
+    while (opened != null) {
+        val closed = tag.close.find(text, opened.range.last + 1) ?: break
+        val body = text.subSequence(opened.range.last + 1, closed.range.first)
+        found += Tagged(opened, body, opened.range.first..closed.range.last)
+        opened = tag.open.find(text, closed.range.last + 1)
+    }
+    return found
 }
