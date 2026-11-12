@@ -1,14 +1,22 @@
 package dev.phoneagent.app.adapters.screen
 
+import android.app.Application
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageInfo
+import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.phoneagent.core.ports.LaunchTarget
 import dev.phoneagent.core.ports.SystemIntentKind
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Shadows.shadowOf
 import java.time.ZoneOffset
+import java.util.concurrent.Executor
 
 /** 64 KiB of adversarial text. */
 private const val LONG = 64 * 1024
@@ -34,6 +42,8 @@ private const val SMALL_STACK = 256L * 1024
  */
 @RunWith(AndroidJUnit4::class)
 class LongTextRegexTest {
+    private val context = ApplicationProvider.getApplicationContext<Application>()
+
     /** Runs [check] on a thread with [SMALL_STACK] and returns what it returned, or throws what it threw. */
     private fun <T> onSmallStack(check: () -> T): T {
         var result: Result<T>? = null
@@ -65,6 +75,28 @@ class LongTextRegexTest {
             "settings page app_details needs a valid 'package'",
             (broken as LaunchIntents.Built.Invalid).reason,
         )
+    }
+
+    @Test
+    fun anInstalledPackageOfManyPartsIsCheckedWithoutRecursion() {
+        // The package manager's names reach core's AppEntry too, checked there without a regex
+        // since fix05 (core.ports isPackageName); before, AppEntry's init overflowed here.
+        val name = dotted(LONG)
+        for (pkg in listOf(name, "$name!")) {
+            shadowOf(context.packageManager).installPackage(
+                PackageInfo().apply {
+                    packageName = pkg
+                    applicationInfo = ApplicationInfo().apply { packageName = pkg }
+                },
+            )
+        }
+        // Runs where it is called: on the thread with the small stack.
+        val catalog = AndroidAppCatalog(context, Executor(Runnable::run).asCoroutineDispatcher())
+        runBlocking { catalog.apps() }
+
+        val listed = onSmallStack { runBlocking { catalog.apps() } }.map { it.packageName }
+        assertTrue("listed: a dotted Java package name", name in listed)
+        assertFalse("left out: not a Java package name", "$name!" in listed)
     }
 
     @Test
