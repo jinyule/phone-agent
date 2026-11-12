@@ -117,6 +117,7 @@ private fun visibleOf(event: SessionEvent): Visible? =
         is CompactionPrune,
         is TaskStarted,
         is TaskLevelChanged,
+        is PolicyRulesRecorded,
         is ReasoningDropped,
         is SideRequest,
         is SideResponse,

@@ -24,8 +24,9 @@ import kotlin.reflect.KClass
  * - From every `session/resumed` on (so after every stop), the task waits for the user: until a
  *   `user/message` of kind USER is recorded in a turn, nothing runs. A turn may start, the inbox,
  *   the security level and other user messages may be recorded, the run may stop or be resumed
- *   again, and the runtime may read the screen on its own (`screen/snapshot` without a call), but
- *   no step, request, reply, call, prompt, side request or context change.
+ *   again, the runtime may record the rules of the new run (`policy/rules`) and read the screen on
+ *   its own (`screen/snapshot` without a call), but no step, request, reply, call, prompt, side
+ *   request or context change.
  *
  * An ignorable record of a type this build does not know changes none of this: it ends no wait
  * and stands neither between `turn/end(STOPPED)` and its `task/stopped` nor between a
@@ -122,6 +123,7 @@ private val OUTSIDE_TURNS: Set<KClass<out SessionEvent>> = setOf(TaskStopped::cl
 private val WHILE_WAITING: Set<KClass<out SessionEvent>> =
     setOf(
         TaskLevelChanged::class,
+        PolicyRulesRecorded::class,
         InboxSpliced::class,
         TaskStopped::class,
         SessionResumed::class,

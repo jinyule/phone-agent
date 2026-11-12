@@ -13,6 +13,7 @@ import dev.phoneagent.core.session.CompactionSummary
 import dev.phoneagent.core.session.HandoffEnded
 import dev.phoneagent.core.session.HandoffStarted
 import dev.phoneagent.core.session.InboxSpliced
+import dev.phoneagent.core.session.PolicyRulesRecorded
 import dev.phoneagent.core.session.PolicyVerdictRecorded
 import dev.phoneagent.core.session.PromptWithdrawn
 import dev.phoneagent.core.session.QuestionAnswered
@@ -102,6 +103,7 @@ internal fun isContextEvent(event: SessionEvent): Boolean =
 
         is TaskStarted,
         is TaskLevelChanged,
+        is PolicyRulesRecorded,
         is TurnStarted,
         is TurnEnded,
         is StepStarted,

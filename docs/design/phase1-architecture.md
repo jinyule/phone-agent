@@ -426,7 +426,7 @@ interface TaskRuntime {
 }
 ```
 
-实现是 `core.agent.AgentLoop`：`start(setup, sessionId, settings, scope)` 新建会话，`settings` 就是第 1 条记录 `task/start(level, unattended)`；`resume(setup, scope)` 打开已有会话。级别和 unattended 之后只从日志推导（`task/start`、`task/level-changed`），不是 `LoopConfig` 的配置项。`AgentSetup.plan.model` 是**为这个会话建的** `ChatModel`：适配器的 `BlobSource` 读本会话的 blobs，所以一个会话一个 `ChatModel` 实例。
+实现是 `core.agent.AgentLoop`：`start(setup, sessionId, settings, scope)` 新建会话，`settings` 就是第 1 条记录 `task/start(level, unattended)`，紧接着记 `setup.rules`（`policy/rules`，刷盘以后才接收输入）；`resume(setup, scope)` 打开已有会话，`session/resumed` 之后同样记一条 `policy/rules`。级别和 unattended 之后只从日志推导（`task/start`、`task/level-changed`），不是 `LoopConfig` 的配置项。`AgentSetup.plan.model` 是**为这个会话建的** `ChatModel`：适配器的 `BlobSource` 读本会话的 blobs，所以一个会话一个 `ChatModel` 实例。
 
 **输入与 Phase**：
 - 输入方法都不挂起、立即返回；先记成 `inbox/spliced`，再生效。
@@ -505,7 +505,7 @@ fun interface Chain<I, O> { suspend fun proceed(input: I): O }   // 不调用 pr
 | `toolPostExecute` | 每个调用有结果之后（执行、拒绝、转交都算） | `PostExecuteInput(call, tool, result)` → `PostExecuteResult(result, context)` | 替换结果；附加上下文（进 nextStep） | LoopGuard（含重复调用提醒）、OutwardPacing、KnowledgeNotice、Spill |
 | `turnStopping` | 有最终回答且 nextStep 里没有 steer 时 | `TurnStoppingInput(turn, step, continuations, reply)` → `End` / `Continue(context)` | 继续本 turn（受续跑上限约束） | TodoContinuation（M3） |
 
-主循环自带、不能被拦截器替换的部分：`preStep` 之前的步数上限；`request` 之后的刷盘；`toolPreExecute` 之后的 PolicyEngine；`toolExecute` 链最内层的执行事实（`tool/started`、刷盘、`tool/executed`），以及包住整条链的工具超时；提示的单提示锁和锁释放前的收尾（§3.2），派发不再补写 `prompt/withdrawn`；工具读屏时的屏幕判定（下面"屏幕判定"）。
+主循环自带、不能被拦截器替换的部分：每次运行开头的 `policy/rules`（`AgentSetup.rules`，§3.9）；`preStep` 之前的步数上限；`request` 之后的刷盘；`toolPreExecute` 之后的 PolicyEngine；`toolExecute` 链最内层的执行事实（`tool/started`、刷盘、`tool/executed`），以及包住整条链的工具超时；提示的单提示锁和锁释放前的收尾（§3.2），派发不再补写 `prompt/withdrawn`；工具读屏时的屏幕判定（下面"屏幕判定"）。
 
 **`requestError` 默认行为**：
 - `RetryInterceptor`：可重试的错误每个 step 最多重试 5 次；服务端给了 retry-after 就按它等，否则从 500 ms 指数退避到 10 s，一半固定一半随机。retry-after 超过 `maxRetryAfterMs`（默认 60 s，构造时校验）**不重试**，直接按不可重试失败，不会把等待缩短到上限。重试前的等待可以被 steer 打断。
@@ -561,7 +561,8 @@ sealed interface SessionEvent   // task/start|level-changed、turn/start|end、s
                                 // assistant/message|attempt、request/header|retry、context/reasoning-dropped、
                                 // side/request|response、tool/call|result、policy/verdict、approval/asked|decided、
                                 // handoff/start|end、question/asked|answered、prompt/withdrawn、compaction/*、
-                                // inbox/spliced、screen/snapshot|action|launch|judged|frame(blobRef)、tool/started|executed、task/stopped…
+                                // inbox/spliced、screen/snapshot|action|launch|judged|frame(blobRef)、tool/started|executed、task/stopped、
+                                // policy/rules…
 ```
 
 完整的类型表和每种类型是否 ignorable 登记在 `core.session.SessionEventTypes`；命名规则、序列化方式和格式版本见 ADR `2026-11-01-core-contracts`。
@@ -570,7 +571,7 @@ sealed interface SessionEvent   // task/start|level-changed、turn/start|end、s
 1. **模型可见 ⟺ 已记录**：请求 = 请求头 + `deriveMessages(events)` + 工具清单。`deriveMessages` 是纯函数；请求组装好后冻结。回放测试会逐字节核对。
    - 请求头带非秘密的线路快照 `wire: WireProfile`（凭据种类、非秘密 headers、推理字段与回传、图片发法、推理档位映射后的字段和值、输出上限字段名、禁止并行工具调用 / `stream_options` / `include` 开关、正文工具调用还原、映射规则版本），由 `ChatModel.prepare` 生成。适配器只从请求读这些项，不读实时的 ProviderProfile（`model-layer.md` §2）；
    - `request/header` 和 `assistant/message` 只属于主对话。看图、轻量等旁路请求整份记成 `side/request`（含快照），结果记成 `side/response`，二者不进主视图；
-   - PolicyEngine 的输入都能从日志算出：第 1 条记录固定是 `task/start(level, unattended)`，级别中途变化记 `task/level-changed`；`operatedPackages` 和 `outwardConfirmedPackages` 按执行事实（`tool/started`、`tool/executed`）推导，样例在 core 测试源码的 `PolicyContextSamples`。
+   - PolicyEngine 的输入都能从日志算出：第 1 条记录固定是 `task/start(level, unattended)`，级别中途变化记 `task/level-changed`；判定用的规则记在 `policy/rules(rulesVersion, tuning)`：每次运行开头一条（`task/start` 之后、每个 `session/resumed` 之后，两次运行之间升级了 App 规则就可能变），`tuning` 是 `PolicyTuning` 的全部字段，每个 `policy/verdict` 归它前面最近的一条；回放拿自己的规则和它比。这条记录 ignorable，不进模型视图；`operatedPackages` 和 `outwardConfirmedPackages` 按执行事实（`tool/started`、`tool/executed`）推导，样例在 core 测试源码的 `PolicyContextSamples`。
 2. **大对象存 blob**：截图存为 `blobs/<sha256>`（不带扩展名），日志里只记引用、mime 和尺寸。**旧截图怎么瘦身按协议区分**（见 `model-layer.md` §5）：
    - Responses / Chat Completions：越过阈值时在客户端做一次 Replace，只保留最近 N 张图（默认 3），更早的换成文字占位。
    - Anthropic：**不在客户端改写历史**，因为 preserved thinking 会让之后的思考块失效。改用服务端 context editing / compaction，Replace 只用于 UI 投影。

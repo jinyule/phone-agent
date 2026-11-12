@@ -13,6 +13,7 @@ import dev.phoneagent.core.ports.SurfaceManager
 import dev.phoneagent.core.session.InboxEntry
 import dev.phoneagent.core.session.InboxEntryKind
 import dev.phoneagent.core.session.InboxQueue
+import dev.phoneagent.core.session.PolicyRulesRecorded
 import dev.phoneagent.core.session.SessionFiles
 import dev.phoneagent.core.session.SessionLogException
 import dev.phoneagent.core.session.SessionRecord
@@ -62,6 +63,9 @@ import kotlin.time.TimeSource
  *   configuration: they come from the log, `task/start` and `task/level-changed`).
  * @property interceptors the extensions at the fixed points.
  * @property timeSource measures tool timeouts (virtual time in tests).
+ * @property rules the rules [policy] judges with, recorded at the start of every run: right after
+ *   `task/start` and right after each `session/resumed`; `null` records none. The product assembly
+ *   always gives them.
  */
 public data class AgentSetup(
     val taskId: TaskId,
@@ -77,6 +81,7 @@ public data class AgentSetup(
     val config: LoopConfig = LoopConfig(),
     val interceptors: Interceptors = Interceptors(),
     val timeSource: TimeSource.WithComparableMarks = TimeSource.Monotonic,
+    val rules: PolicyRulesRecorded? = null,
 )
 
 /**
@@ -231,8 +236,9 @@ public class AgentLoop private constructor(
         /**
          * Starts task [AgentSetup.taskId] with a new session [sessionId] in [AgentSetup.files], running
          * in [scope], with the security level and attendance in [settings] (record 1, `task/start`;
-         * from then on the log is their only source). It is idle until the first followup. Throws
-         * what `SessionStore.create` throws.
+         * from then on the log is their only source), then [AgentSetup.rules] (flushed). It is idle
+         * until the first followup. Throws what `SessionStore.create` throws, and what appending or
+         * flushing the rules throws; then it closes the log again.
          */
         public suspend fun start(
             setup: AgentSetup,
@@ -241,7 +247,16 @@ public class AgentLoop private constructor(
             scope: CoroutineScope,
         ): AgentLoop {
             val store = SessionStore.create(setup.files, sessionId, setup.taskId, settings, setup.clock)
-            return AgentLoop(setup, store, store.records(), scope)
+            val handover = StoreHandover(store)
+            try {
+                setup.rules?.let { rules ->
+                    store.append(rules)
+                    store.flush()
+                }
+                return handover.to(AgentLoop(setup, store, store.records(), scope))
+            } finally {
+                handover.release()
+            }
         }
 
         /**
@@ -250,7 +265,8 @@ public class AgentLoop private constructor(
          * log first ([repairOf], in the order `SessionStore.open` lists): an open prompt is
          * withdrawn, calls without a result get NOT_STARTED without a `tool/started`, else
          * OUTCOME_UNKNOWN (observe first when it may have changed the phone), an open step and
-         * turn end `FAILED`, an unfinished stop gets `task/stopped(ERROR)`; then `session/resumed`.
+         * turn end `FAILED`, an unfinished stop gets `task/stopped(ERROR)`; then `session/resumed`
+         * and [AgentSetup.rules].
          * Nothing continues on its own: the task waits for the user's input, and queued input stays
          * queued until the next followup or steer. Throws what `SessionStore.open` throws, and
          * [IllegalArgumentException] when the log belongs to another task. When it throws or is
@@ -283,6 +299,7 @@ public class AgentLoop private constructor(
             val repairs = repairOf(store.records(), RepairCause.FAILED, RESUMED_DETAIL, setup.config.texts)
             for (repair in repairs) store.append(repair.event, sources = repair.sources)
             store.append(SessionResumed(opened.log.truncatedTail?.bytes ?: 0))
+            setup.rules?.let { store.append(it) }
             store.flush()
             return AgentLoop(setup, store, store.records(), scope)
         }

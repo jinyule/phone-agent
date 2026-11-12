@@ -18,6 +18,7 @@ import dev.phoneagent.core.ports.Clock
 import dev.phoneagent.core.ports.ScreenPort
 import dev.phoneagent.core.ports.StoragePath
 import dev.phoneagent.core.ports.SurfaceManager
+import dev.phoneagent.core.session.PolicyRulesRecorded
 import dev.phoneagent.core.session.SessionEvent
 import dev.phoneagent.core.session.SessionFiles
 import dev.phoneagent.core.session.SessionRecord
@@ -61,6 +62,7 @@ internal class LoopHarness(
     val settings: TaskStarted = ATTENDED,
     val interceptors: Interceptors = Interceptors(requestError = emptyList()),
     val storage: InMemoryStoragePort = InMemoryStoragePort(),
+    val rules: PolicyRulesRecorded? = null,
     strictReplay: Boolean = true,
     observe: (ChatModel) -> ChatModel = { it },
 ) {
@@ -92,6 +94,7 @@ internal class LoopHarness(
             config = config,
             interceptors = interceptors,
             timeSource = scope.testScheduler.timeSource,
+            rules = rules,
         )
 
     /**
