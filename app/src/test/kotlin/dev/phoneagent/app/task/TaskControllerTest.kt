@@ -173,6 +173,33 @@ class TaskControllerTest {
         }
 
     @Test
+    fun theNextRunHasNoneOfTheStoppedRunsCommandsEvenIfTheViewMissedTheStop() =
+        runTest {
+            val tasks = controller()
+            tasks.send("a")
+            runCurrent()
+            val first = task.run
+            // The view is reading the log for a prompt it does not know when the run stops, and the
+            // next run replaces it before it sees the stop.
+            val gate = CompletableDeferred<Unit>()
+            task.gate = gate
+            first.phase.value = Phase.Waiting(WaitReason.USER, prompt)
+            runCurrent()
+            tasks.stop()
+            first.phase.value = Phase.Stopped(StopCause.USER)
+            tasks.send("b")
+            runCurrent()
+            gate.complete(Unit)
+            runCurrent()
+            assertEquals(2, task.runs.size)
+            assertEquals("only b is handed", 1, tasks.view.value.handed)
+
+            finishTurn("b")
+            runCurrent()
+            assertFalse(tasks.view.value.busy)
+        }
+
+    @Test
     fun aShutdownStopsTheRunAsAShutdown() =
         runTest {
             val tasks = controller()
