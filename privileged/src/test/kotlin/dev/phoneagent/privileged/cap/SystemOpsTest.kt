@@ -127,6 +127,37 @@ class SystemOpsTest {
         )
     }
 
+    @Test
+    fun aPackageNameOf64KiBIsRefusedWithoutOverflowingTheStack() {
+        // FWD-B1 sweep: PackageNames checked the shape with a regex repeating a group, which overflowed the stack.
+        val malformed = "a.".repeat(KIB_64 / 2)
+        val absent = "a.".repeat(KIB_64 / 2 - 1) + "aa"
+        val installed = helper.install(malformed, activity = malformed + "Main")
+        val display = helper.display()
+        val observed =
+            mapOf(
+                "mute, ends in ." to outcome { helper.core.setAudioMuted(malformed, true) },
+                "mute, not installed" to outcome { helper.core.setAudioMuted(absent, true) },
+                "cold start, ends in ." to
+                    outcome { helper.core.startActivity(display, Intent().setComponent(installed), 0, true) },
+            )
+        val expected =
+            mapOf(
+                "mute, ends in ." to "false",
+                "mute, not installed" to "false",
+                "cold start, ends in ." to "${StartResult.REFUSED}",
+            )
+        assertEquals(expected, observed)
+        assertEquals("no command ran", emptyList<List<String>>(), helper.commands.commands)
+    }
+
+    private fun outcome(call: () -> Any): String =
+        try {
+            call().toString()
+        } catch (overflow: StackOverflowError) {
+            overflow.toString()
+        }
+
     private fun appops(): RecordingCommands =
         RecordingCommands().apply {
             answer = { command ->
@@ -146,5 +177,8 @@ class SystemOpsTest {
 
     private companion object {
         const val MUSIC = "com.example.music"
+
+        /** 64 KiB, in characters (the names are ASCII). */
+        const val KIB_64 = 65_536
     }
 }

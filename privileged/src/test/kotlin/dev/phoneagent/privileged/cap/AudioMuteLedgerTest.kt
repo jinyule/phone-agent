@@ -140,6 +140,26 @@ class AudioMuteLedgerTest {
         val modes = mapOf("a.b" to "allow", "c.d" to "ignore")
         assertEquals(modes, AudioMuteLedger.parse(AudioMuteLedger.format(modes)))
     }
+
+    @Test
+    fun aLedgerLineOf64KiBIsReadOrDroppedWithoutOverflowingTheStack() {
+        // FWD-B1 sweep: PackageNames checked the shape with a regex repeating a group, which overflowed the stack.
+        val valid = "a.".repeat(KIB_64 / 2 - 1) + "aa"
+        val malformed = "a.".repeat(KIB_64 / 2)
+        val observed =
+            mapOf("valid" to valid, "ends in ." to malformed).mapValues { (_, pkg) ->
+                try {
+                    AudioMuteLedger
+                        .parse("$pkg allow\n")
+                        .keys
+                        .map { it.length }
+                        .toString()
+                } catch (overflow: StackOverflowError) {
+                    overflow.toString()
+                }
+            }
+        assertEquals(mapOf("valid" to "[$KIB_64]", "ends in ." to "[]"), observed)
+    }
 }
 
 class GrantSpecTest {
@@ -160,3 +180,6 @@ class GrantSpecTest {
         ).forEach { assertFalse("$it was allowed", GrantSpec.isAllowed(it)) }
     }
 }
+
+/** 64 KiB, in characters (the names are ASCII). */
+private const val KIB_64 = 65_536
