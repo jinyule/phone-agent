@@ -12,11 +12,14 @@ import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import mockwebserver3.RecordedRequest
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.Semaphore
+import java.util.concurrent.TimeUnit
 
 /**
  * An OpenAI-compatible Chat Completions server on loopback for "test and save": a model listing,
  * and a trial that calls the tool with the token it was asked for. [listingStatus] and
- * [trialStatus] make either step fail with the provider's own error body.
+ * [trialStatus] make either step fail with the provider's own error body; [holdTrials] keeps the
+ * trial calls waiting until released.
  */
 internal class FakeProvider : AutoCloseable {
     private val server = MockWebServer()
@@ -26,6 +29,33 @@ internal class FakeProvider : AutoCloseable {
     @Volatile var trialStatus: Int = 200
 
     @Volatile var listing: String = """{"object":"list","data":[{"id":"main-model","context_length":32768}]}"""
+
+    @Volatile private var hold: Hold? = null
+
+    /** Trials wait from now on, each until [Hold.release] lets it answer. */
+    fun holdTrials(): Hold = Hold().also { hold = it }
+
+    /** Held trials: each one that starts waiting is reported once to [arrived]. */
+    class Hold {
+        private val arrivals = Semaphore(0)
+        private val passes = Semaphore(0)
+
+        /** Waits until one more trial waits; `false` when none does within [seconds]. */
+        fun arrived(seconds: Long = WAIT_SECONDS): Boolean = arrivals.tryAcquire(seconds, TimeUnit.SECONDS)
+
+        /** Lets [count] trials answer, waiting ones first; by default every one from now on. */
+        fun release(count: Int = ALL) = passes.release(count)
+
+        internal fun await() {
+            arrivals.release()
+            passes.acquire()
+        }
+
+        private companion object {
+            const val WAIT_SECONDS = 10L
+            const val ALL = 1_000
+        }
+    }
 
     /** Every request: method, path, Authorization header and model asked for. */
     val requests: MutableList<Seen> = CopyOnWriteArrayList()
@@ -45,7 +75,7 @@ internal class FakeProvider : AutoCloseable {
         server.start()
     }
 
-    /** The base URL, `http://127.0.0.1:port/v1`. */
+    /** The base URL, `http://<loopback name>:port/v1` (the name MockWebServer reports). */
     val baseUrl: String get() = server.url("/v1").toString().removeSuffix("/")
 
     private fun answer(request: RecordedRequest): MockResponse {
@@ -74,6 +104,7 @@ internal class FakeProvider : AutoCloseable {
             }
 
             else -> {
+                hold?.await()
                 trial(tokenOf(sent!!))
             }
         }

@@ -26,9 +26,12 @@ import kotlin.concurrent.thread
  * The request (see [DebugModelRequest]) arrives on stdin, so its key is in no command line: other
  * shell-uid processes can read those (the helper nonce rule of phase1 §2.2). `printf` is a shell
  * builtin, so `$JSON` reaches no argv either. The request goes through the UI's "test and save"
- * ([DebugModelConfig]), and `status` reports how it went without repeating it. `status` says
- * `receiving` from the moment `config` is opened, so a read after `content write` returns never
- * sees the previous request's outcome.
+ * ([DebugModelConfig]), and `status` reports how it went without repeating it (only its `nonce`).
+ * `status` says `receiving` from the moment `config` is opened, so a read after `content write`
+ * returns never sees the previous request's outcome. A request while another runs is refused as
+ * `busy`; one sent while the saved settings are broken is refused as `settings_broken` unless it
+ * carries `"reset": true` ([DebugModelRequest]). Poll `status` until its state is neither
+ * `receiving` nor `running`, and match its `nonce` with the request's.
  *
  * Exported because the shell cannot open an unexported provider (that needs root); DUMP in the
  * manifest keeps ordinary apps out, and every call also checks that the caller is uid 2000. Only
