@@ -2,7 +2,8 @@
 <!-- Plain http is not limited here but where addresses are accepted: ProviderProfile takes http
      only for local servers (loopback, private and link-local literals, localhost, *.local), the
      address Ollama and LM Studio on the user's computer are reached at. Android's policy cannot
-     express "private addresses", so without this every local server fails with CLEARTEXT. -->
+     express "private addresses", so without this every local server fails with CLEARTEXT.
+     Every other HTTP client must refuse plain http itself: docs/adr/2026-11-12-release-cleartext.md. -->
 <network-security-config xmlns:tools="http://schemas.android.com/tools">
     <base-config
         cleartextTrafficPermitted="true"
