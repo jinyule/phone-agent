@@ -91,6 +91,28 @@ class FormCheckTest {
     }
 
     @Test
+    fun addressesAndHeaderValuesTheHttpClientRefusesAreProblems() {
+        // Every cell is collected first, so one run shows each that is let through.
+        val addresses =
+            listOf(
+                "http://127.0.0.1:0/v1",
+                "http://127.0.0.1:65536/v1",
+                "http://127.0.0.1:99999/v1",
+                "https://example.com:99999/v1",
+            ).associateWith { problems(custom.copy(baseUrl = it)) }
+        val values =
+            listOf("caf\u00e9", "line\nbreak", "\u0000", "\u007f")
+                .associate { "header $it" to problems(custom.copy(headers = mapOf("X-Note" to it))) }
+        assertEquals(
+            addresses.mapValues { listOf(FormProblem.BASE_URL_INVALID) } +
+                values.mapValues { listOf(FormProblem.HEADER_INVALID) },
+            addresses + values,
+        )
+        assertEquals(emptyList<FormProblem>(), problems(custom.copy(baseUrl = "http://127.0.0.1:65535/v1")))
+        assertEquals(emptyList<FormProblem>(), problems(custom.copy(headers = mapOf("X-Note" to "a\tb ~"))))
+    }
+
+    @Test
     fun otherProblems() {
         assertEquals(listOf(FormProblem.UNKNOWN_PRESET), problems(deepseek.copy(presetId = "nope")))
         assertEquals(

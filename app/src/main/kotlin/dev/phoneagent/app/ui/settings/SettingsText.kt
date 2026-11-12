@@ -137,6 +137,7 @@ internal fun problemText(problem: FormProblem): Int =
         FormProblem.PROTOCOL_UNSUPPORTED -> R.string.problem_protocol_unsupported
         FormProblem.CONTEXT_INVALID -> R.string.problem_context_invalid
         FormProblem.VISION_NEEDS_IMAGES -> R.string.problem_vision_needs_images
+        FormProblem.NOT_SENDABLE -> R.string.problem_not_sendable
     }
 
 @StringRes

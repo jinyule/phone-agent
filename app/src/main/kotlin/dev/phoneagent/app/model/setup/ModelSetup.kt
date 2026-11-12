@@ -68,7 +68,16 @@ internal class ModelSetup(
             val credential = ref?.let { Credential.ApiKey(it) } ?: Credential.None
             val profile = form.profile(credential)
             val probe = probeWith(TrialCredentials(ref, typed, credentials))
-            when (val run = Trials(form, profile, probe, onModel).run()) {
+            val run =
+                try {
+                    Trials(form, profile, probe, onModel).run()
+                } catch (ignoredUnsendable: IllegalArgumentException) {
+                    // The HTTP client refused the address or a header the profile accepted (core checks
+                    // both like the client does, so this is a disagreement): a form problem, not a crash.
+                    null
+                }
+            when (run) {
+                null -> SetupOutcome.Invalid(listOf(FormProblem.NOT_SENDABLE))
                 is TrialRun.Failed -> SetupOutcome.Failed(run.checks)
                 is TrialRun.Passed -> save(form, profile, run, typed?.let { checkNotNull(ref) to it })
             }

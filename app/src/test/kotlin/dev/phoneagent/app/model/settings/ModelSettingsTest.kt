@@ -193,4 +193,19 @@ class ModelSettingsTest {
         assertEquals(SettingsProblemKind.INVALID_VALUE, problem.kind)
         assertEquals("\$.providers[0].profile", problem.where)
     }
+
+    @Test
+    fun addressesAndHeaderValuesTheHttpClientRefusesAreRefusedOnLoad() {
+        val stored = text(settings())
+        val texts =
+            listOf(":0", ":65536", ":99999").associateWith {
+                stored.replace("https://api.deepseek.com", "https://api.deepseek.com$it")
+            } + ("caf\u00e9" to stored.replaceFirst("\"headers\":{}", "\"headers\":{\"X-Note\":\"caf\u00e9\"}"))
+        assertTrue(texts.values.all { it != stored })
+        val problems = texts.mapValues { (ModelSettingsFile.parse(it.value) as? SettingsLoad.Broken)?.problem }
+        assertEquals(
+            texts.mapValues { SettingsProblem(SettingsProblemKind.INVALID_VALUE, "\$.providers[0].profile") },
+            problems,
+        )
+    }
 }

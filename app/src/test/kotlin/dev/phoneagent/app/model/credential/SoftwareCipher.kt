@@ -9,11 +9,13 @@ import javax.crypto.spec.GCMParameterSpec
 /**
  * [SecretCipher] with a software AES-256-GCM key, standing in for the Keystore on the JVM. GCM is
  * real, so tampering, a swapped AAD and a replaced key really fail. [forget] and [lose] simulate a
- * cleared Keystore (a new key, or none); [refuseSeal] a Keystore that refuses to create keys.
+ * cleared Keystore (a new key, or none); [refuseSeal] a Keystore that refuses to create keys, and
+ * [sealFailure] one that fails in a way nobody expects (thrown as is).
  */
 internal class SoftwareCipher : SecretCipher {
     private var key: SecretKey? = newKey()
     var refuseSeal: Boolean = false
+    var sealFailure: RuntimeException? = null
     var seals: Int = 0
         private set
 
@@ -22,6 +24,7 @@ internal class SoftwareCipher : SecretCipher {
         aad: ByteArray,
     ): Sealed {
         if (refuseSeal) throw GeneralSecurityException("keystore refused")
+        sealFailure?.let { throw it }
         seals++
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, key ?: newKey().also { key = it })

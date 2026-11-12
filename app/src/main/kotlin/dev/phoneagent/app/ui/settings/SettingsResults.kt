@@ -30,6 +30,10 @@ internal fun RunResult(run: RunState) {
         is RunState.Done -> {
             Outcome(run.outcome)
         }
+
+        RunState.Error -> {
+            Text(stringResource(R.string.result_error), color = MaterialTheme.colorScheme.error)
+        }
     }
 }
 

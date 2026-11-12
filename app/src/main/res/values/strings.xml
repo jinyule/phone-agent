@@ -69,12 +69,13 @@
     <string name="problem_model_id_invalid">A model name is too long or holds control characters.</string>
     <string name="problem_key_missing">Enter the API key, or choose None.</string>
     <string name="problem_key_not_header_safe">The API key holds characters that cannot be sent.</string>
-    <string name="problem_base_url_invalid">The address must be https://host[/path] without a trailing slash; plain http only for local servers.</string>
+    <string name="problem_base_url_invalid">The address must be https://host[:port][/path] with a port from 1 to 65535 and no trailing slash; plain http only for local servers.</string>
     <string name="problem_header_invalid">A header name looks like a credential, or a value cannot be sent.</string>
     <string name="problem_unknown_preset">This preset is not known.</string>
     <string name="problem_protocol_unsupported">This protocol cannot be called yet.</string>
     <string name="problem_context_invalid">The context window must be a positive number.</string>
     <string name="problem_vision_needs_images">A vision model must accept images.</string>
+    <string name="problem_not_sendable">The address or a header cannot be sent. Nothing was saved.</string>
 
     <!-- Model settings: test results -->
     <string name="result_model">Model %1$s</string>
@@ -90,6 +91,7 @@
     <string name="result_not_saved_key">All checks passed, but the key could not be stored. The previous setup stays.</string>
     <string name="result_not_saved_settings">All checks passed, but the settings could not be written. The previous setup stays.</string>
     <string name="result_nothing_saved">Nothing was saved.</string>
+    <string name="result_error">Something unexpected went wrong, and the run stopped. Try again.</string>
     <string name="reason_credential_echoed">The reply contained the key, so it was rejected. Use another key, or choose None if the service needs no key.</string>
     <string name="reason_credential_in_trial">The key is part of the trial request itself, so every correct reply would repeat it. Use another key, or choose None if the service needs no key.</string>
 

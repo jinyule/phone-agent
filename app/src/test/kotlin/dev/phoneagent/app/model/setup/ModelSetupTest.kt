@@ -10,9 +10,11 @@ import dev.phoneagent.app.model.settings.RoleBinding
 import dev.phoneagent.core.ids.ModelId
 import dev.phoneagent.core.ids.ProviderId
 import dev.phoneagent.core.model.Credential
+import dev.phoneagent.core.model.CredentialResolver
 import dev.phoneagent.core.model.ModelErrorKind
 import dev.phoneagent.core.model.ModelRole
 import dev.phoneagent.core.model.VerifiedCapability
+import dev.phoneagent.core.model.openai.OpenAiAdapters
 import dev.phoneagent.core.model.openai.ProbeResult
 import dev.phoneagent.core.model.openai.ProbeStep
 import kotlinx.coroutines.runBlocking
@@ -253,6 +255,44 @@ class ModelSetupTest {
         assertEquals(emptyList<File>(), keyFiles)
         assertEquals(emptyMap<ProviderId, CredentialStatus>(), (services.state.value as SettingsState.Ready).keys)
     }
+
+    @Test
+    fun addressesAndHeaderValuesTheHttpClientRefusesAreFormProblemsNotCrashes() {
+        // Each cell is collected first (an exception counts as its class), so one run shows them all.
+        val addresses =
+            listOf("http://127.0.0.1:0/v1", "http://127.0.0.1:65536/v1", "http://127.0.0.1:99999/v1")
+                .associateWith { outcomeOrThrown(form.copy(baseUrl = it)) }
+        val values =
+            listOf("caf\u00e9", "line\nbreak")
+                .associate { "header $it" to outcomeOrThrown(form.copy(headers = mapOf("X-Note" to it))) }
+        assertEquals(
+            addresses.mapValues { SetupOutcome.Invalid(listOf(FormProblem.BASE_URL_INVALID)) } +
+                values.mapValues { SetupOutcome.Invalid(listOf(FormProblem.HEADER_INVALID)) },
+            addresses + values,
+        )
+        assertEquals(emptyList<FakeProvider.Seen>(), provider.requests)
+        assertNothingWritten()
+    }
+
+    @Test
+    fun anIllegalArgumentFromTheProbeIsAFormProblemNotACrash() {
+        // Core now refuses what OkHttp refuses before any request, so no form reaches this; a resolver
+        // stands in for a disagreement between the two, at the point the probe builds its request.
+        val unsendable = CredentialResolver { _, _ -> throw IllegalArgumentException("refused like OkHttp refuses") }
+        val refusing = ModelServices(files, noBackup, cipher, probeWith = { OpenAiAdapters(unsendable).probe() })
+        val outcome =
+            runBlocking {
+                refusing.reload()
+                refusing.testAndSave(form)
+            }
+        assertEquals(SetupOutcome.Invalid(listOf(FormProblem.NOT_SENDABLE)), outcome)
+        assertEquals(emptyList<FakeProvider.Seen>(), provider.requests)
+        assertFalse(settingsFile.exists())
+        assertEquals(emptyList<File>(), keyFiles)
+    }
+
+    private fun outcomeOrThrown(form: ProviderForm): Any =
+        runCatching { save(form) }.getOrElse { it.javaClass.simpleName }
 
     private fun assertNothingWritten() {
         assertFalse(settingsFile.exists())

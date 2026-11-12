@@ -1,5 +1,6 @@
 package dev.phoneagent.app.ui.settings
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -11,6 +12,7 @@ import dev.phoneagent.app.model.setup.ProviderForm
 import dev.phoneagent.app.model.setup.SetupOutcome
 import dev.phoneagent.core.ids.ModelId
 import dev.phoneagent.core.model.openai.ProviderPreset
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -45,11 +47,17 @@ internal sealed interface RunState {
     data class Done(
         val outcome: SetupOutcome,
     ) : RunState
+
+    /** Ended by something unexpected; only its class was logged. */
+    data object Error : RunState
 }
 
 /**
  * The settings screen's state. The form, key included, lives only here, in memory: it is not put
  * into the saved-state bundle, so the key never reaches disk outside the credential store.
+ *
+ * Nothing its work throws reaches the thread's uncaught handler: an unexpected failure ends as
+ * [RunState.Error] (cancellation, when the screen goes away, is not a failure).
  */
 internal class ModelSettingsViewModel(
     private val services: ModelServices,
@@ -68,8 +76,15 @@ internal class ModelSettingsViewModel(
     /** The last "test and save". */
     val run: StateFlow<RunState> = currentRun.asStateFlow()
 
+    private val failures =
+        CoroutineExceptionHandler { _, failure ->
+            // Only the class: a message can quote the form, key included.
+            Log.w(TAG, "settings work failed (${failure.javaClass.name})")
+            currentRun.value = RunState.Error
+        }
+
     init {
-        viewModelScope.launch {
+        viewModelScope.launch(failures) {
             val loaded = services.reload()
             if (loaded is SettingsState.Ready) currentForm.value = ProviderForm.of(loaded.settings)
         }
@@ -87,7 +102,7 @@ internal class ModelSettingsViewModel(
         if (currentRun.value is RunState.Testing) return
         currentRun.value = RunState.Testing(null)
         val form = currentForm.value
-        viewModelScope.launch {
+        viewModelScope.launch(failures) {
             val outcome = services.testAndSave(form) { currentRun.value = RunState.Testing(it) }
             if (outcome is SetupOutcome.Saved) currentForm.value = ProviderForm.of(outcome.settings)
             currentRun.value = RunState.Done(outcome)
@@ -95,7 +110,7 @@ internal class ModelSettingsViewModel(
     }
 
     override fun reset() {
-        viewModelScope.launch {
+        viewModelScope.launch(failures) {
             services.reset()
             currentForm.value = ProviderForm.start(null)
             currentRun.value = RunState.Idle
@@ -103,6 +118,8 @@ internal class ModelSettingsViewModel(
     }
 
     companion object {
+        private const val TAG = "PhoneAgentSettings"
+
         /** Builds the view model on the process-wide [ModelServices]. */
         val Factory: ViewModelProvider.Factory =
             viewModelFactory {

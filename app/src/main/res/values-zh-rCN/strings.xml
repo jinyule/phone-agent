@@ -67,12 +67,13 @@
     <string name="problem_model_id_invalid">有模型名太长或含控制字符。</string>
     <string name="problem_key_missing">请填写 API Key，或者选“无”。</string>
     <string name="problem_key_not_header_safe">API Key 里有无法发送的字符。</string>
-    <string name="problem_base_url_invalid">地址要写成 https://host[/path]，末尾不带斜杠；只有本地服务可以用 http。</string>
+    <string name="problem_base_url_invalid">地址要写成 https://host[:端口][/path]，端口在 1 到 65535 之间，末尾不带斜杠；只有本地服务可以用 http。</string>
     <string name="problem_header_invalid">有 header 名字像凭据，或者值无法发送。</string>
     <string name="problem_unknown_preset">不认识这个预设。</string>
     <string name="problem_protocol_unsupported">这个协议还不能调用。</string>
     <string name="problem_context_invalid">上下文长度必须是正数。</string>
     <string name="problem_vision_needs_images">看图模型必须能接收图片。</string>
+    <string name="problem_not_sendable">地址或某个 header 无法发送。没有保存任何内容。</string>
 
     <!-- Model settings: test results -->
     <string name="result_model">模型 %1$s</string>
@@ -88,6 +89,7 @@
     <string name="result_not_saved_key">测试都通过了，但 key 没能保存。之前的设置保持不变。</string>
     <string name="result_not_saved_settings">测试都通过了，但设置没能写入。之前的设置保持不变。</string>
     <string name="result_nothing_saved">没有保存任何内容。</string>
+    <string name="result_error">出现意外错误，这次测试中断了。请重试。</string>
     <string name="reason_credential_echoed">回复里出现了 key，所以被拒绝。请换一个 key；服务不需要 key 时请选“无”。</string>
     <string name="reason_credential_in_trial">这个 key 本身就是试调用请求的一部分，任何正确的回复都会重复它。请换一个 key；服务不需要 key 时请选“无”。</string>
 

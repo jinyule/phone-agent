@@ -196,7 +196,10 @@ internal enum class FormProblem {
     /** The key holds characters an HTTP header cannot carry. */
     KEY_NOT_HEADER_SAFE,
 
-    /** The address is not `https://host[/path]`, or plain `http` to a host that is not local. */
+    /**
+     * The address is not `https://host[:port][/path]` with a port in 1..65535, or plain `http` to a
+     * host that is not local.
+     */
     BASE_URL_INVALID,
 
     /** A header name looks like a credential, or a value is not valid HTTP. */
@@ -213,6 +216,13 @@ internal enum class FormProblem {
 
     /** A vision model is named but not marked as accepting images. */
     VISION_NEEDS_IMAGES,
+
+    /**
+     * The HTTP client refused to build a request that passed the checks above (its address or a
+     * header): the checks and the client disagree. The refused request was not sent, and nothing
+     * was saved.
+     */
+    NOT_SENDABLE,
 }
 
 /** Advice shown with a form; none of it keeps the form from being tested. */
