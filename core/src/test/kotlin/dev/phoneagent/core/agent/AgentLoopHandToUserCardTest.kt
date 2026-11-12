@@ -40,9 +40,10 @@ import java.io.IOException
 
 /**
  * The card of the real hand_to_user (WP06) as the loop shows it: a result hand_to_user reported
- * itself is settled (FAILED for a decline, even when no screen could be read afterwards), and the
- * ERROR the runtime writes when handOff threw instead (a failed take-back: where the app is is
- * unknown) shows UNKNOWN, not FAILED.
+ * itself is settled (FAILED for a decline, even when no screen could be read afterwards, and for
+ * a hand-over that moved nothing), except a take-back that failed after the user's turn
+ * (NOT_TAKEN_BACK: the app stays with the user), which shows UNKNOWN, as does the ERROR the runtime
+ * writes when handOff threw instead (a failed take-back: where the app is is unknown).
  */
 class AgentLoopHandToUserCardTest {
     private val c1 = ToolCallId("c1")
@@ -154,7 +155,7 @@ class AgentLoopHandToUserCardTest {
         }
 
     @Test
-    fun `a take-back that throws an IOException ends hand_to_user as not taken back`() =
+    fun `a take-back that throws an IOException ends hand_to_user as not taken back, shown unknown`() =
         runTest {
             val played = played(Surfaces(takeBack = { throw IOException("display busy") }), UserReply.HandoffDone)
 
@@ -168,6 +169,7 @@ class AgentLoopHandToUserCardTest {
             )
             assertEquals(ToolStatus.ERROR, played.result.status)
             assertEquals("not_taken_back", played.result.detail("handoff"))
+            assertEquals(StepState.UNKNOWN, played.card, "the app stays with the user, what they did is unknown")
         }
 
     @Test

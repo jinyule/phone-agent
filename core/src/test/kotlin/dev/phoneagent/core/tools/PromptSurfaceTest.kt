@@ -444,15 +444,17 @@ class PromptSurfaceTest {
                     .getValue(
                         "hand_to_user",
                     ).execute(call("hand_to_user", """{"kind":"login"}""", reason = "请登录微信"), ctx)
-            // Moving the app failed, either to the user or back from them.
-            val handFailed =
-                tools
-                    .getValue(
-                        "hand_to_user",
-                    ).execute(
-                        call("hand_to_user", """{"kind":"login"}""", reason = "请登录微信"),
-                        FakeContext(interaction = FakeInteraction(handoffResult = HandoffResult.FAILED)),
-                    )
+            // Moving the app failed: to the user (nothing moved), or back from them.
+            val (handFailed, notBack) =
+                listOf(HandoffResult.FAILED, HandoffResult.NOT_TAKEN_BACK).map { failed ->
+                    tools
+                        .getValue(
+                            "hand_to_user",
+                        ).execute(
+                            call("hand_to_user", """{"kind":"login"}""", reason = "请登录微信"),
+                            FakeContext(interaction = FakeInteraction(handoffResult = failed)),
+                        )
+                }
             val confirmed =
                 tools.getValue("request_confirmation").execute(
                     call("request_confirmation", """{"action":"发送消息","target":"张三","content":"十点半到"}"""),
@@ -465,7 +467,14 @@ class PromptSurfaceTest {
                     ).execute(call("end_not_done", """{"cause":"blocked","summary":"需要登录"}"""), ctx)
             Golden.assertMatches(
                 "results/interaction-and-end.expected.txt",
-                listOf(asked, handed, handFailed, confirmed, ended).joinToString("\n\n=====\n\n") { it.text() },
+                listOf(
+                    asked,
+                    handed,
+                    handFailed,
+                    notBack,
+                    confirmed,
+                    ended,
+                ).joinToString("\n\n=====\n\n") { it.text() },
             )
         }
 

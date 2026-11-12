@@ -8,6 +8,7 @@ import dev.phoneagent.core.tool.ToolContext
 import dev.phoneagent.core.tool.ToolGroup
 import dev.phoneagent.core.tool.ToolResult
 import dev.phoneagent.core.tool.ToolStatus
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.util.Locale
@@ -18,11 +19,12 @@ import java.util.Locale
  * model is told to observe before acting.
  *
  * Every result it reports itself names the handoff's outcome in `details.handoff` (`done`,
- * `declined`, `expired`, `unavailable`, `failed`): the hand-off settled, and its card says how. An
- * ERROR without it is the runtime's, not its own: handOff threw instead of returning (a failed
- * take-back, or a hand-over that did not settle, so the app may be with the user:
- * `ToolInteraction.handOff`), or the call failed around it. Whether the hand-off happened is then
- * unknown, so its card shows UNKNOWN, not FAILED.
+ * `declined`, `expired`, `unavailable`, `failed`, `not_taken_back`): the hand-off settled, and its
+ * card says how, except `not_taken_back`: the app stays with the user and what they did is
+ * unknown, so its card shows UNKNOWN. So does an ERROR without the detail, the runtime's, not its
+ * own: handOff threw instead of returning (a failed take-back, or a hand-over that did not
+ * settle, so the app may be with the user: `ToolInteraction.handOff`), or the call failed around
+ * it. `failed` moved nothing, so its card shows FAILED.
  */
 internal class HandToUserTool(
     mask: (String) -> String,
@@ -44,7 +46,8 @@ internal class HandToUserTool(
     // It moves the app to the user's screen, and a stopped hand-off is not taken back.
     override val mayChangePhone: Boolean = true
 
-    override fun uncertain(result: ToolResult): Boolean = result.details?.get(OUTCOME) == null
+    override fun uncertain(result: ToolResult): Boolean =
+        result.details?.get(OUTCOME).let { outcome -> outcome == null || outcome == NOT_BACK }
 
     override suspend fun execute(
         call: ToolCall,
@@ -82,12 +85,19 @@ internal class HandToUserTool(
                 ToolResult.failure(ToolStatus.ERROR, "现在没有人能接手（无人值守的任务）。这一步只能用户来做：end_not_done(cause=blocked)。")
             }
 
-            // Either the app could not be moved to the user, or it could not be taken back and stays
-            // on the main screen, whatever the user answered (SurfaceManager.takeBack).
-            HandoffResult.FAILED, HandoffResult.NOT_TAKEN_BACK -> {
+            // Nothing moved (SurfaceManager.handToUser): the app is where it was.
+            HandoffResult.FAILED -> {
                 ToolResult.failure(
                     ToolStatus.ERROR,
-                    "切换屏幕失败：可能没能把 App 交到用户手上，也可能用户处理完以后没能把 App 收回来，它还留在用户的屏幕上。" +
+                    "切换屏幕失败：没能把 App 交到用户手上，用户没有接手。先 phone_observe 看看现在的画面，再决定。",
+                )
+            }
+
+            // It stays on the main screen, whatever the user answered (SurfaceManager.takeBack).
+            HandoffResult.NOT_TAKEN_BACK -> {
+                ToolResult.failure(
+                    ToolStatus.ERROR,
+                    "切换屏幕失败：用户处理完以后没能把 App 收回来，它还留在用户的屏幕上，不知道用户做了什么。" +
                         "先 phone_observe 看看现在的画面，再决定。",
                 )
             }
@@ -100,6 +110,9 @@ internal class HandToUserTool(
         const val OUTCOME = "handoff"
     }
 }
+
+/** The outcome detail of a handoff that left the app with the user ([HandoffResult.NOT_TAKEN_BACK]). */
+private val NOT_BACK = JsonPrimitive(HandoffResult.NOT_TAKEN_BACK.name.lowercase(Locale.ROOT))
 
 private val KINDS =
     linkedMapOf(

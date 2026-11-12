@@ -115,18 +115,21 @@ class UserToolsTest {
                     HandoffResult.EXPIRED,
                     HandoffResult.UNAVAILABLE,
                     HandoffResult.FAILED,
+                    HandoffResult.NOT_TAKEN_BACK,
                 ).map { outcome ->
                     val result = run("hand_to_user", """{"kind":"login"}""", FakeInteraction(handoffResult = outcome))
                     assertEquals(ToolStatus.ERROR, result.status, "$outcome")
                     result.text()
                 }
-            assertEquals(4, texts.toSet().size)
+            assertEquals(5, texts.toSet().size)
             assertTrue(texts[0].contains("不要绕过这一步"))
             assertTrue(texts[2].contains("end_not_done(cause=blocked)"))
-            // FAILED is recorded when the app could not be moved to the user, and also when it could
-            // not be taken back: it then stays on the user's screen, whatever the user answered.
-            assertTrue(texts[3].contains("可能没能把 App 交到用户手上"), texts[3])
-            assertTrue(texts[3].contains("也可能用户处理完以后没能把 App 收回来"), texts[3])
+            // FAILED: nothing moved, the user was never asked. NOT_TAKEN_BACK: the app stays on the
+            // user's screen, whatever the user answered.
+            assertTrue(texts[3].contains("没能把 App 交到用户手上"), texts[3])
+            assertTrue(texts[3].contains("用户没有接手"), texts[3])
+            assertTrue(texts[4].contains("没能把 App 收回来"), texts[4])
+            assertTrue(texts[4].contains("还留在用户的屏幕上"), texts[4])
         }
 
     @Test
@@ -153,7 +156,7 @@ class UserToolsTest {
                         HandoffResult.EXPIRED to StepState.FAILED,
                         HandoffResult.UNAVAILABLE to StepState.FAILED,
                         HandoffResult.FAILED to StepState.FAILED,
-                        HandoffResult.NOT_TAKEN_BACK to StepState.FAILED,
+                        HandoffResult.NOT_TAKEN_BACK to StepState.UNKNOWN,
                     ),
                     results.mapValues { (_, result) -> handOff.presentResult(call, result).state },
                 )
