@@ -42,7 +42,8 @@ import dev.phoneagent.core.model.openai.ProviderPresets
 /**
  * The model settings: a full-page error with a reset when the saved settings cannot be used;
  * otherwise the current setup (asking for keys that must be entered again), the form, and the
- * result of the last "test and save", step by step.
+ * result of the last "test and save", step by step. Every control of the form is disabled while
+ * it is being tested.
  */
 @Composable
 internal fun ModelSettingsScreen(
@@ -136,43 +137,39 @@ private fun ProviderFormSection(
     run: RunState,
     actions: SettingsActions,
 ) {
+    val enabled = run !is RunState.Testing
     Text(stringResource(R.string.form_title), style = MaterialTheme.typography.titleMedium)
-    PresetChoice(form, actions)
+    PresetChoice(form, enabled, actions)
     // Right under the provider: "None" is offered first, so local services do not get a placeholder key.
-    AuthChoiceRow(form, actions)
+    AuthChoiceRow(form, enabled, actions)
     val keepsKey =
         ready.keys[form.providerId] == CredentialStatus.PRESENT && storedKeyRef(form, ready.settings) != null
-    if (form.auth == AuthChoice.API_KEY) KeyField(form, keepsKey, actions)
-    Field(form.baseUrl, R.string.form_base_url, SettingsTags.BASE_URL) { actions.edit(form.copy(baseUrl = it)) }
+    if (form.auth == AuthChoice.API_KEY) KeyField(form, keepsKey, enabled, actions)
+    Field(form.baseUrl, TextField.BASE_URL, enabled) { actions.edit(form.copy(baseUrl = it)) }
     for (hint in FormCheck.hints(form)) {
         if (hint is FormHint.UsePreset) {
             Text(stringResource(R.string.hint_use_preset, hint.preset.displayName))
-            OutlinedButton(onClick = { actions.choosePreset(hint.preset) }) {
+            OutlinedButton(onClick = { actions.choosePreset(hint.preset) }, enabled = enabled) {
                 Text(stringResource(R.string.hint_use_preset_action))
             }
         }
     }
-    if (form.presetId == null) ProtocolChoice(form, actions)
-    Field(form.mainModel, R.string.form_main_model, SettingsTags.MAIN_MODEL) { actions.edit(form.copy(mainModel = it)) }
-    Field(
-        form.lightModel,
-        R.string.form_light_model,
-        SettingsTags.LIGHT_MODEL,
-    ) { actions.edit(form.copy(lightModel = it)) }
-    Field(form.visionModel, R.string.form_vision_model, SettingsTags.VISION_MODEL) {
-        actions.edit(form.copy(visionModel = it))
-    }
+    if (form.presetId == null) ProtocolChoice(form, enabled, actions)
+    Field(form.mainModel, TextField.MAIN_MODEL, enabled) { actions.edit(form.copy(mainModel = it)) }
+    Field(form.lightModel, TextField.LIGHT_MODEL, enabled) { actions.edit(form.copy(lightModel = it)) }
+    Field(form.visionModel, TextField.VISION_MODEL, enabled) { actions.edit(form.copy(visionModel = it)) }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Switch(checked = form.visionImages, onCheckedChange = { actions.edit(form.copy(visionImages = it)) })
+        Switch(
+            checked = form.visionImages,
+            onCheckedChange = { actions.edit(form.copy(visionImages = it)) },
+            enabled = enabled,
+        )
         Text(stringResource(R.string.form_vision_images))
     }
-    Field(
-        form.contextTokens?.toString().orEmpty(),
-        R.string.form_context,
-        SettingsTags.CONTEXT,
-        KeyboardType.Number,
-    ) { actions.edit(form.copy(contextTokens = it.trim().toIntOrNull())) }
-    Button(onClick = actions::testAndSave, enabled = run !is RunState.Testing) {
+    Field(form.contextTokens?.toString().orEmpty(), TextField.CONTEXT, enabled) {
+        actions.edit(form.copy(contextTokens = it.trim().toIntOrNull()))
+    }
+    Button(onClick = actions::testAndSave, enabled = enabled) {
         Text(stringResource(R.string.form_test_and_save))
     }
 }
@@ -180,6 +177,7 @@ private fun ProviderFormSection(
 @Composable
 private fun PresetChoice(
     form: ProviderForm,
+    enabled: Boolean,
     actions: SettingsActions,
 ) {
     Text(stringResource(R.string.form_provider))
@@ -189,12 +187,14 @@ private fun PresetChoice(
                 selected = form.presetId == preset.id,
                 onClick = { actions.choosePreset(preset) },
                 label = { Text(preset.displayName) },
+                enabled = enabled,
             )
         }
         FilterChip(
             selected = form.presetId == null,
             onClick = { actions.choosePreset(null) },
             label = { Text(stringResource(R.string.form_custom)) },
+            enabled = enabled,
         )
     }
 }
@@ -202,6 +202,7 @@ private fun PresetChoice(
 @Composable
 private fun AuthChoiceRow(
     form: ProviderForm,
+    enabled: Boolean,
     actions: SettingsActions,
 ) {
     Text(stringResource(R.string.form_auth))
@@ -210,11 +211,13 @@ private fun AuthChoiceRow(
             selected = form.auth == AuthChoice.NONE,
             onClick = { actions.edit(form.copy(auth = AuthChoice.NONE)) },
             label = { Text(stringResource(R.string.form_auth_none)) },
+            enabled = enabled,
         )
         FilterChip(
             selected = form.auth == AuthChoice.API_KEY,
             onClick = { actions.edit(form.copy(auth = AuthChoice.API_KEY)) },
             label = { Text(stringResource(R.string.form_auth_key)) },
+            enabled = enabled,
         )
     }
 }
@@ -223,11 +226,13 @@ private fun AuthChoiceRow(
 private fun KeyField(
     form: ProviderForm,
     hasStoredKey: Boolean,
+    enabled: Boolean,
     actions: SettingsActions,
 ) {
     OutlinedTextField(
         value = form.apiKey,
         onValueChange = { actions.edit(form.copy(apiKey = it)) },
+        enabled = enabled,
         label = { Text(stringResource(R.string.form_key)) },
         supportingText = if (hasStoredKey) ({ Text(stringResource(R.string.form_key_keep)) }) else null,
         singleLine = true,
@@ -243,6 +248,7 @@ private fun KeyField(
 @Composable
 private fun ProtocolChoice(
     form: ProviderForm,
+    enabled: Boolean,
     actions: SettingsActions,
 ) {
     Text(stringResource(R.string.form_protocol))
@@ -252,6 +258,7 @@ private fun ProtocolChoice(
                 selected = form.protocol == protocol,
                 onClick = { actions.edit(form.copy(protocol = protocol)) },
                 label = { Text(stringResource(text)) },
+                enabled = enabled,
             )
         }
     }
@@ -263,20 +270,33 @@ private val PROTOCOL_TEXTS =
         ModelProtocol.OPENAI_RESPONSES to R.string.form_protocol_responses,
     )
 
+/** The form's plain text fields: label, test tag and keyboard. */
+private enum class TextField(
+    val label: Int,
+    val tag: String,
+    val keyboard: KeyboardType = KeyboardType.Uri,
+) {
+    BASE_URL(R.string.form_base_url, SettingsTags.BASE_URL),
+    MAIN_MODEL(R.string.form_main_model, SettingsTags.MAIN_MODEL),
+    LIGHT_MODEL(R.string.form_light_model, SettingsTags.LIGHT_MODEL),
+    VISION_MODEL(R.string.form_vision_model, SettingsTags.VISION_MODEL),
+    CONTEXT(R.string.form_context, SettingsTags.CONTEXT, KeyboardType.Number),
+}
+
 @Composable
 private fun Field(
     value: String,
-    label: Int,
-    tag: String,
-    keyboard: KeyboardType = KeyboardType.Uri,
+    field: TextField,
+    enabled: Boolean,
     onChange: (String) -> Unit,
 ) {
     OutlinedTextField(
         value = value,
         onValueChange = onChange,
-        label = { Text(stringResource(label)) },
+        enabled = enabled,
+        label = { Text(stringResource(field.label)) },
         singleLine = true,
-        keyboardOptions = KeyboardOptions(keyboardType = keyboard),
-        modifier = Modifier.fillMaxWidth().testTag(tag),
+        keyboardOptions = KeyboardOptions(keyboardType = field.keyboard),
+        modifier = Modifier.fillMaxWidth().testTag(field.tag),
     )
 }

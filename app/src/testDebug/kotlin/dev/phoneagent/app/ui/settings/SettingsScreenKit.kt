@@ -17,7 +17,7 @@ internal fun text(
     vararg args: Any,
 ): String = ApplicationProvider.getApplicationContext<Context>().getString(id, *args)
 
-/** The settings screen on a live form: edits go back into it, like the view model does. */
+/** The settings screen on a live form and run: edits go back into the form, like the view model does. */
 internal class FakeSettingsScreen(
     compose: ComposeContentTestRule,
     start: ProviderForm,
@@ -25,12 +25,13 @@ internal class FakeSettingsScreen(
     run: RunState = RunState.Idle,
 ) : SettingsActions {
     var form by mutableStateOf(start)
+    var run by mutableStateOf(run)
     val presets = mutableListOf<ProviderPreset?>()
     var tests = 0
     var resets = 0
 
     init {
-        compose.setContent { MaterialTheme { ModelSettingsScreen(settings, form, run, this) } }
+        compose.setContent { MaterialTheme { ModelSettingsScreen(settings, form, this.run, this) } }
     }
 
     override fun edit(form: ProviderForm) {

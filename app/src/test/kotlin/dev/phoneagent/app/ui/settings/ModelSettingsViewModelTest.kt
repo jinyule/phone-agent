@@ -7,6 +7,7 @@ import dev.phoneagent.app.model.setup.FakeProvider
 import dev.phoneagent.app.model.setup.FormProblem
 import dev.phoneagent.app.model.setup.ProviderForm
 import dev.phoneagent.app.model.setup.SetupOutcome
+import dev.phoneagent.core.model.openai.ProviderPresets
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
@@ -93,6 +94,34 @@ class ModelSettingsViewModelTest {
         model.testAndSave()
         val again = runBlocking { withTimeout(WAIT_MILLIS) { model.run.first { it is RunState.Done } } }
         assertTrue(again.toString(), (again as RunState.Done).outcome is SetupOutcome.Saved)
+    }
+
+    @Test
+    fun theFormCannotChangeWhileItIsBeingTested() {
+        val hold = provider.holdTrials()
+        val model = ModelSettingsViewModel(services)
+        model.edit(form)
+        model.testAndSave()
+        check(hold.arrived()) { "the trial never came" }
+        model.edit(model.form.value.copy(mainModel = "newer-model"))
+        val afterEdit = model.form.value.mainModel
+        model.choosePreset(ProviderPresets.DEEPSEEK)
+        val afterPreset = model.form.value.presetId
+        hold.release()
+        val end = runBlocking { withTimeout(WAIT_MILLIS) { model.run.first { it !is RunState.Testing } } }
+        val shownAfterSave = model.form.value.mainModel
+        model.edit(model.form.value.copy(mainModel = "newer-model"))
+        // Collected first, so a run that takes edits meanwhile shows where they went.
+        assertEquals(
+            listOf("main-model", null, "Saved", "main-model", "newer-model"),
+            listOf(
+                afterEdit,
+                afterPreset,
+                (end as? RunState.Done)?.outcome?.javaClass?.simpleName,
+                shownAfterSave,
+                model.form.value.mainModel,
+            ),
+        )
     }
 
     private companion object {

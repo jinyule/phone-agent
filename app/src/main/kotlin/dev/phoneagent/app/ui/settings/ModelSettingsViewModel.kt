@@ -20,10 +20,10 @@ import kotlinx.coroutines.launch
 
 /** What the settings screen can ask for. */
 internal interface SettingsActions {
-    /** The user changed the form. */
+    /** The user changed the form (ignored while it is being tested). */
     fun edit(form: ProviderForm)
 
-    /** The user picked [preset] (`null`: custom); what was typed stays. */
+    /** The user picked [preset] (`null`: custom); what was typed stays (ignored while it is being tested). */
     fun choosePreset(preset: ProviderPreset?)
 
     /** "Test and save" of the current form. */
@@ -58,6 +58,10 @@ internal sealed interface RunState {
  *
  * Nothing its work throws reaches the thread's uncaught handler: an unexpected failure ends as
  * [RunState.Error] (cancellation, when the screen goes away, is not a failure).
+ *
+ * While a "test and save" runs ([RunState.Testing]) the form cannot change: the screen disables it
+ * and edits are ignored. The form a saved run shows afterwards is therefore the one it tested,
+ * never one that replaced later input.
  */
 internal class ModelSettingsViewModel(
     private val services: ModelServices,
@@ -91,10 +95,12 @@ internal class ModelSettingsViewModel(
     }
 
     override fun edit(form: ProviderForm) {
+        if (currentRun.value is RunState.Testing) return
         currentForm.value = form
     }
 
     override fun choosePreset(preset: ProviderPreset?) {
+        if (currentRun.value is RunState.Testing) return
         currentForm.value = currentForm.value.switchedTo(preset)
     }
 
