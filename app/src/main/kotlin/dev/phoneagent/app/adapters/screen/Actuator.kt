@@ -14,8 +14,9 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Taps, scrolls, swipes and keys on one display, each with its fallback chain (phase1 §3.3):
- * node action first, then a display-targeted accessibility gesture. Injection through the
- * privileged helper is the third level from M2 ([InputInjector]).
+ * node action first, then a display-targeted accessibility gesture, except that a press given to
+ * a node is that node's action only ([tap]). Injection through the privileged helper is the third
+ * level from M2 ([InputInjector]).
  *
  * @param ownAt whether a pixel lies on this app's own UI; no gesture or injected stroke starts there.
  */
@@ -55,10 +56,14 @@ internal class Actuator(
 
     /**
      * Taps (or long-presses) [element]: the click (long click) action of [press], the node the press
-     * goes to ([NodeActions.pressTarget]), else, with none, a gesture at [element]'s center. Apps
-     * may answer the action `false` although it ran, so a `false` is followed by a gesture only when
-     * [probe] sees no change and the answer came quickly; a `false` that took
-     * [ScreenTimings.clickUncertainMs] or longer (the platform gave up waiting) is not retried.
+     * goes to ([NodeActions.pressTarget]), else, with none, a gesture at [element]'s center. A press
+     * given to [press] is never followed by a gesture (ADR 2026-11-12-no-touch-after-refused-press):
+     * the policy judged [press], not what a touch at the center would reach (a sibling over it, a
+     * window come since). Apps may answer the action `false` although it ran, so a `false` after
+     * which [probe] sees a change is done; any other `false` is [Result.NotDone], saying it may have
+     * happened when the answer took [ScreenTimings.clickUncertainMs] or longer (the platform gave up
+     * waiting), else that the app refused it. Once the center is checked before a touch (M2), the
+     * touch may come back for a `false` answered quickly.
      */
     suspend fun tap(
         element: NodeTarget,
@@ -89,7 +94,12 @@ internal class Actuator(
             }
 
             else -> {
-                tapAt(center, long)
+                val what = if (long) "long press" else "click"
+                Result.NotDone(
+                    "the app refused the $what and nothing changed; it was not made up for with a touch. " +
+                        "If it still needs pressing, tap its coordinates instead: that tap is checked for " +
+                        "what lies at that point",
+                )
             }
         }
     }

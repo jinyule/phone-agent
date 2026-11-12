@@ -115,24 +115,30 @@ class ActuatorTest {
         }
 
     @Test
-    fun aRefusedClickFallsBackToAGesture() =
+    fun aRefusedPressIsNotMadeUpForWithAGesture() =
         runTest {
-            val button = node("android.widget.Button", Rect(0, 0, 100, 100)) { isClickable = true }
-            button.log.answer = { _, _ -> false }
+            // Fix list fwd B2: a touch at the center may reach what the policy did not judge.
+            for (long in listOf(false, true)) {
+                val button =
+                    node("android.widget.Button", Rect(0, 0, 100, 100)) {
+                        isClickable = true
+                        isLongClickable = true
+                    }
+                button.log.answer = { _, _ -> false }
+                val what = if (long) "long press" else "click"
 
-            assertEquals(
-                Actuator.Result.Done(Actuator.Via.GESTURE),
-                actuator().tap(target(button), press = button, long = false, probe = unchanged),
-            )
-            assertEquals(listOf(AccessibilityNodeInfo.ACTION_CLICK), button.log.ids)
-            assertEquals(
-                listOf(PixelPoint(50f, 50f)),
-                host.gestures
-                    .single()
-                    .second
-                    .single()
-                    .points,
-            )
+                assertEquals(
+                    Actuator.Result.NotDone(
+                        "the app refused the $what and nothing changed; it was not made up for with a touch. " +
+                            "If it still needs pressing, tap its coordinates instead: that tap is checked for " +
+                            "what lies at that point",
+                    ),
+                    actuator().tap(target(button), press = button, long = long, probe = unchanged),
+                )
+                val action = if (long) AccessibilityNodeInfo.ACTION_LONG_CLICK else AccessibilityNodeInfo.ACTION_CLICK
+                assertEquals(listOf(action), button.log.ids)
+            }
+            assertTrue("no gesture", host.gestures.isEmpty())
         }
 
     @Test
