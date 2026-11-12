@@ -18,7 +18,7 @@ class FormatFixtureTest {
         @TempDir root: Path,
     ) {
         val written = FormatFixture.write(root)
-        assertEquals(root.resolve("v${SessionFormat.CURRENT_VERSION}").resolve(FormatFixture.FILE), written)
+        assertEquals(root.resolve("v1").resolve(FormatFixture.FILE), written)
         assertEquals(FormatFixture.text(), Files.readString(written))
     }
 
@@ -26,24 +26,24 @@ class FormatFixtureTest {
     fun `the fixture of a later version carries that version in its directory and its header`(
         @TempDir root: Path,
     ) {
-        val next = SessionFormat.CURRENT_VERSION + 1
-        val later =
+        val v2 =
             SessionCodec(
                 migrations =
-                    SessionFormat.MIGRATIONS +
+                    listOf(
                         object : SessionMigration {
-                            override val fromVersion = SessionFormat.CURRENT_VERSION
+                            override val fromVersion = 1
 
                             override fun migrate(envelope: JsonObject) = envelope
                         },
-                currentVersion = next,
+                    ),
+                currentVersion = 2,
             )
-        val written = FormatFixture.write(root, later)
-        assertEquals(root.resolve("v$next").resolve(FormatFixture.FILE), written)
+        val written = FormatFixture.write(root, v2)
+        assertEquals(root.resolve("v2").resolve(FormatFixture.FILE), written)
         val bytes = Files.readAllBytes(written)
-        assertEquals(next, later.decodeHeader(bytes.decodeToString().lineSequence().first()).version)
-        val read = later.read(bytes)
-        assertEquals(next, read.header.version)
+        assertEquals(2, v2.decodeHeader(bytes.decodeToString().lineSequence().first()).version)
+        val read = v2.read(bytes)
+        assertEquals(2, read.header.version)
         assertEquals(SessionSamples.records, read.records)
     }
 
@@ -51,11 +51,10 @@ class FormatFixtureTest {
     fun `the generator refuses a version directory that exists, even an empty one`(
         @TempDir root: Path,
     ) {
-        val current = root.resolve("v${SessionFormat.CURRENT_VERSION}")
-        Files.createDirectory(current)
+        Files.createDirectory(root.resolve("v1"))
         val error = assertThrows<IllegalStateException> { FormatFixture.main(arrayOf(root.toString())) }
         assertTrue("never rewritten" in error.message.orEmpty(), error.message)
-        assertFalse(Files.exists(current.resolve(FormatFixture.FILE)))
+        assertFalse(Files.exists(root.resolve("v1").resolve(FormatFixture.FILE)))
     }
 
     @Test

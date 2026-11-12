@@ -57,7 +57,7 @@ class SessionStoreTest {
             assertEquals(store.header, log.header)
             assertEquals(
                 SessionHeader(
-                    version = SessionFormat.CURRENT_VERSION,
+                    version = 1,
                     sessionId = SessionSamples.session,
                     taskId = SessionSamples.task,
                     createdAt = 100,
@@ -188,10 +188,10 @@ class SessionStoreTest {
     fun `open refuses logs of another version and missing logs`() =
         runTest {
             newStore().append(TurnStarted(1))
-            val next = SessionCodec(SessionFormat.MIGRATIONS + Identity, SessionFormat.CURRENT_VERSION + 1)
-            val error = assertThrows<UnsupportedSessionVersionException> { SessionStore.open(files, clock, next) }
-            assertEquals(SessionFormat.CURRENT_VERSION, error.version)
-            assertEquals(2, SessionStore.read(files, next).records.size, "reading through migrations still works")
+            val v2 = SessionCodec(listOf(Identity), currentVersion = 2)
+            val error = assertThrows<UnsupportedSessionVersionException> { SessionStore.open(files, clock, v2) }
+            assertEquals(1, error.version)
+            assertEquals(2, SessionStore.read(files, v2).records.size, "reading through migrations still works")
             assertThrows<FileNotFoundException> {
                 SessionStore.open(
                     SessionFiles(storage, StoragePath("missing")),
@@ -374,7 +374,7 @@ class SessionStoreTest {
     }
 
     private object Identity : SessionMigration {
-        override val fromVersion = SessionFormat.CURRENT_VERSION
+        override val fromVersion = 1
 
         override fun migrate(envelope: kotlinx.serialization.json.JsonObject) = envelope
     }

@@ -78,8 +78,7 @@ object SessionSamples {
     val call = ToolCallId("call-1")
     val prompt = PromptId("prompt-1")
     val blob = BlobRef("a".repeat(64))
-    val header =
-        SessionHeader(version = SessionFormat.CURRENT_VERSION, sessionId = session, taskId = task, createdAt = 1_000)
+    val header = SessionHeader(version = 1, sessionId = session, taskId = task, createdAt = 1_000)
     val start = TaskStarted(SecurityLevel.STANDARD, unattended = false)
 
     /** A wire snapshot with every field set away from its default. */
