@@ -27,6 +27,14 @@ public fun interface PolicyEngine {
 }
 
 /**
+ * The tool a new screen is judged as (policy-rules §6.4). The runtime judges every screen a tool
+ * call reads as a call of this tool with no arguments, with the reading call's id, task, session
+ * and reason, resolved as a READ on that screen, with no approval in the context, and shows the
+ * screen to the model only on [Verdict.Allow]. The rules answer such a call with Allow or Refuse.
+ */
+public const val SCREEN_JUDGMENT_TOOL: String = "phone_observe"
+
+/**
  * What a call would do, resolved before execution from the action, its target element and the
  * current screen.
  *
