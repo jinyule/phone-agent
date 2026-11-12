@@ -48,6 +48,7 @@ public data class ToolCall(
  * @property status how the call ended.
  * @property content what the model reads: text and images only.
  * @property details structured data for `presentResult` and projections; never sent to the model.
+ *   [SCREEN] names the screen [content] shows, when it shows one.
  * @property control a signal to the loop (e.g. end the turn), or `null`; only on [ToolStatus.OK].
  */
 @Serializable
@@ -69,6 +70,15 @@ public data class ToolResult(
 
     /** Shortcuts. */
     public companion object {
+        /**
+         * Key in [details] of the snapshot id (a string) of the screen [content] shows: the page,
+         * diff or header the model reads. Absent when the result shows no screen. The runtime
+         * counts a screen as seen by the model only when it was judged shown for the call and its
+         * result names it here (policy-rules §6.4); a result that leaves it out only means later
+         * results compare less with it.
+         */
+        public const val SCREEN: String = "screen"
+
         /** A successful text result. */
         public fun ok(text: String): ToolResult = ToolResult(ToolStatus.OK, listOf(Part.Text(text)))
 

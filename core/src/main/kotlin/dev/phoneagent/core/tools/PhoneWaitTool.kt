@@ -154,7 +154,7 @@ internal class PhoneWaitTool(
         val details =
             buildJsonObject {
                 put("met", met)
-                put("screen", snapshot.id.value)
+                put(ToolResult.SCREEN, snapshot.id.value)
             }
         val text = line + "\n" + presenter.page(snapshot, SnapshotDetail.BRIEF)
         return ToolResult(if (met) ToolStatus.OK else ToolStatus.ERROR, listOf(Part.Text(text)), details)

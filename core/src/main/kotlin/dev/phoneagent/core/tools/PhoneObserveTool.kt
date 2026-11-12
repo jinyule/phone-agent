@@ -103,7 +103,7 @@ internal class PhoneObserveTool(
             }
         val details =
             buildJsonObject {
-                put("screen", snapshot.id.value)
+                put(ToolResult.SCREEN, snapshot.id.value)
                 put("quality", snapshot.quality.name)
                 put("imageAttached", content.any { it is Part.Image })
             }
