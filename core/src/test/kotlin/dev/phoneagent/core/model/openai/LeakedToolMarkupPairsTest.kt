@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertAll
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.EnumSource
 import kotlin.random.Random
@@ -29,9 +30,26 @@ class LeakedToolMarkupPairsTest {
     @ParameterizedTest
     @EnumSource(OpenTags::class)
     fun `each character is read a bounded number of times`(tags: OpenTags) {
-        val text = CountingChars(tags.text)
-        assertNull(LeakedToolMarkup.recover(text, TOOLS, LeakedCallFormat.entries.toSet()), "$tags")
-        assertTrue(text.most() <= MAX_READS, "$tags: ${text.most()} reads")
+        val reads =
+            LeakedCallFormat.entries.associateWith { format ->
+                val text = CountingChars(tags.text)
+                assertNull(LeakedToolMarkup.recover(text, TOOLS, setOf(format)), "$tags, $format")
+                text.most()
+            }
+        assertAll(reads.map { (format, most) -> { assertTrue(most <= MAX_READS, "$tags, $format: $most reads") } })
+    }
+
+    @Test
+    fun `a close tag written in an open tag's name does not close it`() {
+        val invoke = "<|DSML|invoke name=\"</|DSML|invoke>\">x</|DSML|invoke>"
+        val parameter = "<|DSML|parameter name=\"</|DSML|parameter>\" string=\"true\">1</|DSML|parameter>"
+        assertAll(
+            { assertEquals(listOf(invoke.indices to listOf("</|DSML|invoke>", "x")), seen(invoke, Tag.INVOKE)) },
+            {
+                val expected = listOf(parameter.indices to listOf("</|DSML|parameter>", "true", "1"))
+                assertEquals(expected, seen(parameter, Tag.PARAMETER))
+            },
+        )
     }
 
     @Test
@@ -41,11 +59,16 @@ class LeakedToolMarkupPairsTest {
             val text = buildString { repeat(random.nextInt(MAX_PIECES)) { append(PIECES.random(random)) } }
             for ((tag, old) in OLD_BLOCKS) {
                 val expected = old.findAll(text).map { it.range to it.groupValues.drop(1) }.toList()
-                val paired = pairs(text, tag).map { it.range to it.open.groupValues.drop(1) + it.body.toString() }
-                assertEquals(expected, paired, "$tag in [$text]")
+                assertEquals(expected, seen(text, tag), "$tag in [$text]")
             }
         }
     }
+
+    /** Each pair of [tag] in [text]: where it stands, the open tag's groups and the body. */
+    private fun seen(
+        text: String,
+        tag: Tag,
+    ) = pairs(text, tag).map { it.range to it.open.groupValues.drop(1) + it.body.toString() }
 
     private companion object {
         const val TOOL_CALL_OPENS = 5957
@@ -94,6 +117,7 @@ class LeakedToolMarkupPairsTest {
                 listOf("<|DSML|parameter name=\"z\" string=\"true\">") +
                 listOf("<|DSML|parameter name=\"q\" string=\"maybe\">") +
                 listOf("</｜DSML｜parameter>", "</|DSML|parameter>") +
+                listOf("<|DSML|invoke name=\"</|DSML|invoke>\">", "<|DSML|parameter name=\"</|DSML|parameter>\">") +
                 listOf("<", "</", "<|", "<｜", "｜", "|", "||", "DSML", "｜DSML｜", "|DSML|", ">", "\"", "\"a\"") +
                 listOf("function_calls", "invoke", "parameter", " name=", " name=\"", " string=\"false\"") +
                 listOf(" ", "\n", "\t", "x", "{}", "{\"name\":\"tap\",\"arguments\":{}}", "[", "]", "1", "<<", ">>")

@@ -18,7 +18,8 @@ internal class CountingChars(
         endIndex: Int,
     ): CharSequence = CountingChars(text, reads, offset + startIndex, endIndex - startIndex)
 
-    override fun toString(): String = buildString { for (index in 0 until length) append(get(index)) }
+    /** The characters, each read once. */
+    override fun toString(): String = CharArray(length) { get(it) }.concatToString()
 
     /** The most reads of any one character. */
     fun most(): Int = reads.maxOrNull() ?: 0
