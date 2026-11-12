@@ -50,7 +50,10 @@ class OpenCall {
         fun after(records: List<SessionRecord>): ToolCallId? =
             OpenCall().apply { records.forEach { take(it.event) } }.current
 
-        /** The call [event] names, if any. */
+        /**
+         * The call [event] names, if any. Every event with a call id belongs here; `screen/judged`
+         * (WP02b, design-6.4 §4) joins when it is logged.
+         */
         fun named(event: SessionEvent): ToolCallId? =
             when {
                 event is ToolCallRecorded -> event.call.id
@@ -172,6 +175,15 @@ object DeviceScript {
         return steps
     }
 
+    /**
+     * The port call [event] records, or `null` for a record that is not device input. A screen
+     * judgment (`screen/judged`, WP02b) is a fact to compare, not input: it stays `null` here.
+     * The framed observe of design-6.4 §4 changes two things: its port calls are snapshot S,
+     * frame, snapshot S2 while the log has S, S2 and then `screen/frame{checkedOn = S2}`, so the
+     * FRAME step moves before the S2 snapshot it names; and a frame the runtime dropped leaves no
+     * record, so [ReplayScreen.frame] must give `null` where no FRAME step is queued (today a
+     * missing frame is a `noFrame` fact and anything else fails).
+     */
     private fun step(
         seq: Long,
         event: SessionEvent,

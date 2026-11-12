@@ -16,16 +16,37 @@ import dev.phoneagent.core.session.ApprovalAsked
 import dev.phoneagent.core.session.PolicyVerdictRecorded
 import dev.phoneagent.core.session.ScreenActed
 import dev.phoneagent.core.session.ScreenObserved
+import dev.phoneagent.core.session.SessionCodec
 import dev.phoneagent.core.session.SessionEvent
 import dev.phoneagent.core.session.SessionRecord
+import dev.phoneagent.core.session.SessionSamples
 import dev.phoneagent.core.session.ToolResultRecorded
 import dev.phoneagent.core.tool.ToolResult
 import dev.phoneagent.core.tool.ToolStatus
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+
+/** Where an event's data keeps the id of the call it belongs to (`replay/normalized-fields.txt`). */
+private val OWN_CALL = listOf("callId", "card.callId", "call.id")
+
+private fun field(
+    data: JsonElement,
+    path: String,
+): String? =
+    path
+        .split('.')
+        .fold(data as JsonElement?) { at, name -> (at as? JsonObject)?.get(name) }
+        ?.jsonPrimitive
+        ?.contentOrNull
 
 class DeviceScriptTest {
     private val call = ReplaySamples.call
@@ -79,6 +100,22 @@ class DeviceScriptTest {
     @Test
     fun `no call is open when every call has its result`() {
         assertNull(OpenCall.after(records(verdict(call), result(call))))
+    }
+
+    @Test
+    fun `every event that carries the id of its call names that call`() {
+        val codec = SessionCodec()
+        val wrong =
+            SessionSamples.records.mapNotNull { record ->
+                val line = Json.parseToJsonElement(codec.encode(record)).jsonObject
+                val carried = OWN_CALL.firstNotNullOfOrNull { path -> field(line.getValue("data"), path) }
+                val named = OpenCall.named(record.event)?.value
+                val type = line.getValue("type").jsonPrimitive.content
+                "$type carries $carried, OpenCall.named gives $named".takeIf {
+                    carried != named && record.event !is ToolResultRecorded
+                }
+            }
+        assertEquals(emptyList<String>(), wrong)
     }
 
     // DeviceScript
