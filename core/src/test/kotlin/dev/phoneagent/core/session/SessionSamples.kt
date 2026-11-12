@@ -343,6 +343,16 @@ object SessionSamples {
                 ActionOutcome(ActionOutcome.Status.Ok, ActionOutcome.Effect.CHANGED),
             ),
             ScreenFrame(blob, "image/jpeg", 720, 1280, som = true, snapshotId = SnapshotId("s1")),
+            ScreenJudged(call, SnapshotId("s1"), JudgmentPurpose.TOOL, JudgmentOutcome.SHOWN),
+            ScreenJudged(
+                call,
+                SnapshotId("s2"),
+                JudgmentPurpose.FRAME_PRECHECK,
+                JudgmentOutcome.WITHHELD,
+                rule = "hard.finance_app",
+                hint = "this app is off limits",
+            ),
+            ScreenJudged(call, SnapshotId("s2"), JudgmentPurpose.TOOL, JudgmentOutcome.WITHHELD, ScreenJudged.HAND_OFF),
             ToolExecuted(call, ToolStatus.OK),
             ToolResultRecorded(
                 call,

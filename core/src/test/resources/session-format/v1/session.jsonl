@@ -48,19 +48,22 @@
 {"seq":47,"time":470,"type":"screen/launch","ignorable":true,"data":{"callId":"call-1","target":{"type":"link","uri":"https://example.com/a"},"outcome":{"status":{"type":"ok"},"effect":"CHANGED","after":null,"diff":null}}}
 {"seq":48,"time":480,"type":"screen/launch","ignorable":true,"data":{"callId":"call-1","target":{"type":"system","kind":"TIMER","fields":{"seconds":"60"}},"outcome":{"status":{"type":"ok"},"effect":"CHANGED","after":null,"diff":null}}}
 {"seq":49,"time":490,"type":"screen/frame","ignorable":true,"data":{"blob":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","mime":"image/jpeg","width":720,"height":1280,"som":true,"snapshotId":"s1"}}
-{"seq":50,"time":500,"type":"tool/executed","data":{"callId":"call-1","status":"OK"}}
-{"seq":51,"time":510,"type":"tool/result","sources":[20],"data":{"callId":"call-1","name":"phone_tap","result":{"status":"OK","content":[{"type":"text","text":"done"},{"type":"image","blob":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","mime":"image/jpeg","width":720,"height":1280}],"details":{"effect":"CHANGED"},"control":null}}}
-{"seq":52,"time":520,"type":"tool/result","sources":[19],"data":{"callId":"call-3","name":"end_not_done","result":{"status":"OK","content":[{"type":"text","text":"ended"}],"details":null,"control":{"type":"end_turn","reason":"BLOCKED","summary":"需要登录，已交给用户"}}}}
-{"seq":53,"time":530,"type":"tool/result","sources":[19],"data":{"callId":"call-2","name":"phone_tap","result":{"status":"SKIPPED","content":[{"type":"text","text":"only one action per step"}],"details":null,"control":null}}}
-{"seq":54,"time":540,"type":"step/end","data":{"turn":1,"step":1,"outcome":"COMPLETED"}}
-{"seq":55,"time":550,"type":"context/reasoning-dropped","data":{"upToSeq":19}}
-{"seq":56,"time":560,"type":"compaction/start","ignorable":true,"data":{"trigger":"PRESSURE","inputTokens":120000}}
-{"seq":57,"time":570,"type":"compaction/summary","surfaceOp":{"type":"replace","startSeq":6,"endSeq":8},"data":{"parts":[{"type":"text","text":"summary of earlier steps"}]}}
-{"seq":58,"time":580,"type":"compaction/prune","surfaceOp":{"type":"replace","startSeq":7,"endSeq":7},"data":{"parts":[{"type":"text","text":"[screenshot removed]"}]}}
-{"seq":59,"time":590,"type":"compaction/end","ignorable":true,"data":{"outcome":"COMPLETED","inputTokens":40000}}
-{"seq":60,"time":600,"type":"turn/end","data":{"turn":1,"reason":"COMPLETED","detail":null}}
-{"seq":61,"time":610,"type":"turn/start","data":{"turn":2}}
-{"seq":62,"time":620,"type":"turn/end","data":{"turn":2,"reason":"FAILED","detail":"flush failed"}}
-{"seq":63,"time":630,"type":"task/stopped","data":{"cause":"ERROR"}}
-{"seq":64,"time":640,"type":"session/resumed","data":{"droppedTailBytes":17}}
-{"seq":65,"time":650,"type":"task/stopped","data":{"cause":"USER"}}
+{"seq":50,"time":500,"type":"screen/judged","data":{"callId":"call-1","snapshot":"s1","purpose":"TOOL","outcome":"SHOWN","rule":null,"hint":null}}
+{"seq":51,"time":510,"type":"screen/judged","data":{"callId":"call-1","snapshot":"s2","purpose":"FRAME_PRECHECK","outcome":"WITHHELD","rule":"hard.finance_app","hint":"this app is off limits"}}
+{"seq":52,"time":520,"type":"screen/judged","data":{"callId":"call-1","snapshot":"s2","purpose":"TOOL","outcome":"WITHHELD","rule":"hand_off","hint":null}}
+{"seq":53,"time":530,"type":"tool/executed","data":{"callId":"call-1","status":"OK"}}
+{"seq":54,"time":540,"type":"tool/result","sources":[20],"data":{"callId":"call-1","name":"phone_tap","result":{"status":"OK","content":[{"type":"text","text":"done"},{"type":"image","blob":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","mime":"image/jpeg","width":720,"height":1280}],"details":{"effect":"CHANGED"},"control":null}}}
+{"seq":55,"time":550,"type":"tool/result","sources":[19],"data":{"callId":"call-3","name":"end_not_done","result":{"status":"OK","content":[{"type":"text","text":"ended"}],"details":null,"control":{"type":"end_turn","reason":"BLOCKED","summary":"需要登录，已交给用户"}}}}
+{"seq":56,"time":560,"type":"tool/result","sources":[19],"data":{"callId":"call-2","name":"phone_tap","result":{"status":"SKIPPED","content":[{"type":"text","text":"only one action per step"}],"details":null,"control":null}}}
+{"seq":57,"time":570,"type":"step/end","data":{"turn":1,"step":1,"outcome":"COMPLETED"}}
+{"seq":58,"time":580,"type":"context/reasoning-dropped","data":{"upToSeq":19}}
+{"seq":59,"time":590,"type":"compaction/start","ignorable":true,"data":{"trigger":"PRESSURE","inputTokens":120000}}
+{"seq":60,"time":600,"type":"compaction/summary","surfaceOp":{"type":"replace","startSeq":6,"endSeq":8},"data":{"parts":[{"type":"text","text":"summary of earlier steps"}]}}
+{"seq":61,"time":610,"type":"compaction/prune","surfaceOp":{"type":"replace","startSeq":7,"endSeq":7},"data":{"parts":[{"type":"text","text":"[screenshot removed]"}]}}
+{"seq":62,"time":620,"type":"compaction/end","ignorable":true,"data":{"outcome":"COMPLETED","inputTokens":40000}}
+{"seq":63,"time":630,"type":"turn/end","data":{"turn":1,"reason":"COMPLETED","detail":null}}
+{"seq":64,"time":640,"type":"turn/start","data":{"turn":2}}
+{"seq":65,"time":650,"type":"turn/end","data":{"turn":2,"reason":"FAILED","detail":"flush failed"}}
+{"seq":66,"time":660,"type":"task/stopped","data":{"cause":"ERROR"}}
+{"seq":67,"time":670,"type":"session/resumed","data":{"droppedTailBytes":17}}
+{"seq":68,"time":680,"type":"task/stopped","data":{"cause":"USER"}}

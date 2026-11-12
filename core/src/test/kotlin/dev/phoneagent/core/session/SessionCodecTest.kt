@@ -282,6 +282,36 @@ class SessionCodecTest {
     }
 
     @Test
+    fun `a screen judgment has a rule exactly when withheld, and a hint only then`() {
+        val p = SessionSamples
+        val s1 =
+            dev.phoneagent.core.ids
+                .SnapshotId("s1")
+        val shown = JudgmentOutcome.SHOWN
+        val withheld = JudgmentOutcome.WITHHELD
+        val cases =
+            listOf(
+                "shown" to { ScreenJudged(p.call, s1, JudgmentPurpose.TOOL, shown) },
+                "withheld with a rule" to { ScreenJudged(p.call, s1, JudgmentPurpose.TOOL, withheld, "r") },
+                "withheld with a rule and a hint" to
+                    { ScreenJudged(p.call, s1, JudgmentPurpose.TOOL, withheld, "r", "h") },
+                "withheld without a rule" to { ScreenJudged(p.call, s1, JudgmentPurpose.FRAME_PRECHECK, withheld) },
+                "withheld with a blank rule" to { ScreenJudged(p.call, s1, JudgmentPurpose.TOOL, withheld, " ") },
+                "shown with a rule" to { ScreenJudged(p.call, s1, JudgmentPurpose.TOOL, shown, "r") },
+                "shown with a hint" to { ScreenJudged(p.call, s1, JudgmentPurpose.TOOL, shown, hint = "h") },
+            )
+        val accepted = cases.filter { (_, make) -> runCatching(make).isSuccess }.map { it.first }
+        assertEquals(listOf("shown", "withheld with a rule", "withheld with a rule and a hint"), accepted)
+        assertEquals(null, ScreenJudged(p.call, s1, JudgmentPurpose.TOOL, shown).rule)
+        // A log that breaks the rule is refused when read.
+        val broken =
+            """{"seq":2,"time":0,"type":"screen/judged","data":{"callId":"call-1","snapshot":"s1",""" +
+                """"purpose":"TOOL","outcome":"WITHHELD","rule":null,"hint":null}}"""
+        val error = assertThrows<SessionCorruptedException> { codec.read(log(headerLine, line(1), broken)) }
+        assertEquals(3, error.line)
+    }
+
+    @Test
     fun `optional payload fields have defaults`() {
         val p = SessionSamples
         assertEquals(null, HandoffStarted(p.prompt, dev.phoneagent.core.ports.HandoffKind.OTHER, "x").callId)
