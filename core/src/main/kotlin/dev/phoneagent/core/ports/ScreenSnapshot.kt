@@ -308,6 +308,9 @@ public enum class ScreenFlag {
  * Both snapshots come from the same [ScreenPort], so an equal ref is the same element; elements
  * are paired only by ref, and a ref that changes is one element removed and one added.
  *
+ * @property base the earlier snapshot, the one compared with (`before` of [SnapshotAnalyzer.diff]).
+ *   The runtime shows a diff only when the model saw that snapshot (policy-rules §6.4); otherwise
+ *   it gives the tool the outcome without its diff.
  * @property added printed elements whose ref the earlier snapshot did not show (`+`), as they are now.
  * @property removed refs the earlier snapshot showed that the later one no longer shows: the
  *   element went away, was hidden or absorbed, got a new ref, or its ref went to an element that
@@ -329,6 +332,7 @@ public enum class ScreenFlag {
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
 public data class ScreenDiff(
+    val base: SnapshotId,
     val added: List<UiElement> = emptyList(),
     val removed: List<ElementRef> = emptyList(),
     val changed: List<UiElement> = emptyList(),

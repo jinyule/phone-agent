@@ -273,6 +273,7 @@ object SessionSamples {
                     after = snapshot,
                     diff =
                         ScreenDiff(
+                            base = SnapshotId("s1"),
                             added = listOf(element),
                             removed = listOf(ElementRef("e9")),
                             changed = listOf(field),
@@ -290,7 +291,7 @@ object SessionSamples {
                     ActionOutcome.Status.Ok,
                     ActionOutcome.Effect.CHANGED,
                     after = snapshot.copy(id = SnapshotId("s2"), ocr = null, fingerprint = "fp-2"),
-                    diff = ScreenDiff(changed = listOf(field), ocrUnverified = true),
+                    diff = ScreenDiff(base = SnapshotId("s1"), changed = listOf(field), ocrUnverified = true),
                 ),
             ),
             ScreenActed(

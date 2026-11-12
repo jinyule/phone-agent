@@ -215,7 +215,12 @@ class ScreenActionToolsTest {
                     val screen =
                         FakeScreen().apply {
                             onAct =
-                                { _, _ -> ActionOutcome(Status.Ok, effect, after, ScreenDiff()) }
+                                {
+                                    _,
+                                    _,
+                                    ->
+                                    ActionOutcome(Status.Ok, effect, after, ScreenDiff(base = SnapshotId("s12")))
+                                }
                         }
                     run("phone_key", """{"key":"back"}""", screen).text().lines().first()
                 }
@@ -291,7 +296,7 @@ class ScreenActionToolsTest {
             assertNoChangeWithDiff(background)
             assertTrue(background.contains("+ @e11 \"张三：在吗\""), background)
             // With an empty diff the port's "no change" stands alone.
-            val unchanged = tapWithoutPortChange(Screens.CHAT_ELEMENTS, ScreenDiff())
+            val unchanged = tapWithoutPortChange(Screens.CHAT_ELEMENTS, ScreenDiff(base = SnapshotId("s12")))
             assertTrue(unchanged.startsWith("已点击 @e10，但画面没有变化：可能还在加载"), unchanged)
             assertFalse(unchanged.contains("不一定是这个动作造成的"), unchanged)
             // A change the port saw is just done.
@@ -324,7 +329,17 @@ class ScreenActionToolsTest {
                     args,
                     FakeScreen().apply {
                         onAct =
-                            { _, _ -> ActionOutcome(Status.Refused("自己的界面"), Effect.UNKNOWN, after, ScreenDiff()) }
+                            {
+                                _,
+                                _,
+                                ->
+                                ActionOutcome(
+                                    Status.Refused("自己的界面"),
+                                    Effect.UNKNOWN,
+                                    after,
+                                    ScreenDiff(base = SnapshotId("s12")),
+                                )
+                            }
                     },
                 )
             assertEquals(ToolStatus.REFUSED, withScreen.status)
@@ -354,7 +369,12 @@ class ScreenActionToolsTest {
                         args,
                         FakeScreen().apply {
                             onAct =
-                                { _, _ -> ActionOutcome(status, Effect.CHANGED, after, ScreenDiff()) }
+                                {
+                                    _,
+                                    _,
+                                    ->
+                                    ActionOutcome(status, Effect.CHANGED, after, ScreenDiff(base = SnapshotId("s12")))
+                                }
                         },
                     )
                 assertTrue(result.text().contains("screen s13"), "$status: ${result.text()}")
@@ -372,7 +392,14 @@ class ScreenActionToolsTest {
                 run(
                     "phone_tap",
                     args,
-                    screen(ActionOutcome(Status.Failed("找不到输入法"), Effect.UNKNOWN, after, ScreenDiff())),
+                    screen(
+                        ActionOutcome(
+                            Status.Failed("找不到输入法"),
+                            Effect.UNKNOWN,
+                            after,
+                            ScreenDiff(base = SnapshotId("s12")),
+                        ),
+                    ),
                 )
             assertEquals(ToolStatus.ERROR, failed.status)
             assertTrue(

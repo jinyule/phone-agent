@@ -50,11 +50,12 @@ class DiffBaseTest {
             // A row added to a list; a label added outside lists would renumber the window (r3 B1).
             host.show(people("Alice"))
             val port = mainPort(host)
-            port.snapshot()
+            val latest = port.snapshot()
             host.onGesture = { host.show(people("Alice", "Bob")) }
 
             val outcome = port.act(UiAction.Tap(Target.Point(250, 525)), on = null)
 
             assertEquals(listOf("Bob"), outcome.diff?.added?.map { it.name })
+            assertEquals(latest.id, outcome.diff?.base)
         }
 }

@@ -2,6 +2,7 @@ package dev.phoneagent.core.ports
 
 import dev.phoneagent.core.ids.SnapshotId
 import dev.phoneagent.core.ids.TaskId
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -90,33 +91,43 @@ class PortTypesTest {
     @Test
     fun `screen diffs know when nothing changed`() {
         val element = UiElement(ElementRef("e1"), ElementRole.TEXT, bounds = Bounds(0, 0, 1, 1))
-        assertTrue(ScreenDiff().isEmpty)
-        assertFalse(ScreenDiff(added = listOf(element)).isEmpty)
-        assertFalse(ScreenDiff(removed = listOf(element.ref)).isEmpty)
-        assertFalse(ScreenDiff(changed = listOf(element)).isEmpty)
+        val s1 = SnapshotId("s1")
+        assertTrue(ScreenDiff(s1).isEmpty)
+        assertFalse(ScreenDiff(s1, added = listOf(element)).isEmpty)
+        assertFalse(ScreenDiff(s1, removed = listOf(element.ref)).isEmpty)
+        assertFalse(ScreenDiff(s1, changed = listOf(element)).isEmpty)
         val ocr = OcrLine("加载中", Bounds(0, 0, 10, 10))
-        assertFalse(ScreenDiff(ocrAdded = listOf(ocr)).isEmpty)
-        assertFalse(ScreenDiff(ocrRemoved = listOf(ocr)).isEmpty)
+        assertFalse(ScreenDiff(s1, ocrAdded = listOf(ocr)).isEmpty)
+        assertFalse(ScreenDiff(s1, ocrRemoved = listOf(ocr)).isEmpty)
         // OCR that was not compared is no change, only a note.
-        assertTrue(ScreenDiff(ocrUnverified = true).isEmpty)
+        assertTrue(ScreenDiff(s1, ocrUnverified = true).isEmpty)
     }
 
     @Test
-    fun `empty OCR changes are left out of the encoded diff, even when defaults are encoded`() {
+    fun `a diff always names its base, and empty OCR changes are left out of the encoding`() {
         val withDefaults = Json { encodeDefaults = true }
+        val s1 = SnapshotId("s1")
         assertEquals(
-            """{"added":[],"removed":["e1"],"changed":[]}""",
-            withDefaults.encodeToString(ScreenDiff(removed = listOf(ElementRef("e1")))),
+            """{"base":"s1","added":[],"removed":["e1"],"changed":[]}""",
+            withDefaults.encodeToString(ScreenDiff(s1, removed = listOf(ElementRef("e1")))),
         )
-        val diff = ScreenDiff(ocrAdded = listOf(OcrLine("已完成", Bounds(0, 0, 10, 10))))
+        val diff = ScreenDiff(s1, ocrAdded = listOf(OcrLine("已完成", Bounds(0, 0, 10, 10))))
         assertEquals(diff, withDefaults.decodeFromString<ScreenDiff>(withDefaults.encodeToString(diff)))
-        val unverified = ScreenDiff(ocrUnverified = true)
+        val unverified = ScreenDiff(s1, ocrUnverified = true)
         assertEquals(
-            """{"added":[],"removed":[],"changed":[],"ocrUnverified":true}""",
+            """{"base":"s1","added":[],"removed":[],"changed":[],"ocrUnverified":true}""",
             withDefaults.encodeToString(unverified),
         )
         assertEquals(unverified, Json.decodeFromString<ScreenDiff>(Json.encodeToString(unverified)))
-        assertEquals(ScreenDiff(), Json.decodeFromString<ScreenDiff>("""{"added":[],"removed":[],"changed":[]}"""))
+        assertEquals(
+            ScreenDiff(s1),
+            Json.decodeFromString<ScreenDiff>("""{"base":"s1","added":[],"removed":[],"changed":[]}"""),
+        )
+        assertThrows<SerializationException> {
+            Json.decodeFromString<ScreenDiff>(
+                """{"added":[],"removed":[],"changed":[]}""",
+            )
+        }
     }
 
     @Test

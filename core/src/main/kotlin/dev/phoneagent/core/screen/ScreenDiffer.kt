@@ -41,7 +41,10 @@ public class ScreenDiffer internal constructor(
 ) {
     private val lines = ElementLines(format, SnapshotDetail.FULL)
 
-    /** What changed from [before] to [after]; added and changed in [after]'s order, removed in [before]'s. */
+    /**
+     * What changed from [before] to [after], based on [before]'s id; added and changed in
+     * [after]'s order, removed in [before]'s.
+     */
     public fun diff(
         before: ScreenSnapshot,
         after: ScreenSnapshot,
@@ -59,10 +62,12 @@ public class ScreenDiffer internal constructor(
             }
         }
         val removed = was.keys.filter { it !in now }
-        val ocr = after.ocr ?: return ScreenDiff(added, removed, changed, ocrUnverified = !before.ocr.isNullOrEmpty())
+        val unverified = !before.ocr.isNullOrEmpty()
+        val ocr = after.ocr ?: return ScreenDiff(before.id, added, removed, changed, ocrUnverified = unverified)
         val ocrBefore = ocrLines(before.ocr.orEmpty())
         val ocrAfter = ocrLines(ocr)
         return ScreenDiff(
+            base = before.id,
             added = added,
             removed = removed,
             changed = changed,

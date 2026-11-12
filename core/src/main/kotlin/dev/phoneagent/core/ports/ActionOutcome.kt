@@ -11,7 +11,8 @@ import kotlinx.serialization.Serializable
  * @property effect what visibly happened afterwards.
  * @property after the snapshot read back after the screen settled, its `detail` the one the port
  *   read it at; `null` when it could not be read.
- * @property diff [after] compared with the snapshot the action was planned on; `null` when either is missing.
+ * @property diff [after] compared with the snapshot the action was planned on, which [ScreenDiff.base]
+ *   names; `null` when either is missing.
  */
 @Serializable
 public data class ActionOutcome(
@@ -30,7 +31,9 @@ public data class ActionOutcome(
 
         /**
          * Not done as requested: it may have partly happened, or whether it happened cannot be
-         * told; [reason] says what is known, for the model, in English.
+         * told; [reason] says what is known, for the model, in English. It may quote the screen, so
+         * the runtime passes it on only when this outcome's [after] was judged shown, and a fixed
+         * text otherwise (policy-rules §6.4).
          */
         @Serializable
         @SerialName("failed")
@@ -39,7 +42,10 @@ public data class ActionOutcome(
             val reason: String,
         ) : Status
 
-        /** Not attempted because a device-side guard refused it (e.g. touching this app's own UI). */
+        /**
+         * Not attempted because a device-side guard refused it (e.g. touching this app's own UI).
+         * [reason] reaches the model on the same terms as [Failed.reason].
+         */
         @Serializable
         @SerialName("refused")
         public data class Refused(
