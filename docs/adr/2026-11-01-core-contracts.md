@@ -230,6 +230,16 @@ v1 仍未发布。`ScreenSnapshot` 加 `detail: SnapshotDetail = BRIEF`：端口
 
 v1 未发布（第一个 M1 PR 才冻结），以上都不升版本；v1 fixture 原地补字段和样本，`format-names.txt` 跟着加。
 
+### 17. 每次运行记下判定用的规则（WP09 B，协调者决定 run 元数据）
+
+- `policy/rules`（`PolicyRulesRecorded`，ignorable = true）：`rulesVersion`（`PolicyTuning.RULES_VERSION`，加载时校验 >= 1）和 `tuning`（`PolicyTuning.byName()` 的全部字段，含默认值，按声明顺序写成 JSON 对象）。
+- 由 runtime 写，来源是 `AgentSetup.rules`：`start` 在 `task/start` 之后写一条，刷盘以后才接收输入；`resume` 在 `session/resumed` 之后再写一条，因为两次运行之间升级了 App，规则就可能变。每个 `policy/verdict` 归它前面最近的一条。`AgentSetup.rules` 为 null 时不写（只有测试这样用，产品装配总会给）。
+- 运行规则：等待用户期间可以写它（`RunRules` 的等待集合）。它不进模型视图，也不是 step 的上下文事件。
+- ignorable 的理由：模型视图、回合结构和任务设置都不依赖它，runtime 也不从它推导 PolicyContext；它只供回放比对。旧版本读到它会跳过，没有它的日志（它出现之前写的）照样能读。
+- 为什么是新事件，不放进 `task/start`：见 ADR `2026-11-13-product-assembly` 的 Alternatives considered。
+
+v1 未发布，不升版本；v1 fixture 用生成任务重新生成（第 2 条记录是新样本，其余只是 seq 顺延），`format-names.txt` 跟着加。
+
 ## Alternatives considered
 
 - **id 用裸 `String` 或 typealias**：编译器分不清 `TaskId` 和 `SessionId`，传错参数只能靠测试发现。
