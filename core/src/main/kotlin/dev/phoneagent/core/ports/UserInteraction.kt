@@ -49,7 +49,9 @@ public interface ToolInteraction {
     /**
      * Moves the task to the main display for the user to do a [kind] step, explained by [reason]
      * (non-blank, user's language), and moves it back. The screen has changed afterwards whatever
-     * the result: observe before acting.
+     * the result: observe before acting. When the port cannot take it back after the user's turn
+     * (`SurfaceManager.takeBack` throws an IOException), this returns
+     * [HandoffResult.NOT_TAKEN_BACK]: the app stays on the main display, whatever the user answered.
      *
      * A handoff that ends without its `handoff/end` (the call cuts it off: its budget, a
      * cancellation inside the tool; or an unexpected failure) is taken back at once. When that
@@ -172,8 +174,20 @@ public enum class HandoffResult {
     /** Nobody can take over (unattended task); nothing was moved. */
     UNAVAILABLE,
 
-    /** Moving the task between displays failed; details are in `handoff/end`. */
+    /**
+     * The task could not be handed over: nothing moved, the user was never asked, and the app is
+     * where it was (`SurfaceManager.handToUser`). In the log, `handoff/end` FAILED also follows a
+     * hand-over whose port threw any other IOException; handOff then throws instead of returning
+     * it (the app may have moved). Details are in `handoff/end`.
+     */
     FAILED,
+
+    /**
+     * After the user's turn the task could not be taken back (`SurfaceManager.takeBack` threw an
+     * IOException): the app stays on the main display, and what the user did is unknown, whatever
+     * they answered. Details are in `handoff/end`.
+     */
+    NOT_TAKEN_BACK,
 }
 
 /**

@@ -152,8 +152,9 @@ internal class Prompts(
         /**
          * Moves the task to the user and back with [moves] when there is a [SurfaceManager];
          * without one (main-display mode) the user acts where the task already is. Moving failures
-         * ([IOException], as the ports report device trouble) end the handoff as FAILED with a
-         * detail naming the move and the exception's class only (its text may quote the screen);
+         * ([IOException], as the ports report device trouble) end the handoff, a hand-over's as
+         * FAILED, a take-back's as NOT_TAKEN_BACK, with a detail naming the move and the
+         * exception's class only (its text may quote the screen);
          * a hand-over that failed with anything but [ScreenUnavailableException] is unsettled, and
          * handOff then throws ([Moves.giveBack]). A move that ends otherwise (another exception, a
          * cancellation, an Error) writes no `handoff/end`: the prompt is withdrawn. A handoff the
@@ -191,7 +192,7 @@ internal class Prompts(
                         backing = true
                         val back = moving("take back") { surfaces.takeBack(ticket) }
                         backing = false
-                        back.fold({ result to null }, ::failed)
+                        back.fold({ result to null }, ::notTakenBack)
                     },
                     onFailure = ::failed,
                 )
@@ -285,6 +286,9 @@ internal class Prompts(
             }
 
         private fun failed(failure: Throwable): Pair<HandoffResult, String?> = HandoffResult.FAILED to failure.message
+
+        private fun notTakenBack(failure: Throwable): Pair<HandoffResult, String?> =
+            HandoffResult.NOT_TAKEN_BACK to failure.message
 
         private suspend fun awaitHandoff(id: PromptId): HandoffResult =
             wait.paused { awaitReply(id, WaitReason.HANDOFF, loop.config.handoffTimeoutMs, ::fitHandoff) }

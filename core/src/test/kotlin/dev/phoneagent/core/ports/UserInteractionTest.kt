@@ -54,7 +54,7 @@ class UserInteractionTest {
     fun `result enums are part of the session format`() {
         assertEquals(listOf("APPROVED", "REJECTED", "EXPIRED", "UNAVAILABLE"), ConfirmResult.entries.map { it.name })
         assertEquals(
-            listOf("DONE", "DECLINED", "EXPIRED", "UNAVAILABLE", "FAILED"),
+            listOf("DONE", "DECLINED", "EXPIRED", "UNAVAILABLE", "FAILED", "NOT_TAKEN_BACK"),
             HandoffResult.entries.map { it.name },
         )
         assertEquals(

@@ -173,11 +173,26 @@ internal class Gate(
 
     private fun handedOff(result: HandoffResult): ToolResult =
         when (result) {
-            HandoffResult.DONE -> ToolResult.ok(loop.texts.handoffDone)
-            HandoffResult.DECLINED -> ToolResult.failure(ToolStatus.REFUSED, loop.texts.handoffDeclined)
-            HandoffResult.EXPIRED -> ToolResult.failure(ToolStatus.REFUSED, loop.texts.handoffExpired)
-            HandoffResult.UNAVAILABLE -> ToolResult.failure(ToolStatus.REFUSED, loop.texts.handoffUnavailable)
-            HandoffResult.FAILED -> ToolResult.failure(ToolStatus.REFUSED, loop.texts.handoffFailed)
+            HandoffResult.DONE -> {
+                ToolResult.ok(loop.texts.handoffDone)
+            }
+
+            HandoffResult.DECLINED -> {
+                ToolResult.failure(ToolStatus.REFUSED, loop.texts.handoffDeclined)
+            }
+
+            HandoffResult.EXPIRED -> {
+                ToolResult.failure(ToolStatus.REFUSED, loop.texts.handoffExpired)
+            }
+
+            HandoffResult.UNAVAILABLE -> {
+                ToolResult.failure(ToolStatus.REFUSED, loop.texts.handoffUnavailable)
+            }
+
+            // The call never ran, however the move failed.
+            HandoffResult.FAILED, HandoffResult.NOT_TAKEN_BACK -> {
+                ToolResult.failure(ToolStatus.REFUSED, loop.texts.handoffFailed)
+            }
         }
 
     private fun refused(text: String): Ruling = Ruling.Answered(ToolResult.failure(ToolStatus.REFUSED, text))

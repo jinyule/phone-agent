@@ -190,14 +190,17 @@ public data class HandoffStarted(
 ) : SessionEvent
 
 /**
- * `handoff/end`: the handoff ended: the task is back on the agent display, never left it, or
- * could not be moved ([HandoffResult.FAILED]); the next step must observe first. FAILED may also
- * follow a hand-over whose port threw an IOException: the app may have moved, so where it is is
- * unknown; [detail] names the move that failed (`hand over failed: …` or `take back failed: …`).
+ * `handoff/end`: the handoff ended: the task is back on the agent display, never left it
+ * ([HandoffResult.FAILED]: it could not be handed over), or could not be taken back
+ * ([HandoffResult.NOT_TAKEN_BACK]: it stays on the main display); the next step must observe
+ * first. FAILED may also follow a hand-over whose port threw an IOException: the app may have
+ * moved, so where it is is unknown. [detail] names the move that failed (`hand over failed: …`
+ * for FAILED, `take back failed: …` for NOT_TAKEN_BACK).
  *
  * @property promptId the prompt.
  * @property result the result returned to the waiting call.
- * @property detail why it failed, for diagnostics; `null` unless [result] is [HandoffResult.FAILED].
+ * @property detail why it failed, for diagnostics; `null` unless [result] is [HandoffResult.FAILED]
+ *   or [HandoffResult.NOT_TAKEN_BACK].
  */
 @Serializable
 @SerialName("handoff/end")
@@ -207,7 +210,8 @@ public data class HandoffEnded(
     val detail: String? = null,
 ) : SessionEvent {
     init {
-        require(detail == null || result == HandoffResult.FAILED) { "handoff/end: detail only for FAILED" }
+        val moveFailed = result == HandoffResult.FAILED || result == HandoffResult.NOT_TAKEN_BACK
+        require(detail == null || moveFailed) { "handoff/end: detail only for a failed move" }
     }
 }
 

@@ -108,7 +108,7 @@ class AgentLoopFailureTextTest {
 
             val noBack = handOver(FailingSurfaces(hand = null, back = IOException(leak(), cause())), answer = true)
             val ended = noBack.events().only<HandoffEnded>().single()
-            assertEquals(HandoffResult.FAILED, ended.result)
+            assertEquals(HandoffResult.NOT_TAKEN_BACK, ended.result)
             assertEquals("take back failed: java.io.IOException", ended.detail)
             assertNoSecretIn(noBack)
         }

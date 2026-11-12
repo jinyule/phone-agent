@@ -5,6 +5,7 @@ package dev.phoneagent.core.agent
 import dev.phoneagent.core.ids.TaskId
 import dev.phoneagent.core.ids.ToolCallId
 import dev.phoneagent.core.ports.HandoffKind
+import dev.phoneagent.core.ports.HandoffResult
 import dev.phoneagent.core.ports.HandoffTicket
 import dev.phoneagent.core.ports.ScreenUnavailableException
 import dev.phoneagent.core.ports.SurfaceAllocation
@@ -13,10 +14,12 @@ import dev.phoneagent.core.ports.SurfaceKind
 import dev.phoneagent.core.ports.SurfaceManager
 import dev.phoneagent.core.ports.SurfaceRef
 import dev.phoneagent.core.screen.ScreenFormatter
+import dev.phoneagent.core.session.HandoffEnded
 import dev.phoneagent.core.session.ToolResultRecorded
 import dev.phoneagent.core.testing.FakeChatModel
 import dev.phoneagent.core.testing.FakeChatModel.Companion.call
 import dev.phoneagent.core.testing.ScriptedScreen
+import dev.phoneagent.core.testing.detail
 import dev.phoneagent.core.tool.StepState
 import dev.phoneagent.core.tool.ToolResult
 import dev.phoneagent.core.tool.ToolStatus
@@ -33,6 +36,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
+import java.io.IOException
 
 /**
  * The card of the real hand_to_user (WP06) as the loop shows it: a result hand_to_user reported
@@ -45,8 +49,9 @@ class AgentLoopHandToUserCardTest {
     private val texts = LoopTexts()
     private val handToUser = PhaseOneTools.create(ScreenFormatter()).single { it.def.name == "hand_to_user" }
 
-    /** Hands over and back; [takeBack] runs before a take-back returns, and may throw. */
+    /** Hands over and back; [handToUser] and [takeBack] run before a move returns, and may throw. */
     private class Surfaces(
+        private val handToUser: () -> Unit = {},
         private val takeBack: () -> Unit = {},
     ) : SurfaceManager {
         override val capability: StateFlow<SurfaceCapability> = MutableStateFlow(SurfaceCapability.Available(true))
@@ -59,7 +64,10 @@ class AgentLoopHandToUserCardTest {
         override suspend fun handToUser(
             task: TaskId,
             kind: HandoffKind,
-        ): HandoffTicket = HandoffTicket(task, kind, SurfaceRef(7, SurfaceKind.AGENT), "t1")
+        ): HandoffTicket {
+            handToUser()
+            return HandoffTicket(task, kind, SurfaceRef(7, SurfaceKind.AGENT), "t1")
+        }
 
         override suspend fun takeBack(ticket: HandoffTicket): SurfaceRef {
             takeBack()
@@ -70,15 +78,17 @@ class AgentLoopHandToUserCardTest {
     private class Played(
         val result: ToolResult,
         val card: StepState,
+        val ended: HandoffEnded?,
     )
 
     /**
      * Runs c1, hand_to_user(login), on [surfaces]; the user answers with [reply] while handed
-     * over, then [handedOver] runs. Returns c1's result and the state of its last card.
+     * over (none: the hand-over failed, nobody is asked), then [handedOver] runs. Returns c1's
+     * result, the state of its last card and its `handoff/end`.
      */
     private suspend fun TestScope.played(
         surfaces: Surfaces,
-        reply: UserReply,
+        reply: UserReply?,
         screen: ScriptedScreen = ScriptedScreen(ScriptedScreen.snapshotOf("s1")),
         handedOver: () -> Unit = {},
     ): Played {
@@ -92,9 +102,11 @@ class AgentLoopHandToUserCardTest {
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { loop.events.toList(events) }
         runCurrent()
         loop.followup(text("登录"))
-        val prompt = loop.awaitPrompt().promptId!!
-        handedOver()
-        loop.answer(prompt, reply)
+        if (reply != null) {
+            val prompt = loop.awaitPrompt().promptId!!
+            handedOver()
+            loop.answer(prompt, reply)
+        }
         advanceUntilIdle()
         val result =
             harness
@@ -103,7 +115,7 @@ class AgentLoopHandToUserCardTest {
                 .single { it.callId == c1 }
                 .result
         val card = events.filterIsInstance<LoopEvent.Card>().last { it.callId == c1 }.card
-        return Played(result, card.state)
+        return Played(result, card.state, harness.events().only<HandoffEnded>().singleOrNull())
     }
 
     @Test
@@ -139,5 +151,34 @@ class AgentLoopHandToUserCardTest {
                     .last(),
             )
             assertEquals(StepState.FAILED, unread.card, "taken back: the user declined, nothing uncertain")
+        }
+
+    @Test
+    fun `a take-back that throws an IOException ends hand_to_user as not taken back`() =
+        runTest {
+            val played = played(Surfaces(takeBack = { throw IOException("display busy") }), UserReply.HandoffDone)
+
+            assertEquals(
+                HandoffEnded(
+                    played.ended!!.promptId,
+                    HandoffResult.NOT_TAKEN_BACK,
+                    "take back failed: java.io.IOException",
+                ),
+                played.ended,
+            )
+            assertEquals(ToolStatus.ERROR, played.result.status)
+            assertEquals("not_taken_back", played.result.detail("handoff"))
+        }
+
+    @Test
+    fun `a hand-over that moved nothing ends hand_to_user as failed`() =
+        runTest {
+            val unmoved = ScreenUnavailableException("no display")
+            val played = played(Surfaces(handToUser = { throw unmoved }), reply = null)
+
+            assertEquals(HandoffResult.FAILED, played.ended?.result)
+            assertEquals(ToolStatus.ERROR, played.result.status)
+            assertEquals("failed", played.result.detail("handoff"))
+            assertEquals(StepState.FAILED, played.card, "nothing moved: the app is where it was")
         }
 }

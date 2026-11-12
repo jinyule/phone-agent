@@ -84,7 +84,7 @@ internal class HandToUserTool(
 
             // Either the app could not be moved to the user, or it could not be taken back and stays
             // on the main screen, whatever the user answered (SurfaceManager.takeBack).
-            HandoffResult.FAILED -> {
+            HandoffResult.FAILED, HandoffResult.NOT_TAKEN_BACK -> {
                 ToolResult.failure(
                     ToolStatus.ERROR,
                     "切换屏幕失败：可能没能把 App 交到用户手上，也可能用户处理完以后没能把 App 收回来，它还留在用户的屏幕上。" +

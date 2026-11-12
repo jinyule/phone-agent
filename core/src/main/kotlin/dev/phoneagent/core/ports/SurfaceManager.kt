@@ -43,8 +43,8 @@ public interface SurfaceManager {
      * Moves the app back to the agent display after a handoff. The caller must observe again.
      * Throws [ScreenUnavailableException] when it cannot be moved back; the app stays on the main
      * display and [ticket] is spent. The runtime then records `handoff/end` with
-     * [HandoffResult.FAILED] and a detail naming the move and the exception's class only, whatever
-     * the user answered.
+     * [HandoffResult.NOT_TAKEN_BACK] and a detail naming the move and the exception's class only,
+     * whatever the user answered.
      *
      * A handoff its call cuts off (its budget, a cancellation inside the tool) is taken back at
      * once, waiting at most `LoopConfig.takeBackTimeoutMs`; it is closed with `prompt/withdrawn`,

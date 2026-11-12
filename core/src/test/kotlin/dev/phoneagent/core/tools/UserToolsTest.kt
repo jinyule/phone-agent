@@ -153,6 +153,7 @@ class UserToolsTest {
                         HandoffResult.EXPIRED to StepState.FAILED,
                         HandoffResult.UNAVAILABLE to StepState.FAILED,
                         HandoffResult.FAILED to StepState.FAILED,
+                        HandoffResult.NOT_TAKEN_BACK to StepState.FAILED,
                     ),
                     results.mapValues { (_, result) -> handOff.presentResult(call, result).state },
                 )
