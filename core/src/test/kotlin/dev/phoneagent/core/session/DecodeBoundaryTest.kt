@@ -154,12 +154,38 @@ class DecodeBoundaryTest {
         assertAll(cells)
     }
 
+    @Test
+    fun `a malformed type or package name of 64 KiB is corruption of its line, read by the codec`() {
+        // Each field is exactly 64 KiB and ends where its format does not allow: a type in "-", a package name in ".".
+        val type = "a/" + "a-".repeat((KIB_64 - 2) / 2)
+        val name = "a.".repeat(KIB_64 / 2)
+        val launch =
+            encodedPayload(
+                SessionSamples.events.filterIsInstance<ScreenLaunched>().first { it.target is LaunchTarget.App },
+            )
+        val cells =
+            listOf(
+                Triple("type", type, envelope(type, "{}")),
+                Triple("package name", name, envelope("screen/launch", launch.replace("com.example.chat", name))),
+            ).map { (what, field, line) ->
+                Executable {
+                    assertEquals(KIB_64, field.encodeToByteArray().size, what)
+                    val error = runCatching { read(line) }.exceptionOrNull()
+                    assertTrue(error is SessionCorruptedException && error.line == prefix.size + 2, "$what: $error")
+                }
+            }
+        assertAll(cells)
+    }
+
     private companion object {
         /**
          * Segments in the long package name and words in the long type: far more than the stack
          * holds repetitions of a regex group.
          */
         const val REPEATS = 32_000
+
+        /** 64 KiB, in bytes of UTF-8 (the malformed fields are ASCII). */
+        const val KIB_64 = 65_536
 
         val tapDef: String =
             Json.encodeToString(
