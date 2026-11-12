@@ -5,8 +5,9 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.serializer
 import java.io.File
-import java.io.FileNotFoundException
 import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.NoSuchFileException
 
 /**
  * [ModelSettings] in [file], replaced atomically ([writeAtomically]). Loading validates everything
@@ -15,15 +16,21 @@ import java.io.IOException
 internal class ModelSettingsFile(
     private val file: File,
 ) {
-    /** The settings on disk. */
+    /**
+     * The settings on disk. Only a file that is not there is [SettingsLoad.Empty]; one that is there
+     * but cannot be read (no permission, a directory in its place, a failed read) is broken, so
+     * nothing it may reference is deleted. Which one it is comes from the open itself, one system
+     * call: `java.io` reports all of them as `FileNotFoundException`, and checking `exists()` first
+     * would leave a window between the check and the read.
+     */
     fun load(): SettingsLoad =
         try {
-            parse(file.readText(Charsets.UTF_8))
-        } catch (ignoredNoFile: FileNotFoundException) {
-            // First run, or after a reset.
+            parse(String(Files.readAllBytes(file.toPath()), Charsets.UTF_8))
+        } catch (ignoredNoFile: NoSuchFileException) {
+            // The open found no file: first run, or after a reset.
             SettingsLoad.Empty
         } catch (ignoredUnreadable: IOException) {
-            // Named by kind only; the path is the app's own.
+            // It is there but cannot be read. Named by kind only; the path is the app's own.
             SettingsLoad.Broken(SettingsProblem(SettingsProblemKind.UNREADABLE_FILE, null))
         }
 

@@ -5,6 +5,7 @@ import dev.phoneagent.app.model.credential.SoftwareCipher
 import dev.phoneagent.app.model.settings.ModelSettings
 import dev.phoneagent.app.model.settings.ModelSettingsFile
 import dev.phoneagent.app.model.settings.SettingsFixtures
+import dev.phoneagent.app.model.settings.SettingsProblem
 import dev.phoneagent.app.model.settings.SettingsProblemKind
 import dev.phoneagent.app.model.setup.AuthChoice
 import dev.phoneagent.app.model.setup.FakeProvider
@@ -129,6 +130,84 @@ class ModelServicesTest {
             )
             assertTrue(services.state.value is SettingsState.Broken)
         }
+    }
+
+    /**
+     * A key and the settings that use it, then [make] spoils the settings file; then a save, after a
+     * reload or as the first thing; then a reset. What the services show and keep at each step.
+     */
+    private fun saveOverSpoiledFile(
+        make: (File) -> Unit,
+        reloadFirst: Boolean,
+        provider: FakeProvider,
+    ): List<Any> {
+        val root = temp.newFolder()
+        val services =
+            ModelServices(File(root, "files").also { it.mkdir() }, File(root, "no_backup").also { it.mkdir() }, cipher)
+        services.credentials.put(SettingsFixtures.REF, "sk-test-not-a-real-key")
+        make(File(root, "files/${ModelSettingsFile.NAME}"))
+        val custom = ProviderForm.start(null)
+        val form = custom.copy(baseUrl = provider.baseUrl, auth = AuthChoice.NONE, mainModel = "main-model")
+        val sentBefore = provider.requests.size
+        val outcome =
+            runBlocking {
+                if (reloadFirst) services.reload()
+                services.testAndSave(form)
+            }
+        val spoiled =
+            listOf(
+                services.state.value,
+                outcome,
+                services.credentials.status(SettingsFixtures.REF),
+                provider.requests.size - sentBefore,
+            )
+        val reset = runBlocking { services.reset() }
+        return spoiled + listOf(reset, services.credentials.status(SettingsFixtures.REF))
+    }
+
+    @Test
+    fun aSettingsFileThatCannotBeReadKeepsItsKeysAndRefusesSavesUntilTheUserResets() {
+        val stored = Json.encodeToString(serializer<ModelSettings>(), SettingsFixtures.settings())
+        val shapes =
+            mapOf<String, (File) -> Unit>(
+                "file without read permission" to { SettingsFixtures.unreadable(it, stored) },
+                "directory in its place" to { SettingsFixtures.directoryAt(it) },
+            )
+        // Collected first, so each cell shows everything a run that ignores the spoiled file changes.
+        val seen =
+            FakeProvider().use { provider ->
+                shapes.entries
+                    .flatMap { (shape, make) ->
+                        listOf(true, false).map { reloadFirst ->
+                            val cell = "$shape, ${if (reloadFirst) "reload" else "save"} first"
+                            cell to saveOverSpoiledFile(make, reloadFirst, provider)
+                        }
+                    }.toMap()
+            }
+        val broken = SettingsState.Broken(SettingsProblem(SettingsProblemKind.UNREADABLE_FILE, null))
+        assertEquals(4, seen.size)
+        assertEquals(
+            seen.keys.associateWith {
+                listOf(
+                    broken,
+                    SetupOutcome.SettingsBroken,
+                    CredentialStatus.PRESENT,
+                    0,
+                    SettingsState.Ready(null, emptyMap()),
+                    CredentialStatus.MISSING,
+                )
+            },
+            seen,
+        )
+    }
+
+    @Test
+    fun aMissingFileIsNoSettingsAndTheKeysNobodyUsesGo() {
+        services.credentials.put(SettingsFixtures.REF, "sk-test-not-a-real-key")
+        assertEquals(
+            listOf(SettingsState.Ready(null, emptyMap()), CredentialStatus.MISSING),
+            listOf(reload(), services.credentials.status(SettingsFixtures.REF)),
+        )
     }
 
     @Test

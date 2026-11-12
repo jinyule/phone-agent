@@ -149,7 +149,7 @@ internal data class SettingsProblem(
 
 /** The kinds of [SettingsProblem]; the UI shows one text per kind. */
 internal enum class SettingsProblemKind {
-    /** The file cannot be read from storage. */
+    /** The file is there but cannot be read (no permission, a directory in its place, a failed read). */
     UNREADABLE_FILE,
 
     /** Not JSON, or not the shape of the settings. */

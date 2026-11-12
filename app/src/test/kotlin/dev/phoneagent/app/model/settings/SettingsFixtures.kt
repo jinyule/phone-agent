@@ -11,6 +11,7 @@ import dev.phoneagent.core.model.SecretRef
 import dev.phoneagent.core.model.VerifiedCapability
 import dev.phoneagent.core.model.openai.ProviderPresets
 import dev.phoneagent.core.model.openai.WireOptions
+import java.io.File
 
 /** Valid settings to start tests from. */
 internal object SettingsFixtures {
@@ -55,4 +56,18 @@ internal object SettingsFixtures {
             baseUrl = "http://192.168.1.5:11434/v1",
             credential = Credential.None,
         )
+
+    /** Makes [file] hold [text] that this process cannot read (checked: a run as root fails here, loudly). */
+    fun unreadable(
+        file: File,
+        text: String,
+    ) {
+        file.writeText(text)
+        check(file.setReadable(false, false) && !file.canRead()) { "read permission is not enforced here" }
+    }
+
+    /** Puts an empty directory where [file] should be. */
+    fun directoryAt(file: File) {
+        check(file.mkdir()) { "no directory made" }
+    }
 }
