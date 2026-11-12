@@ -108,4 +108,12 @@
     <string name="kind_network">连不上服务商。</string>
     <string name="kind_server">服务商出错。</string>
     <string name="kind_bad_response">服务商的回复无法使用。</string>
+
+    <!-- Task service notification -->
+    <string name="task_channel">正在运行的任务</string>
+    <string name="task_running">正在执行你的任务</string>
+    <string name="task_waiting_user">等你回答</string>
+    <string name="task_waiting_handoff">轮到你在手机上操作</string>
+    <string name="task_waiting_lock">等屏幕解锁</string>
+    <string name="task_stop">停止</string>
 </resources>

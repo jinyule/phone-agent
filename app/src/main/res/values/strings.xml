@@ -110,4 +110,12 @@
     <string name="kind_network">The provider could not be reached.</string>
     <string name="kind_server">The provider failed.</string>
     <string name="kind_bad_response">The provider\'s reply could not be used.</string>
+
+    <!-- Task service notification -->
+    <string name="task_channel">Running tasks</string>
+    <string name="task_running">Working on your task</string>
+    <string name="task_waiting_user">Waiting for your answer</string>
+    <string name="task_waiting_handoff">Your turn: do the step on the phone</string>
+    <string name="task_waiting_lock">Waiting for the screen to be unlocked</string>
+    <string name="task_stop">Stop</string>
 </resources>

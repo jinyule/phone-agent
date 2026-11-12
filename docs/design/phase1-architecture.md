@@ -63,6 +63,7 @@ phone-agent/
 │                与传输无关：同一份 Core 由 Binder 交接，或作为 Shizuku UserService 运行
 ├─ app/          Android 宿主
 │   ui/          Compose：对话、轨迹、审批卡、接管、设置、onboarding 向导
+│   task/        进程里唯一的 TaskController：建会话、发命令、停止与继续；对话视图由日志记录折叠而成
 │   service/     TaskService（前台）、AgentAccessibilityService、悬浮胶囊、无键盘 IME
 │   adapters/    AndroidScreen（实现 ScreenPort）、AgentDisplayManager、Ocr、Frames
 │   setup/       配对流程、助手生命周期、无障碍自动恢复、能力探针
@@ -99,6 +100,12 @@ phone-agent/
                 │ 拉起方式：① 内置 ADB 客户端（Android 12+）经 adbd 的 shell,v2（没有时用 exec:）服务
                 │          ② Shizuku UserService  ③ 开发者在 USB 下运行启动脚本
 ```
+
+**App 侧的任务**（M1，主屏模式）：
+- 进程里只有一个 `TaskController`，对话页和 `TaskService` 共用。第一条命令建会话：主模型为这个会话新建（`BlobSource` 读本会话的 blobs），再 `assemble(model, productConfig)`、`setup(…, surfaces = null)`；ScreenPort 是主屏，用装配给的 analyzer。`ProductConfig` 里本 App 的名称包括应用名和无障碍服务名的中英文，代理不操作本 App，也不操作它的无障碍设置页。
+- 停止以后的下一条命令由同一会话的 `AgentLoop.resume` 接着跑；停止还没生效时发出的命令，等到 `Stopped` 再交给新实例。进程重启后还不会接回旧会话，日志留在磁盘上。
+- 对话视图是日志记录的折叠，轨迹卡用 `Tool.presentCall` / `presentResult` 从记录重新生成，所以和 runtime 发出的卡一致。`LoopEvent.Recorded` 的 seq 有缺口，或者 `Phase.Waiting` 指向没见过的提示时，从日志重建；读日志期间收到的记录并进重建结果。
+- `TaskService`（specialUse 前台服务）由可见的对话页在发命令时启动。任务"忙"的期间（命令已交出、还没记成 `user/message`；turn 打开；运行中或等待用户）持有 WakeLock，显示带停止按钮的通知；不忙了就自己停。服务被销毁时任务还忙，就按 `SHUTDOWN` 停止。
 
 **启动边界**：助手代 App 启动的，只能是 App 自己调用 startActivity 也能启动的那个 Activity，并且不能借 shell 身份多带任何权限。每条启动路径（直接启动、`am start` 回退、冷启动）都只启动同一个检查返回的目标；具体规则见 §3.5 和 `docs/adr/2026-11-01-privileged-display-and-input.md` 决定 1。
 
