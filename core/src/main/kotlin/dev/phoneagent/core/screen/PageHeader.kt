@@ -89,5 +89,6 @@ internal class PageHeader(
             ScreenFlag.PAYMENT -> "支付页"
             ScreenFlag.RATE_LIMIT -> "App 提示操作太频繁"
             ScreenFlag.LOCKED -> "手机已锁屏"
+            ScreenFlag.WITHHELD -> "按安全规则不显示这一屏的内容"
         }
 }

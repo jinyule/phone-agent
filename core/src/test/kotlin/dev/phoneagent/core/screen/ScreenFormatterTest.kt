@@ -70,7 +70,8 @@ class ScreenFormatterTest {
                     SnapshotDetail.BRIEF,
                 )
             assertEquals(
-                "状态：禁止截屏 · 键盘已弹出 · 系统选择框在前面 · 登录页 · 人机验证 · 支付页 · App 提示操作太频繁 · 手机已锁屏",
+                "状态：禁止截屏 · 键盘已弹出 · 系统选择框在前面 · 登录页 · 人机验证 · 支付页 · App 提示操作太频繁 · 手机已锁屏 · " +
+                    "按安全规则不显示这一屏的内容",
                 all.lines()[1],
             )
             assertFalse(page().contains("状态："))

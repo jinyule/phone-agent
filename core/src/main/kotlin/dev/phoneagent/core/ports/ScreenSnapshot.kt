@@ -290,6 +290,13 @@ public enum class ScreenFlag {
 
     /** The device is locked or the screen is off (D11: tasks pause). */
     LOCKED,
+
+    /**
+     * The policy refused to show this screen to the model (policy-rules §6.4): a copy that keeps
+     * only the id, surface, pkg and detail of the screen read, with no content. Only the runtime
+     * sets it, on the copy it gives a tool; ports never set it, and logged screens never carry it.
+     */
+    WITHHELD,
 }
 
 /**
