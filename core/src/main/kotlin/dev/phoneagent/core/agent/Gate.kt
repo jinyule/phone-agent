@@ -34,10 +34,12 @@ import kotlinx.coroutines.withTimeoutOrNull
  * `PolicyContext.approved`, on S', or on no screen when there is no screen port or the read failed
  * or took longer than [LoopConfig.recheckScreenTimeoutMs]. Whether a call may run
  * without a screen is the policy's decision, never the runtime's. Allow runs it; Refuse and
- * HandOff end as such (a hand-off whose take-back failed as ERROR, the turn going on); a new
- * Confirm (the screen changed under the approval) is shown again, at most
- * [LoopConfig.maxReconfirmations] times per call, after which the call is refused and the model
- * told to observe and try again.
+ * HandOff end as such. A hand-off whose move failed never ran, and the turn goes on: as REFUSED
+ * with [LoopTexts.handoffFailed] when handOff returned NOT_TAKEN_BACK or FAILED, as ERROR with it
+ * when handOff threw; either gets [LoopTexts.screenUnknown] too when no screen was read after the
+ * handoff (never, when handOff threw). A new Confirm (the screen changed under the approval) is
+ * shown again, at most [LoopConfig.maxReconfirmations] times per call, after which the call is
+ * refused and the model told to observe and try again.
  *
  * S' is read at the plan screen's detail so that the policy counts elements on S' as the executor
  * counts them on the screen the call names. A call by ref names the plan screen: the rules refuse,
@@ -155,10 +157,11 @@ internal class Gate(
     )
 
     /**
-     * Hands [verdict]'s call off; it never runs. A failed take-back ([ScreenUnavailableException]
-     * from handOff: where the app is is unknown, `Prompts`) answers the call as ERROR, and the turn
-     * goes on: no screen was read after the handoff, so the result gets [LoopTexts.screenUnknown]
-     * and the model observes first.
+     * Hands [verdict]'s call off; it never runs. A handOff that throws ([ScreenUnavailableException]:
+     * a failed take-back or an unsettled hand-over, where the app is is unknown, `Prompts`) answers
+     * the call as ERROR, and the turn goes on: no screen was read after the handoff, so the result
+     * gets [LoopTexts.screenUnknown] and the model observes first. A NOT_TAKEN_BACK or FAILED it
+     * returns answers the call as REFUSED; the screen note then follows from the look after it.
      */
     private suspend fun handedOff(
         verdict: Verdict.HandOff,

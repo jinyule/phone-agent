@@ -110,7 +110,7 @@ public data class LoopTexts(
     val handoffExpired: String = "未完成：没有人及时接手这一步。",
     /** The task is unattended, so nobody can take over. */
     val handoffUnavailable: String = "未完成：这一步需要用户来做，但现在没有人能接手。",
-    /** Moving the task to the user failed. */
+    /** Moving the task to the user or back failed (REFUSED or ERROR, see the Gate); the step was not done. */
     val handoffFailed: String = "未完成：把这一步交给用户时出错了。",
     /**
      * Appended, on a line of its own, to a handed-off call's result when no screen was read after
