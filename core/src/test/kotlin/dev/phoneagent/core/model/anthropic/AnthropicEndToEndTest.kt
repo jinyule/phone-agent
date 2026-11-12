@@ -2,6 +2,7 @@ package dev.phoneagent.core.model.anthropic
 
 import dev.phoneagent.core.ids.BlobRef
 import dev.phoneagent.core.ids.ModelId
+import dev.phoneagent.core.model.CacheLayout
 import dev.phoneagent.core.model.ChatModel
 import dev.phoneagent.core.model.ChatRequest
 import dev.phoneagent.core.model.ChatResponse
@@ -9,11 +10,29 @@ import dev.phoneagent.core.model.CredentialKind
 import dev.phoneagent.core.model.Message
 import dev.phoneagent.core.model.ModelCapabilities
 import dev.phoneagent.core.model.ModelError
+import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.Part
+import dev.phoneagent.core.model.PromptBlock
 import dev.phoneagent.core.model.PromptCaching
 import dev.phoneagent.core.model.ReasoningLevel
+import dev.phoneagent.core.model.RequestSettings
 import dev.phoneagent.core.model.Role
 import dev.phoneagent.core.model.StopReason
+import dev.phoneagent.core.session.AssistantMessage
+import dev.phoneagent.core.session.CompactionPrune
+import dev.phoneagent.core.session.RequestHeader
+import dev.phoneagent.core.session.SessionEvent
+import dev.phoneagent.core.session.SessionRecord
+import dev.phoneagent.core.session.SessionSamples
+import dev.phoneagent.core.session.SurfaceOp
+import dev.phoneagent.core.session.ToolCallRecorded
+import dev.phoneagent.core.session.ToolResultRecorded
+import dev.phoneagent.core.session.UserMessage
+import dev.phoneagent.core.session.UserMessageKind
+import dev.phoneagent.core.session.deriveMessages
+import dev.phoneagent.core.tool.ToolCall
+import dev.phoneagent.core.tool.ToolResult
+import dev.phoneagent.core.tool.ToolStatus
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -50,10 +69,11 @@ import kotlin.time.Duration.Companion.minutes
  * Small live checks against an Anthropic Messages endpoint; skipped unless
  * `PA_E2E_ANTHROPIC_BASE_URL`, `PA_E2E_ANTHROPIC_KEY` and `PA_E2E_ANTHROPIC_MODEL` are set. Run
  * against a gateway that converts Messages to another model, they check the wire format (text,
- * streaming, a tool round trip, an image, append-only history), not Claude's own behavior:
- * thinking signatures, cache hits, refusals and fallbacks are covered by the stream fixtures.
+ * streaming, a tool round trip and a follow-up whose requests are derived from a session log, an
+ * image, append-only history), not Claude's own behavior: thinking signatures, cache hits,
+ * refusals and fallbacks are covered by the stream fixtures.
  *
- * Four model calls. One run sends at most `PA_E2E_MAX_REQUESTS` (default 6) requests; a rate limit
+ * Five model calls. One run sends at most `PA_E2E_MAX_REQUESTS` (default 6) requests; a rate limit
  * or quota error stops every remaining check, and nothing is retried. Each call prints one `e2e:`
  * line; raw streams (key masked) go to `build/e2e-anthropic/` for review. Assertion messages never
  * quote what the server sent.
@@ -165,11 +185,14 @@ class AnthropicEndToEndTest {
 
     @Test
     @Order(2)
-    fun `tool round trip with append-only history`() =
+    fun `tool round trip and a follow-up, each request derived from the log, append-only`() =
         runTest(timeout = TIMEOUT) {
             val model = model()
-            val ask = Kit.user("巴黎现在天气怎么样？请调用 get_weather 工具，reason 填“查天气”。")
-            val first = request(ask)
+            val log = Log(model.prepare(ReasoningLevel.LOW))
+            log += UserMessage(UserMessageKind.USER, listOf(Part.Text(ASK)))
+            log += log.header
+            log += UserMessage(UserMessageKind.RUNTIME_CONTEXT, listOf(Part.Text("前台：天气 App")))
+            val first = log.request()
             val (reply, deltas) = call("tool call", model, first)
             assertEquals(StopReason.TOOL_USE, reply.stopReason)
             val call = reply.toolCalls.single()
@@ -177,12 +200,16 @@ class AnthropicEndToEndTest {
             assertTrue(listOf(call.id) == deltas.started.map { it.id }, "the call is announced once (ids not shown)")
             val args = runCatching { Json.parseToJsonElement(call.argsJson) }.getOrNull() as? JsonObject
             assertTrue(args?.containsKey("city") == true, "the arguments name a city (arguments not shown)")
-            val second =
-                request(
-                    ask,
-                    Message(Role.ASSISTANT, reply.parts),
-                    Message(Role.TOOL, listOf(Part.ToolResult(call.id, listOf(Part.Text("晴，22°C")), isError = false))),
+            log += AssistantMessage(1, profile.id, modelId, reply.parts, reply.stopReason, reply.usage)
+            log +=
+                ToolCallRecorded(
+                    ToolCall(call.id, SessionSamples.task, SessionSamples.session, call.name, args!!, "查天气"),
                 )
+            val result =
+                log.add(
+                    ToolResultRecorded(call.id, call.name, ToolResult(ToolStatus.OK, listOf(Part.Text("晴，22°C")))),
+                )
+            val second = log.request()
             val (answer) = call("tool result", model, second)
             assertEquals(StopReason.END_TURN, answer.stopReason)
             assertTrue(
@@ -192,8 +219,48 @@ class AnthropicEndToEndTest {
                     .contains("22"),
                 "the answer uses the tool result (value not shown)",
             )
+            log += AssistantMessage(1, profile.id, modelId, answer.parts, answer.stopReason, answer.usage)
+            // A prune the Anthropic projection leaves out of the request (history only appended).
+            log.add(CompactionPrune(listOf(Part.Text("[结果已省略]"))), SurfaceOp.Replace(result, result))
+            log += UserMessage(UserMessageKind.USER, listOf(Part.Text("用一句话复述刚才查到的天气，不要调用工具。")))
+            val third = log.request()
+            val (again) = call("follow-up", model, third)
+            assertEquals(StopReason.END_TURN, again.stopReason)
             assertAppendOnly(first, second)
+            assertAppendOnly(second, third)
         }
+
+    /** A session log in memory, with each request derived from it as the loop does. */
+    private inner class Log(
+        prepared: RequestSettings,
+    ) {
+        val header =
+            RequestHeader(
+                provider = profile.id,
+                model = modelId,
+                protocol = ModelProtocol.ANTHROPIC_MESSAGES,
+                wire = prepared.wire,
+                system = listOf(PromptBlock("system", "你是测试助手。回答尽量简短。")),
+                tools = listOf(Kit.WEATHER),
+                cache = CacheLayout.DEFAULT,
+                contextEdits = prepared.contextEdits,
+                maxOutputTokens = MAX_TOKENS,
+                reasoning = prepared.reasoning,
+            )
+        private val records = mutableListOf(SessionRecord(1, 0, SessionSamples.start))
+
+        /** Appends [event]; returns its seq. */
+        fun add(
+            event: SessionEvent,
+            surfaceOp: SurfaceOp = SurfaceOp.Append,
+        ): Long = (records.size + 1L).also { records += SessionRecord(it, 0, event, surfaceOp) }
+
+        operator fun plusAssign(event: SessionEvent) {
+            add(event)
+        }
+
+        fun request(): ChatRequest = header.toRequest(deriveMessages(records))
+    }
 
     @Test
     @Order(3)
@@ -213,8 +280,9 @@ class AnthropicEndToEndTest {
         }
 
     /**
-     * model-layer §6: the messages of a request, without their moving cache breakpoints, are a
-     * prefix of the next request's.
+     * model-layer §6: a request, without its moving cache breakpoints, has the system and tools of
+     * the one before it, whose message blocks (each with its role: consecutive messages of a role
+     * merge on the wire) are a prefix of its own.
      */
     private fun assertAppendOnly(
         first: ChatRequest,
@@ -222,13 +290,21 @@ class AnthropicEndToEndTest {
     ) {
         val wire = MessagesWire(profile.id, modelId)
 
-        fun messages(request: ChatRequest): List<JsonElement> {
-            val body = wire.body(request, WireRules.of(request, CredentialKind.API_KEY), ImageData.NONE)
-            return body["messages"]!!.jsonArray.map(::withoutCache)
-        }
-        val before = messages(first)
-        val after = messages(second)
-        assertTrue(before == after.take(before.size), "history is append-only (bodies not shown)")
+        fun body(request: ChatRequest) =
+            withoutCache(
+                wire.body(request, WireRules.of(request, CredentialKind.API_KEY), ImageData.NONE),
+            ) as JsonObject
+
+        fun blocks(body: JsonObject): List<JsonElement> =
+            body["messages"]!!.jsonArray.flatMap { message ->
+                val role = (message as JsonObject).getValue("role")
+                message.getValue("content").jsonArray.map { JsonArray(listOf(role, it)) }
+            }
+        val (before, after) = body(first) to body(second)
+        assertTrue(before["system"] == after["system"], "the system prompt is unchanged (values not shown)")
+        assertTrue(before["tools"] == after["tools"], "the tools are unchanged (values not shown)")
+        val earlier = blocks(before)
+        assertTrue(earlier == blocks(after).take(earlier.size), "history is append-only (bodies not shown)")
     }
 
     private fun withoutCache(element: JsonElement): JsonElement =
@@ -284,6 +360,7 @@ class AnthropicEndToEndTest {
     }
 
     private companion object {
+        const val ASK = "巴黎现在天气怎么样？请调用 get_weather 工具，reason 填“查天气”。"
         const val DEFAULT_BUDGET = 6
         const val MAX_TOKENS = 4096
         const val SIDE = 64
