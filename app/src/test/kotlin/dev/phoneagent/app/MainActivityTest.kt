@@ -20,6 +20,7 @@ import dev.phoneagent.app.ui.chat.ChatTags
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.serializer
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -41,6 +42,18 @@ class MainActivityTest {
             compose.onNodeWithText(context.getString(R.string.chat_empty)).assertExists()
             compose.onNodeWithText(context.getString(R.string.nav_models)).performClick()
             compose.onNodeWithText(context.getString(R.string.settings_none)).assertExists()
+        }
+    }
+
+    @Test
+    fun backFromTheModelSettingsReturnsToTheChat() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            compose.onNodeWithText(context.getString(R.string.chat_empty)).assertExists()
+            compose.onNodeWithText(context.getString(R.string.nav_models)).performClick()
+            compose.onNodeWithText(context.getString(R.string.settings_none)).assertExists()
+            scenario.onActivity { activity -> activity.onBackPressedDispatcher.onBackPressed() }
+            compose.onNodeWithText(context.getString(R.string.chat_empty)).assertExists()
+            scenario.onActivity { activity -> assertFalse(activity.isFinishing) }
         }
     }
 

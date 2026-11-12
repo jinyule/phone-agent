@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -56,13 +57,17 @@ internal enum class Destination {
     MODELS,
 }
 
-/** The shell: the chat with the task (where it opens) and the model settings. */
+/**
+ * The shell: the chat with the task (where it opens) and the model settings. Back from the model
+ * settings returns to the chat; back from the chat leaves the app.
+ */
 @Composable
 internal fun AppRoot(
     chat: ChatViewModel,
     settings: ModelSettingsViewModel,
 ) {
     var destination by rememberSaveable { mutableStateOf(Destination.CHAT) }
+    BackHandler(enabled = destination != Destination.CHAT) { destination = Destination.CHAT }
     Scaffold { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             PrimaryTabRow(selectedTabIndex = destination.ordinal) {
