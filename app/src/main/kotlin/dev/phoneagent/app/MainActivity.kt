@@ -97,7 +97,14 @@ private fun ChatDestination(
 ) {
     val view by viewModel.view.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    // What is sent waits for the answer to the notification permission, so the dialog is gone before
+    // the task looks at the screen; granted or not, it then goes.
+    var waiting by rememberSaveable { mutableStateOf<String?>(null) }
+    val permission =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+            waiting?.let(viewModel::send)
+            waiting = null
+        }
     val actions =
         remember(viewModel) {
             object : ChatActions by viewModel {
@@ -106,8 +113,12 @@ private fun ChatDestination(
                         Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
                             PackageManager.PERMISSION_GRANTED
-                    viewModel.send(text)
-                    if (ask) permission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    if (ask) {
+                        waiting = text
+                        permission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    } else {
+                        viewModel.send(text)
+                    }
                 }
             }
         }
