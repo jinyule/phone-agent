@@ -14,8 +14,8 @@ class ElementIdentityTest {
     private val nodes = ArrayList<Identities.Facts>()
 
     /**
-     * How a node of [add] is: [shown] `false` for one the read leaves out (out of view); [cut] and
-     * [clipped] as [Identities.Loss] has them.
+     * How a node of [add] is: [shown] `false` for one the read leaves out (out of view); [cut],
+     * [clipped] and [besideGap] as [Identities.Loss] has them.
      */
     private class Kind(
         val list: Boolean = false,
@@ -23,6 +23,7 @@ class ElementIdentityTest {
         val interactive: Boolean = false,
         val cut: Boolean = false,
         val clipped: Boolean = false,
+        val besideGap: Boolean = false,
     )
 
     private val list = Kind(list = true)
@@ -41,7 +42,7 @@ class ElementIdentityTest {
                 label = label,
                 shape = Identities.Shape(kind.list, kind.interactive),
                 parent = parent,
-                loss = Identities.Loss(cut = kind.cut, clipped = kind.clipped),
+                loss = Identities.Loss(cut = kind.cut, clipped = kind.clipped, besideGap = kind.besideGap),
             )
         return nodes.lastIndex
     }
@@ -261,7 +262,7 @@ class ElementIdentityTest {
         assertFalse(reliable(like))
         assertFalse("however whole it looks", reliable(ok))
         assertFalse(reliable(feed))
-        assertTrue("a row is whole by itself", reliable(ada + 2))
+        assertFalse("below the list, which is not reliable", reliable(ada + 2))
     }
 
     @Test
@@ -283,6 +284,34 @@ class ElementIdentityTest {
         assertTrue(reliable(after + 2))
         assertTrue(reliable(feed))
         assertTrue(reliable(ok))
+    }
+
+    @Test
+    fun whatANodeLacksPassesDownThroughNodesTheReadLeavesOut() {
+        // Fix list fwd B1: the nested lists are out of view; the read gives their rows the outer list as parent.
+        val root = add(null)
+        val outer = add(null, parent = root, kind = list)
+        val items =
+            add(
+                "Items",
+                parent = outer,
+                role = ElementRole.LIST,
+                kind = Kind(list = true, shown = false, besideGap = true),
+            )
+        val wrapper = add(null, parent = items, kind = Kind(shown = false))
+        val like = add("Like", parent = wrapper, role = ElementRole.BUTTON, kind = control)
+        val photos = add("Photos", parent = outer, role = ElementRole.LIST, kind = Kind(list = true, shown = false))
+        val share = add("Share", parent = photos, role = ElementRole.BUTTON, kind = control)
+        val cut = add(null, parent = outer, kind = Kind(cut = true))
+        add("Cy", parent = cut, role = ElementRole.TEXT)
+        val inCut = add("Songs", parent = cut, role = ElementRole.LIST, kind = list)
+        val play = add("Play", parent = inCut, role = ElementRole.BUTTON, kind = control)
+
+        assertNull(identities()[items])
+        assertTrue("the outer list", reliable(outer))
+        assertFalse("below the list beside the gap, two nodes down", reliable(like))
+        assertTrue("below a list away from the gap", reliable(share))
+        assertFalse("below a kept list in a row cut", reliable(play))
     }
 
     @Test

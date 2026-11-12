@@ -12,9 +12,9 @@ import java.security.MessageDigest
  * The context is the labels of the element's window outside lists when it is in no list, else of
  * its row ([Identities.of]). Labels are the nodes' own text or description, of nodes out of view
  * too while the tree still holds them, so scrolling a list renumbers neither the bars around it
- * nor a row that is still partly in view. An identity is not [reliable] when its context could
- * not be read in full, or is a row the list's edge cut down to its controls: nothing is paired
- * by it.
+ * nor a row that is still partly in view. An identity is not [reliable] when its context, or
+ * that of a node above it, could not be read in full, or is a row the list's edge cut down to its
+ * controls: nothing is paired by it.
  *
  * Used by [RefCarrier] for both carrying refs to the next screen and finding a planned element
  * again before an action ([RefMatcher]); there is no second notion of identity.
@@ -138,7 +138,11 @@ internal object Identities {
      *   children to the budgets, its last row if that row is still open; a list that could not
      *   read a child, the rows of the children beside it, nested lists included (rule 3);
      * - a row the list's edge cut whose labels are all its controls' own (rule 4): what told it
-     *   apart may be gone. Rows not cut and elements in no list are not held to this.
+     *   apart may be gone. Rows not cut and elements in no list are not held to this;
+     * - a node below one of the above in the tree walked, whether the nodes between are kept or not
+     *   (fix list fwd B1). A kept node above that is not reliable gets a new ref, and so does all
+     *   below it; a node the read leaves out (out of view, or alike to a kept one) gets no ref, and
+     *   what it lacks is passed down all the same.
      */
     fun of(nodes: List<Facts>): List<ElementIdentity?> = Contexts(nodes).identities()
 
@@ -229,6 +233,8 @@ internal object Identities {
 
         fun identities(): List<ElementIdentity?> {
             val owner = arrayOfNulls<Owner>(nodes.size)
+            // Per node walked, kept or not: its context and those of all nodes above it are reliable.
+            val whole = BooleanArray(nodes.size)
             return nodes.indices.map { i ->
                 val parent = nodes[i].parent
                 val mine =
@@ -238,7 +244,8 @@ internal object Identities {
                         else -> checkNotNull(owner[parent])
                     }
                 owner[i] = mine
-                nodes[i].base?.copy(context = contextOf(mine), reliable = reliableOf(mine))
+                whole[i] = reliableOf(mine) && (parent == null || whole[parent])
+                nodes[i].base?.copy(context = contextOf(mine), reliable = whole[i])
             }
         }
 

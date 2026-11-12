@@ -25,8 +25,8 @@ internal class TreeEntry(
  * screen; among several, only the one at the same place in both screens keeps its ref. Parents are
  * paired first, so an element whose parent got a new ref gets one too. Anything ambiguous, and any
  * element whose identity is not [ElementIdentity.reliable] (read only in part, or a row the list's
- * edge cut down to its controls), gets a new number above all numbers handed out before, and its
- * old ref is void: a ref never comes back for a different element.
+ * edge cut down to its controls, it or a node above it), gets a new number above all numbers handed
+ * out before, and its old ref is void: a ref never comes back for a different element.
  *
  * It renumbers rather than guess: any changed label outside lists (a clock, a carousel, a banner)
  * gives everything of that window outside lists new refs, the lists and their rows with it; any
