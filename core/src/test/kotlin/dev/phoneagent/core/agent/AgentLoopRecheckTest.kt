@@ -295,7 +295,11 @@ class AgentLoopRecheckTest {
             assertEquals(refuse.hintForModel, run.result().text())
         }
 
-    /** Refuses a write without a screen, like the rules do (WP05); allows everything else. */
+    /**
+     * Refuses without a screen and allows everything else: a stand-in for the rules' `call.no_screen`
+     * (WP05 `RulesEngine`), so this test is about the runtime alone. `AgentLoopRealPolicyTest` runs
+     * the re-check on no screen with the real rules.
+     */
     private val needsScreen =
         PolicyEngine { _, _, ctx -> if (ctx.screen == null) refuse else Verdict.Allow }
 
