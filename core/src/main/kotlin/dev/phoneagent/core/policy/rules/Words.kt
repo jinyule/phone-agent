@@ -126,10 +126,10 @@ internal object Words {
         )
 
     /**
-     * What joins two actions in an English label ([Text.phrase] form): "Send and delete", "Delete
-     * & send", "Save + post", "Delete, then send". Only the joiner itself is taken: "and" and
-     * "then" as whole words, at word boundaries, so joiners in a row ("and then", "& then") each
-     * split and so do hyphenated ones ("Send-and-delete"); an [ENGLISH_SIGNS] sign that stands
+     * What joins two actions in an English label ([Text.phrase] form, [splitJoiners]): "Send and
+     * delete", "Delete & send", "Save + post", "Delete, then send". Only the joiner itself is taken:
+     * these words as whole words, at word boundaries, so joiners in a row ("and then", "& then")
+     * each split and so do hyphenated ones ("Send-and-delete"); an [ENGLISH_SIGNS] sign that stands
      * alone between spaces, as one does once spaced out from between the Latin letters of a word
      * ([ENGLISH_SIGNS]). The spaces and commas around a joiner stay with the parts, which are read
      * without them. A control's own label and a dialog also split at [ENGLISH_PAUSES]. Each part is
@@ -137,7 +137,7 @@ internal object Words {
      * where every part is within the length limit of the text ([PolicyTuning.labelMax],
      * [PolicyTuning.contextMax] in dialogs; any length in a control's own label, [Lexicon.ofControl]).
      */
-    val ENGLISH_JOINERS: Regex = Regex("\\b(?:and|then)\\b|(?<=\\s)[&+/](?=\\s)")
+    val ENGLISH_JOINERS: List<String> = listOf("and", "then")
 
     /**
      * "," and ";" before a space, joining actions in a control's own label and in a dialog only

@@ -119,7 +119,7 @@ private fun englishPhrase(
 
 /**
  * [text] with the sign of each word made of Latin letters and one [Words.ENGLISH_SIGNS] sign
- * between them spaced out ("send&delete" → "send & delete"), so [Words.ENGLISH_JOINERS] splits
+ * between them spaced out ("send&delete" → "send & delete"), so [splitJoiners] splits
  * there. Quotes and brackets around the word and the punctuation after it are left out of that
  * ([Words.ENGLISH_WORD_WRAPPERS], [Words.ENGLISH_WORD_STOPS]: "\"send&delete\"", "send+delete? this…").
  * A word that, without them, starts or ends with any other mark is not split: a path, a hashtag, a
@@ -301,7 +301,7 @@ internal object Phrases {
         val spaced = Text.phrase(label).trimEnd { !it.isLetterOrDigit() }
         val letters = spaced.split(' ')
         val text = if (letters.size > 1 && letters.all { it.length == 1 }) letters.joinToString("") else spaced
-        val joined = spacedSigns(text).split(Words.ENGLISH_JOINERS)
+        val joined = splitJoiners(spacedSigns(text))
         val pieces =
             (if (pauses) joined.flatMap { it.split(Words.ENGLISH_PAUSES) } else joined)
                 .map { withoutFillers(trimmed(it)) }
