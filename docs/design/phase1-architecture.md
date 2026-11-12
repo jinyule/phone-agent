@@ -499,7 +499,7 @@ fun interface Chain<I, O> { suspend fun proceed(input: I): O }   // 不调用 pr
 |---|---|---|---|---|
 | `preStep` | 每个 step 之前（本 step 的输入已写入日志） | `PreStepInput(turn, step, log)` → `Proceed` / `Refuse(detail)` | **拒绝本 step**；追加 runtime-context（前台 App、时间、知识提示）；压缩。`log` 只能写上下文事件（`compaction/*`、`context/reasoning-dropped`、runtime-context），其他事件在写入之前抛 `IllegalArgumentException` | RuntimeContext、Compaction |
 | `request` | 每次 attempt 之前 | `RequestPlan` → `RequestPlan` | 为主请求选模型、推理档位、缓存断点（线路快照和上下文编辑都不在计划里：链之后由 runtime 调 `model.prepare(reasoning)` 生成，头里记它给的快照、钳制后的档位和 `contextEdits`，所以换了模型，服务端上下文管理也跟着换；model-layer §3.3）；`RequestPlan` 只服务主对话，看图和轻量请求走旁路（`side/*`）；**不能改消息** | ModelRouter |
-| `requestError` | attempt 失败后（step 仍打开；回复没过边界校验也算，按 `BadResponse`） | `RequestFailure(error, attempt, retries, log)` → `Retry(delayMs)` / `Fail` | 决定是否重试；每次重试记 `request/retry`。`log` 和 `preStep` 的是同一份允许清单，例如签名失效时先写 `context/reasoning-dropped` 再重试，下一次 attempt 按写入后的日志组装 | `RetryInterceptor`（默认）、OverflowCompaction、ImageOffload |
+| `requestError` | attempt 失败后（step 仍打开；回复没过边界校验也算，按 `BadResponse`） | `RequestFailure(error, attempt, retries, log)` → `Retry(delayMs)` / `Fail` | 决定是否重试；每次重试记 `request/retry`。`log` 和 `preStep` 的是同一份允许清单，例如签名失效时先写 `context/reasoning-dropped` 再重试，下一次 attempt 按写入后的日志组装 | `RetryInterceptor`、`ReasoningDropRecovery`（默认链就是这两个，按这个顺序）、OverflowCompaction、ImageOffload |
 | `toolPreExecute` | 每个通过校验的调用，已写 `tool/call` | `PreExecuteInput(call, tool)` → `Verdict` | allow / refuse / confirm / handoff | **PolicyEngine**（固定排在链后，不可重排、无法绕过） |
 | `toolExecute` | 包住执行体，在工具超时之内 | `ExecuteInput(call, tool, context)` → `ToolResult` | 包装、延后或短路这个调用，spill-back 检测；**不能替换调用**：`proceed` 只接受判定过的那一组 call、tool、context，而且只能调一次，否则什么都不执行，调用记 `ERROR`。链的最内层由运行时写 `tool/started`（刷盘后再调 `Tool.execute`；刷盘期间来的停止或超时，什么都不执行）和 `tool/executed`，拦截器短路不产生这两条 | MainScreenWatch |
 | `toolPostExecute` | 每个调用有结果之后（执行、拒绝、转交都算） | `PostExecuteInput(call, tool, result)` → `PostExecuteResult(result, context)` | 替换结果；附加上下文（进 nextStep） | LoopGuard（含重复调用提醒）、OutwardPacing、KnowledgeNotice、Spill |
@@ -507,7 +507,9 @@ fun interface Chain<I, O> { suspend fun proceed(input: I): O }   // 不调用 pr
 
 主循环自带、不能被拦截器替换的部分：`preStep` 之前的步数上限；`request` 之后的刷盘；`toolPreExecute` 之后的 PolicyEngine；`toolExecute` 链最内层的执行事实（`tool/started`、刷盘、`tool/executed`），以及包住整条链的工具超时；提示的单提示锁和锁释放前的收尾（§3.2），派发不再补写 `prompt/withdrawn`；工具读屏时的屏幕判定（下面"屏幕判定"）。
 
-**`requestError` 默认行为**（`RetryInterceptor`）：可重试的错误每个 step 最多重试 5 次；服务端给了 retry-after 就按它等，否则从 500 ms 指数退避到 10 s，一半固定一半随机。retry-after 超过 `maxRetryAfterMs`（默认 60 s，构造时校验）**不重试**，直接按不可重试失败，不会把等待缩短到上限。重试前的等待可以被 steer 打断。
+**`requestError` 默认行为**：
+- `RetryInterceptor`：可重试的错误每个 step 最多重试 5 次；服务端给了 retry-after 就按它等，否则从 500 ms 指数退避到 10 s，一半固定一半随机。retry-after 超过 `maxRetryAfterMs`（默认 60 s，构造时校验）**不重试**，直接按不可重试失败，不会把等待缩短到上限。重试前的等待可以被 steer 打断。
+- `ReasoningDropRecovery`（model-layer §5"恢复兜底"）：错误是 `PrefixBindingMismatch` 时，写 `context/reasoning-dropped(upToSeq)`，`upToSeq` 是最近一条完整回复（不算被中断的回复）的 seq，然后立即重试（`Retry(0)`，占本 step 的重试次数）；下一次 attempt 不带此前回复里的推理块，compaction 块、文字、调用和结果都保留。只在这次删除真的会去掉东西时才重试：最近一次删除之后的完整回复里还有推理块。否则（还没有回复，或者删完以后又失配）交给链的下一环，最后 Fail，所以每次失配最多重试一次。全部从日志推导。其他错误原样交给下一环。
 
 **`toolPreExecute` 与 PolicyEngine**：
 - 拦截器链先跑。PolicyEngine 再用 `IntentResolver` 解析调用，在 `ctx.screen` 上判定。`ctx.screen` 从日志推导：**已经有 `tool/result` 的调用所记录的最近一屏**（包括 runtime 记在那个调用名下的屏：批准后复核读的屏 S'，以及接管结束后读的屏，§7.3）；还没有结果的调用记的屏、不属于任何调用的屏都不算。记下以后，只要发生下面任何一种作废边界，它和之前记的屏就都不算了：
@@ -755,15 +757,15 @@ TaskRuntime 循环（每个 step，对应 §3.8 的拦截点）：
                 → 达到上下文 60% 时压缩，写 compaction/* 记录
        preStep 不知道这次请求走哪个协议，所以协议的区分不在这里做，而在投影：deriveMessages 看最新 request/header 的协议
        （Responses / Chat Completions：按 compaction 的 Replace 在客户端裁剪旧界面结果、折叠旧往返；
-        Anthropic：历史只追加，不应用 Replace，旧内容交给服务端 context editing / compaction）
-  3. request 链定下模型和想要的推理档位 → 对最终选定的模型调用 ChatModel.prepare(档位)（钳制档位、生成线路快照）
-       → 用同一个 RequestSettings 填 reasoning 和 wire → 写 request/header（有变化才写）
+        Anthropic：历史只追加，不应用 Replace，旧内容交给服务端 compaction（官方端点默认开）/ context editing）
+  3. request 链定下模型和想要的推理档位 → 对最终选定的模型调用 ChatModel.prepare(档位)（钳制档位、生成线路快照、给出上下文编辑）
+       → 用同一个 RequestSettings 填 reasoning、wire 和 contextEdits → 写 request/header（有变化才写）
        → deriveMessages → 冻结 → 刷盘 → ChatModel.complete
        每个 attempt 都重新走一遍：request 链换了模型或档位，就重新 prepare，不沿用旧的 wire
        steer 到来、模型请求还在进行：取消这次 attempt（已输出的部分记成 interrupted），取走 steer 后重发
        工具执行中不被插话打断
        回复先过边界校验（§3.7：callId 在 session 内唯一；以 OTHER 结束的回复不能带调用；不能是空回复或只有 reasoning）→ 不过就当 BadResponse 走下面的失败路径，回复不记录、不执行
-       失败 → requestError 链（重试 / 溢出压缩 / 卸载图片 / 思考块前缀不匹配时去掉 thinking 块重试一次）
+       失败 → requestError 链（重试 / 溢出压缩 / 卸载图片 / 思考块前缀不匹配时去掉 thinking 块重试一次：ReasoningDropRecovery，默认链里有）
        撞到 max-tokens → 本次回复的工具调用全部 SKIPPED（告诉模型参数不完整、请重新发起），turn 结束
   4. 没有工具调用 → 校验（工具调用漏成文字 / 语言是否对）→ 作为最终回答 → turnStopping（空回复在第 3 步就当 BadResponse 了）
   5. 有工具调用（每轮只执行第一个，其余 SKIPPED）→ 参数校验（不过就 INVALID_ARGS，不写 tool/call）

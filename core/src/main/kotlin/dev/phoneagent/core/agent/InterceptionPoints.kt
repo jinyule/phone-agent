@@ -28,7 +28,8 @@ import dev.phoneagent.core.tool.ToolResult
  *
  * @property preStep before every step: refuse it, append runtime context, compact.
  * @property request before every attempt: choose the model and reasoning; cannot touch messages.
- * @property requestError after a failed attempt: decide to retry; [RetryInterceptor] by default.
+ * @property requestError after a failed attempt: decide to retry; [RetryInterceptor] then
+ *   [ReasoningDropRecovery] by default.
  * @property toolPreExecute before every validated call: allow, refuse, ask or hand off. The policy
  *   guard always runs after this chain and the stricter verdict wins, so nothing here can bypass it.
  * @property toolExecute around the tool's execution, inside the call's timeout; it may wrap, delay or
@@ -39,7 +40,7 @@ import dev.phoneagent.core.tool.ToolResult
 public data class Interceptors(
     val preStep: List<Interceptor<PreStepInput, PreStepResult>> = emptyList(),
     val request: List<Interceptor<RequestPlan, RequestPlan>> = emptyList(),
-    val requestError: List<Interceptor<RequestFailure, Recovery>> = listOf(RetryInterceptor()),
+    val requestError: List<Interceptor<RequestFailure, Recovery>> = listOf(RetryInterceptor(), ReasoningDropRecovery()),
     val toolPreExecute: List<Interceptor<PreExecuteInput, Verdict>> = emptyList(),
     val toolExecute: List<Interceptor<ExecuteInput, ToolResult>> = emptyList(),
     val toolPostExecute: List<Interceptor<PostExecuteInput, PostExecuteResult>> = emptyList(),

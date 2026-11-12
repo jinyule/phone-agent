@@ -124,9 +124,10 @@ public data class RequestRetry(
  * (a [Part.Reasoning] whose kind is `ReasoningKind.isReasoning`) of `assistant/message` records
  * with seq <= [upToSeq]; their text, tool calls and compaction blocks, and all tool results, stay
  * as they were, and a reply left without parts is left out. Reasoning of later replies stays; a
- * later drop adds to this one. Written by the `requestError` interceptor that recovers from
- * `ModelErrorKind.PREFIX_BINDING_MISMATCH` before it retries without the stale blocks (model-layer
- * §5). Not ignorable: a reader that skipped it would rebuild a different request.
+ * later drop adds to this one. Written by `ReasoningDropRecovery` (`core.agent`, in the default
+ * `requestError` chain) on `ModelErrorKind.PREFIX_BINDING_MISMATCH`, up to the latest complete
+ * reply, before it retries without the stale blocks (model-layer §5). Not ignorable: a reader
+ * that skipped it would rebuild a different request.
  *
  * @property upToSeq last record whose reasoning is dropped, >= 1 and before this record.
  */
