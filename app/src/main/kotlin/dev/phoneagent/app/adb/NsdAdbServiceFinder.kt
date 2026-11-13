@@ -9,6 +9,7 @@
  */
 package dev.phoneagent.app.adb
 
+import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.os.Build
@@ -23,6 +24,8 @@ import java.net.InetAddress
 import java.net.NetworkInterface
 import java.net.SocketException
 import java.util.concurrent.Executor
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 
 /**
@@ -49,21 +52,37 @@ internal data class NsdConfig(
 /**
  * Finds the ports of this device's adbd services by mDNS (NsdManager). Only services whose address
  * belongs to this device count: other phones on the network announce the same service types. The
- * services are resolved one at a time (older systems resolve only one at once). Discovery that
- * cannot start, and services that do not resolve in time, are logged and give no port.
+ * services are resolved one at a time. Discovery that cannot start, and services that do not
+ * resolve in time, are logged and give no port. Discovery is stopped when a search ends, also one
+ * that ends before the system reported discovery started.
+ *
+ * Before Android 14 ([legacyResolve]) a resolve cannot be cancelled, and the system resolves one
+ * service per NsdManager at a time (others fail with FAILURE_ALREADY_ACTIVE). So a resolve that did
+ * not answer in time still holds that slot: until it calls back, every search of this finder ends
+ * its mDNS part with the ports it has, and the caller goes on (the connect search to the scan). Use
+ * one finder per NsdManager ([of]).
  */
 internal class NsdAdbServiceFinder(
     nsd: Lazy<NsdManager>,
     private val callbacks: Executor,
     private val config: NsdConfig = NsdConfig(),
     private val isLocal: (InetAddress) -> Boolean = ::isThisDevice,
+    /** Resolve with the pre-Android 14 resolveService; tests force it on a newer SDK. */
+    private val legacyResolve: Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE,
 ) : AdbServiceFinder {
     private val nsd by nsd
+
+    /** Whether a legacy resolve has not called back yet. */
+    private val legacyResolving = AtomicBoolean(false)
 
     override suspend fun findPorts(
         service: AdbService,
         timeoutMs: Long,
     ): List<Int> {
+        if (legacyResolving.get()) {
+            Log.i(TAG, "an earlier mDNS resolve has not ended; no mDNS search for ${service.type}")
+            return emptyList()
+        }
         val found = Channel<NsdServiceInfo>(Channel.UNLIMITED)
         val discovery = Discovery(found)
         nsd.discoverServices(service.type, NsdManager.PROTOCOL_DNS_SD, discovery)
@@ -83,6 +102,10 @@ internal class NsdAdbServiceFinder(
     ) {
         var next = found.receiveCatching().getOrNull()
         while (next != null) {
+            if (legacyResolving.get()) {
+                Log.i(TAG, "an mDNS resolve did not end in time; this search goes on without mDNS")
+                return
+            }
             resolve(next)?.let { ports += it }
             next =
                 if (ports.isEmpty()) {
@@ -102,21 +125,39 @@ internal class NsdAdbServiceFinder(
     }
 
     private suspend fun resolution(info: NsdServiceInfo): NsdServiceInfo? =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+        if (!legacyResolve && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             suspendCancellableCoroutine { waiting ->
                 val callback = ServiceInfoCallback { waiting.resume(it) }
                 nsd.registerServiceInfoCallback(info, callbacks, callback)
                 waiting.invokeOnCancellation { callback.unregister() }
             }
         } else {
-            suspendCancellableCoroutine { waiting ->
-                @Suppress("DEPRECATION") // The only way before Android 14.
-                nsd.resolveService(info, LegacyResolve { waiting.resume(it) })
-            }
+            legacyResolution(info)
         }
 
+    /** Holds [legacyResolving] until the system calls back, which may be after the wait ended. */
+    private suspend fun legacyResolution(info: NsdServiceInfo): NsdServiceInfo? {
+        if (!legacyResolving.compareAndSet(false, true)) return null
+        return suspendCancellableCoroutine { waiting ->
+            val listener =
+                LegacyResolve { resolved ->
+                    legacyResolving.set(false)
+                    // Ignored when the wait was cancelled.
+                    waiting.resume(resolved)
+                }
+            try {
+                @Suppress("DEPRECATION") // The only way before Android 14.
+                nsd.resolveService(info, listener)
+            } catch (refused: IllegalArgumentException) {
+                // An incomplete service or a listener in use: nothing will call back.
+                legacyResolving.set(false)
+                throw refused
+            }
+        }
+    }
+
     private fun addresses(info: NsdServiceInfo): List<InetAddress> =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+        if (!legacyResolve && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             info.hostAddresses
         } else {
             @Suppress("DEPRECATION") // Replaced by hostAddresses in Android 14.
@@ -127,11 +168,7 @@ internal class NsdAdbServiceFinder(
     private inner class Discovery(
         private val found: Channel<NsdServiceInfo>,
     ) : NsdManager.DiscoveryListener {
-        @Volatile private var started = false
-
-        override fun onDiscoveryStarted(serviceType: String) {
-            started = true
-        }
+        override fun onDiscoveryStarted(serviceType: String) = Unit
 
         override fun onServiceFound(info: NsdServiceInfo) {
             found.trySend(info)
@@ -156,13 +193,17 @@ internal class NsdAdbServiceFinder(
             Log.w(TAG, "mDNS discovery of $serviceType failed to stop ($errorCode)")
         }
 
+        /**
+         * Stops discovery, also before the system reported it started: NsdManager registers the
+         * listener when discoverServices returns, and a later onDiscoveryStarted would otherwise
+         * leave discovery running for the rest of the process.
+         */
         fun stop() {
             found.close()
-            if (!started) return
             try {
                 nsd.stopServiceDiscovery(this)
             } catch (notActive: IllegalArgumentException) {
-                // Discovery already ended (it failed, or the system stopped it): nothing to stop.
+                // Discovery already ended (it failed to start, or the system stopped it): nothing to stop.
                 Log.i(TAG, "mDNS discovery was not active any more", notActive)
             }
         }
@@ -212,8 +253,23 @@ internal class NsdAdbServiceFinder(
         override fun onServiceResolved(serviceInfo: NsdServiceInfo) = done(serviceInfo)
     }
 
-    private companion object {
-        const val TAG = "PhoneAgentAdbMdns"
+    companion object {
+        private const val TAG = "PhoneAgentAdbMdns"
+
+        @Volatile
+        private var instance: NsdAdbServiceFinder? = null
+
+        /** The process-wide finder, on the application's NsdManager. */
+        fun of(context: Context): NsdAdbServiceFinder =
+            instance ?: synchronized(this) {
+                instance ?: create(context.applicationContext).also { instance = it }
+            }
+
+        private fun create(app: Context): NsdAdbServiceFinder =
+            NsdAdbServiceFinder(
+                lazy { app.getSystemService(NsdManager::class.java) },
+                Executors.newSingleThreadExecutor(),
+            )
     }
 }
 
