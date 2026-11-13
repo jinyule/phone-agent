@@ -20,7 +20,6 @@ import dev.phoneagent.core.adb.AdbCommand
 import dev.phoneagent.core.adb.AdbConnectPort
 import dev.phoneagent.core.adb.AdbEndpoint
 import dev.phoneagent.core.adb.AdbIdentity
-import dev.phoneagent.core.adb.AdbKeyStore
 import dev.phoneagent.core.adb.AdbService
 import dev.phoneagent.core.adb.AdbServiceFinder
 import dev.phoneagent.core.adb.AdbSession
@@ -49,7 +48,7 @@ import java.io.IOException
  */
 @RequiresApi(Build.VERSION_CODES.S)
 internal class BuiltinAdb(
-    private val store: AdbKeyStore,
+    private val store: AsideKeyStore,
     private val record: AdbPairingRecord,
     private val finder: AdbServiceFinder,
     private val identityName: String,
@@ -73,15 +72,38 @@ internal class BuiltinAdb(
 
     /**
      * The identity, loaded (or created) once per process. A new identity, or one other than the
-     * identity that paired, drops the pairing record: the device does not know its key.
+     * identity that paired, drops the pairing record: the device does not know its key. One that
+     * cannot be read now fails with [IOException] and stays, so a later call may read it.
      */
-    suspend fun identity(): IdentityLoad =
+    suspend fun identity(): IdentityLoad = identity { AdbIdentity.loadOrCreate(store, identityName) }
+
+    private suspend fun identity(load: suspend () -> IdentityLoad): IdentityLoad =
         identityLock.withLock {
             identity?.let { return@withLock IdentityLoad(it, IdentityLoad.Origin.STORED) }
-            val load = AdbIdentity.loadOrCreate(store, identityName)
-            record.identityLoaded(load.origin, load.identity.fingerprint)
-            identity = load.identity
-            load
+            val loaded = load()
+            record.identityLoaded(loaded.origin, loaded.identity.fingerprint)
+            identity = loaded.identity
+            loaded
+        }
+
+    /**
+     * For [pair]: the stored identity, or, when it cannot be read now, a new one, with the old file
+     * set aside ([AsideKeyStore.setAside]). The user asked to pair, so an identity that may never
+     * be read again does not block it.
+     */
+    private suspend fun loadOrSetAside(): IdentityLoad =
+        try {
+            AdbIdentity.loadOrCreate(store, identityName)
+        } catch (unreadable: IOException) {
+            // Only the classes along the causes, each once: the messages may come from the Keystore.
+            val classes =
+                generateSequence<Throwable>(unreadable) { it.cause }
+                    .map { it.javaClass.name }
+                    .distinct()
+                    .joinToString(" < ")
+            Log.w(TAG, "cannot read the adb identity ($classes); pairing sets it aside for a new one")
+            store.setAside()
+            AdbIdentity.loadOrCreate(store, identityName)
         }
 
     /** A client for [identity]. */
@@ -91,12 +113,15 @@ internal class BuiltinAdb(
     suspend fun findPairingPort(): Int? =
         finder.findPorts(AdbService.PAIRING, PortSearchConfig.DEFAULT_MDNS_TIMEOUT_MS).firstOrNull()
 
-    /** Pairs with the dialog at [port] on this device; success records the pairing and the identity's fingerprint. */
+    /**
+     * Pairs with the dialog at [port] on this device; success records the pairing and the identity's
+     * fingerprint. An identity that cannot be read now is set aside and a new one pairs.
+     */
     suspend fun pair(
         port: Int,
         code: PairingCode,
     ): PairingResult {
-        val identity = identity().identity
+        val identity = identity(::loadOrSetAside).identity
         return AdbClient(identity, ConscryptKeyExporter)
             .pair(AdbEndpoint(PortSearchConfig.LOOPBACK, port), code)
             .also { record.pairingEnded(it, identity.fingerprint) }

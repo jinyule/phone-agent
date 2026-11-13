@@ -30,6 +30,7 @@
      - 密文认证不过（`AEADBadTagException`：文件坏了，或者是别的密钥封存的；比 IV 加 tag 还短的也算）；
      - 空文件，或者格式字节不认识。
    - 其他打开失败（检查型的 `GeneralSecurityException`、Keystore 内部的 `ProviderException`）可能是一时的：`read` 抛 IOException，文件不动，下一次请求再试，和 core 的 `AdbKeyStore.read` 约定一致。一次偶发的 Keystore 失败不能永久换掉身份。
+   - 例外是用户自己发起的配对（`BuiltinAdb.pair`）：这时读不出旧身份，就把旧文件改名留底（`adbkey.sealed.unreadable-<毫秒时间>`，只留最近一份），换一个新身份去配对；原来有配对记录的，原因记为 `IDENTITY_REPLACED`。打一行 Log.w，只写异常链上的类名。否则一直读不出（比如 Keystore 一直报 `UnrecoverableKeyException`）的时候，连重新配对都做不了。自动拉起仍然是读不出就不换。
    - 封存失败时 `write` 抛 IOException，旧文件不动；自动拉起记一笔日志，等下一次请求再试。
    - 没有写进文件也抛 IOException：`AtomicFile.finishWrite` 对同步、关闭、改名的失败只打日志。所以在 `finishWrite` 之前自己先同步一次（`fd.sync()`），失败就 `failWrite` 回滚、抛 IOException；写完还要读回来比对，兜住关闭和改名的失败。否则下一个进程读到的是旧文件或者没有文件，会悄悄换掉身份。
    - Keystore 自己内部的失败是非检查型的 `ProviderException`，封存和打开时都和检查型的 `GeneralSecurityException` 一样处理（凭据存储的 `KeystoreCipher` 也是这样）。

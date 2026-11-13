@@ -3,7 +3,6 @@ package dev.phoneagent.app.adb
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import dev.phoneagent.core.adb.AdbEndpoint
-import dev.phoneagent.core.adb.AdbKeyStore
 import dev.phoneagent.core.adb.AdbServiceFinder
 import dev.phoneagent.core.adb.LocalPortScan
 import dev.phoneagent.core.adb.PortSearchConfig
@@ -86,12 +85,16 @@ class BuiltinAdbSearchTest {
 }
 
 /** An identity store in memory. */
-private class MemoryKeyStore : AdbKeyStore {
+private class MemoryKeyStore : AsideKeyStore {
     private var stored: ByteArray? = null
 
     override fun read(): ByteArray? = stored
 
     override fun write(pkcs8: ByteArray) {
         stored = pkcs8
+    }
+
+    override fun setAside() {
+        stored = null
     }
 }

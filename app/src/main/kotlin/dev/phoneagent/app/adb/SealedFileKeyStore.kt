@@ -28,6 +28,16 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
+/** An [AdbKeyStore] whose stored key can be set aside, so that a new one takes its place. */
+internal interface AsideKeyStore : AdbKeyStore {
+    /**
+     * Moves the stored key out of the way, kept as the only backup; afterwards [read] returns
+     * `null`. Does nothing when nothing is stored; throws [IOException] when it cannot.
+     */
+    @Throws(IOException::class)
+    fun setAside()
+}
+
 /** The key that sealed a stored adb key is gone (a keystore reset): nothing it sealed opens again. */
 internal class WrapKeyLost(
     message: String,
@@ -68,6 +78,9 @@ internal interface KeyWrap {
  * was: the new file is synced before `AtomicFile.finishWrite`, which only logs a failed sync, and a
  * failed sync undoes the write; the file is read back afterwards, since `finishWrite` only logs a
  * failed close or rename as well.
+ *
+ * [setAside] renames the file to `<name>.unreadable-<ms since the epoch>` and deletes earlier ones:
+ * pairing again sets an identity that cannot be read now aside instead of waiting for it.
  */
 internal class SealedFileKeyStore(
     private val file: File,
@@ -76,8 +89,19 @@ internal class SealedFileKeyStore(
     private val sync: (out: FileOutputStream) -> Unit = { it.fd.sync() },
     /** Makes the [AtomicFile] of [file]; tests make it fail. */
     private val atomicFile: (File) -> AtomicFile = ::AtomicFile,
-) : AdbKeyStore {
+) : AsideKeyStore {
     override fun read(): ByteArray? = readOrNull()?.let(::unseal)
+
+    override fun setAside() {
+        if (!file.exists()) return
+        file.absoluteFile.parentFile
+            ?.listFiles { other -> other.name.startsWith(file.name + ASIDE) }
+            ?.forEach(File::delete)
+        val aside = File(file.path + ASIDE + System.currentTimeMillis())
+        if (!file.renameTo(aside)) throw IOException("cannot set the stored adb key aside")
+        // What AtomicFile left of an earlier write would come back as the stored key.
+        atomicFile(file).delete()
+    }
 
     override fun write(pkcs8: ByteArray) {
         val bytes = byteArrayOf(FORMAT) + seal(pkcs8)
@@ -171,6 +195,9 @@ internal class SealedFileKeyStore(
 
         /** Version of the file layout. */
         const val FORMAT: Byte = 1
+
+        /** Between the file's name and the time in the name of a key set aside. */
+        const val ASIDE = ".unreadable-"
 
         /** No PKCS#8 key is empty, so the identity is replaced. */
         val UNUSABLE = ByteArray(0)
