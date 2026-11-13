@@ -318,6 +318,47 @@ class HelperAutoLaunchTest {
         }
 
     @Test
+    fun `an early exit that reaches the limit during the wait launches no more`() =
+        runTest {
+            // Codex r2: a handoff 1 s before the death, and both at once.
+            fun limits() = ShadowLog.getLogs().count { it.msg == "helper launch: TooManyEarlyExits(exits=1)" }
+            for (lived in listOf(1_000L, 0L)) {
+                starts.clear()
+                val before = limits()
+                val helper = FakeHelperPort()
+                val auto = autoLaunch(helper, exiting.copy(maxEarlyExits = 1))
+                auto.start()
+                auto.requestLaunch()
+                advanceTimeBy(1_000)
+                // Waits until 10 s.
+                auto.requestLaunch()
+                advanceTimeBy(1_000)
+                helper.set(FakeHelperPort.connected())
+                advanceTimeBy(lived)
+                helper.set(FakeHelperPort.died())
+                advanceTimeBy(10 * INTERVAL_MS)
+                assertEquals("$lived", listOf(starts.first()), starts)
+                assertTrue("$lived", limits() > before)
+            }
+        }
+
+    @Test
+    fun `pairing again during the wait launches by the interval after no early exit`() =
+        runTest {
+            lifetimes = ArrayDeque(List(2) { 2_000L })
+            val helper = FakeHelperPort()
+            val auto = autoLaunch(helper, exiting)
+            auto.start()
+            helper.needsLaunch()
+            // Deaths at 2 and 12 s: the next start waits until 10 + 20 s.
+            advanceTimeBy(13_000)
+            auto.paired()
+            advanceTimeBy(40_000)
+            // From 13 s on, no early exit: 10 s after the start at 10 s. That helper lives on.
+            assertEquals(listOf(0L, 10_000L, 20_000L), starts)
+        }
+
+    @Test
     fun `closing stops both triggers`() =
         runTest {
             val helper = FakeHelperPort()

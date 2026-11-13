@@ -13,7 +13,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.IOException
 
 /**
@@ -90,8 +94,10 @@ internal data class LaunchConfig(
  * waits for a handoff, which needs that lock. Requests only start a coroutine in [scope]. One launch
  * runs at a time; requests that arrive meanwhile make one more run after it, and a run does nothing
  * when a helper is connected by then. Runs start at least [LaunchConfig.minLaunchIntervalMs] apart
- * (by [clock]). A failed launch is logged and not retried until the next request: a helper state
- * change, or [paired] ([startIfPaired] after a pairing succeeded again).
+ * (by [clock]). A run waiting out that time wakes at every helper state change and at [paired], and
+ * looks again at the limit, the count and the time: what it read before the wait may be out of date.
+ * A failed launch is logged and not retried until the next request: a helper state change, or
+ * [paired] ([startIfPaired] after a pairing succeeded again).
  *
  * A helper that dies within [LaunchConfig.earlyExitWindowMs] of its handoff (by anyone) exited
  * early. Consecutive early exits stretch the time between launch starts
@@ -117,6 +123,9 @@ internal class HelperAutoLaunch(
     /** Consecutive early exits. Guarded by [lock]. */
     private var earlyExits = 0
 
+    /** Bumped after each helper state change and pairing, which a waiting run must look at again. */
+    private val changes = MutableStateFlow(0L)
+
     /** Starts watching; closing the result stops it (a launch already running finishes). */
     fun start(): AutoCloseable {
         val listening = helper.addListener(::changed)
@@ -136,10 +145,9 @@ internal class HelperAutoLaunch(
 
     private fun changed(state: HelperState) {
         if (state is HelperState.Connected) synchronized(lock) { handedOffAt = clock() }
-        if (state is HelperState.NeedsLaunch) {
-            exited(state.reason)
-            requestLaunch()
-        }
+        if (state is HelperState.NeedsLaunch) exited(state.reason)
+        changes.update { it + 1 }
+        if (state is HelperState.NeedsLaunch) requestLaunch()
     }
 
     /** Counts an early exit of the connected helper, or starts the count over after a later one. */
@@ -156,6 +164,7 @@ internal class HelperAutoLaunch(
     /** A pairing succeeded: the early-exit count starts over, and a launch is requested at once. */
     internal fun paired() {
         synchronized(lock) { earlyExits = 0 }
+        changes.update { it + 1 }
         requestLaunch()
     }
 
@@ -200,13 +209,19 @@ internal class HelperAutoLaunch(
     }
 
     private suspend fun launchUnlessConnected() {
-        val exits = synchronized(lock) { earlyExits }
-        if (exits >= config.maxEarlyExits) {
-            Log.w(TAG, "helper launch: ${LaunchOutcome.TooManyEarlyExits(exits)}")
-            return
+        while (true) {
+            val seen = changes.value
+            val exits = synchronized(lock) { earlyExits }
+            if (exits >= config.maxEarlyExits) {
+                Log.w(TAG, "helper launch: ${LaunchOutcome.TooManyEarlyExits(exits)}")
+                return
+            }
+            if (helper.state is HelperState.Connected) return
+            val wait = lastStart?.let { it + config.intervalAfter(exits) - clock() } ?: 0
+            if (wait <= 0) break
+            // An exit counted, a pairing or a handoff meanwhile changes what the wait was for.
+            withTimeoutOrNull(wait) { changes.first { it != seen } }
         }
-        lastStart?.let { delay(it + config.intervalAfter(exits) - clock()) }
-        if (helper.state is HelperState.Connected) return
         lastStart = clock()
         Log.i(TAG, "helper launch: ${launchLogged()}")
     }
