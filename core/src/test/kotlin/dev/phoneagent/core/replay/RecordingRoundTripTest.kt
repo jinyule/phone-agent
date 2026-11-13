@@ -256,15 +256,22 @@ class RecordingRoundTripTest {
             // The read after the capture is of another app, so the frame does not go with it; that
             // read took 300 ms, a fact on the port call after the capture.
             device.onSnapshot = reads(Screens.CHAT, checked.copy(pkg = "com.example.other"), secondDelayMs = 300)
-            val recording = recorded { screen -> assertNull(screen.framed().frame) }
+            var dropped: FramedSnapshot? = null
+            val recording = recorded { screen -> dropped = screen.framed() }
+            assertTrue(device.frames.isNotEmpty() && dropped?.frame == null, "the device gave a frame, the tool none")
             assertTrue(recording.screen.none { it.event is ScreenFrame }, "the frame was dropped")
             assertEquals(
                 listOf(DeviceFact(call.value, 3, DevicePort.SNAPSHOT, delayMs = 300)),
                 recording.override.device,
             )
             val start = currentTime
-            assertEquals(recording.records, rerun(recording) { screen -> assertNull(screen.framed().frame) })
+            var none: FramedSnapshot? = null
+            assertEquals(recording.records, rerun(recording) { screen -> none = screen.framed() })
             assertEquals(300L, currentTime - start)
+            // Replay's capture gives no frame: the tool gets what it got from the dropped one, so its
+            // result is the same too.
+            assertEquals(dropped?.snapshot, none?.snapshot)
+            assertNull(none?.frame)
         }
 
     @Test

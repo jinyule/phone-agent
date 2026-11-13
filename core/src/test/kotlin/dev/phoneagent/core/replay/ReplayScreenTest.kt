@@ -227,6 +227,19 @@ class ReplayScreenTest {
         }
 
     @Test
+    fun `a capture with no frame gives none, also after one with a frame`() =
+        runTest {
+            val screen =
+                screen(
+                    step(1, DevicePort.FRAME, DeviceResult.Frame(ReplaySamples.blob, "image/png", 2, 2, som = true)),
+                    step(2, DevicePort.FRAME, DeviceResult.NoFrame),
+                )
+            assertArrayEquals(ReplaySamples.frameBytes, screen.frame(som = true)?.bytes)
+            assertNull(screen.frame(som = true))
+            screen.assertConsumed()
+        }
+
+    @Test
     fun `a wait that saw no change takes its whole timeout`() =
         runTest {
             assertEquals(
