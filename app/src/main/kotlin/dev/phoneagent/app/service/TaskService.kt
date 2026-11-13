@@ -9,6 +9,7 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import androidx.annotation.StringRes
 import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -42,12 +43,16 @@ import kotlinx.coroutines.launch
  *
  * The wake lock is renewed on every change of the task, each time for [WAKE_MS], longer than any
  * wait for the user ([LoopConfig] defaults), so it lapses only for a task that shows no change at
- * all for that long.
+ * all for that long. The notification is posted again only when its text changes: the system drops
+ * a package's notifications beyond a few a second, and a run writes records faster than that.
  */
 class TaskService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var watching: Job? = null
     private lateinit var wakeLock: PowerManager.WakeLock
+
+    /** The text of the notification last posted, by [onStartCommand] or by [shown]. */
+    private var posted: Int? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -71,7 +76,10 @@ class TaskService : Service() {
         val tasks = Tasks.of(this)
         if (intent?.action == ACTION_STOP) tasks.stop()
         // Every start through startForegroundService must reach startForeground, even a stop.
-        ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(tasks.view.value), FOREGROUND_TYPE)
+        val view = tasks.view.value
+        val text = textOf(view.chat?.phase)
+        ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(text), FOREGROUND_TYPE)
+        posted = text
         if (watching == null) watching = scope.launch { tasks.view.collect(::shown) }
         return START_NOT_STICKY
     }
@@ -84,10 +92,13 @@ class TaskService : Service() {
             return
         }
         wakeLock.acquire(WAKE_MS)
+        val text = textOf(view.chat?.phase)
+        if (text == posted) return
         val manager = NotificationManagerCompat.from(this)
         if (manager.areNotificationsEnabled()) {
             @Suppress("MissingPermission") // Checked just above; without it the service runs unseen.
-            manager.notify(NOTIFICATION_ID, notification(view))
+            manager.notify(NOTIFICATION_ID, notification(text))
+            posted = text
         }
     }
 
@@ -99,7 +110,9 @@ class TaskService : Service() {
         super.onDestroy()
     }
 
-    private fun notification(view: TaskView): Notification {
+    private fun notification(
+        @StringRes text: Int,
+    ): Notification {
         val open =
             PendingIntent.getActivity(
                 this,
@@ -121,7 +134,7 @@ class TaskService : Service() {
             .Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_task_notification)
             .setContentTitle(getString(R.string.app_name))
-            .setContentText(getString(textOf(view.chat?.phase)))
+            .setContentText(getString(text))
             .setContentIntent(open)
             .setOngoing(true)
             .setOnlyAlertOnce(true)

@@ -14,7 +14,16 @@ import dev.phoneagent.app.task.Tasks
 import dev.phoneagent.app.task.command
 import dev.phoneagent.core.agent.Phase
 import dev.phoneagent.core.agent.WaitReason
+import dev.phoneagent.core.ids.ModelId
 import dev.phoneagent.core.ids.PromptId
+import dev.phoneagent.core.ids.ProviderId
+import dev.phoneagent.core.ids.ToolCallId
+import dev.phoneagent.core.model.Part
+import dev.phoneagent.core.model.StopReason
+import dev.phoneagent.core.ports.ConfirmCard
+import dev.phoneagent.core.ports.ConfirmReason
+import dev.phoneagent.core.session.ApprovalAsked
+import dev.phoneagent.core.session.AssistantMessage
 import dev.phoneagent.core.session.StopCause
 import dev.phoneagent.core.session.TurnEndReason
 import dev.phoneagent.core.session.TurnEnded
@@ -59,6 +68,11 @@ class TaskServiceTest {
     private fun shown(): Notification? =
         shadowOf(context.getSystemService(NotificationManager::class.java)).getNotification(1)
 
+    private val prompt = PromptId("prompt-1")
+
+    private fun reply(text: String) =
+        AssistantMessage(1, ProviderId("p"), ModelId("m"), listOf(Part.Text(text)), StopReason.END_TURN)
+
     private fun finishTurn() {
         task.append(TurnStarted(1))
         task.append(command("a"))
@@ -92,6 +106,42 @@ class TaskServiceTest {
         assertTrue(shadow.isStoppedBySelf)
         assertTrue(shadow.isForegroundStopped)
         assertFalse(wake.isHeld)
+    }
+
+    @Test
+    fun theNotificationIsPostedAgainOnlyWhenItsTextChanges() {
+        tasks.send("a")
+        idle()
+        started()
+        // Every notification posted, by identity: each post builds a new one.
+        val posts = mutableListOf<Notification>()
+
+        fun change(step: () -> Unit) {
+            step()
+            idle()
+            shown()?.let { latest -> if (posts.none { it === latest }) posts += latest }
+        }
+        change {}
+        val atStart = posts.size
+
+        change { task.run.phase.value = Phase.Running(1, 1) }
+        change { task.append(TurnStarted(1)) }
+        change { task.append(command("a")) }
+        change { task.append(reply("looking")) }
+        change { task.append(reply("still looking")) }
+        assertEquals("records that leave the text alone post nothing", atStart, posts.size)
+
+        val card = ConfirmCard(ToolCallId("call-1"), ConfirmReason.SPEND, "pay")
+        change { task.append(ApprovalAsked(prompt, card, 100)) }
+        change { task.run.phase.value = Phase.Waiting(WaitReason.USER, prompt) }
+        assertEquals("the question is posted once", atStart + 1, posts.size)
+        assertEquals(context.getString(R.string.task_waiting_user), posts.last().text())
+
+        change { task.run.phase.value = Phase.Running(1, 2) }
+        change { task.append(reply("paid")) }
+        assertEquals(atStart + 2, posts.size)
+        assertEquals(context.getString(R.string.task_running), posts.last().text())
+        assertTrue(ShadowPowerManager.getLatestWakeLock().isHeld)
     }
 
     @Test
