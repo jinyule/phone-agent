@@ -45,7 +45,6 @@
         }
     },
     "assembly": {
-        "vision": false,
         "ownPackages": [
             "dev.phoneagent"
         ],

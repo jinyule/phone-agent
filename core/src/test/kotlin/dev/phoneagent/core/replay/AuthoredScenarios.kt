@@ -402,7 +402,7 @@ object AuthoredScenarios {
 
     /**
      * A steer while the reply streams: the user's correction is given at the request's log
-     * position (seq 7, the request header), so it cuts the reply in flight. Guards the cut prefix
+     * position (seq 8, the request header), so it cuts the reply in flight. Guards the cut prefix
      * joining the view before the steer message, without its reasoning (DeriveMessages), and the
      * steer reaching the next request.
      */
@@ -417,7 +417,7 @@ object AuthoredScenarios {
                     followup("看看微信里有谁"),
                     Stimulus.Input(
                         InboxEntry(InboxEntryKind.STEER, listOf(Part.Text("只要告诉我有没有张三"))),
-                        after = 7,
+                        after = 8,
                     ),
                 ),
             replies = { model ->

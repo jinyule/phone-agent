@@ -85,22 +85,22 @@ data class PolicyPin(
 }
 
 /**
- * Product settings of the recording that differ from the defaults. The others (screen format,
- * tools and loop configs) are the defaults; a scenario that needs one of them set adds a field.
+ * Product settings of the recording that differ from the defaults ([ReplayHarness.config]). The
+ * others (screen format, tools and loop configs) are the defaults; a scenario that needs one of
+ * them set adds a field. Whether the screen components show images is the model's vision
+ * ([Scenario.model]), as the product assembly takes it.
  *
- * @property vision whether the screen components were built for a model that sees images.
  * @property ownPackages the app's package names, as `PolicyRules` takes them.
  * @property ownLabels the app's labels, as `PolicyRules` takes them.
  * @property tuning the `PolicyTuning` fields set for this scenario, by name; the others keep their
  *   defaults ([PolicyPins.tuning]).
  * @property maxOutputTokens the main requests' output cap (`RequestPlan.maxOutputTokens`), `null`
- *   for the adapter's default.
+ *   for the adapter's default; set over the product's plan, which has none yet.
  * @property reasoning the reasoning level the main requests ask for (`RequestPlan.reasoning`),
- *   `null` for the provider's default.
+ *   `null` for the provider's default; set over the product's plan, which has none yet.
  */
 @Serializable
 data class Assembly(
-    val vision: Boolean = false,
     val ownPackages: Set<String> = setOf("dev.phoneagent"),
     val ownLabels: Set<String> = setOf("PhoneAgent"),
     val tuning: Map<String, Int> = emptyMap(),
