@@ -51,7 +51,7 @@
    - 孤儿助手一看到 App 进程就会交接，失败后依次等 1 s、3 s、10 s 再试（`HelperLifecycle.DEFAULT_RETRY_DELAYS_MS`），所以 5 s 能盖住第 0、1、4 s 的三次尝试；
    - 时间过了还没连上（NotConnected 或 NeedsLaunch），才拉起；
    - 启动时已经是 NeedsLaunch（过期助手在监听者挂上之前就被拒了），就立即拉起，不等。
-6. **拉起命令和 `scripts/start-helper.sh` 同形**：`read n; (echo "$n" | CLASSPATH=… setsid app_process … &); sleep 1`。stdin 是口令加 `\n`；`exec:` 下 stdin 不会关闭，`read` 要靠这个 `\n` 才能返回。口令在发命令之前才申请（`issueLaunchNonce`），所以不会出现在命令行和日志里。
+6. **拉起命令和 `scripts/start-helper.sh` 同形**：`read n; (echo "$n" | CLASSPATH=… setsid app_process … &); sleep 1`。stdin 是口令加 `\n`；`exec:` 下 stdin 不会关闭，`read` 要靠这个 `\n` 才能返回。口令在发命令之前才申请（`issueLaunchNonce`），所以不会出现在命令行和日志里。命令的输出也不进日志：冒充 adbd 的一方可以把 stdin 原样回显，所以 `CommandFailed` 只留退出码、失败类型和输出的长度，`LaunchOutcome` 的 `toString`（自动拉起按它记日志）里没有原始输出。
 7. **在 Conscrypt 上靠 BoringSSL 的原因认出对端 alert**（core 改动）：
    - 实测未配对的 key 收到的是 `SSLProtocolException`，消息里带着 `SSLV3_ALERT_CERTIFICATE_UNKNOWN`，而 A 段只看类型，会把它误判成 TLS；
    - 现在，消息里报的是对端 alert 的 `SSLProtocolException`，不再算我们自己的错误，在可能是拒绝的阶段归为 UNAUTHORIZED。JDK 收到的 alert 也按同一规则认，具体写法见 phase1 §7.1；

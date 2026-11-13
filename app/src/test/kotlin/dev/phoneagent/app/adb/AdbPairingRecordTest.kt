@@ -4,7 +4,6 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import dev.phoneagent.core.adb.AdbCommand
 import dev.phoneagent.core.adb.AdbEndpoint
-import dev.phoneagent.core.adb.CommandResult
 import dev.phoneagent.core.adb.ConnectFailure
 import dev.phoneagent.core.adb.ConnectResult
 import dev.phoneagent.core.adb.IdentityLoad
@@ -174,7 +173,7 @@ class AdbPairingRecordTest {
     @Test
     fun `a launch whose command failed forgets the cached port`() {
         record.connectionEnded(PORT, launched)
-        record.connectionEnded(PORT, LaunchOutcome.CommandFailed(CommandResult.Completed(1, "", "denied")))
+        record.connectionEnded(PORT, LaunchOutcome.CommandFailed(1, null, 6))
         assertNull(AdbPairingRecord(prefs).portCache.load())
     }
 

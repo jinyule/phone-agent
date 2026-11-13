@@ -57,6 +57,9 @@ internal class FakeSession(
     /** Runs inside [run], as adbd runs the command. */
     var onRun: () -> Unit = {},
 ) : HelperLauncher.Connection.Open {
+    /** What [run] answers, given the stdin it was sent; [result] when `null`. */
+    var answer: ((ByteArray) -> CommandResult)? = null
+
     val runs = mutableListOf<Pair<AdbCommand, ByteArray>>()
     var closed = false
 
@@ -70,7 +73,7 @@ internal class FakeSession(
         check(!closed) { "run on a closed session" }
         runs += command to stdin
         onRun()
-        return result
+        return answer?.invoke(stdin) ?: result
     }
 
     override fun ended(outcome: LaunchOutcome) {

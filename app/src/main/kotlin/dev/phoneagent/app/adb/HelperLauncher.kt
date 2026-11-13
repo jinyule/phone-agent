@@ -11,6 +11,7 @@ package dev.phoneagent.app.adb
 
 import dev.phoneagent.app.helper.HelperState
 import dev.phoneagent.core.adb.AdbCommand
+import dev.phoneagent.core.adb.CommandFailure
 import dev.phoneagent.core.adb.CommandResult
 import dev.phoneagent.core.adb.ConnectFailure
 import dev.phoneagent.core.adb.PortSearchResult
@@ -18,7 +19,10 @@ import dev.phoneagent.core.adb.PortSource
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeoutOrNull
 
-/** How one launch through the built-in adb client ended. `toString` never contains the nonce. */
+/**
+ * How one launch through the built-in adb client ended; logged as its `toString`. Nothing here holds
+ * the command's output ([CommandFailed]), so `toString` never contains the nonce.
+ */
 internal sealed interface LaunchOutcome {
     /** A helper handed off after the launch command ran; [pid] is the connected helper's. */
     data class Launched(
@@ -54,10 +58,31 @@ internal sealed interface LaunchOutcome {
         val reason: String,
     ) : LaunchOutcome
 
-    /** The launch command did not finish with exit status 0. */
+    /**
+     * The launch command did not finish with exit status 0: [exitCode] when it ran to the end,
+     * [failure] when it did not. Only this summary is kept, and [outputChars], the length of what
+     * the command printed (stdout and stderr) or of the session's failure detail: either may echo
+     * the command's stdin, the nonce, so neither is kept, logged or part of `toString`.
+     */
     data class CommandFailed(
-        val result: CommandResult,
-    ) : LaunchOutcome
+        val exitCode: Int?,
+        val failure: CommandFailure?,
+        val outputChars: Int,
+    ) : LaunchOutcome {
+        companion object {
+            /** The summary of [result]. */
+            fun of(result: CommandResult): CommandFailed =
+                when (result) {
+                    is CommandResult.Completed -> {
+                        CommandFailed(result.exitCode, null, result.stdout.length + result.stderr.length)
+                    }
+
+                    is CommandResult.Failed -> {
+                        CommandFailed(null, result.reason, result.detail.length)
+                    }
+                }
+        }
+    }
 
     /** The command ran, but no helper handed off within the wait. */
     data class NoHandoff(
@@ -191,7 +216,7 @@ internal class HelperLauncher(
         val result = session.run(command, HelperLaunchCommand.stdin(nonce))
         val ran = result is CommandResult.Completed && (result.exitCode ?: 0) == 0
         return if (!ran) {
-            LaunchOutcome.CommandFailed(result)
+            LaunchOutcome.CommandFailed.of(result)
         } else {
             withTimeoutOrNull(handoffTimeoutMs) { handoff.await() }?.let { pid ->
                 LaunchOutcome.Launched(pid, session.source)
