@@ -18,8 +18,10 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.nio.file.Path
 import kotlin.io.path.isDirectory
+import kotlin.io.path.isRegularFile
 import kotlin.io.path.name
 
 /**
@@ -184,17 +186,38 @@ object FixtureTexts {
 
     private val BLOB_FIELD = Regex(""""blob":"([0-9a-f]{64})"""")
 
-    /** Deletes the fixture files in [dir]; a file a fixture does not hold fails first, deleting nothing. */
+    /**
+     * Deletes the fixture files in [dir]. Every entry is checked before anything is deleted, links
+     * not followed: at the top only the files a fixture holds ([ReplayFiles.KNOWN]), each a regular
+     * file and `blobs/` a directory; in `blobs/` only regular files named as blobs
+     * ([ReplayFiles.BLOB_NAME]). Anything else fails with [IllegalArgumentException], deleting
+     * nothing.
+     */
     private fun clear(dir: Path) {
         val entries = Files.list(dir).use { it.toList() }
-        val stray = entries.map { it.name }.filter { it !in ReplayFiles.KNOWN }
-        require(stray.isEmpty()) { "$dir holds $stray: not a fixture directory, left alone" }
-        val blobs = dir.resolve(ReplayFiles.BLOBS)
-        if (blobs.isDirectory()) {
-            Files.list(blobs).use { it.toList() }.forEach(Files::delete)
-            Files.delete(blobs)
+        val blobs =
+            entries
+                .filter { it.name == ReplayFiles.BLOBS && it.isDirectory(LinkOption.NOFOLLOW_LINKS) }
+                .flatMap { blobDir -> Files.list(blobDir).use { it.toList() } }
+        val stray =
+            entries.filterNot { entry ->
+                entry.name in ReplayFiles.KNOWN &&
+                    if (entry.name == ReplayFiles.BLOBS) {
+                        entry.isDirectory(LinkOption.NOFOLLOW_LINKS)
+                    } else {
+                        entry.isRegularFile(LinkOption.NOFOLLOW_LINKS)
+                    }
+            } +
+                blobs.filterNot {
+                    it.isRegularFile(
+                        LinkOption.NOFOLLOW_LINKS,
+                    ) && ReplayFiles.BLOB_NAME.matches(it.name)
+                }
+        require(stray.isEmpty()) {
+            "$dir holds ${stray.map { dir.relativize(it).toString() }.sorted()}: not a fixture directory, left alone"
         }
-        entries.filter { it.name != ReplayFiles.BLOBS }.forEach(Files::delete)
+        blobs.forEach(Files::delete)
+        entries.forEach(Files::delete)
     }
 
     /**

@@ -77,7 +77,9 @@ object ReplayFiles {
             encodeDefaults = true
         }
 
-    private val BLOB_NAME = Regex("[0-9a-f]{64}")
+    /** A blob file's name in `blobs/`: the lowercase hex SHA-256 of its bytes. */
+    val BLOB_NAME: Regex = Regex("[0-9a-f]{64}")
+
     private val BLOB_FIELD = Regex(""""blob":"([0-9a-f]{64})"""")
 
     /** [text] of a `scenario.json`. */
