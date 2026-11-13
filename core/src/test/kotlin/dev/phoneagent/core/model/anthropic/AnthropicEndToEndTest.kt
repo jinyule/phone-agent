@@ -201,9 +201,19 @@ class AnthropicEndToEndTest {
             val args = runCatching { Json.parseToJsonElement(call.argsJson) }.getOrNull() as? JsonObject
             assertTrue(args?.containsKey("city") == true, "the arguments name a city (arguments not shown)")
             log += AssistantMessage(1, profile.id, modelId, reply.parts, reply.stopReason, reply.usage)
+            // Recorded as the loop records a call: the schema's `reason` is ToolCall.reason, not an argument.
+            val fields = checkNotNull(args)
+            val reason = (fields[ToolCall.REASON] as? JsonPrimitive)?.content?.takeIf { it.isNotBlank() } ?: "查天气"
             log +=
                 ToolCallRecorded(
-                    ToolCall(call.id, SessionSamples.task, SessionSamples.session, call.name, args!!, "查天气"),
+                    ToolCall(
+                        call.id,
+                        SessionSamples.task,
+                        SessionSamples.session,
+                        call.name,
+                        JsonObject(fields - ToolCall.REASON),
+                        reason,
+                    ),
                 )
             val result =
                 log.add(
