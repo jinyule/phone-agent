@@ -192,11 +192,19 @@ internal class TaskController(
         running.stop(cause)
     }
 
-    /** Forgets the task unless it is busy, so the next command starts a new one. */
+    /**
+     * Forgets the task unless it is busy, so the next command starts a new one. Its run is stopped
+     * first ([StopCause.USER]) and waited for until [Phase.Stopped], by when it has closed its log
+     * and ended its coroutines; only then does the view stop following it.
+     */
     fun newTask() {
         scope.launch {
             lock.withLock {
                 if (current.value.busy) return@withLock
+                runtime?.let { old ->
+                    if (old.phase.value !is Phase.Stopped) old.stop(StopCause.USER)
+                    old.phase.first { it is Phase.Stopped }
+                }
                 watching?.cancel()
                 watching = null
                 session = null
