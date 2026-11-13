@@ -1,13 +1,20 @@
 package dev.phoneagent.app
 
 import android.Manifest
+import android.app.Activity
 import android.content.Context
 import android.content.pm.PackageManager
+import android.view.WindowManager
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.core.graphics.Insets
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -21,6 +28,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.serializer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -28,6 +36,11 @@ import org.robolectric.Shadows.shadowOf
 import java.io.File
 
 private const val WAIT_MS = 5_000L
+
+/** The status bar, navigation bar and keyboard heights in the tests, in pixels. */
+private const val STATUS_PX = 24f
+private const val NAVIGATION_PX = 48f
+private const val IME_PX = 200
 
 @RunWith(AndroidJUnit4::class)
 class MainActivityTest {
@@ -55,6 +68,64 @@ class MainActivityTest {
             compose.onNodeWithText(context.getString(R.string.chat_empty)).assertExists()
             scenario.onActivity { activity -> assertFalse(activity.isFinishing) }
         }
+    }
+
+    @Test
+    fun theKeyboardLiftsTheComposerOntoItAndLeavesTheTabsUnderTheStatusBar() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            // Reads back the manifest's adjustResize; the deprecation is for setting it in code.
+            @Suppress("DEPRECATION")
+            val resize = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+            scenario.onActivity { activity ->
+                assertEquals(
+                    "the system leaves the window alone and hands the keyboard to the page",
+                    resize,
+                    activity.window.attributes.softInputMode and WindowManager.LayoutParams.SOFT_INPUT_MASK_ADJUST,
+                )
+            }
+            val root =
+                compose
+                    .onRoot()
+                    .fetchSemanticsNode()
+                    .boundsInRoot.bottom
+            val input = compose.onNodeWithTag(ChatTags.INPUT)
+
+            fun bottom() = input.fetchSemanticsNode().boundsInRoot.bottom
+
+            fun tabs() =
+                compose
+                    .onNodeWithText(context.getString(R.string.nav_chat))
+                    .fetchSemanticsNode()
+                    .boundsInRoot.top
+
+            scenario.onActivity { activity -> activity.applyInsets(keyboard = 0) }
+            compose.waitForIdle()
+            assertTrue("the tabs are under the status bar", tabs() >= STATUS_PX)
+            val tabsTop = tabs()
+            // The composer's own margin above the navigation bar.
+            val margin = root - NAVIGATION_PX - bottom()
+            assertTrue(margin >= 0f)
+
+            scenario.onActivity { activity -> activity.applyInsets(keyboard = IME_PX) }
+            compose.waitForIdle()
+            // The keyboard covers the navigation bar: its inset already holds it, so it counts once.
+            assertEquals("right on the keyboard", root - IME_PX - margin, bottom(), 1f)
+            assertEquals("the tabs stay put", tabsTop, tabs(), 0f)
+            compose.onNodeWithText(context.getString(R.string.chat_empty)).assertIsDisplayed()
+        }
+    }
+
+    /** What the system sends the window: the status and navigation bars, and a [keyboard] px keyboard (0: none). */
+    private fun Activity.applyInsets(keyboard: Int) {
+        val insets =
+            WindowInsetsCompat
+                .Builder()
+                .setInsets(WindowInsetsCompat.Type.statusBars(), Insets.of(0, STATUS_PX.toInt(), 0, 0))
+                .setInsets(WindowInsetsCompat.Type.navigationBars(), Insets.of(0, 0, 0, NAVIGATION_PX.toInt()))
+                .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, keyboard))
+                .setVisible(WindowInsetsCompat.Type.ime(), keyboard > 0)
+                .build()
+        ViewCompat.dispatchApplyWindowInsets(window.decorView, insets)
     }
 
     @Test

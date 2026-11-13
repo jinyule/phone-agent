@@ -12,7 +12,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
@@ -59,7 +61,9 @@ internal enum class Destination {
 
 /**
  * The shell: the chat with the task (where it opens) and the model settings. Back from the model
- * settings returns to the chat; back from the chat leaves the app.
+ * settings returns to the chat; back from the chat leaves the app. The keyboard shrinks the page
+ * from below (the activity is `adjustResize`, the page pads for the IME), so the composer rides on
+ * the keyboard while the tabs stay under the status bar.
  */
 @Composable
 internal fun AppRoot(
@@ -69,7 +73,14 @@ internal fun AppRoot(
     var destination by rememberSaveable { mutableStateOf(Destination.CHAT) }
     BackHandler(enabled = destination != Destination.CHAT) { destination = Destination.CHAT }
     Scaffold { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+        Column(
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .consumeWindowInsets(padding)
+                    .imePadding(),
+        ) {
             PrimaryTabRow(selectedTabIndex = destination.ordinal) {
                 Tab(
                     selected = destination == Destination.CHAT,
