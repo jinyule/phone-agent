@@ -83,12 +83,15 @@ class TaskControllerTest {
     private fun reply(text: String) =
         AssistantMessage(1, ProviderId("p"), ModelId("m"), listOf(Part.Text(text)), StopReason.END_TURN)
 
-    /** The turn of a command, from its start to its end, and the run done. */
-    private fun finishTurn(text: String) {
-        task.append(TurnStarted(1))
-        task.append(command(text))
-        task.append(TurnEnded(1, TurnEndReason.COMPLETED))
-        task.run.phase.value = Phase.Done
+    /** The turn of a command in [of], from its start to its end, and the run done. */
+    private fun finishTurn(
+        text: String,
+        of: FakeTask = task,
+    ) {
+        of.append(TurnStarted(1))
+        of.append(command(text))
+        of.append(TurnEnded(1, TurnEndReason.COMPLETED))
+        of.run.phase.value = Phase.Done
     }
 
     @Test
@@ -521,6 +524,33 @@ class TaskControllerTest {
             tasks.send("b")
             runCurrent()
             assertEquals(2, starts)
+        }
+
+    @Test
+    fun aCommandSentWhileANewTaskWaitsForTheOldRunGoesToTheNewTaskAndIsCountedOnce() =
+        runTest {
+            val made = mutableListOf<FakeTask>()
+            val tasks = TaskController(backgroundScope) { FakeTask().also(made::add).started }
+            tasks.send("a")
+            runCurrent()
+            finishTurn("a", made[0])
+            runCurrent()
+            tasks.newTask()
+            runCurrent()
+            assertEquals(listOf(StopCause.USER), made[0].run.stops)
+
+            tasks.send("b") // the old chat is still shown while its run stops
+            made[0].run.phase.value = Phase.Stopped(StopCause.USER)
+            runCurrent()
+            assertEquals(listOf("b"), made[1].run.followups)
+            finishTurn("b", made[1])
+            runCurrent()
+            assertEquals("every command handed", 0, tasks.view.value.queued)
+            assertFalse(tasks.view.value.busy)
+
+            tasks.stop()
+            tasks.send("c")
+            assertTrue("busy from the send on, while the stop takes effect", tasks.view.value.busy)
         }
 
     @Test

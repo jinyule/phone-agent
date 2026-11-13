@@ -202,7 +202,8 @@ internal class TaskController(
     /**
      * Forgets the task unless it is busy, so the next command starts a new one. Its run is stopped
      * first ([StopCause.USER]) and waited for until [Phase.Stopped], by when it has closed its log
-     * and ended its coroutines; only then does the view stop following it.
+     * and ended its coroutines; only then does the view stop following it. A command sent while
+     * the run is waited for stays counted ([TaskView.queued]) and goes to the new task.
      */
     fun newTask() {
         scope.launch {
@@ -219,7 +220,8 @@ internal class TaskController(
                 stopping = null
                 heard.clear()
                 shownLog = 0L
-                current.value = TaskView()
+                // Commands sent meanwhile are counted outside the lock and go to the new task.
+                current.update { TaskView(queued = it.queued) }
             }
         }
     }
