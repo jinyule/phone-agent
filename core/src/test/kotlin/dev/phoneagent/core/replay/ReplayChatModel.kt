@@ -165,8 +165,9 @@ class ReplayChatModel(
     val templates: Map<ToolCallId, RequestTemplates.Resolved> get() = resolved
 
     /**
-     * The settings the next request was recorded with. [reasoning] clamped to this model's levels
-     * must be the level the recording sent; anything else fails with [AssertionError].
+     * The settings the next request was recorded with: its level, wire and context edits.
+     * [reasoning] clamped to this model's levels must be the level the recording sent; anything
+     * else fails with [AssertionError].
      */
     override fun prepare(reasoning: ReasoningLevel?): RequestSettings {
         val upcoming =
@@ -178,7 +179,7 @@ class ReplayChatModel(
                 "request #${upcoming.n}: $reasoning clamps to $level, the recording sent ${upcoming.request.reasoning}",
             )
         }
-        return RequestSettings(level, upcoming.request.wire)
+        return RequestSettings(level, upcoming.request.wire, upcoming.request.contextEdits)
     }
 
     override suspend fun complete(

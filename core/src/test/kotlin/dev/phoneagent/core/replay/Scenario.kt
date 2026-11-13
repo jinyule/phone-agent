@@ -1,6 +1,7 @@
 package dev.phoneagent.core.replay
 
 import dev.phoneagent.core.model.ModelInfo
+import dev.phoneagent.core.model.ReasoningLevel
 import dev.phoneagent.core.policy.SecurityLevel
 import dev.phoneagent.core.ports.AppEntry
 import dev.phoneagent.core.ports.SurfaceRef
@@ -92,6 +93,10 @@ data class PolicyPin(
  * @property ownLabels the app's labels, as `PolicyRules` takes them.
  * @property tuning the `PolicyTuning` fields set for this scenario, by name; the others keep their
  *   defaults ([PolicyPins.tuning]).
+ * @property maxOutputTokens the main requests' output cap (`RequestPlan.maxOutputTokens`), `null`
+ *   for the adapter's default.
+ * @property reasoning the reasoning level the main requests ask for (`RequestPlan.reasoning`),
+ *   `null` for the provider's default.
  */
 @Serializable
 data class Assembly(
@@ -99,7 +104,15 @@ data class Assembly(
     val ownPackages: Set<String> = setOf("dev.phoneagent"),
     val ownLabels: Set<String> = setOf("PhoneAgent"),
     val tuning: Map<String, Int> = emptyMap(),
-)
+    val maxOutputTokens: Int? = null,
+    val reasoning: ReasoningLevel? = null,
+) {
+    init {
+        require(maxOutputTokens == null || maxOutputTokens > 0) {
+            "scenario.json: assembly.maxOutputTokens must be > 0, got $maxOutputTokens"
+        }
+    }
+}
 
 /**
  * The device side of a recording (engineering-baseline §3.2: device-dependent values live here, not

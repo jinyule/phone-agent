@@ -2,6 +2,7 @@ package dev.phoneagent.core.replay
 
 import dev.phoneagent.core.ids.ModelId
 import dev.phoneagent.core.model.ChatResponse
+import dev.phoneagent.core.model.ContextEditPolicy
 import dev.phoneagent.core.model.Delta
 import dev.phoneagent.core.model.ModelError
 import dev.phoneagent.core.model.ModelErrorKind
@@ -220,6 +221,25 @@ class ReplayChatModelTest {
     @Test
     fun `prepare gives the settings of the next recorded request`() {
         assertEquals(RequestSettings(ReasoningLevel.HIGH, ReplaySamples.wire), model().prepare(ReasoningLevel.HIGH))
+    }
+
+    @Test
+    fun `prepare gives the context edits the next request was recorded with`() {
+        val server =
+            ContextEditPolicy.ServerSide(
+                clearToolUsesAboveTokens = null,
+                keepToolUses = 3,
+                compactAboveTokens = 150_000,
+            )
+        val recorded = requests.map { it.copy(request = it.request.copy(contextEdits = server)) }
+        assertEquals(
+            server,
+            ReplayChatModel(
+                ReplaySamples.info,
+                recorded,
+                ModelScript.of(records, recorded),
+            ).prepare(ReasoningLevel.HIGH).contextEdits,
+        )
     }
 
     @Test

@@ -48,7 +48,9 @@
         "ownLabels": [
             "PhoneAgent"
         ],
-        "tuning": {}
+        "tuning": {},
+        "maxOutputTokens": null,
+        "reasoning": null
     },
     "device": {
         "surface": {

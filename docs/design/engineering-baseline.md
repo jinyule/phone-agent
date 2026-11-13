@@ -136,6 +136,21 @@ core/src/test/resources/sessions/<scenario>/
 
 归一化器的锁定测试：模型可见的每一类改动（文字、参数、工具名、结果、两个调用的结果互换、两个不同的 id、header、压缩范围、opaque、图片……）归一化后仍然不同，每种一个测试；交换律（先归一化再 `deriveMessages` 和反过来逐字节相同）；字段登记表完整。
 
+**现有 fixture 守护的路径**（都是 authored，每个场景的 KDoc 写全它守护什么，见 `AuthoredScenarios`）：
+- `observe-tap`（Anthropic 协议）：读屏，用 `{{fromRequest:…}}` 从屏上取 ref，再点击。
+- `confirm-send-approved`（OpenAI Responses）：外发要确认，用户批准，再复核重读的屏 S′。
+- `refused-finance-app`（Chat Completions）：打开金融 App 被硬拒绝，设备没动。
+- `anthropic-thinking`：Claude 路径，带 thinking 块和 compaction 块、服务端压缩设置、非默认的 maxOutputTokens 和档位。回复流到一半断网，同一步重试，断掉的前缀只给界面看；签名过期，默认恢复链写 `context/reasoning-dropped`，重试时去掉截止那条回复的 thinking。
+- `cart-cautious`、`cart-autonomous`：谨慎和自主两档下的 DELETE 和 SPEND（带金额）；自主档删除不问。
+- `steer-mid-reply`：回复流到一半被 steer 打断，前缀和 steer 进入下一个请求。authored 刺激带 `after`，就在回复流出的时候给出。
+
+**尚无 fixture 的路径**（回放这一层没有守护：单测各有覆盖，但没有请求文件能对上）：
+- 客户端压缩（带 Replace 的 `compaction/summary`、`compaction/prune`）：M1 的 core 里还没有生产者，所以"Anthropic 路径不做客户端压缩"（铁律 7）在回放层也没有守护（评审 D3 存活）。压缩器合入的 WP 同时补 fixture。
+- `ask_user`（`question/*`）和 `hand_to_user`（`handoff/*`）：本轮未做，留给下一轮或 WP11；SurfaceManager 移屏失败的 hand-off 装载即失败。
+- 被扣下的屏（`screen/judged` WITHHELD）、带帧的 observe（vision、`screen/frame`、blobs）、`side/*` 请求：现有场景都不看图。帧的端口顺序和丢帧由 `RecordingRoundTripTest` 守护。
+- 停止、关闭和恢复（`task/stopped`、`session/resumed`）、中途切换档位、inject 输入：驱动支持，`SessionDriverTest` 覆盖了，但还没有 fixture。
+- live 录制（真模型、真机）：WP11。
+
 **原则**：修 fixture，不修归一化器。任何非平凡的、模型可见或用户可见的改动，**同一个 PR 里**就要更新相应的 fixture（`record-session` 技能列出要跑的命令）。
 
 ---

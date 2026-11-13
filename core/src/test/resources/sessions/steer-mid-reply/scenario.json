@@ -1,0 +1,68 @@
+{
+    "format": 1,
+    "recording": "authored",
+    "description": "A steer given while the first reply streams cuts it; the prefix and the steer reach the next request.",
+    "model": {
+        "provider": "test-openai",
+        "model": "gpt-test",
+        "protocol": "OPENAI_RESPONSES",
+        "capabilities": {
+            "tools": true,
+            "vision": false,
+            "contextTokens": 128000,
+            "maxOutputTokens": null,
+            "reasoningLevels": null,
+            "promptCaching": "IMPLICIT",
+            "thinkingBinding": "NONE",
+            "verified": []
+        }
+    },
+    "task": {
+        "level": "STANDARD",
+        "unattended": false
+    },
+    "policy": {
+        "rulesVersion": 7,
+        "tuning": {
+            "labelMax": 12,
+            "contextMax": 40,
+            "shortText": 20,
+            "totalTextMax": 30,
+            "labelRead": 120,
+            "titleBand": 150,
+            "clearNear": 80,
+            "rowSwipeMin": 100,
+            "rowMinWidth": 600,
+            "carouselMax": 400,
+            "maxElements": 5000,
+            "maxScreenText": 100000,
+            "maxDepth": 100,
+            "totalsRead": 8
+        }
+    },
+    "assembly": {
+        "vision": false,
+        "ownPackages": [
+            "dev.phoneagent"
+        ],
+        "ownLabels": [
+            "PhoneAgent"
+        ],
+        "tuning": {},
+        "maxOutputTokens": null,
+        "reasoning": null
+    },
+    "device": {
+        "surface": {
+            "displayId": 7,
+            "kind": "AGENT"
+        },
+        "widthPx": 1080,
+        "heightPx": 2400,
+        "densityDpi": 440,
+        "build": null,
+        "sdk": null,
+        "packages": {},
+        "apps": []
+    }
+}

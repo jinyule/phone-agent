@@ -3,8 +3,11 @@
 package dev.phoneagent.core.replay
 
 import dev.phoneagent.core.agent.AgentSetup
+import dev.phoneagent.core.agent.Interceptor
 import dev.phoneagent.core.agent.Interceptors
+import dev.phoneagent.core.agent.Recovery
 import dev.phoneagent.core.agent.ReplayChecker
+import dev.phoneagent.core.agent.RequestFailure
 import dev.phoneagent.core.agent.RequestPlan
 import dev.phoneagent.core.agent.RetryInterceptor
 import dev.phoneagent.core.ids.SessionId
@@ -40,10 +43,11 @@ import kotlin.random.Random
 /**
  * The product loop of a session fixture (WP08 design §9), assembled as the app assembles it: the
  * policy capability ([PolicyRules] with the scenario's own packages, labels and tuning), the screen
- * components built on its lexicon, the phase-1 tools, the product system prompt, the default loop
- * config and retries (seeded jitter, which N3 zeroes anyway), and the scenario's app catalog. No
- * SurfaceManager yet (design-review 7). It runs in [scope]'s virtual time on an in-memory session
- * directory.
+ * components built on its lexicon, the phase-1 tools, the product system prompt with the
+ * scenario's output cap and reasoning level, the default loop config and the default
+ * `requestError` chain (its retries with seeded jitter, which N3 zeroes anyway), and the
+ * scenario's app catalog. No SurfaceManager yet (design-review 7). It runs in [scope]'s virtual
+ * time on an in-memory session directory.
  *
  * Every request goes through a strict [ReplayChecker] (phase1 §3.9 rule 1) and then [tape], which
  * keeps it for `requests.expected.jsonl`; recording and replay wrap their models the same way.
@@ -86,14 +90,21 @@ class ReplayHarness(
         AgentSetup(
             taskId = TASK,
             files = files,
-            plan = RequestPlan(checker.wrap(tape), SystemPrompt.BLOCKS, tools.map { it.def }),
+            plan =
+                RequestPlan(
+                    checker.wrap(tape),
+                    SystemPrompt.BLOCKS,
+                    tools.map { it.def },
+                    maxOutputTokens = scenario.assembly.maxOutputTokens,
+                    reasoning = scenario.assembly.reasoning,
+                ),
             registry = ToolRegistry(tools, ToolGroup.entries),
             policy = rules.engine,
             intents = rules.resolver,
             screen = screen,
             apps = Catalog(scenario.device.apps),
             clock = Clock { scope.testScheduler.currentTime },
-            interceptors = Interceptors(requestError = listOf(RetryInterceptor(random = Random(0)))),
+            interceptors = Interceptors(requestError = seeded(Interceptors().requestError)),
             timeSource = scope.testScheduler.timeSource,
         )
 
@@ -110,6 +121,10 @@ class ReplayHarness(
 
     /** The log as persisted so far. */
     suspend fun log(): SessionLog = SessionStore.read(files)
+
+    /** [chain] with each [RetryInterceptor] replaced by one with seeded jitter, so a replay waits as long. */
+    private fun seeded(chain: List<Interceptor<RequestFailure, Recovery>>) =
+        chain.map { if (it is RetryInterceptor) RetryInterceptor(random = Random(0)) else it }
 
     private class Catalog(
         private val apps: List<AppEntry>,
