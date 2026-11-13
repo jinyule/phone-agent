@@ -16,6 +16,7 @@ import dev.phoneagent.core.policy.SecurityLevel
 import dev.phoneagent.core.policy.Verdict
 import dev.phoneagent.core.ports.ActionOutcome
 import dev.phoneagent.core.ports.ElementRef
+import dev.phoneagent.core.ports.Frame
 import dev.phoneagent.core.ports.OcrLine
 import dev.phoneagent.core.ports.ScreenDiff
 import dev.phoneagent.core.ports.ScreenFlag
@@ -125,14 +126,19 @@ class RecordingRoundTripTest {
         port: ScreenPort,
         log: Log,
         blobs: BlobStore = BlobStore(InMemoryStoragePort(), StoragePath("blobs")),
-    ) = RecordingScreen(port, toolCall, blobs, ScreenGate(resolver, allow), WITHHELD, log)
+        policy: PolicyEngine = allow,
+    ) = RecordingScreen(port, toolCall, blobs, ScreenGate(resolver, policy), WITHHELD, log)
 
-    /** A recording of [calls] on [device]. */
-    private suspend fun TestScope.recorded(calls: suspend (RecordingScreen) -> Unit): Recording {
+    /** A recording of [calls] on [port] ([device] by default), screens judged by [policy]. */
+    private suspend fun TestScope.recorded(
+        port: ScreenPort = device,
+        policy: PolicyEngine = allow,
+        calls: suspend (RecordingScreen) -> Unit,
+    ): Recording {
         val log = Log()
-        val facts = FactRecorder(device, analyzer, { call }) { currentTime }
+        val facts = FactRecorder(port, analyzer, { call }) { currentTime }
         val blobs = BlobStore(InMemoryStoragePort(), StoragePath("blobs"))
-        calls(recordingScreen(facts, log, blobs))
+        calls(recordingScreen(facts, log, blobs, policy))
         val frames = log.all.mapNotNull { (it.event as? ScreenFrame)?.blob }
         val stored = frames.associateWith { requireNotNull(blobs.get(it)) }
         return Recording(log.all.toList(), ReplayOverride(device = facts.facts), stored)
@@ -150,11 +156,12 @@ class RecordingRoundTripTest {
      */
     private suspend fun rerun(
         recording: Recording,
+        policy: PolicyEngine = allow,
         calls: suspend (RecordingScreen) -> Unit,
     ): List<SessionRecord> {
         val log = Log()
         val replay = replay(recording.records, recording.override, recording.blobs)
-        calls(recordingScreen(replay, log))
+        calls(recordingScreen(replay, log, policy = policy))
         replay.assertConsumed()
         return log.all.toList()
     }
@@ -272,6 +279,69 @@ class RecordingRoundTripTest {
             // result is the same too.
             assertEquals(dropped?.snapshot, none?.snapshot)
             assertNull(none?.frame)
+        }
+
+    @Test
+    fun `a delay on a dropped frame and one after it replay in place`() =
+        runTest {
+            device.onSnapshot = reads(Screens.CHAT, checked.copy(pkg = "com.example.other"), secondDelayMs = 300)
+            val slow =
+                object : ScreenPort by device {
+                    override suspend fun frame(
+                        maxEdge: Int,
+                        som: Boolean,
+                    ): Frame? {
+                        delay(200)
+                        return device.frame(maxEdge, som)
+                    }
+                }
+            val recording = recorded(slow) { screen -> assertNull(screen.framed().frame) }
+            assertTrue(device.frames.isNotEmpty() && recording.screen.none { it.event is ScreenFrame }, "dropped")
+            assertEquals(
+                listOf(
+                    DeviceFact(call.value, 2, DevicePort.FRAME, delayMs = 200),
+                    DeviceFact(call.value, 3, DevicePort.SNAPSHOT, delayMs = 300),
+                ),
+                recording.override.device,
+            )
+            val start = currentTime
+            assertEquals(recording.records, rerun(recording) { screen -> assertNull(screen.framed().frame) })
+            assertEquals(500L, currentTime - start)
+        }
+
+    @Test
+    fun `a frame that threw and a delay after it replay in place`() =
+        runTest {
+            device.onSnapshot = reads(Screens.CHAT, checked, secondDelayMs = 300)
+            device.frameError = ScreenUnavailableException("no surface")
+            val recording = recorded { screen -> assertNull(screen.framed().frame) }
+            val thrown = Thrown(ScreenUnavailableException::class.java.name, "no surface")
+            assertEquals(
+                listOf(
+                    DeviceFact(call.value, 2, DevicePort.FRAME, throws = thrown),
+                    DeviceFact(call.value, 3, DevicePort.SNAPSHOT, delayMs = 300),
+                ),
+                recording.override.device,
+            )
+            val start = currentTime
+            assertEquals(recording.records, rerun(recording) { screen -> assertNull(screen.framed().frame) })
+            assertEquals(300L, currentTime - start)
+        }
+
+    @Test
+    fun `a read before a capture that was withheld captures nothing, again`() =
+        runTest {
+            // RecordingScreen judges the read before it captures, and only a shown read is captured:
+            // DeviceScript reads each capture off that judgment, so a capture made before it, or
+            // without one, has no port call to replay.
+            device.onSnapshot = reads(Screens.CHAT)
+            val withholding = PolicyEngine { _, _, _ -> Verdict.Refuse("hard.test", "不能看") }
+            val recording = recorded(policy = withholding) { screen -> assertNull(screen.framed().frame) }
+            assertEquals(emptyList<Boolean>(), device.frames, "nothing was captured")
+            assertEquals(
+                recording.records,
+                rerun(recording, withholding) { screen -> assertNull(screen.framed().frame) },
+            )
         }
 
     @Test

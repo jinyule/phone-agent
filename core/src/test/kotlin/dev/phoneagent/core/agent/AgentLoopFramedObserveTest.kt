@@ -75,6 +75,14 @@ class AgentLoopFramedObserveTest {
             .copy(pkg = "com.android.settings", activity = "com.android.settings.$activity")
     }
 
+    /** The chat page as [id] with its send button (e10) boxed elsewhere than on [chat]. */
+    private fun boxMoved(id: String): ScreenSnapshot {
+        val elsewhere = box(880, 860, 980, 910)
+        return chat(id).let { page ->
+            page.copy(elements = page.elements.map { if (it.ref.value == "e10") it.copy(bounds = elsewhere) else it })
+        }
+    }
+
     /** A port reading [reads] in order, capturing [frame]. */
     private fun framing(vararg reads: ScreenSnapshot): ScriptedScreen = ScriptedScreen(*reads).also { it.frame = frame }
 
@@ -159,22 +167,7 @@ class AgentLoopFramedObserveTest {
     @Test
     fun `a frame goes with no screen read after it that is in another app, withheld or boxed elsewhere`() =
         runTest {
-            val elsewhere = box(880, 860, 980, 910)
-            val moved =
-                chat("s3").let { page ->
-                    page.copy(
-                        elements =
-                            page.elements.map {
-                                if (it.ref.value ==
-                                    "e10"
-                                ) {
-                                    it.copy(bounds = elsewhere)
-                                } else {
-                                    it
-                                }
-                            },
-                    )
-                }
+            val moved = boxMoved("s3")
             val cases =
                 listOf(
                     Triple("another app", listOf(chat("s1"), chat("s2")), chat("s3").copy(pkg = "com.example.notes")),
@@ -202,6 +195,33 @@ class AgentLoopFramedObserveTest {
                         "ends ${text.takeLast(40)}".takeIf { !said },
                     )
                 if (problems.isNotEmpty()) wrong += "$case: $problems"
+            }
+            assertEquals(emptyList<String>(), wrong)
+        }
+
+    @Test
+    fun `a dropped frame and no frame at all write the same log and give the model the same`() =
+        runTest {
+            // Session replay gives no frame for a capture whose frame the log did not keep
+            // (DeviceScript in the replay tests), so the runtime must not tell the two apart.
+            val cases =
+                mapOf(
+                    "another app" to listOf(chat("s1"), chat("s2"), chat("s3").copy(pkg = "com.example.notes")),
+                    "sensitive settings" to listOf(settings("s1"), settings("s2"), settings("s3", developer = true)),
+                    "a box moved" to listOf(chat("s1"), chat("s2"), boxMoved("s3")),
+                )
+            val wrong = mutableListOf<String>()
+            for ((case, reads) in cases) {
+                val framing = framing(*reads.toTypedArray())
+                val (dropped, droppedModel) = observed(framing)
+                val (none, noneModel) = observed(ScriptedScreen(*reads.toTypedArray()))
+                wrong +=
+                    listOfNotNull(
+                        "nothing captured".takeIf { framing.frameRequests.isEmpty() },
+                        "the logs differ".takeIf { dropped.events() != none.events() },
+                        "the results differ".takeIf { dropped.resultOf("c0") != none.resultOf("c0") },
+                        "the requests differ".takeIf { droppedModel.requests != noneModel.requests },
+                    ).map { "$case: $it" }
             }
             assertEquals(emptyList<String>(), wrong)
         }
