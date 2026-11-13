@@ -30,9 +30,9 @@ import kotlinx.coroutines.withTimeoutOrNull
  * puts it again.
  *
  * When a stimulus is given:
- * - with [Stimulus.after] (from a fixture): once the log has reached that seq, i.e. right after
- *   the record it followed in the recording. A log already past it fails: the replay no longer
- *   waits where the recording did;
+ * - with [Stimulus.after] (from a fixture, or set by an authored script to act mid-step): once the
+ *   log has reached that seq, i.e. right after the record it followed in the recording. A log
+ *   already past it fails: the replay no longer waits where the recording did;
  * - an [Stimulus.Answer]: once its prompt waits ([Phase.Waiting] with the id of the session's
  *   n-th prompt), without letting time pass, so no expiry runs first;
  * - an authored one (no `after`): a [Stimulus.Resume] once the runtime stopped, any other once the

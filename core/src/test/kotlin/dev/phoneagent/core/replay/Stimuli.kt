@@ -35,7 +35,8 @@ import dev.phoneagent.core.tool.ToolStatus
  * One thing the user or the app did to a running session (WP08 design §5), given by
  * [SessionDriver] in order. Each one that is not an answer is given when the log has reached
  * [after]: the seq of the last record before its effect in the recording (read from a fixture,
- * [UserScript]), or `null` in an authored script, given once the loop no longer runs on its own.
+ * [UserScript]), or in an authored script the seq to give it at (a steer while a reply streams);
+ * `null` in an authored script gives it once the loop no longer runs on its own.
  */
 sealed interface Stimulus {
     /** The log position it is given at, or `null` (authored: see [SessionDriver]). */
