@@ -71,6 +71,15 @@ class MainActivityTest {
     }
 
     @Test
+    fun backFromTheChatLeavesTheApp() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            compose.onNodeWithText(context.getString(R.string.chat_empty)).assertExists()
+            scenario.onActivity { activity -> activity.onBackPressedDispatcher.onBackPressed() }
+            scenario.onActivity { activity -> assertTrue(activity.isFinishing) }
+        }
+    }
+
+    @Test
     fun theKeyboardLiftsTheComposerOntoItAndLeavesTheTabsUnderTheStatusBar() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             // Reads back the manifest's adjustResize; the deprecation is for setting it in code.
