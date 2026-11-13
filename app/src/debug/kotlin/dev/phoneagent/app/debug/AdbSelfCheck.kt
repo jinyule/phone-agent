@@ -3,7 +3,6 @@ package dev.phoneagent.app.debug
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.net.nsd.NsdManager
 import android.os.Build
 import android.os.SystemClock
 import androidx.annotation.RequiresApi
@@ -33,7 +32,6 @@ import dev.phoneagent.core.adb.PortSearchResult
 import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.io.IOException
-import java.util.concurrent.Executors
 import kotlin.concurrent.thread
 
 /**
@@ -142,7 +140,8 @@ internal object AdbSelfCheck {
         }
 
         private suspend fun mdns() {
-            val finder = adbFinder(context)
+            // The app's own finder: before Android 14 one resolve at a time holds for the whole process.
+            val finder = NsdAdbServiceFinder.of(context)
             for (service in AdbService.entries) {
                 val (ports, ms) = timed { finder.findPorts(service, PortSearchConfig.DEFAULT_MDNS_TIMEOUT_MS) }
                 steps.note("mdns ${service.type}: $ports in $ms ms")
@@ -200,6 +199,8 @@ internal object AdbSelfCheck {
                 }
             val stranger = AdbIdentity.loadOrCreate(MemoryKeyStore(), "phoneagent-selfcheck-unpaired").identity
             val result = AdbClient(stranger, ConscryptKeyExporter).connect(endpoint)
+            // Accepted after all (the check fails): the session is ours to close.
+            (result as? ConnectResult.Connected)?.session?.close()
             val reason = (result as? ConnectResult.Failed)?.reason
             steps.check("unpaired key", reason?.name == "UNAUTHORIZED", "at $endpoint: $result")
         }
@@ -243,12 +244,6 @@ private fun pairingCodeOrNull(
         steps.note("code: ${malformed.message}")
         null
     }
-
-private fun adbFinder(context: Context) =
-    NsdAdbServiceFinder(
-        lazy { context.getSystemService(NsdManager::class.java) },
-        Executors.newSingleThreadExecutor(),
-    )
 
 private fun readOrNull(
     file: File,
