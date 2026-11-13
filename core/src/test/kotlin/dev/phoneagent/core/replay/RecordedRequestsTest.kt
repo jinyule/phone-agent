@@ -27,7 +27,7 @@ class RecordedRequestsTest {
     private val third =
         RecordedRequest(
             3,
-            17,
+            20,
             ReplaySamples.ref,
             requests[1].request.copy(
                 messages = listOf(ReplaySamples.user, Message(Role.USER, listOf(Part.Text("summary")))),
@@ -104,7 +104,7 @@ class RecordedRequestsTest {
 
     @Test
     fun `a logSeq that goes back is refused`() {
-        val text = RecordedRequests.encode(requests).replace("\"logSeq\":15", "\"logSeq\":4")
+        val text = RecordedRequests.encode(requests).replace("\"logSeq\":18", "\"logSeq\":4")
         assertTrue("line 2: logSeq 4 goes back" in failure(text))
     }
 

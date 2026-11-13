@@ -2,6 +2,7 @@ package dev.phoneagent.core.replay
 
 import dev.phoneagent.core.ids.BlobRef
 import dev.phoneagent.core.ids.PromptId
+import dev.phoneagent.core.ids.SnapshotId
 import dev.phoneagent.core.ids.ToolCallId
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.ports.ActionOutcome
@@ -73,10 +74,8 @@ class PrivacyChecklistTest {
 
     @Test
     fun `a screenshot is an item`() {
-        assertItem(
-            "blobs/${screenshot.value} (screenshot, image/jpeg, 1080×2400)",
-            text(ScreenFrame(screenshot, "image/jpeg", 1080, 2400)),
-        )
+        val frame = ScreenFrame(screenshot, "image/jpeg", 1080, 2400, som = false, SnapshotId("s1"), SnapshotId("s2"))
+        assertItem("blobs/${screenshot.value} (screenshot, image/jpeg, 1080×2400)", text(frame))
     }
 
     @Test

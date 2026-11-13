@@ -291,7 +291,7 @@ class ReplayChatModelTest {
             var seq = 5L
             val tape = RequestTape(model()) { seq }
             tape.complete(requests[0].request)
-            seq = 15
+            seq = 18
             tape.complete(requests[1].request)
             assertEquals(requests, tape.requests)
             assertEquals(ReplaySamples.info, tape.info)

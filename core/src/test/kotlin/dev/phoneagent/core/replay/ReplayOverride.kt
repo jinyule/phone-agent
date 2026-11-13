@@ -7,10 +7,11 @@ import java.io.IOException
 /**
  * `replay.override.json` (optional): what the device did that the session log does not hold, and
  * faults injected on purpose. The runtime's `RecordingScreen` records observations, actions,
- * launches and frames that returned; it records nothing for an `awaitChange`, a `frame` that gave
- * no frame, or an observation, frame or wait that threw or was cut off, and for an action that
- * threw it keeps the exception's class only. Record mode writes those facts here; [DeviceScript]
- * merges them with the logged ones.
+ * launches and the frames it kept, and before each capture the judgment that allowed it; it
+ * records nothing for an `awaitChange`, an observation or wait that threw or was cut off, or what
+ * a capture whose frame it did not keep gave, and for an action that threw it keeps the
+ * exception's class only. Record mode writes those facts here; [DeviceScript] merges them with
+ * the logged ones.
  *
  * @property format layout version, [FORMAT].
  * @property device the facts, at most one per (call, op).
@@ -49,11 +50,14 @@ enum class DevicePort { SNAPSHOT, ACT, LAUNCH, FRAME, AWAIT_CHANGE }
  * One port call of tool call [call], the [op]-th one it made (from 1, counting logged and unlogged
  * calls alike), or a note on a logged one.
  *
- * A fact with an outcome is a port call the log does not hold ([unlogged]):
+ * A fact with an outcome on a `snapshot` or `awaitChange` is a port call the log does not hold
+ * ([unlogged]):
  * - [changed]: what `awaitChange` returned (an `awaitChange` is never logged, so every one needs a fact);
- * - [noFrame]: `frame` returned `null`;
- * - [throws]: `snapshot`, `frame` or `awaitChange` threw it;
+ * - [throws]: `snapshot` or `awaitChange` threw it;
  * - [hangs]: it never returned and was cancelled.
+ *
+ * A `frame` call is always in the log, as the judgment that allowed the capture ([DeviceScript]);
+ * an outcome says what it gave where the log kept no frame: [noFrame] (`null`), [throws], [hangs].
  *
  * Without an outcome it annotates the logged port call at that position: [delayMs] (how long the
  * device took, so polling replays the same number of reads), or for an `act` or `launch` logged as
@@ -106,15 +110,8 @@ data class DeviceFact(
     val unlogged: Boolean
         get() =
             when (port) {
-                DevicePort.ACT, DevicePort.LAUNCH -> {
-                    false
-                }
-
-                DevicePort.SNAPSHOT, DevicePort.FRAME, DevicePort.AWAIT_CHANGE -> {
-                    changed != null || noFrame ||
-                        throws != null ||
-                        hangs
-                }
+                DevicePort.ACT, DevicePort.LAUNCH, DevicePort.FRAME -> false
+                DevicePort.SNAPSHOT, DevicePort.AWAIT_CHANGE -> changed != null || throws != null || hangs
             }
 }
 

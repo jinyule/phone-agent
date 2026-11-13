@@ -40,9 +40,12 @@ import dev.phoneagent.core.ports.SurfaceRef
 import dev.phoneagent.core.ports.TreeQuality
 import dev.phoneagent.core.ports.UiElement
 import dev.phoneagent.core.session.AssistantMessage
+import dev.phoneagent.core.session.JudgmentOutcome
+import dev.phoneagent.core.session.JudgmentPurpose
 import dev.phoneagent.core.session.PolicyVerdictRecorded
 import dev.phoneagent.core.session.RequestHeader
 import dev.phoneagent.core.session.ScreenFrame
+import dev.phoneagent.core.session.ScreenJudged
 import dev.phoneagent.core.session.ScreenObserved
 import dev.phoneagent.core.session.SessionCodec
 import dev.phoneagent.core.session.SessionEvent
@@ -70,8 +73,8 @@ import java.nio.file.Path
 
 /**
  * A small whole session for the replay tests: one turn in which the model observes the screen
- * (snapshot and frame) and then answers. Two requests; ids and times as a recording would give
- * them (not normalized).
+ * (a framed observe: the read before the capture, the frame, the read it is checked on) and then
+ * answers. Two requests; ids and times as a recording would give them (not normalized).
  */
 object ReplaySamples {
     val provider = ProviderId("anthropic")
@@ -124,6 +127,9 @@ object ReplaySamples {
             fingerprint = "fp-recorded",
         )
 
+    /** The read after the capture, which the frame is checked on and shown with. */
+    val checked = snapshot.copy(id = SnapshotId("s2"))
+
     val system = listOf(PromptBlock("identity", "You operate a phone."))
     val tools = listOf(ToolDef("phone_observe", "Read the screen.", JsonObject(emptyMap())))
     val user = Message(Role.USER, listOf(Part.Text("看看屏幕上有谁")))
@@ -160,7 +166,10 @@ object ReplaySamples {
             PolicyVerdictRecorded(call, SecurityLevel.STANDARD, ActionIntent(IntentKind.READ), Verdict.Allow),
             ToolStarted(call, 8),
             ScreenObserved(call, snapshot),
-            ScreenFrame(blob, "image/png", 2, 2, som = true, snapshotId = snapshot.id),
+            ScreenJudged(call, snapshot.id, JudgmentPurpose.FRAME_PRECHECK, JudgmentOutcome.SHOWN),
+            ScreenObserved(call, checked),
+            ScreenJudged(call, checked.id, JudgmentPurpose.TOOL, JudgmentOutcome.SHOWN),
+            ScreenFrame(blob, "image/png", 2, 2, som = true, snapshotId = snapshot.id, checkedOn = checked.id),
             ToolExecuted(call, ToolStatus.OK),
             ToolResultRecorded(call, "phone_observe", ToolResult(ToolStatus.OK, resultParts)),
             StepEnded(1, 1, StepOutcome.COMPLETED),
@@ -199,7 +208,7 @@ object ReplaySamples {
             RecordedRequest(1, 5, ref, firstRequest),
             RecordedRequest(
                 2,
-                15,
+                18,
                 ref,
                 firstRequest.copy(
                     messages =

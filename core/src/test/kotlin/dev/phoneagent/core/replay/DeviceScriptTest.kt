@@ -13,8 +13,12 @@ import dev.phoneagent.core.ports.ElementRef
 import dev.phoneagent.core.ports.Target
 import dev.phoneagent.core.ports.UiAction
 import dev.phoneagent.core.session.ApprovalAsked
+import dev.phoneagent.core.session.JudgmentOutcome
+import dev.phoneagent.core.session.JudgmentPurpose
 import dev.phoneagent.core.session.PolicyVerdictRecorded
 import dev.phoneagent.core.session.ScreenActed
+import dev.phoneagent.core.session.ScreenFrame
+import dev.phoneagent.core.session.ScreenJudged
 import dev.phoneagent.core.session.ScreenObserved
 import dev.phoneagent.core.session.SessionCodec
 import dev.phoneagent.core.session.SessionEvent
@@ -73,6 +77,21 @@ class DeviceScriptTest {
         outcome: ActionOutcome,
     ) = ScreenActed(id, ReplaySamples.snapshot.id, tap, outcome)
 
+    private fun precheck(
+        outcome: JudgmentOutcome = JudgmentOutcome.SHOWN,
+        rule: String? = null,
+    ) = ScreenJudged(call, ReplaySamples.snapshot.id, JudgmentPurpose.FRAME_PRECHECK, outcome, rule)
+
+    /** A framed observe up to the judgment of the read after the capture: no frame kept. */
+    private val dropped =
+        arrayOf(
+            verdict(call),
+            ScreenObserved(call, ReplaySamples.snapshot),
+            precheck(),
+            ScreenObserved(call, ReplaySamples.checked),
+            ScreenJudged(call, ReplaySamples.checked.id, JudgmentPurpose.TOOL, JudgmentOutcome.SHOWN),
+        )
+
     private fun failure(block: () -> Unit): String =
         assertThrows<IllegalArgumentException> { block() }.message.orEmpty()
 
@@ -121,11 +140,88 @@ class DeviceScriptTest {
     // DeviceScript
 
     @Test
-    fun `the logged port calls of a call are its steps, frames included`() {
+    fun `the logged port calls of a call are its steps, a frame captured between its two reads`() {
         val steps = script().getValue(call)
-        assertEquals(listOf(DevicePort.SNAPSHOT to 10L, DevicePort.FRAME to 11L), steps.map { it.port to it.seq })
-        assertEquals(listOf(1, 2), steps.map { it.op })
+        assertEquals(
+            listOf(DevicePort.SNAPSHOT to 10L, DevicePort.FRAME to 14L, DevicePort.SNAPSHOT to 12L),
+            steps.map { it.port to it.seq },
+        )
+        assertEquals(listOf(1, 2, 3), steps.map { it.op })
         assertEquals(DeviceResult.Snapshot(ReplaySamples.snapshot), steps[0].result)
+        assertEquals(DeviceResult.Frame(ReplaySamples.blob, "image/png", 2, 2, som = true), steps[1].result)
+        assertEquals(DeviceResult.Snapshot(ReplaySamples.checked), steps[2].result)
+    }
+
+    @Test
+    fun `a capture the log kept no frame of gives none, at its place`() {
+        val steps = script(records(*dropped)).getValue(call)
+        assertEquals(
+            listOf(DevicePort.SNAPSHOT to 2L, DevicePort.FRAME to 3L, DevicePort.SNAPSHOT to 4L),
+            steps.map { it.port to it.seq },
+        )
+        assertEquals(DeviceResult.NoFrame, steps[1].result)
+    }
+
+    @Test
+    fun `a read before a capture that was withheld makes no capture`() {
+        val steps =
+            script(
+                records(
+                    verdict(call),
+                    ScreenObserved(call, ReplaySamples.snapshot),
+                    precheck(JudgmentOutcome.WITHHELD, "x"),
+                ),
+            ).getValue(call)
+        assertEquals(listOf(DevicePort.SNAPSHOT), steps.map { it.port })
+    }
+
+    @Test
+    fun `only the judgment before a capture makes one`() {
+        val tool = ScreenJudged(call, ReplaySamples.snapshot.id, JudgmentPurpose.TOOL, JudgmentOutcome.SHOWN)
+        val steps = script(records(verdict(call), ScreenObserved(call, ReplaySamples.snapshot), tool)).getValue(call)
+        assertEquals(listOf(DevicePort.SNAPSHOT), steps.map { it.port })
+    }
+
+    @Test
+    fun `a frame that follows no capture of its screen fails`() {
+        val frame =
+            ScreenFrame(
+                ReplaySamples.blob,
+                "image/png",
+                2,
+                2,
+                som = true,
+                snapshotId = ReplaySamples.checked.id,
+                checkedOn = ReplaySamples.checked.id,
+            )
+        assertTrue("follows no capture of that screen" in failure { script(records(*dropped, frame)) })
+    }
+
+    @Test
+    fun `a fact says what a capture without a kept frame gave`() {
+        val thrown = Thrown(IllegalStateException::class.java.name, "x")
+        val steps =
+            script(records(*dropped), DeviceFact("toolu_01", 2, DevicePort.FRAME, throws = thrown, delayMs = 40))
+                .getValue(call)
+        assertEquals(DeviceResult.Throws(thrown) to 40L, steps[1].result to steps[1].delayMs)
+        assertEquals(3, steps.size, "a capture is no extra port call")
+    }
+
+    @Test
+    fun `a delay on a kept frame keeps the frame`() {
+        val step = script(facts = arrayOf(DeviceFact("toolu_01", 2, DevicePort.FRAME, delayMs = 40))).getValue(call)[1]
+        assertEquals(
+            DeviceResult.Frame(ReplaySamples.blob, "image/png", 2, 2, som = true) to 40L,
+            step.result to step.delayMs,
+        )
+    }
+
+    @Test
+    fun `a fact that says a kept frame gave none fails`() {
+        assertTrue(
+            "has its frame in the log, the fact says noFrame" in
+                failure { script(facts = arrayOf(DeviceFact("toolu_01", 2, DevicePort.FRAME, noFrame = true))) },
+        )
     }
 
     @Test
@@ -134,8 +230,11 @@ class DeviceScriptTest {
             script(
                 facts = arrayOf(DeviceFact("toolu_01", 2, DevicePort.AWAIT_CHANGE, changed = false)),
             ).getValue(call)
-        assertEquals(listOf(DevicePort.SNAPSHOT, DevicePort.AWAIT_CHANGE, DevicePort.FRAME), steps.map { it.port })
-        assertEquals(listOf(1, 2, 3), steps.map { it.op })
+        assertEquals(
+            listOf(DevicePort.SNAPSHOT, DevicePort.AWAIT_CHANGE, DevicePort.FRAME, DevicePort.SNAPSHOT),
+            steps.map { it.port },
+        )
+        assertEquals(listOf(1, 2, 3, 4), steps.map { it.op })
         assertEquals(DeviceResult.Changed(false), steps[1].result)
     }
 
@@ -145,7 +244,7 @@ class DeviceScriptTest {
             script(
                 facts = arrayOf(DeviceFact("toolu_01", 1, DevicePort.SNAPSHOT, delayMs = 250)),
             ).getValue(call)
-        assertEquals(listOf(250L, 0L), steps.map { it.delayMs })
+        assertEquals(listOf(250L, 0L, 0L), steps.map { it.delayMs })
     }
 
     @Test

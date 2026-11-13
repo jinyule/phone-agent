@@ -22,7 +22,7 @@
         "unattended": false
     },
     "policy": {
-        "rulesVersion": 6,
+        "rulesVersion": 7,
         "tuning": {
             "labelMax": 12,
             "contextMax": 40,

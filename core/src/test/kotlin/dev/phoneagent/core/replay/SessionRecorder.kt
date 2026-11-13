@@ -97,7 +97,9 @@ class TemplatingModel(
  * (`replay.override.json`, [DeviceFact]): an `awaitChange`'s result, a `frame` that gave none,
  * a read, frame or wait that threw or was cut off, the message of an action that threw, and how
  * long each port call took in virtual time ([now]). Calls are counted per tool call as
- * [DeviceScript] counts them, the call being the one the log says is open ([currentCall]).
+ * [DeviceScript] counts them, the call being the one the log says is open ([currentCall]); a
+ * capture counts whether or not the runtime keeps its frame, as [DeviceScript] reads each capture
+ * off the judgment that allowed it.
  * Snapshots and outcomes come back analyzed by [analyzer], as a real port gives them.
  *
  * A port call replay could not give again fails loudly: an exception of a class [ThrownTypes]

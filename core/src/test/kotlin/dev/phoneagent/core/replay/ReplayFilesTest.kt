@@ -159,10 +159,16 @@ class ReplayFilesTest {
     }
 
     @Test
-    fun `only port calls with an outcome are unlogged`() {
+    fun `only reads and waits with an outcome are unlogged`() {
+        val failed = Thrown(IllegalStateException::class.java.name, "x")
         assertEquals(
-            listOf(true, false),
-            listOf(awaited.unlogged, DeviceFact("{{call:1}}", 1, DevicePort.SNAPSHOT, delayMs = 5).unlogged),
+            listOf(true, false, true, false),
+            listOf(
+                awaited.unlogged,
+                DeviceFact("{{call:1}}", 1, DevicePort.SNAPSHOT, delayMs = 5).unlogged,
+                DeviceFact("{{call:1}}", 1, DevicePort.SNAPSHOT, throws = failed).unlogged,
+                DeviceFact("{{call:1}}", 1, DevicePort.FRAME, noFrame = true).unlogged,
+            ),
         )
     }
 

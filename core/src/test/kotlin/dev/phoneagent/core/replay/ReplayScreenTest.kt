@@ -41,7 +41,7 @@ class ReplayScreenTest {
             ActionOutcome.Status.Ok,
             ActionOutcome.Effect.CHANGED,
             after,
-            ScreenDiff(removed = listOf(ElementRef("e9"))),
+            ScreenDiff(ReplaySamples.snapshot.id, removed = listOf(ElementRef("e9"))),
         )
     private val launchTarget = LaunchTarget.App("com.example.chat", cold = false)
 

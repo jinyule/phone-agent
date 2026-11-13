@@ -9,10 +9,13 @@ import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.ports.UiAction
 import dev.phoneagent.core.session.ApprovalAsked
 import dev.phoneagent.core.session.HandoffStarted
+import dev.phoneagent.core.session.JudgmentOutcome
+import dev.phoneagent.core.session.JudgmentPurpose
 import dev.phoneagent.core.session.PolicyVerdictRecorded
 import dev.phoneagent.core.session.QuestionAsked
 import dev.phoneagent.core.session.ScreenActed
 import dev.phoneagent.core.session.ScreenFrame
+import dev.phoneagent.core.session.ScreenJudged
 import dev.phoneagent.core.session.ScreenLaunched
 import dev.phoneagent.core.session.ScreenObserved
 import dev.phoneagent.core.session.SessionEvent
@@ -50,10 +53,7 @@ class OpenCall {
         fun after(records: List<SessionRecord>): ToolCallId? =
             OpenCall().apply { records.forEach { take(it.event) } }.current
 
-        /**
-         * The call [event] names, if any. Every event with a call id belongs here; `screen/judged`
-         * (WP02b, design-6.4 §4) joins when it is logged.
-         */
+        /** The call [event] names, if any. Every event with a call id belongs here. */
         fun named(event: SessionEvent): ToolCallId? =
             when {
                 event is ToolCallRecorded -> event.call.id
@@ -64,6 +64,7 @@ class OpenCall {
                 event is ToolStarted -> event.callId
                 event is ToolExecuted -> event.callId
                 event is ScreenObserved -> event.callId
+                event is ScreenJudged -> event.callId
                 event is ScreenActed -> event.callId
                 event is ScreenLaunched -> event.callId
                 else -> null
@@ -112,9 +113,11 @@ sealed interface DeviceResult {
 /**
  * One port call of a recording: the [op]-th port call made for [call], what replay must ask
  * ([port], and for an action or launch the [action] on [on], or the [target]), and what it then
- * does, after [delayMs] of virtual time.
+ * does, after [delayMs] of virtual time. For a frame, [on] is the screen read before the capture.
  *
- * @property seq the fixture record it comes from, or `null` for a fact of `replay.override.json`.
+ * @property seq the fixture record it comes from (for a frame, its `screen/frame`, or the judgment
+ *   that allowed the capture when the log kept no frame), or `null` for a fact of
+ *   `replay.override.json`.
  */
 data class DeviceStep(
     val call: ToolCallId?,
@@ -142,8 +145,10 @@ object DeviceScript {
     /**
      * The port calls of [records] and [override], by call, in order. Fails with
      * [IllegalArgumentException] when a `screen/snapshot` names another call than the open one
-     * ([OpenCall]), a fact lies beyond its call's port calls or annotates a call of another port,
-     * or an action logged as having thrown has no fact giving the exception's message.
+     * ([OpenCall]), a `screen/frame` follows no capture of its screen, a fact lies beyond its
+     * call's port calls or annotates a call of another port, a fact gives an outcome to a capture
+     * whose frame the log kept, or an action logged as having thrown has no fact giving the
+     * exception's message.
      */
     fun of(
         records: List<SessionRecord>,
@@ -158,31 +163,71 @@ object DeviceScript {
 
     private fun logged(records: List<SessionRecord>): Map<ToolCallId?, List<DeviceStep>> {
         val open = OpenCall()
-        val steps = LinkedHashMap<ToolCallId?, MutableList<DeviceStep>>()
+        val logged = Logged()
         for (record in records) {
             val event = record.event
             open.take(event)
-            val step = step(record.seq, event) ?: continue
             val call = open.current
             val named = (event as? ScreenObserved)?.callId
             require(event !is ScreenObserved || named == call) {
                 "seq ${record.seq}: a screen/snapshot of ${named?.value} while ${call?.value} is the open call; " +
                     "replay cannot place it"
             }
+            if (event is ScreenFrame) {
+                logged.kept(call, record.seq, event)
+            } else {
+                step(record.seq, event)?.let { logged.add(call, it) }
+            }
+        }
+        return logged.steps
+    }
+
+    /** The logged port calls of a log by call, as [logged] collects them. */
+    private class Logged {
+        val steps = LinkedHashMap<ToolCallId?, MutableList<DeviceStep>>()
+
+        /** Where each capture still without its frame is in its call's steps, by the read before it. */
+        private val captures = HashMap<Pair<ToolCallId?, SnapshotId>, Int>()
+
+        fun add(
+            call: ToolCallId?,
+            step: DeviceStep,
+        ) {
             val list = steps.getOrPut(call) { mutableListOf() }
+            if (step.port == DevicePort.FRAME) step.on?.let { captures[call to it] = list.size }
             list += step.copy(call = call, op = list.size + 1)
         }
-        return steps
+
+        /** Puts [frame], kept by the log, into the capture [call] made after reading [frame]'s first screen. */
+        fun kept(
+            call: ToolCallId?,
+            seq: Long,
+            frame: ScreenFrame,
+        ) {
+            val at =
+                requireNotNull(captures.remove(call to frame.snapshotId)) {
+                    "seq $seq: a screen/frame of ${frame.snapshotId.value} in ${call?.value} follows no capture of " +
+                        "that screen (screen/judged FRAME_PRECHECK SHOWN); replay cannot place it"
+                }
+            val list = steps.getValue(call)
+            list[at] =
+                list[at].copy(
+                    seq = seq,
+                    result = DeviceResult.Frame(frame.blob, frame.mime, frame.width, frame.height, frame.som),
+                )
+        }
     }
 
     /**
-     * The port call [event] records, or `null` for a record that is not device input. A screen
-     * judgment (`screen/judged`, WP02b) is a fact to compare, not input: it stays `null` here.
-     * The framed observe of design-6.4 §4 changes two things: its port calls are snapshot S,
-     * frame, snapshot S2 while the log has S, S2 and then `screen/frame{checkedOn = S2}`, so the
-     * FRAME step moves before the S2 snapshot it names; and a frame the runtime dropped leaves no
-     * record, so [ReplayScreen.frame] must give `null` where no FRAME step is queued (today a
-     * missing frame is a `noFrame` fact and anything else fails).
+     * The port call [event] records, or `null` for a record that is not device input.
+     *
+     * A capture is read off its judgment: the runtime captures a frame only right after it
+     * recorded the read before the capture as shown (`screen/judged` FRAME_PRECHECK SHOWN), so
+     * each such judgment is one `frame` call, between that read and the read after it, as the
+     * port saw them. Its frame is the `screen/frame` of that read, recorded later; a capture
+     * the log kept no frame of gives `null` ([DeviceResult.NoFrame]), which the runtime takes
+     * as it took the dropped frame: no frame, nothing recorded. Any other judgment is a fact to
+     * compare, not input.
      */
     private fun step(
         seq: Long,
@@ -201,14 +246,9 @@ object DeviceScript {
                 DeviceStep(null, 0, DevicePort.LAUNCH, seq, moved(event.outcome), target = event.target)
             }
 
-            event is ScreenFrame -> {
-                DeviceStep(
-                    null,
-                    0,
-                    DevicePort.FRAME,
-                    seq,
-                    DeviceResult.Frame(event.blob, event.mime, event.width, event.height, event.som),
-                )
+            event is ScreenJudged && event.purpose == JudgmentPurpose.FRAME_PRECHECK &&
+                event.outcome == JudgmentOutcome.SHOWN -> {
+                DeviceStep(null, 0, DevicePort.FRAME, seq, DeviceResult.NoFrame, on = event.snapshot)
             }
 
             else -> {
@@ -240,20 +280,47 @@ object DeviceScript {
         return (1..total).map { op ->
             val fact = byOp[op]
             if (fact != null && fact.unlogged) {
-                DeviceStep(call, op, fact.port, null, unlogged(fact), delayMs = fact.delayMs)
+                DeviceStep(call, op, fact.port, null, outcome(fact), delayMs = fact.delayMs)
             } else {
                 annotated(queue.removeFirst().copy(op = op), fact)
             }
         }
     }
 
-    private fun unlogged(fact: DeviceFact): DeviceResult =
+    private fun outcome(fact: DeviceFact): DeviceResult =
         when {
             fact.changed != null -> DeviceResult.Changed(fact.changed)
             fact.noFrame -> DeviceResult.NoFrame
             fact.throws != null -> DeviceResult.Throws(fact.throws)
             else -> DeviceResult.Hangs
         }
+
+    /**
+     * A capture with its [fact]: what the device did where the log kept no frame (gave none,
+     * threw, hung), or only the delay; an outcome for a capture whose frame the log kept fails.
+     */
+    private fun captured(
+        step: DeviceStep,
+        fact: DeviceFact?,
+        where: String,
+    ): DeviceStep {
+        val said =
+            fact?.let {
+                listOfNotNull(
+                    "noFrame".takeIf { fact.noFrame },
+                    "throws".takeIf { fact.throws != null },
+                    "hangs".takeIf { fact.hangs },
+                ).singleOrNull()
+            }
+        require(said == null || step.result == DeviceResult.NoFrame) {
+            "replay.override.json: $where has its frame in the log, the fact says $said"
+        }
+        return when {
+            fact == null -> step
+            said == null -> step.copy(delayMs = fact.delayMs)
+            else -> step.copy(result = outcome(fact), delayMs = fact.delayMs)
+        }
+    }
 
     private fun annotated(
         step: DeviceStep,
@@ -263,6 +330,15 @@ object DeviceScript {
         require(fact == null || fact.port == step.port) {
             "replay.override.json: $where is a ${step.port}, the fact says ${fact?.port}"
         }
+        return if (step.port == DevicePort.FRAME) captured(step, fact, where) else noted(step, fact, where)
+    }
+
+    /** A logged read, action or launch with its [fact]: the delay, and for one that threw the exception. */
+    private fun noted(
+        step: DeviceStep,
+        fact: DeviceFact?,
+        where: String,
+    ): DeviceStep {
         val threw = threwClass(step.result)
         val thrown = fact?.throws
         if (threw == null) {

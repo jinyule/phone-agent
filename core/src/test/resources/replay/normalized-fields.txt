@@ -36,6 +36,7 @@ requests                  settings.cache.recentMessages                         
 requests                  settings.contextEdits.{server}.clearToolUsesAboveTokens   Int        value
 requests                  settings.contextEdits.{server}.keepToolUses               Int        value
 requests                  settings.contextEdits.{server}.compactAboveTokens         Int        value
+requests                  settings.contextEdits.{server}.clearAtLeastTokens         Int        value
 requests                  settings.maxOutputTokens                                  Int        value
 requests                  keep                                                      Int        value
 requests                  append[].parts[].{image}.blob                             BlobRef    kept
@@ -135,6 +136,7 @@ request/header            cache.recentMessages                                  
 request/header            contextEdits.{server}.clearToolUsesAboveTokens            Int        value
 request/header            contextEdits.{server}.keepToolUses                        Int        value
 request/header            contextEdits.{server}.compactAboveTokens                  Int        value
+request/header            contextEdits.{server}.clearAtLeastTokens                  Int        value
 request/header            maxOutputTokens                                           Int        value
 
 request/retry             attempt                                                   Int        value
@@ -173,6 +175,7 @@ screen/action             outcome.after.ocr[].bounds.top                        
 screen/action             outcome.after.ocr[].bounds.right                          Int        value
 screen/action             outcome.after.ocr[].bounds.bottom                         Int        value
 screen/action             outcome.after.ocr[].confidence                            Double     value
+screen/action             outcome.diff.base                                         SnapshotId kept
 screen/action             outcome.diff.added[].ref                                  ElementRef kept
 screen/action             outcome.diff.added[].bounds.left                          Int        value
 screen/action             outcome.diff.added[].bounds.top                           Int        value
@@ -203,6 +206,10 @@ screen/frame              blob                                                  
 screen/frame              width                                                     Int        value
 screen/frame              height                                                    Int        value
 screen/frame              snapshotId                                                SnapshotId kept
+screen/frame              checkedOn                                                 SnapshotId kept
+
+screen/judged             callId                                                    ToolCallId call
+screen/judged             snapshot                                                  SnapshotId kept
 
 screen/launch             callId                                                    ToolCallId call
 screen/launch             outcome.after.id                                          SnapshotId kept
@@ -219,6 +226,7 @@ screen/launch             outcome.after.ocr[].bounds.top                        
 screen/launch             outcome.after.ocr[].bounds.right                          Int        value
 screen/launch             outcome.after.ocr[].bounds.bottom                         Int        value
 screen/launch             outcome.after.ocr[].confidence                            Double     value
+screen/launch             outcome.diff.base                                         SnapshotId kept
 screen/launch             outcome.diff.added[].ref                                  ElementRef kept
 screen/launch             outcome.diff.added[].bounds.left                          Int        value
 screen/launch             outcome.diff.added[].bounds.top                           Int        value
@@ -277,6 +285,7 @@ side/request              request.cache.recentMessages                          
 side/request              request.contextEdits.{server}.clearToolUsesAboveTokens    Int        value
 side/request              request.contextEdits.{server}.keepToolUses                Int        value
 side/request              request.contextEdits.{server}.compactAboveTokens          Int        value
+side/request              request.contextEdits.{server}.clearAtLeastTokens          Int        value
 side/request              request.maxOutputTokens                                   Int        value
 
 side/response             outcome.{completed}.response.parts[].{image}.blob         BlobRef    kept
