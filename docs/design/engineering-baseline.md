@@ -121,7 +121,7 @@ core/src/test/resources/sessions/<scenario>/
 
 **三种模式**（Gradle 属性 `-PsessionSnapshot=`，由约定插件 `phoneagent.session-replay` 解析并传给 `:core:test`）：
 - `replay`：默认，CI 只跑这个。取值非法，或 `CI=true` 时不是 `replay`，在配置阶段就失败。
-- `record`：跑录制来源并写出新 fixture。M1 的来源是 JVM 上的 authored 场景；真模型加真机的来源留给 WP11。跑完自动归一化、gitleaks 扫描（本机没装时只警告，清单里写"未扫描"，CI 扫全历史兜底），并生成一份**人工隐私审查清单** `core/build/session-record/<scenario>/privacy-checklist.md`（不提交；截图、通讯录、聊天内容只允许来自测试账号）。
+- `record`：跑录制来源并写出新 fixture。M1 的来源是 JVM 上的 authored 场景；真模型加真机的来源留给 WP11。跑完自动归一化，先写到 `core/build/session-record/<scenario>/fixture/` 暂存，在那里用 gitleaks 扫描；扫描干净才搬进 `src`。扫出泄漏或 gitleaks 自身出错时，`src` 一个字节都不动。本机没装 gitleaks 时，authored 且没有密钥的来源只警告（清单里写"未扫描"，CI 扫全历史兜底），`recording: live` 或带 `secrets` 的来源直接失败。同时生成一份**人工隐私审查清单** `core/build/session-record/<scenario>/privacy-checklist.md`（不提交；截图、通讯录、聊天内容只允许来自测试账号）。
 - `refresh`：无 key。用 fixture 里的模型回复、设备事实和外部输入跑一遍，先要求"走了同一条路"（模型和设备的脚本、外部输入都恰好用完，铁律 1 严格检查通过），再就地重写日志、请求文件、边车和 policy pin；模型回复和设备事实永远不会被它改掉。它不碰 prompt-surface 金样和 loop 金样：三者共用比对和接受的写法，各自一个接受开关。
 - `record` 和 `refresh` 只跑回放测试，并且不进缓存、不算 up-to-date（它们写 `src/`）。
 

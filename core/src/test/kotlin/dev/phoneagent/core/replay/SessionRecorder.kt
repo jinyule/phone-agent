@@ -189,21 +189,33 @@ class FactRecorder(
 /**
  * Record mode (WP08 design §7): runs a [RecordingSource] through the product loop, then writes it
  * as a fixture: normalized (N1–N5), templates put back (N7), the device facts the log lacks, the
- * blobs, the sidecars and the current policy pin. Afterwards it scans the fixture with gitleaks
- * when it is installed and writes the privacy checklist ([PrivacyChecklist]); a fixture is only
- * committed after a person went through that list.
+ * blobs, the sidecars and the current policy pin. The fixture is staged outside the sources and
+ * scanned there with gitleaks; only then is it installed, and the privacy checklist
+ * ([PrivacyChecklist]) is written next to the staged copy. A fixture is only committed after a
+ * person went through that list.
  */
 object SessionRecorder {
+    /** The staged fixture's directory under `<work>/<name>/`. */
+    const val STAGED: String = "fixture"
+
     /**
-     * Records [source] in [scope]'s virtual time into [dir] (replacing its fixture files) and
-     * writes its checklist under [checklists]. Fails with [AssertionError] when the run did not
-     * use up its stimuli or failed, and with [IllegalStateException] when gitleaks found something.
+     * Records [source] in [scope]'s virtual time and installs it as the fixture in [dir], replacing
+     * its fixture files. The fixture is first written to `<work>/<name>/fixture/` ([STAGED]; [work]
+     * is under `build/`, never committed) and scanned there with [gitleaks] (`null`: not installed);
+     * its checklist goes to `<work>/<name>/privacy-checklist.md`. [dir] is touched only when the
+     * scan is clean, or when gitleaks is not installed and the source is authored with no keys
+     * (a warning on stderr); the staged copy is left for review either way.
+     *
+     * Fails with [AssertionError] when the run did not use up its stimuli or failed, and with
+     * [IllegalStateException], [dir] untouched, when gitleaks found something, failed itself, or
+     * is not installed for a live source or one with keys.
      */
     suspend fun record(
         scope: TestScope,
         source: RecordingSource,
         dir: Path,
-        checklists: Path,
+        work: Path,
+        gitleaks: Path? = Gitleaks.onPath(),
     ) {
         val model = TemplatingModel(source.model())
         val scenario =
@@ -245,12 +257,20 @@ object SessionRecorder {
                         )
                     },
             )
-        FixtureTexts.write(dir, scenario, texts, override, blobs(harness.files, texts))
-        val scan = Gitleaks.scan(dir)
-        PrivacyChecklist.write(checklists.resolve(source.name), source.name, log, scenario, scan)
+        val staged = work.resolve(source.name).resolve(STAGED)
+        FixtureTexts.write(staged, scenario, texts, override, blobs(harness.files, texts))
+        val scan = Gitleaks.scan(staged, gitleaks)
+        PrivacyChecklist.write(work.resolve(source.name), source.name, log, scenario, scan)
         check(scan !is Gitleaks.Scan.Found) {
-            "${source.name}: gitleaks found secrets in $dir:\n${(scan as Gitleaks.Scan.Found).report}"
+            "${source.name}: gitleaks found secrets in the staged fixture $staged, $dir untouched:\n" +
+                (scan as Gitleaks.Scan.Found).report
         }
+        val scanOptional = source.recording == Recording.AUTHORED && source.secrets.isEmpty()
+        check(scan != Gitleaks.Scan.NotInstalled || scanOptional) {
+            "${source.name}: gitleaks is not installed; a ${source.recording.name.lowercase()} recording" +
+                " with ${source.secrets.size} key(s) is installed only after a scan, $dir untouched"
+        }
+        FixtureTexts.install(staged, dir)
     }
 
     private suspend fun blobs(

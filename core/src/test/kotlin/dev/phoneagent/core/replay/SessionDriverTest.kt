@@ -60,7 +60,7 @@ class SessionDriverTest {
     /** Records [source], replays the fixture, and returns the log's stimuli and what failed. */
     private fun roundTrip(source: AuthoredScenario): Pair<List<Stimulus>, List<String>> {
         val dir = temp.resolve(source.name)
-        runTest { SessionRecorder.record(this, source, dir, temp.resolve("checklists")) }
+        runTest { SessionRecorder.record(this, source, dir, temp.resolve("work")) }
         val fixture = ReplayFiles.load(dir)
         var failed = emptyList<String>()
         runTest {
@@ -105,7 +105,7 @@ class SessionDriverTest {
                 this,
                 stopAndResume(Stimulus.Stop(StopCause.USER)),
                 dir,
-                temp.resolve("checklists"),
+                temp.resolve("work"),
             )
         }
         val events =

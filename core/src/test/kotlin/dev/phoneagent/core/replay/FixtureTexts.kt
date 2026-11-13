@@ -227,4 +227,23 @@ object FixtureTexts {
             Files.write(dir.resolve(ReplayFiles.BLOBS).resolve(ref.value), bytes)
         }
     }
+
+    /**
+     * Replaces the fixture in [dir] with the one [staged] holds, byte for byte. [staged] must load
+     * as a fixture ([ReplayFiles.load]) before [dir] is touched; [dir] is then cleared as [write]
+     * clears it, and each file copied.
+     */
+    fun install(
+        staged: Path,
+        dir: Path,
+    ) {
+        ReplayFiles.load(staged)
+        if (dir.isDirectory()) clear(dir)
+        Files.createDirectories(dir)
+        val paths = Files.walk(staged).use { it.toList() }
+        for (from in paths.drop(1)) {
+            val to = dir.resolve(staged.relativize(from).toString())
+            if (from.isDirectory()) Files.createDirectory(to) else Files.copy(from, to)
+        }
+    }
 }

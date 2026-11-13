@@ -17,8 +17,9 @@ import java.nio.file.Path
 import java.util.concurrent.TimeUnit
 
 /**
- * gitleaks over a freshly recorded fixture (engineering-baseline §3.2), as lefthook runs it: when
- * it is not installed the fixture is not scanned, which the checklist says; CI scans the history.
+ * gitleaks over a freshly recorded fixture while it is staged under `build/`, before it is
+ * installed into the sources (engineering-baseline §3.2, [SessionRecorder.record]). When it is not
+ * installed the fixture is not scanned, which the checklist says; CI scans the history.
  */
 object Gitleaks {
     private const val TIMEOUT_S = 60L
