@@ -277,7 +277,11 @@ class AssembledFlowsTest {
 
     // A tap that lands in a refused app (policy-rules §6.4, WITHHELD)
 
-    /** A bank page: everything on it carries the marker. */
+    /**
+     * A bank page: each kind of text core is given carries the marker, an element's name, value,
+     * hint (shown for a field without a value) and resource id, the activity and OCR. The app maps
+     * a content description into the name and passes no window title (the app's `TextSourcesTest`).
+     */
     private val bank: ScreenSnapshot =
         Screens
             .snapshot(
@@ -285,6 +289,10 @@ class AssembledFlowsTest {
                 listOf(
                     el("e1", ElementRole.BUTTON, "返回", box(0, 30, 80, 90), setOf(ElementState.CLICKABLE)),
                     el("e2", ElementRole.TEXT, "MARK_ELEMENT 余额 12,345.67", box(40, 200, 700, 260)),
+                    el("e3", ElementRole.INPUT, "MARK_NAME 转账金额", box(40, 400, 700, 460), setOf(ElementState.EDITABLE))
+                        .copy(value = "MARK_VALUE 500", resourceId = "com.icbc:id/MARK_RESOURCE"),
+                    el("e4", ElementRole.INPUT, bounds = box(40, 500, 700, 560), states = setOf(ElementState.EDITABLE))
+                        .copy(hint = "MARK_HINT 备注"),
                 ),
             ).copy(
                 pkg = "com.icbc",
@@ -292,25 +300,39 @@ class AssembledFlowsTest {
                 ocr = listOf(OcrLine("MARK_OCR 账户", box(40, 300, 700, 340))),
             )
 
+    /** The markers on [bank]. */
+    private val markers =
+        listOf("MARK_ELEMENT", "MARK_NAME", "MARK_VALUE", "MARK_HINT", "MARK_RESOURCE", "MARK_ACTIVITY", "MARK_OCR")
+
+    /** A run whose tap on the chat lands on [page]; the model reads it and answers. */
+    private suspend fun TestScope.tapInto(page: ScreenSnapshot): Pair<AssembledLoop, FakeChatModel> {
+        val screen =
+            ScriptedScreen(Screens.CHAT)
+                .answers(
+                    ActionOutcome(Status.Ok, Effect.NEW_APP, page, ScreenDiff(Screens.CHAT.id, added = page.elements)),
+                )
+        val model =
+            blind()
+                .calls(call("c0", "phone_observe"))
+                .calls(call("c1", "phone_tap", """{"screen":"s12","ref":"e3","reason":"更多"}"""))
+                .answers("好")
+        return assembled(model, screen).ran() to model
+    }
+
+    /** The control for the next test: what of the same page the model sees when the app is not refused. */
+    @Test
+    fun `the bank page in an app that is not refused shows the model every marker but the resource id`() =
+        runTest {
+            val (_, model) = tapInto(bank.copy(pkg = "com.example.notes"))
+            val seen = model.requests.last().toString()
+            // A resource id only feeds the policy's reading of icon buttons; the format never shows it.
+            assertEquals(markers - "MARK_RESOURCE", markers.filter { it in seen })
+        }
+
     @Test
     fun `a tap that lands in a bank app shows none of it in the result, the cards or the next request`() =
         runTest {
-            val screen =
-                ScriptedScreen(Screens.CHAT)
-                    .answers(
-                        ActionOutcome(
-                            Status.Ok,
-                            Effect.NEW_APP,
-                            bank,
-                            ScreenDiff(Screens.CHAT.id, added = bank.elements),
-                        ),
-                    )
-            val model =
-                blind()
-                    .calls(call("c0", "phone_observe"))
-                    .calls(call("c1", "phone_tap", """{"screen":"s12","ref":"e3","reason":"更多"}"""))
-                    .answers("好")
-            val harness = assembled(model, screen).ran()
+            val (harness, model) = tapInto(bank)
 
             val result = harness.resultOf("c1")
             assertEquals(ToolStatus.OK, result.status)
