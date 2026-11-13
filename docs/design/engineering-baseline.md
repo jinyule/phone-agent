@@ -113,7 +113,7 @@ core/src/test/resources/sessions/<scenario>/
 - `ReplayScreen`：每个调用一个队列，当前调用从回放日志推出（最后一条点名了某个调用、且它还没有 `tool/result` 的记录）。每次端口调用的方法必须和录制时一致；`act`、`launch` 还要比 `UiAction` 和 `on`、或 `LaunchTarget`。不一致就当场失败，并记进结束时的检查。快照的 fingerprint 和 quality 用当前的 analyzer 重算（quality 影响自动附图，是模型可见的；改 analyzer 要 refresh fixture），diff 按录制值给。设备耗时在虚拟时间里 delay。带帧的 observe：端口上的顺序是 S、`frame`、S2，日志里是 S、判定、S2、判定，帧留下时最后才有 `screen/frame{snapshotId = S}`。runtime 只在记下 `screen/judged` FRAME_PRECHECK SHOWN 之后抓帧，所以每条这样的判定就是一次 `frame`，排在 S 和 S2 之间。有 S 的 `screen/frame` 就给这一帧；没有（runtime 丢掉了：S2 被扣下、换了 App、框对不上、S2 读失败）就给 null。runtime 拿到 null 和丢帧走同一条路，日志和工具结果都不变。
 - 断言（全部收集，一次报出）：
   - 请求文件逐字节一致，加上每次请求的 `ReplayChecker` 严格检查；
-  - `policy/verdict` 序列一致；`scenario.json` 的 `rulesVersion`、`tuning` 和当前值严格相等，判定变了而版本没变时单独提示"没升 RULES_VERSION"；
+  - 判定序列一致：每条 `policy/verdict` 和 `screen/judged` 的完整 data，Confirm 的卡片和原因也在内；`scenario.json` 的 `rulesVersion`、`tuning` 和当前值严格相等，判定序列变了而版本没变时单独提示"没升 RULES_VERSION"；
   - 事件序列一致（两边都解码、用当前编解码器重写、再归一化）；
   - 两个边车文件一致（由第一个请求渲染，写法和 prompt-surface 金样相同）；
   - 脚本、设备队列、override、外部输入全部用完。

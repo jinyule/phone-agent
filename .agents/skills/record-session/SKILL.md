@@ -49,7 +49,7 @@ prompt-surface 金样和 loop 金样用上面同一条 `cp -R` 接受，会话 f
 2. **policy pin**：`policy.rulesVersion: …` 或 `policy.tuning.<字段>: …`。规则版本或 tuning 和 fixture 录制时不同；审阅判定的变化以后 `refresh`。
 3. **请求文件**（`requests.expected.jsonl`）：报出第一个不同的请求、它的位置（`.append[0].parts[0].text` 这样的 JSON 路径）和两边的整行。送进模型的东西变了；确认是有意的就 `refresh`。
 4. **事件序列**（`session.jsonl`，归一化以后逐行比），同样报第一个不同的记录和字段。
-5. **判定序列**（"policy/verdict, one line per verdict"）：每行是调用、档位、intent 和包名、判定和原因。另有一条 "verdicts changed while RULES_VERSION is still N" 时，判定变了而规则版本没动：先在 `PolicyTuning` 里升 `RULES_VERSION`，再 `refresh`。
+5. **判定序列**（"policy/verdict and screen/judged, one line per decision"）：每行是一条 `policy/verdict` 或 `screen/judged`，写类型和用当前编解码器写出的完整 data。`policy/verdict` 含调用、档位、intent 和整个判定：Confirm 的卡片和原因，HandOff 的 kind，Refuse 的原因和提示。`screen/judged` 含屏、用途、结论、规则和提示。另有一条 "verdicts changed while RULES_VERSION is still N" 时，判定变了而规则版本没动：先在 `PolicyTuning` 里升 `RULES_VERSION`，再 `refresh`。
 6. **边车**（系统提示词、工具定义）：和 prompt-surface 金样同一种写法，通常和金样一起变。
 
 其他失败：

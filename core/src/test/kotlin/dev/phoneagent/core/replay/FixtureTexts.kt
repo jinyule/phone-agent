@@ -3,17 +3,19 @@ package dev.phoneagent.core.replay
 import dev.phoneagent.core.ids.BlobRef
 import dev.phoneagent.core.ids.ToolCallId
 import dev.phoneagent.core.model.ChatRequest
-import dev.phoneagent.core.policy.Verdict
 import dev.phoneagent.core.session.AssistantMessage
 import dev.phoneagent.core.session.PolicyVerdictRecorded
+import dev.phoneagent.core.session.ScreenJudged
 import dev.phoneagent.core.session.SessionCodec
 import dev.phoneagent.core.session.SessionLog
 import dev.phoneagent.core.session.SessionRecord
 import dev.phoneagent.core.testing.PromptSurfaces
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.nio.file.Files
 import java.nio.file.Path
@@ -84,25 +86,22 @@ object FixtureTexts {
         )
 
     /**
-     * The decisions of [records] (WP08 design §6 ②), one line each: `policy/verdict` with the call,
-     * the level, the intent's kind and package, and the verdict with its reason. Screen verdicts
-     * (`screen/judged`, design-6.4 §4) join this list once they are logged.
+     * The PolicyEngine's decisions in [records] (WP08 design §6 ②), one line each in log order:
+     * every `policy/verdict` (the call, the level, the intent, the whole verdict: a Confirm's card
+     * with its reason, a HandOff's kind, a Refuse's reason and hint) and every `screen/judged`
+     * (policy-rules §6.4), as its type and its data the way [codec] writes them. Any change of a
+     * decision changes its line.
      */
-    fun decisions(records: List<SessionRecord>): List<String> =
-        records.mapNotNull { record ->
-            val decided = record.event as? PolicyVerdictRecorded ?: return@mapNotNull null
-            val intent = decided.intent
-            "${decided.callId.value} ${decided.level} ${intent.kind}${intent.pkg?.let { " $it" }.orEmpty()}: " +
-                verdict(decided.verdict)
-        }
-
-    private fun verdict(verdict: Verdict): String =
-        when (verdict) {
-            is Verdict.Allow -> "Allow"
-            is Verdict.Confirm -> "Confirm"
-            is Verdict.HandOff -> "HandOff ${verdict.kind}"
-            is Verdict.Refuse -> "Refuse ${verdict.reason}"
-        }
+    fun decisions(
+        records: List<SessionRecord>,
+        codec: SessionCodec = SessionCodec(),
+    ): List<String> =
+        records
+            .filter { it.event is PolicyVerdictRecorded || it.event is ScreenJudged }
+            .map { record ->
+                val line = Json.parseToJsonElement(codec.encode(record)).jsonObject
+                "${line.getValue("type").jsonPrimitive.content} ${line.getValue("data")}"
+            }
 
     /**
      * Where two JSON-lines texts first differ: the line (named by [line] from its index) and the

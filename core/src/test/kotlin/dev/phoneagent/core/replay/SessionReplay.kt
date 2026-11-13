@@ -128,7 +128,7 @@ class Replayed(
                 assertEquals(
                     recordedDecisions.joinToString("\n"),
                     replayedDecisions.joinToString("\n"),
-                    "policy/verdict, one line per verdict",
+                    "policy/verdict and screen/judged, one line per decision",
                 )
             },
             {

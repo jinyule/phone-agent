@@ -117,9 +117,33 @@ class SessionReplayNegativeTest {
         // The rules judge differently at the same version.
         val dir = copy("confirm-send-approved")
         val failed = failures(withScenario(ReplayFiles.load(dir), ::tooBigToRead), dir)
-        assertTrue(failed.anyHas("policy/verdict, one line per verdict"), "$failed")
+        assertTrue(failed.anyHas("policy/verdict and screen/judged, one line per decision"), "$failed")
         assertTrue(failed.anyHas("verdicts changed while RULES_VERSION is still"), "$failed")
         assertTrue(failed.none { it.startsWith("policy.") }, "the pin itself matches: $failed")
+    }
+
+    @Test
+    fun `a confirmation asked for another reason at the same version asks for the rules version`() {
+        // The shape of the review's P3: the rules ask for the send as a deletion, nothing else moves.
+        val dir = copy("confirm-send-approved")
+        editLine(dir, ReplayFiles.SESSION, "\"type\":\"confirm\"") {
+            it.replace("\"reason\":\"OUTWARD\"", "\"reason\":\"DELETE\"")
+        }
+        val failed = failures(dir)
+        assertTrue(failed.anyHas("policy/verdict and screen/judged, one line per decision"), "$failed")
+        assertTrue(failed.anyHas("verdicts changed while RULES_VERSION is still"), "$failed")
+        assertTrue(failed.none { it.startsWith("policy.") }, "the pin itself matches: $failed")
+    }
+
+    @Test
+    fun `a screen judged otherwise at the same version asks for the rules version`() {
+        val dir = copy("observe-tap")
+        editLine(dir, ReplayFiles.SESSION, "\"snapshot\":\"s12\",\"purpose\":\"TOOL\"") {
+            it.replace("\"outcome\":\"SHOWN\",\"rule\":null", "\"outcome\":\"WITHHELD\",\"rule\":\"confirm\"")
+        }
+        val failed = failures(dir)
+        assertTrue(failed.anyHas("policy/verdict and screen/judged, one line per decision"), "$failed")
+        assertTrue(failed.anyHas("verdicts changed while RULES_VERSION is still"), "$failed")
     }
 
     @Test
@@ -132,7 +156,7 @@ class SessionReplayNegativeTest {
                 ).let { it.copy(policy = it.policy.copy(rulesVersion = it.policy.rulesVersion + 1)) }
             }
         val failed = failures(fixture, dir)
-        assertTrue(failed.anyHas("policy/verdict, one line per verdict"), "$failed")
+        assertTrue(failed.anyHas("policy/verdict and screen/judged, one line per decision"), "$failed")
         assertTrue(failed.any { it.startsWith("policy.rulesVersion: the fixture was judged by rules") }, "$failed")
         assertTrue(failed.none { "RULES_VERSION is still" in it }, "the version moved: $failed")
     }
