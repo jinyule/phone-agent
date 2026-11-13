@@ -18,7 +18,7 @@
 - App 重启时，上一个进程留下的孤儿助手会带着续接口令回来，不能每次重启都并发拉起一个新助手（m2-notes 20:3x）；
 - 口令只走 stdin；
 - 扫描只扫回环，并且排除 App 自己占用的端口；
-- 只有拉起和自检所在的包可以引用 `core.adb`。
+- 只有拉起所在的包和 debug 自检可以引用 `core.adb`。
 
 ## 决定
 
@@ -49,7 +49,13 @@
    - 现在，消息里报的是对端 alert 的 `SSLProtocolException`，不再算我们自己的错误，在可能是拒绝的阶段归为 UNAUTHORIZED。JDK 收到的 alert 也按同一规则认，具体写法见 phase1 §7.1；
    - BoringSSL 把收到的 alert 记成原因码 1000 + alert 编号：有名字的写成 `SSLV3_*` / `TLSV1_*`（Android 12 起都带 `ALERT_`；Android 11 的表里 1110–1116 没有 `ALERT_`，例如 `TLSV1_CERTIFICATE_REQUIRED`），没有名字的写成 `reason(1NNN)`。它自己发现的错误都有自己的名字，没有以这两个前缀开头的（例如 `DECRYPTION_FAILED_OR_BAD_RECORD_MAC`、`BAD_ALERT`），仍然算 TLS。不按原因码的数值判断，因为它自己的原因也有 1000 以上的（1122 `PAKE_AND_KEY_SHARE_NOT_ALLOWED`）。
 8. **扫描范围**：App 读不到 `/proc/sys/net/ipv4/ip_local_port_range`（Android 16 上是 EACCES），就退回 `LocalPortScan.FALLBACK_RANGE`（30000..65535），覆盖 Linux 默认的 32768..60999。`ownPorts` 现在为空：App 还没监听任何端口；ToolServer（phase1 §8）落地时要把自己的端口加进去。扫描只由 `loopbackScan` 构造，`BuiltinAdb` 和 debug 自检的 scan 场景用的是同一个。
-9. **架构检查**：`CoreAdbBoundaryTest` 扫 `app/src/{main,debug,release}`，只允许 `dev.phoneagent.app.adb` 和 `dev.phoneagent.app.debug`（以及它们的子包）引用 `dev.phoneagent.core.adb`。检查覆盖 import、通配、别名，以及跨行的全限定名，并带反例。
+9. **架构检查按字节码做**（build-logic 的 `verify<Variant>ClassBoundaries`，挂在 `check` 上，规则在 `AppClassBoundaries.kt`）：
+   - 检查 debug 和 release 两个变体自己编译出的类（AGP 的 project 范围 `CLASSES`，Kotlin 和 javac 的产物都在里面）。一个类的字节里出现了包名（内部形式 `a/b/c/`，或者带点的形式，例如反射用的字符串常量），就算引用了这个包。
+   - `dev.phoneagent.core.adb` 只能由 `dev.phoneagent.app.adb`（含子包）和 debug 自检引用。自检只放行 `AdbSelfCheck.kt` 编译出的 `AdbSelfCheck`、`AdbSelfCheckKt` 两个类（含它们的嵌套类和合成类），不再放行整个 `app.debug`。
+   - `dev.phoneagent.app.adb` 只能由 `PhoneAgentApplication`（开启自动拉起）和同一个自检引用。所以经第三个包转手 `app.adb` 给出的东西，也要先在这里登记。
+   - 源码里的写法都会落到字节码上：反引号、typealias（使用方写的是展开后的类型）、`src/main/java` 下的 .kt、.java、内联函数、经允许的类转手。所以原来的文本扫描 `CoreAdbBoundaryTest` 删掉了。
+   - 已知的放宽和收紧：编译期常量会被拷贝，Kotlin 可能不留引用（常量本身不带能力）；字符串里带点的包名也算引用。
+   - 扫描函数有单测（`ClassBoundariesTest`，构造的 class 字节和 javac 现编译的类）。规则本身是 build-logic 的代码，改清单就是改构建逻辑，要经过评审。
 
 ## Alternatives considered
 

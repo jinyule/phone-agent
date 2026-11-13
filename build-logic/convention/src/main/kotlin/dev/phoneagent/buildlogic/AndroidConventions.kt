@@ -21,7 +21,8 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 /**
  * Android application (`:app`): Compose, version from gradle.properties, strict lint, and unit
  * tests for every build type: AGP only creates them for the tested one (debug) by default. The
- * release ones run only the release checks ([runOnlyReleaseChecksOnRelease]).
+ * release ones run only the release checks ([runOnlyReleaseChecksOnRelease]). Each variant's
+ * classes are checked against [APP_CLASS_BOUNDARIES].
  */
 class AndroidApplicationConventionPlugin : Plugin<Project> {
     override fun apply(target: Project): Unit =
@@ -49,6 +50,7 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
                 beforeVariants { variant ->
                     variant.hostTests[HostTestBuilder.UNIT_TEST_TYPE]?.enable = true
                 }
+                onVariants { variant -> verifyClassBoundaries(variant) }
             }
             configureKotlinAndroid(explicitApi = false)
             configureRobolectricJvm()
