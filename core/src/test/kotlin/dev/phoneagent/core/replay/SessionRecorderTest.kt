@@ -24,6 +24,7 @@ import java.nio.file.attribute.PosixFilePermissions
 import kotlin.io.path.exists
 import kotlin.io.path.isDirectory
 import kotlin.io.path.readLines
+import kotlin.io.path.readText
 import kotlin.io.path.writeText
 
 /**
@@ -114,6 +115,8 @@ class SessionRecorderTest {
         )
         assertEquals(tree(staged), tree(dir))
         ReplayFiles.load(dir)
+        val checklist = work.resolve(NAME).resolve(PrivacyChecklist.FILE).readText()
+        assertTrue("gitleaks: clean" in checklist, checklist)
     }
 
     @Test

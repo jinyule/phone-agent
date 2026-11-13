@@ -12,15 +12,19 @@ import dev.phoneagent.core.ports.ElementRole
 import dev.phoneagent.core.ports.LaunchTarget
 import dev.phoneagent.core.ports.OcrLine
 import dev.phoneagent.core.ports.ScreenSnapshot
+import dev.phoneagent.core.ports.ScreenUnavailableException
 import dev.phoneagent.core.ports.Target
 import dev.phoneagent.core.ports.UiAction
 import dev.phoneagent.core.session.InboxEntry
 import dev.phoneagent.core.session.InboxEntryKind
 import dev.phoneagent.core.session.InboxQueue
 import dev.phoneagent.core.session.InboxSpliced
+import dev.phoneagent.core.session.JudgmentOutcome
+import dev.phoneagent.core.session.JudgmentPurpose
 import dev.phoneagent.core.session.QuestionAnswered
 import dev.phoneagent.core.session.ScreenActed
 import dev.phoneagent.core.session.ScreenFrame
+import dev.phoneagent.core.session.ScreenJudged
 import dev.phoneagent.core.session.ScreenLaunched
 import dev.phoneagent.core.session.ScreenObserved
 import dev.phoneagent.core.session.SessionEvent
@@ -65,7 +69,28 @@ class PrivacyChecklistTest {
         vararg events: SessionEvent,
         scan: Gitleaks.Scan = Gitleaks.Scan.Clean,
         scenario: Scenario = ReplaySamples.scenario,
-    ): String = PrivacyChecklist.text("sample", log(*events), scenario, scan)
+        override: ReplayOverride = ReplayOverride(),
+    ): String = PrivacyChecklist.text("sample", log(*events), scenario, override, scan)
+
+    private fun device(device: Device) = ReplaySamples.scenario.copy(device = device)
+
+    private fun judged(
+        snapshot: String,
+        outcome: JudgmentOutcome,
+        rule: String? = null,
+    ) = ScreenJudged(call, SnapshotId(snapshot), JudgmentPurpose.TOOL, outcome, rule, hint = null)
+
+    /** The items of the section headed [title], as written. */
+    private fun section(
+        title: String,
+        text: String,
+    ): List<String> =
+        text
+            .lines()
+            .dropWhile { it != "## $title" }
+            .drop(1)
+            .takeWhile { !it.startsWith("## ") }
+            .filter { it.startsWith("- [ ] ") }
 
     private fun assertItem(
         item: String,
@@ -119,6 +144,65 @@ class PrivacyChecklistTest {
     }
 
     @Test
+    fun `a withheld screen comes first, as never shown to the model, and not among the texts read`() {
+        val text =
+            text(
+                ScreenObserved(call, screen("s1", "余额 1000")),
+                judged("s1", JudgmentOutcome.WITHHELD, "hard.finance_app"),
+                ScreenObserved(call, screen("s2", "张三")),
+                judged("s2", JudgmentOutcome.SHOWN),
+            )
+        assertEquals("## ${PrivacyChecklist.WITHHELD}", text.lines().first { it.startsWith("## ") })
+        assertTrue("没给模型看过" in PrivacyChecklist.WITHHELD)
+        assertEquals(
+            listOf("- [ ] screen s1 of com.tencent.mm (withheld by hard.finance_app): 余额 1000"),
+            section(PrivacyChecklist.WITHHELD, text),
+        )
+        assertEquals(listOf("- [ ] 张三"), section("Text read from the device", text))
+    }
+
+    @Test
+    fun `a screen withheld after an action is listed as withheld`() {
+        val text =
+            text(
+                ScreenActed(call, null, tap, after(screen("s3", "转账成功"))),
+                judged("s3", JudgmentOutcome.WITHHELD, ScreenJudged.CONFIRM),
+            )
+        assertEquals(
+            listOf("- [ ] screen s3 of com.tencent.mm (withheld by ${ScreenJudged.CONFIRM}): 转账成功"),
+            section(PrivacyChecklist.WITHHELD, text),
+        )
+        assertEquals(emptyList<String>(), section("Text read from the device", text))
+    }
+
+    @Test
+    fun `an app version is an item`() {
+        val scenario = device(ReplaySamples.scenario.device.copy(packages = mapOf("com.tencent.mm" to "8.0.50")))
+        assertItem("com.tencent.mm 8.0.50", text(scenario = scenario))
+    }
+
+    @Test
+    fun `the ROM build is an item`() {
+        val build = "google/sdk_gphone64_arm64/emu64a:15/AE3A.240806.005/12228598:userdebug/dev-keys"
+        assertItem(build, text(scenario = device(ReplaySamples.scenario.device.copy(build = build))))
+    }
+
+    @Test
+    fun `the message of what the device threw is an item, an empty one none`() {
+        val type = ScreenUnavailableException::class.java.name
+        val override =
+            ReplayOverride(
+                device =
+                    listOf(
+                        DeviceFact("call-1", 2, DevicePort.ACT, throws = Thrown(type, "张三的聊天窗口已关闭")),
+                        DeviceFact("call-2", 1, DevicePort.SNAPSHOT, throws = Thrown(type, "")),
+                    ),
+            )
+        val items = section("What the device threw (replay.override.json throws.message)", text(override = override))
+        assertEquals(listOf("- [ ] 张三的聊天窗口已关闭 ($type from ACT of call-1, op 2)"), items)
+    }
+
+    @Test
     fun `a text with a card number in it is flagged, a plain one is not`() {
         val text =
             text(ScreenObserved(call, screen("s1", "卡号 4111 1111 1111 1111")), ScreenObserved(call, screen("s2", "张三")))
@@ -135,7 +219,7 @@ class PrivacyChecklistTest {
     @Test
     fun `a section with nothing in it says so`() {
         val none = ReplaySamples.scenario.copy(device = ReplaySamples.scenario.device.copy(apps = emptyList()))
-        assertEquals(4, text(scenario = none).lines().count { it == "(none)" })
+        assertEquals(8, text(scenario = none).lines().count { it == "(none)" })
     }
 
     @Test
@@ -150,7 +234,7 @@ class PrivacyChecklistTest {
     @Test
     fun `the checklist is written into the directory given`() {
         val dir = temp.resolve("sample")
-        PrivacyChecklist.write(dir, "sample", log(), ReplaySamples.scenario, Gitleaks.Scan.Clean)
+        PrivacyChecklist.write(dir, text())
         assertEquals(text(), dir.resolve(PrivacyChecklist.FILE).readText())
     }
 }

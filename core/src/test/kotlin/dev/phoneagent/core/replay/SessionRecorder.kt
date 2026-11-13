@@ -260,7 +260,10 @@ object SessionRecorder {
         val staged = work.resolve(source.name).resolve(STAGED)
         FixtureTexts.write(staged, scenario, texts, override, blobs(harness.files, texts))
         val scan = Gitleaks.scan(staged, gitleaks)
-        PrivacyChecklist.write(work.resolve(source.name), source.name, log, scenario, scan)
+        PrivacyChecklist.write(
+            work.resolve(source.name),
+            PrivacyChecklist.text(source.name, log, scenario, override, scan),
+        )
         check(scan !is Gitleaks.Scan.Found) {
             "${source.name}: gitleaks found secrets in the staged fixture $staged, $dir untouched:\n" +
                 (scan as Gitleaks.Scan.Found).report

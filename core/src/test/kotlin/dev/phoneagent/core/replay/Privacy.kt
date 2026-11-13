@@ -1,13 +1,16 @@
 package dev.phoneagent.core.replay
 
+import dev.phoneagent.core.ids.SnapshotId
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.ports.AskResult
 import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.screen.SensitiveNumbers
 import dev.phoneagent.core.session.InboxSpliced
+import dev.phoneagent.core.session.JudgmentOutcome
 import dev.phoneagent.core.session.QuestionAnswered
 import dev.phoneagent.core.session.ScreenActed
 import dev.phoneagent.core.session.ScreenFrame
+import dev.phoneagent.core.session.ScreenJudged
 import dev.phoneagent.core.session.ScreenLaunched
 import dev.phoneagent.core.session.ScreenObserved
 import dev.phoneagent.core.session.SessionLog
@@ -93,31 +96,35 @@ object Gitleaks {
 
 /**
  * The manual privacy review of a recording (AGENTS §6), written to
- * `core/build/session-record/<scenario>/privacy-checklist.md`, never committed: every screenshot,
- * every text read from the device, every input and answer of the user, and the app list, each with
- * a box to tick once a person saw that it comes from a test account. Texts in which
- * [SensitiveNumbers] masks something are flagged as suspected numbers.
+ * `core/build/session-record/<scenario>/privacy-checklist.md`, never committed: first the screens
+ * the runtime withheld from the model (`screen/judged` WITHHELD), whose text is in the fixture all
+ * the same; then every screenshot, every other text read from the device, every input and answer
+ * of the user, the app list, the app versions and the ROM build (`scenario.json`), and the
+ * messages of what the device threw (`replay.override.json`), each with a box to tick once a
+ * person saw that it comes from a test account. Texts in which [SensitiveNumbers] masks something
+ * are flagged as suspected numbers.
  */
 object PrivacyChecklist {
     const val FILE: String = "privacy-checklist.md"
 
-    /** Writes the checklist of [log] (recorded as [name] with [scenario]) and [scan] into [dir]. */
+    /** The heading of the withheld screens, the first section. */
+    const val WITHHELD: String = "Withheld screens: 没给模型看过 (never shown to the model, but in the fixture)"
+
+    /** Writes [text], a checklist ([PrivacyChecklist.text]), as [FILE] into [dir] (created). */
     fun write(
         dir: Path,
-        name: String,
-        log: SessionLog,
-        scenario: Scenario,
-        scan: Gitleaks.Scan,
+        text: String,
     ) {
         Files.createDirectories(dir)
-        Files.writeString(dir.resolve(FILE), text(name, log, scenario, scan))
+        Files.writeString(dir.resolve(FILE), text)
     }
 
-    /** The checklist's text. */
+    /** The checklist of [log], recorded as [name] with [scenario] and [override], and scanned with [scan]. */
     fun text(
         name: String,
         log: SessionLog,
         scenario: Scenario,
+        override: ReplayOverride,
         scan: Gitleaks.Scan,
     ): String =
         buildString {
@@ -128,10 +135,39 @@ object PrivacyChecklist {
             )
             appendLine()
             appendLine("gitleaks: ${scanned(scan)}")
+            val withheld = withheld(log)
+            val (hidden, shown) = screens(log).partition { it.id in withheld }
+            section(WITHHELD, hidden.flatMap { screen -> texts(screen).map { withheldItem(screen, withheld, it) } })
             section("Screenshots (blobs)", frames(log))
-            section("Text read from the device", deviceTexts(log))
+            section("Text read from the device", shown.flatMap(::texts))
             section("What the user typed and answered", userTexts(log))
             section("Installed apps (scenario.json)", scenario.device.apps.map { "${it.label} (${it.packageName})" })
+            section(
+                "App versions (scenario.json device.packages)",
+                scenario.device.packages.map { (pkg, version) -> "$pkg $version" },
+            )
+            section("ROM build (scenario.json device.build)", listOfNotNull(scenario.device.build))
+            section("What the device threw (replay.override.json throws.message)", thrown(override))
+        }
+
+    /** The rule that withheld each screen judged WITHHELD, by its id. */
+    private fun withheld(log: SessionLog): Map<SnapshotId, String?> =
+        log.records
+            .mapNotNull { it.event as? ScreenJudged }
+            .filter { it.outcome == JudgmentOutcome.WITHHELD }
+            .associate { it.snapshot to it.rule }
+
+    private fun withheldItem(
+        screen: ScreenSnapshot,
+        withheld: Map<SnapshotId, String?>,
+        text: String,
+    ): String = "screen ${screen.id.value} of ${screen.pkg ?: "no app"} (withheld by ${withheld[screen.id]}): $text"
+
+    private fun thrown(override: ReplayOverride): List<String> =
+        override.device.mapNotNull { fact ->
+            fact.throws?.takeIf { it.message.isNotEmpty() }?.let { thrown ->
+                "${thrown.message} (${thrown.type} from ${fact.port} of ${fact.call ?: "no call"}, op ${fact.op})"
+            }
         }
 
     private fun scanned(scan: Gitleaks.Scan): String =
@@ -175,28 +211,14 @@ object PrivacyChecklist {
         what: String,
     ): String = "blobs/$blob ($what, $mime, $width×$height)"
 
-    private fun deviceTexts(log: SessionLog): List<String> =
-        log.records.flatMap { record ->
+    /** Every screen read from the device, in log order: observed, and after an action or a launch. */
+    private fun screens(log: SessionLog): List<ScreenSnapshot> =
+        log.records.mapNotNull { record ->
             when (val event = record.event) {
-                is ScreenObserved -> {
-                    texts(event.snapshot)
-                }
-
-                is ScreenActed -> {
-                    event.outcome.after
-                        ?.let(::texts)
-                        .orEmpty()
-                }
-
-                is ScreenLaunched -> {
-                    event.outcome.after
-                        ?.let(::texts)
-                        .orEmpty()
-                }
-
-                else -> {
-                    emptyList()
-                }
+                is ScreenObserved -> event.snapshot
+                is ScreenActed -> event.outcome.after
+                is ScreenLaunched -> event.outcome.after
+                else -> null
             }
         }
 

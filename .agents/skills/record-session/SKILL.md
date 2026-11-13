@@ -60,7 +60,7 @@ prompt-surface 金样和 loop 金样用上面同一条 `cp -R` 接受，会话 f
 
 ## 4. 隐私审查（每次 record 之后，提交之前）
 
-- 打开 `core/build/session-record/<scenario>/privacy-checklist.md`，逐项确认截图和用户图片、屏幕文字、用户输入和回答、App 列表都来自测试账号；标着"suspected number"的项（像卡号、手机号）要逐个看；看一遍 `blobs/` 里的每张图。
+- 打开 `core/build/session-record/<scenario>/privacy-checklist.md`，逐项确认截图和用户图片、屏幕文字、用户输入和回答、App 列表、App 版本和 ROM build、设备抛出的异常消息都来自测试账号。最前面一节是被扣下的屏（`screen/judged` WITHHELD，标着"没给模型看过"）：模型没看到，但文字照样在 fixture 里，一样要看；标着"suspected number"的项（像卡号、手机号）要逐个看；看一遍 `blobs/` 里的每张图。
 - 录制先把 fixture 写到 `core/build/session-record/<scenario>/fixture/`，用 gitleaks 扫这份暂存，扫描干净才搬进 `src`。扫出东西录制就失败，信息里有规则、文件和行（密钥是 REDACTED），`src` 里的 fixture 不动，暂存那份留着看。gitleaks 自己出错（配置读不了、超时）时录制也失败、`src` 不动，信息写的是 "gitleaks failed"、fixture 没扫过，不是"有泄漏"。本机没装 gitleaks 时，只有 authored 且没有密钥的来源会搬进 `src`（测试输出里有警告，清单写"gitleaks 未扫描"：本机装上 gitleaks 再扫一次，或者在 PR 里写明）；live 来源或带 `secrets` 的来源直接失败。
 - 清单里 `{{credential:n}}` 有命中，说明 key 进了日志：先查清楚是怎么进去的。
 - 任何模式装载 fixture 时，出现 `sk-`、JWT、`Bearer` 形状的文字都会失败。不要为了过检查去改写这类文字：它本来就不该在 fixture 里。
