@@ -6,9 +6,13 @@ import dev.phoneagent.core.adb.CommandFailure
 import dev.phoneagent.core.adb.CommandResult
 import dev.phoneagent.core.adb.ConnectFailure
 import dev.phoneagent.core.adb.PortSource
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -17,6 +21,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.shadows.ShadowLog
 
 /** HelperState.Connected holds a Binder: Robolectric. */
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -137,6 +142,49 @@ class HelperLauncherTest {
                     ) { helper.set(FakeHelperPort.connected()) }
                 }
             assertTrue(launcher().launch() is LaunchOutcome.Launched)
+        }
+
+    /**
+     * Runs one launch through [HelperAutoLaunch], which logs its outcome, and checks that the
+     * outcome named [ended] was logged, and that no log line or logged failure (with its causes)
+     * since the test began holds a nonce the launch was given.
+     */
+    private fun TestScope.launchWithoutLoggingTheNonce(
+        connection: () -> HelperLauncher.Connection,
+        ended: String,
+    ) {
+        adb.connection = connection
+        val scope = CoroutineScope(StandardTestDispatcher(testScheduler))
+        val config = LaunchConfig(orphanResumeMs = 0, handoffTimeoutMs = HANDOFF_MS, minLaunchIntervalMs = 0)
+        HelperAutoLaunch(helper, launcher()::launch, scope, config) { testScheduler.currentTime }.requestLaunch()
+        advanceTimeBy(HANDOFF_MS + 1)
+        val logs = ShadowLog.getLogs()
+        assertTrue("$logs", logs.any { it.msg.startsWith("helper launch: $ended") })
+        val logged =
+            logs.flatMap { item ->
+                listOf(item.msg.orEmpty()) + generateSequence(item.throwable) { it.cause }.map { "$it" }
+            }
+        assertEquals(1, helper.issued.size)
+        for (text in logged) assertFalse(text, helper.issued.single() in text)
+    }
+
+    @Test
+    fun `a launch that hands off logs no nonce`() =
+        runTest {
+            launchWithoutLoggingTheNonce({ FakeSession { helper.set(FakeHelperPort.connected()) } }, "Launched")
+        }
+
+    @Test
+    fun `a launch without a handoff logs no nonce`() =
+        runTest { launchWithoutLoggingTheNonce({ FakeSession() }, "NoHandoff") }
+
+    @Test
+    fun `a launch whose command fails logs no nonce`() =
+        runTest {
+            launchWithoutLoggingTheNonce(
+                { FakeSession(result = CommandResult.Completed(1, "", "app_process: not found")) },
+                "CommandFailed",
+            )
         }
 
     @Test

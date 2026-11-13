@@ -21,6 +21,9 @@ internal class FakeHelperPort(
     var nonces = 0
     var nonceRefusal: String? = null
 
+    /** Every nonce [issueLaunchNonce] gave, in order. */
+    val issued = mutableListOf<String>()
+
     fun set(next: HelperState) {
         state = next
         listeners.forEach { it(next) }
@@ -34,7 +37,7 @@ internal class FakeHelperPort(
     override fun issueLaunchNonce(): String {
         nonceRefusal?.let { throw IllegalStateException(it) }
         nonces++
-        return NONCE.take(NONCE.length - 1) + nonces
+        return (NONCE.take(NONCE.length - 1) + nonces).also { issued += it }
     }
 
     companion object {
