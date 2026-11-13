@@ -60,7 +60,10 @@ internal class BuiltinAdb(
     private val identityLock = Mutex()
     private var identity: AdbIdentity? = null
 
-    override val isPaired: Boolean get() = record.isPaired
+    /** Whether a pairing succeeded with the current identity. */
+    val isPaired: Boolean get() = record.isPaired
+
+    override val notPaired: NotPairedReason? get() = record.notPaired
 
     /** Whether adbd refused our key in a search, and no launch connected and no pairing succeeded since. */
     val lastRefused: Boolean get() = record.lastRefused

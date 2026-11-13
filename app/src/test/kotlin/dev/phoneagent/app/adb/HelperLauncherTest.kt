@@ -75,9 +75,11 @@ class HelperLauncherTest {
         runTest {
             val connected = FakeHelperPort(FakeHelperPort.connected())
             assertEquals(LaunchOutcome.AlreadyConnected, HelperLauncher(adb, connected, command, HANDOFF_MS).launch())
-            adb.isPaired = false
-            assertEquals(LaunchOutcome.NotPaired, launcher().launch())
-            adb.isPaired = true
+            adb.notPaired = NotPairedReason.NEVER_PAIRED
+            assertEquals(LaunchOutcome.NotPaired(NotPairedReason.NEVER_PAIRED), launcher().launch())
+            adb.notPaired = NotPairedReason.IDENTITY_REPLACED
+            assertEquals(LaunchOutcome.NotPaired(NotPairedReason.IDENTITY_REPLACED), launcher().launch())
+            adb.notPaired = null
             adb.wireless = false
             assertEquals(LaunchOutcome.WirelessDebuggingOff, launcher().launch())
             assertEquals(0, adb.connects)
@@ -103,6 +105,19 @@ class HelperLauncherTest {
                 assertEquals("$reason", LaunchOutcome.NoConnection(failed.search), launcher().launch())
             }
             assertEquals(0, helper.nonces)
+        }
+
+    @Test
+    fun `a search that loaded a new identity is NotPaired, whatever adbd answered`() =
+        runTest {
+            for (reason in listOf(ConnectFailure.UNAUTHORIZED, ConnectFailure.UNREACHABLE)) {
+                adb.notPaired = null
+                adb.connection = {
+                    adb.notPaired = NotPairedReason.IDENTITY_REPLACED
+                    FakeAdb.failed(reason)
+                }
+                assertEquals("$reason", LaunchOutcome.NotPaired(NotPairedReason.IDENTITY_REPLACED), launcher().launch())
+            }
         }
 
     @Test

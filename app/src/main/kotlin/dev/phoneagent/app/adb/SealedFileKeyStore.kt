@@ -21,11 +21,16 @@ import java.io.IOException
 import java.security.GeneralSecurityException
 import java.security.KeyStore
 import java.security.ProviderException
-import java.security.UnrecoverableKeyException
+import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+
+/** The key that sealed a stored adb key is gone (a keystore reset): nothing it sealed opens again. */
+internal class WrapKeyLost(
+    message: String,
+) : GeneralSecurityException(message)
 
 /**
  * Seals the stored adb key and opens it again; both throw [GeneralSecurityException] when they
@@ -37,7 +42,11 @@ internal interface KeyWrap {
     @Throws(GeneralSecurityException::class, IOException::class)
     fun seal(plain: ByteArray): ByteArray
 
-    /** What [seal] was given; [GeneralSecurityException] when [sealed] is not what it returned or its key is gone. */
+    /**
+     * What [seal] was given. Fails for good with [WrapKeyLost] when the sealing key is gone, and
+     * with [AEADBadTagException] when [sealed] is not what [seal] returned (damaged, or sealed
+     * under another key); any other failure may pass.
+     */
     @Throws(GeneralSecurityException::class, IOException::class)
     fun open(sealed: ByteArray): ByteArray
 }
@@ -46,12 +55,16 @@ internal interface KeyWrap {
  * The adb private key (PKCS#8), sealed by [wrap], in [file]: app-private storage that is never
  * backed up or transferred (`noBackupFilesDir`). The file is a format byte followed by what
  * [KeyWrap.seal] returned, written through [AtomicFile], so a crash leaves the old key or the new
- * one. A file that cannot be opened (the keystore key was lost in a reset, or the file is damaged)
- * reads as unusable bytes: `AdbIdentity.loadOrCreate` then replaces the identity and reports
- * `REPLACED`, and the device has to be paired again. A key that cannot be sealed fails [write] with
- * [IOException] and leaves the file as it was. Checked and Keystore-internal failures of [wrap] are
- * treated alike. A key that did not reach the file fails [write] with [IOException] too: the file is
- * read back, since `AtomicFile.finishWrite` only logs a failed sync, close or rename.
+ * one.
+ *
+ * Only a file that can never be opened reads as unusable bytes: the sealing key is gone
+ * ([WrapKeyLost]), the sealed key does not authenticate (`AEADBadTagException`), or the file is
+ * empty or has another format byte. `AdbIdentity.loadOrCreate` then replaces the identity and
+ * reports `REPLACED`, and the device has to be paired again. Any other failure to open, checked or
+ * Keystore-internal, fails [read] with [IOException] and leaves the file, so a later read may open
+ * it. A key that cannot be sealed fails [write] with [IOException] and leaves the file as it was. A
+ * key that did not reach the file fails [write] with [IOException] too: the file is read back,
+ * since `AtomicFile.finishWrite` only logs a failed sync, close or rename.
  */
 internal class SealedFileKeyStore(
     private val file: File,
@@ -101,21 +114,31 @@ internal class SealedFileKeyStore(
         }
 
     private fun unseal(stored: ByteArray): ByteArray =
-        if (stored.isEmpty() || stored[0] != FORMAT) UNUSABLE else open(stored.copyOfRange(1, stored.size))
+        if (stored.isEmpty() || stored[0] != FORMAT) {
+            unusable("the stored adb key file is empty or of an unknown format")
+        } else {
+            open(stored.copyOfRange(1, stored.size))
+        }
 
     private fun open(sealed: ByteArray): ByteArray =
         try {
             wrap.open(sealed)
-        } catch (unopenable: GeneralSecurityException) {
-            // The key cannot be recovered; replacing it is the only way on.
-            unusable(unopenable)
+        } catch (ignoredKeyLost: WrapKeyLost) {
+            // Nothing opens the key any more; replacing it is the only way on.
+            unusable("the key that sealed the stored adb key is gone")
+        } catch (ignoredBadTag: AEADBadTagException) {
+            // Damaged, or sealed under another key: no later try opens it either.
+            unusable("the stored adb key does not authenticate")
+        } catch (failed: GeneralSecurityException) {
+            throw IOException("cannot open the adb key now", failed)
         } catch (keystoreInternal: ProviderException) {
             // The Keystore's own failures arrive unchecked; the same as a checked refusal.
-            unusable(keystoreInternal)
+            throw IOException("cannot open the adb key now", keystoreInternal)
         }
 
-    private fun unusable(cause: Exception): ByteArray {
-        Log.w(TAG, "the stored adb key cannot be opened; a new identity replaces it", cause)
+    /** Logs which way the stored key is unusable, nothing of the file, and reads as [UNUSABLE]. */
+    private fun unusable(why: String): ByteArray {
+        Log.w(TAG, "$why; a new identity replaces it")
         return UNUSABLE
     }
 
@@ -154,8 +177,13 @@ internal class KeystoreKeyWrap(
     }
 
     override fun open(sealed: ByteArray): ByteArray {
-        val key = existingKey() ?: throw UnrecoverableKeyException("the keystore holds no key '$alias'")
-        if (sealed.size <= IV_BYTES) throw UnrecoverableKeyException("a sealed key of ${sealed.size} bytes")
+        val key = existingKey() ?: throw WrapKeyLost("the keystore holds no key '$alias'")
+        // Shorter than an IV and a tag: not what seal returned.
+        if (sealed.size <
+            IV_BYTES + TAG_BITS / Byte.SIZE_BITS
+        ) {
+            throw AEADBadTagException("a sealed key of ${sealed.size} bytes")
+        }
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG_BITS, sealed, 0, IV_BYTES))
         return cipher.doFinal(sealed, IV_BYTES, sealed.size - IV_BYTES)

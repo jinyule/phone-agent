@@ -87,7 +87,7 @@ internal class FakeSession(
 internal class FakeAdb(
     var connection: () -> HelperLauncher.Connection = { FakeSession() },
 ) : HelperLauncher.Adb {
-    override var isPaired = true
+    override var notPaired: NotPairedReason? = null
     var wireless: Boolean? = true
     var connects = 0
 

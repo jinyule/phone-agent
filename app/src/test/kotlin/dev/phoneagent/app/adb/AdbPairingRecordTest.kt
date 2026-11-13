@@ -57,6 +57,43 @@ class AdbPairingRecordTest {
     }
 
     @Test
+    fun `without a pairing ever the reason is never paired, also after a new identity`() {
+        assertEquals(NotPairedReason.NEVER_PAIRED, record.notPaired)
+        record.identityLoaded(IdentityLoad.Origin.CREATED)
+        record.identityLoaded(IdentityLoad.Origin.REPLACED)
+        assertEquals(NotPairedReason.NEVER_PAIRED, AdbPairingRecord(prefs).notPaired)
+        record.pairingEnded(PairingResult.Paired(PairedDevice("adb-guid")))
+        assertNull(record.notPaired)
+    }
+
+    @Test
+    fun `a replaced identity is the reason until a pairing succeeds`() {
+        record.pairingEnded(PairingResult.Paired(PairedDevice("adb-guid")))
+        record.identityLoaded(IdentityLoad.Origin.REPLACED)
+        assertEquals(NotPairedReason.IDENTITY_REPLACED, AdbPairingRecord(prefs).notPaired)
+        record.identityLoaded(IdentityLoad.Origin.STORED)
+        record.identityLoaded(IdentityLoad.Origin.CREATED)
+        assertEquals(NotPairedReason.IDENTITY_REPLACED, record.notPaired)
+        record.pairingEnded(PairingResult.Paired(PairedDevice("adb-guid")))
+        assertNull(record.notPaired)
+        record.identityLoaded(IdentityLoad.Origin.STORED)
+        assertNull(record.notPaired)
+    }
+
+    @Test
+    fun `a key created while paired counts as a replaced identity`() {
+        record.pairingEnded(PairingResult.Paired(PairedDevice("adb-guid")))
+        record.identityLoaded(IdentityLoad.Origin.CREATED)
+        assertEquals(NotPairedReason.IDENTITY_REPLACED, AdbPairingRecord(prefs).notPaired)
+    }
+
+    @Test
+    fun `a stored reason this version does not know reads as never paired`() {
+        prefs.edit().putString("not_paired", "SOMETHING_LATER").commit()
+        assertEquals(NotPairedReason.NEVER_PAIRED, record.notPaired)
+    }
+
+    @Test
     fun `a search that ended on UNAUTHORIZED keeps the pairing and records the refusal`() {
         record.pairingEnded(PairingResult.Paired(PairedDevice("adb-guid")))
         record.searchEnded(failed(ConnectFailure.UNAUTHORIZED))
@@ -98,7 +135,7 @@ class AdbPairingRecordTest {
             var connects = 0
             val adb =
                 object : HelperLauncher.Adb {
-                    override val isPaired get() = record.isPaired
+                    override val notPaired get() = record.notPaired
 
                     override fun wirelessDebuggingOn() = true
 

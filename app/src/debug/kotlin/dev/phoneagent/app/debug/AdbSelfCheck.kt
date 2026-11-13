@@ -104,7 +104,7 @@ internal object AdbSelfCheck {
         val adb = BuiltinAdb.of(context)
         val steps = SelfCheckSteps()
         steps.note(
-            "SDK ${Build.VERSION.SDK_INT}, paired=${adb.isPaired}, lastRefused=${adb.lastRefused}, " +
+            "SDK ${Build.VERSION.SDK_INT}, notPaired=${adb.notPaired}, lastRefused=${adb.lastRefused}, " +
                 "wirelessDebugging=${adb.wirelessDebuggingOn()}",
         )
         runBlocking { Scenarios(context, adb, steps).run(request) }

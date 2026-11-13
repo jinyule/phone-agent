@@ -29,8 +29,10 @@ internal sealed interface LaunchOutcome {
     /** A helper was already connected when the launch was about to start: nothing was done. */
     data object AlreadyConnected : LaunchOutcome
 
-    /** No pairing on record (never paired, or a new identity): the user must pair. */
-    data object NotPaired : LaunchOutcome
+    /** No pairing on record, for [reason]: the user must pair. */
+    data class NotPaired(
+        val reason: NotPairedReason,
+    ) : LaunchOutcome
 
     /** Wireless debugging is off; nothing was tried. */
     data object WirelessDebuggingOff : LaunchOutcome
@@ -86,7 +88,8 @@ internal class HelperLauncher(
 ) {
     /** What the launcher needs of [BuiltinAdb]. */
     interface Adb {
-        val isPaired: Boolean
+        /** Why no pairing is on record, or `null` when one is. */
+        val notPaired: NotPairedReason?
 
         fun wirelessDebuggingOn(): Boolean?
 
@@ -133,10 +136,11 @@ internal class HelperLauncher(
     }
 
     suspend fun launch(): LaunchOutcome {
+        val notPaired = adb.notPaired
         val refusal =
             when {
                 helper.state is HelperState.Connected -> LaunchOutcome.AlreadyConnected
-                !adb.isPaired -> LaunchOutcome.NotPaired
+                notPaired != null -> LaunchOutcome.NotPaired(notPaired)
                 adb.wirelessDebuggingOn() == false -> LaunchOutcome.WirelessDebuggingOff
                 else -> null
             }
@@ -147,12 +151,15 @@ internal class HelperLauncher(
         }
     }
 
-    private fun failed(search: PortSearchResult.Failed): LaunchOutcome =
-        if (search.lastFailure?.reason == ConnectFailure.UNAUTHORIZED) {
-            LaunchOutcome.Unauthorized
-        } else {
-            LaunchOutcome.NoConnection(search)
+    /** A failed search; NotPaired when connecting loaded a new identity, which no device knows. */
+    private fun failed(search: PortSearchResult.Failed): LaunchOutcome {
+        val notPaired = adb.notPaired
+        return when {
+            notPaired != null -> LaunchOutcome.NotPaired(notPaired)
+            search.lastFailure?.reason == ConnectFailure.UNAUTHORIZED -> LaunchOutcome.Unauthorized
+            else -> LaunchOutcome.NoConnection(search)
         }
+    }
 
     private suspend fun run(session: Connection.Open): LaunchOutcome {
         val handoff = CompletableDeferred<Int>()

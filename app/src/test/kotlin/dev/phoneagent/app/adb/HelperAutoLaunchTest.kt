@@ -244,7 +244,7 @@ class HelperAutoLaunchTest {
 
     @Test
     fun `pairing again after NotPaired launches once more, the interval after the first`() =
-        runTest { pairingAgainAfter(LaunchOutcome.NotPaired) }
+        runTest { pairingAgainAfter(LaunchOutcome.NotPaired(NotPairedReason.IDENTITY_REPLACED)) }
 
     @Test
     fun `pairing again after Unauthorized launches once more, the interval after the first`() =

@@ -25,12 +25,17 @@
 1. **只在 Android 12（API 31）及以上提供内置 ADB。** 配对要的 TLS 1.3 exporter 在 Android 上只有 `android.net.ssl.SSLSockets.exportKeyingMaterial`，它从 API 31 才有（`SSLSockets` 类本身从 29 就有）。Android 11 走兜底：Shizuku 或 USB 脚本。`BuiltinAdb` 标了 `@RequiresApi(S)`，调用方先判断 `SDK_INT`。
 2. **身份私钥封存在 App 私有存储里。** PKCS#8 私钥用 AndroidKeyStore 里的 AES-256-GCM 密钥加密（别名 `phoneagent_adb_key_wrap`），写进 `noBackupFilesDir/adb/adbkey.sealed`：
    - 文件格式是一个格式字节加上 IV 和密文，经 AtomicFile 写入；
-   - 打不开（封存密钥丢了、文件坏了、格式未知）就当作不可用，`AdbIdentity.loadOrCreate` 会换新身份并报 `REPLACED`。
+   - 只有确定打不开的才当作不可用，`AdbIdentity.loadOrCreate` 会换新身份并报 `REPLACED`。确定打不开的有三种，各打一行 Log.w，只说是哪一种，不带文件内容和异常：
+     - 封存密钥没了（Keystore 里找不到这个别名，`WrapKeyLost`）；
+     - 密文认证不过（`AEADBadTagException`：文件坏了，或者是别的密钥封存的；比 IV 加 tag 还短的也算）；
+     - 空文件，或者格式字节不认识。
+   - 其他打开失败（检查型的 `GeneralSecurityException`、Keystore 内部的 `ProviderException`）可能是一时的：`read` 抛 IOException，文件不动，下一次请求再试，和 core 的 `AdbKeyStore.read` 约定一致。一次偶发的 Keystore 失败不能永久换掉身份。
    - 封存失败时 `write` 抛 IOException，旧文件不动；自动拉起记一笔日志，等下一次请求再试。
    - 没有写进文件也抛 IOException：`AtomicFile.finishWrite` 对同步、关闭、改名的失败只打日志，所以写完要读回来比对。否则下一个进程读到的是旧文件或者没有文件，会悄悄换掉身份。
-   - Keystore 自己内部的失败是非检查型的 `ProviderException`，和检查型的 `GeneralSecurityException` 一样处理（凭据存储的 `KeystoreCipher` 也是这样）。
+   - Keystore 自己内部的失败是非检查型的 `ProviderException`，封存和打开时都和检查型的 `GeneralSecurityException` 一样处理（凭据存储的 `KeystoreCipher` 也是这样）。
 3. **配对记录、"上次被拒"和端口缓存放在 SharedPreferences 里，用 `apply` 写**（`AdbPairingRecord`）。本机任何进程都能冒充 adbd（`docs/adr/2026-11-03-adb-trust-model.md`），所以它能给出的结果都不当成定论：
    - 新建或替换了身份，清掉配对记录。清掉以后不再自动拉起，直到用户重新配对；
+   - 没有配对记录时，原因也记下来（`notPaired`），拉起报 `NotPaired(reason)`，给界面解释用：从来没配对过是 `NEVER_PAIRED`；已经配对的身份被换掉（`REPLACED`，或者配对时文件没了、新建了身份）是 `IDENTITY_REPLACED`，一直保留到配对成功。身份是在连接时才加载的，所以那一次搜索失败也报 `NotPaired`，不报 `Unauthorized`；
    - 搜索以 UNAUTHORIZED 结束（`AdbConnectPort` 已经对同一个端点试过两次）：配对记录保留，只记下"上次被拒"（`lastRefused`），拉起报 `Unauthorized`，下一次请求照样去连（受 `minLaunchIntervalMs` 约束）。配对成功、或者以后有一次拉起连上了，"上次被拒"就清掉；
    - 端口缓存只在交接成功（`Launched`）以后写，`AdbConnectPort` 连上时自己的写入被丢掉（`portCache`）。`Unauthorized`、`NoHandoff`、`CommandFailed` 都清掉缓存，下一次搜索回到 mDNS 和扫描；`AlreadyConnected`、`NoNonce` 不动它。
 

@@ -14,6 +14,7 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.shadows.ShadowLog
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -31,9 +32,12 @@ class SealedFileKeyStoreTest {
     @get:Rule
     val folder = TemporaryFolder()
 
-    /** AES-GCM under a key in memory; replacing [key] is what a keystore reset does. */
+    /**
+     * AES-GCM under a key in memory. A `null` [key] is a keystore reset: [open] fails with
+     * [WrapKeyLost], and the next [seal] makes a new key, as [KeystoreKeyWrap] does.
+     */
     private class SoftwareWrap : KeyWrap {
-        var key: SecretKey = newKey()
+        var key: SecretKey? = newKey()
 
         /** Thrown by [seal] instead of sealing. */
         var sealFailure: Exception? = null
@@ -45,14 +49,18 @@ class SealedFileKeyStoreTest {
             sealFailure?.let { throw it }
             val iv = ByteArray(IV_BYTES).also(SecureRandom()::nextBytes)
             val cipher = Cipher.getInstance(GCM)
-            cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(TAG_BITS, iv))
+            cipher.init(Cipher.ENCRYPT_MODE, key ?: newKey().also { key = it }, GCMParameterSpec(TAG_BITS, iv))
             return iv + cipher.doFinal(plain)
         }
 
         override fun open(sealed: ByteArray): ByteArray {
             openFailure?.let { throw it }
             val cipher = Cipher.getInstance(GCM)
-            cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG_BITS, sealed, 0, IV_BYTES))
+            cipher.init(
+                Cipher.DECRYPT_MODE,
+                key ?: throw WrapKeyLost("no key"),
+                GCMParameterSpec(TAG_BITS, sealed, 0, IV_BYTES),
+            )
             return cipher.doFinal(sealed, IV_BYTES, sealed.size - IV_BYTES)
         }
 
@@ -83,35 +91,73 @@ class SealedFileKeyStoreTest {
         assertFalse(disk.asList().windowed(16).contains(pkcs8.copyOfRange(100, 116).asList()))
     }
 
-    @Test
-    fun `a lost keystore key, a damaged file or an unknown format reads as unusable and the identity is replaced`() {
-        val damages: List<(File) -> Unit> =
-            listOf(
-                { wrap.key = SoftwareWrap.newKey() },
-                { it.writeBytes(it.readBytes().also { bytes -> bytes[bytes.size - 1] = (bytes.last() + 1).toByte() }) },
-                { it.writeBytes(byteArrayOf(2) + it.readBytes().copyOfRange(1, it.length().toInt())) },
-                { it.writeBytes(ByteArray(0)) },
-            )
-        for ((index, damage) in damages.withIndex()) {
-            assertTrue(!file.exists() || file.delete())
-            assertEquals("case $index", IdentityLoad.Origin.CREATED, load("first"))
-            damage(file)
-            assertArrayEquals("case $index", ByteArray(0), store.read())
-            assertEquals("case $index", IdentityLoad.Origin.REPLACED, load("again"))
-            assertEquals("case $index", IdentityLoad.Origin.STORED, load("again"))
-        }
+    /**
+     * After [damage] to a stored identity, the read is unusable, logged as [logged] alone (no
+     * failure, nothing of the file), and the identity is replaced once, then stored again.
+     */
+    private fun replacedAfter(
+        logged: String,
+        damage: (File) -> Unit,
+    ) {
+        assertEquals(IdentityLoad.Origin.CREATED, load("first"))
+        damage(file)
+        val since = ShadowLog.getLogs().size
+        assertArrayEquals(ByteArray(0), store.read())
+        val lines = ShadowLog.getLogs().drop(since).filter { it.tag == "PhoneAgentBuiltinAdb" }
+        assertEquals(listOf("$logged; a new identity replaces it"), lines.map { it.msg })
+        assertNull(lines.single().throwable)
+        assertEquals(IdentityLoad.Origin.REPLACED, load("again"))
+        assertEquals(IdentityLoad.Origin.STORED, load("again"))
     }
 
     @Test
-    fun `a key that cannot be opened, checked or Keystore-internal, reads as unusable`() {
+    fun `a lost sealing key reads as unusable and the identity is replaced`() =
+        replacedAfter("the key that sealed the stored adb key is gone") { wrap.key = null }
+
+    @Test
+    fun `a key sealed under another key reads as unusable and the identity is replaced`() =
+        replacedAfter("the stored adb key does not authenticate") { wrap.key = SoftwareWrap.newKey() }
+
+    @Test
+    fun `a damaged file reads as unusable and the identity is replaced`() =
+        replacedAfter("the stored adb key does not authenticate") {
+            it.writeBytes(it.readBytes().also { bytes -> bytes[bytes.size - 1] = (bytes.last() + 1).toByte() })
+        }
+
+    @Test
+    fun `an unknown format reads as unusable and the identity is replaced`() =
+        replacedAfter("the stored adb key file is empty or of an unknown format") {
+            it.writeBytes(byteArrayOf(2) + it.readBytes().copyOfRange(1, it.length().toInt()))
+        }
+
+    @Test
+    fun `an empty file reads as unusable and the identity is replaced`() =
+        replacedAfter("the stored adb key file is empty or of an unknown format") { it.writeBytes(ByteArray(0)) }
+
+    /**
+     * [failure] from opening fails the read and the identity load as IOException, leaves the file,
+     * and the next read opens the same key.
+     */
+    private fun failsForNow(failure: Exception) {
         store.write(pkcs8)
-        val read =
-            keystoreFailures().map { failure ->
-                wrap.openFailure = failure
-                runCatching { store.read() }.fold({ "${it?.size} bytes" }, { it.javaClass.simpleName })
-            }
-        assertEquals(listOf("0 bytes", "0 bytes"), read)
+        val before = file.readBytes()
+        wrap.openFailure = failure
+        val read = runCatching { store.read() }.exceptionOrNull()
+        assertTrue("$read", read is IOException && read.cause === failure)
+        val loaded = runCatching { load("again") }.exceptionOrNull()
+        assertTrue("$loaded", loaded is IOException)
+        assertArrayEquals(before, file.readBytes())
+        wrap.openFailure = null
+        assertArrayEquals(pkcs8, store.read())
     }
+
+    @Test
+    fun `a Keystore-internal failure to open fails the read as IOException, and the key opens next time`() =
+        failsForNow(ProviderException("Keystore operation failed"))
+
+    @Test
+    fun `a checked failure to open fails the read as IOException, and the key opens next time`() =
+        failsForNow(GeneralSecurityException("keystore is locked"))
 
     @Test
     fun `a key that cannot be sealed, checked or Keystore-internal, is not written and fails as IOException`() {
