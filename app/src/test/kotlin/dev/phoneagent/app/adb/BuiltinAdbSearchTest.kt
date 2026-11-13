@@ -12,9 +12,11 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.net.InetAddress
 import java.net.ServerSocket
 
 /**
@@ -72,8 +74,34 @@ class BuiltinAdbSearchTest {
         assertNotNull(search.scan)
     }
 
+    @Test
+    fun `a cached port that takes the connection and never answers is forgotten after one search`() {
+        // Codex r2: something posing as adbd holds the cached port and never speaks.
+        ServerSocket(0, BACKLOG, InetAddress.getByName(PortSearchConfig.LOOPBACK)).use { silent ->
+            record.connectionEnded(silent.localPort, LaunchOutcome.Launched(4242, PortSource.MDNS))
+            assertEquals(loopback(silent.localPort), search().tried.first())
+            assertNull(record.portCache.load())
+            assertEquals(listOf(loopback(announced)), search().tried)
+        }
+    }
+
+    @Test
+    fun `after a search that connected elsewhere the next one starts at mDNS, whatever the launch did`() {
+        for (outcome in listOf(LaunchOutcome.AlreadyConnected, LaunchOutcome.NoNonce("the boot count is unknown"))) {
+            record.connectionEnded(cached, LaunchOutcome.Launched(4242, PortSource.MDNS))
+            // As BuiltinAdb.search after the cached port failed and mDNS connected.
+            record.connectedThrough(PortSource.MDNS)
+            record.connectionEnded(announced, outcome)
+            assertNull("$outcome", record.portCache.load())
+            assertEquals("$outcome", listOf(loopback(announced)), search().tried)
+        }
+    }
+
     private companion object {
         const val SEARCH_TIMEOUT_MS = 20_000L
+
+        /** Connections the silent port takes without anyone accepting them. */
+        const val BACKLOG = 5
         const val HANDOFF_MS = 1_000L
 
         /** Three ports that were free a moment ago; connections to them are refused. */

@@ -1,6 +1,7 @@
 package dev.phoneagent.app.adb
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.test.core.app.ApplicationProvider
 import dev.phoneagent.core.adb.AdbCommand
 import dev.phoneagent.core.adb.AdbEndpoint
@@ -123,7 +124,49 @@ class AdbPairingRecordTest {
     }
 
     @Test
-    fun `other failed searches record no refusal and keep the cached port`() {
+    fun `a failed search that tried the cached port forgets it, whatever failed there`() {
+        for (reason in ConnectFailure.entries) {
+            record.connectionEnded(PORT, launched)
+            val tried = listOf(AdbEndpoint("127.0.0.1", PORT), AdbEndpoint("127.0.0.1", OTHER_PORT))
+            record.searchEnded(PortSearchResult.Failed(ConnectResult.Failed(reason, "x"), tried, null))
+            assertNull("$reason", AdbPairingRecord(prefs).portCache.load())
+            assertEquals("$reason", reason == ConnectFailure.UNAUTHORIZED, record.lastRefused)
+            record.connectionEnded(PORT, LaunchOutcome.AlreadyConnected)
+        }
+    }
+
+    @Test
+    fun `a search that connected elsewhere forgets the cached port`() {
+        for (source in listOf(PortSource.MDNS, PortSource.SCAN)) {
+            record.connectionEnded(PORT, launched)
+            record.connectedThrough(source)
+            assertNull("$source", AdbPairingRecord(prefs).portCache.load())
+        }
+    }
+
+    @Test
+    fun `a search that connected through the cached port keeps it`() {
+        record.connectionEnded(PORT, launched)
+        record.connectedThrough(PortSource.CACHE)
+        record.connectionEnded(PORT, LaunchOutcome.AlreadyConnected)
+        assertEquals(PORT, AdbPairingRecord(prefs).portCache.load())
+    }
+
+    @Test
+    fun `without a cached port a search that connected changes nothing`() {
+        record.searchEnded(failed(ConnectFailure.UNAUTHORIZED))
+        val changed = mutableListOf<String?>()
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key -> changed += key }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        for (source in PortSource.entries) record.connectedThrough(source)
+        prefs.unregisterOnSharedPreferenceChangeListener(listener)
+        assertEquals(emptyList<String?>(), changed)
+        assertNull(record.portCache.load())
+        assertTrue(record.lastRefused)
+    }
+
+    @Test
+    fun `other failed searches record no refusal and keep a cached port they did not try`() {
         for (reason in listOf(null) + ConnectFailure.entries - ConnectFailure.UNAUTHORIZED) {
             record.connectionEnded(PORT, launched)
             record.searchEnded(failed(reason))

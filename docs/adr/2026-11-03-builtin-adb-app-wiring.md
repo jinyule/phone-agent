@@ -38,7 +38,7 @@
    - 新建或替换了身份，清掉配对记录。清掉以后不再自动拉起，直到用户重新配对。配对成功时连同身份指纹（`AdbIdentity.fingerprint`，公钥的 SHA-256）一起记下，加载身份时比对：不是配对时那个身份，也按替换处理。身份文件和配对记录是两处存储，写完新身份、还没清配对记录时进程死了，下一个进程会把新身份读成"已存储"，靠指纹才认得出来；
    - 没有配对记录时，原因也记下来（`notPaired`），拉起报 `NotPaired(reason)`，给界面解释用：从来没配对过是 `NEVER_PAIRED`；已经配对的身份被换掉（`REPLACED`，或者配对时文件没了、新建了身份）是 `IDENTITY_REPLACED`，一直保留到配对成功。身份是在连接时才加载的，所以那一次搜索失败也报 `NotPaired`，不报 `Unauthorized`；
    - 搜索以 UNAUTHORIZED 结束（`AdbConnectPort` 已经对同一个端点试过两次）：配对记录保留，只记下"上次被拒"（`lastRefused`），拉起报 `Unauthorized`，下一次请求照样去连（受 `minLaunchIntervalMs` 约束）。配对成功、或者以后有一次拉起连上了，"上次被拒"就清掉；
-   - 端口缓存只在交接成功（`Launched`）以后写，`AdbConnectPort` 连上时自己的写入被丢掉（`portCache`）。`Unauthorized`、`NoHandoff`、`CommandFailed` 都清掉缓存，下一次搜索回到 mDNS 和扫描；`AlreadyConnected`、`NoNonce` 不动它。
+   - 端口缓存只在交接成功（`Launched`）以后写，`AdbConnectPort` 连上时自己的写入被丢掉（`portCache`）。搜索试过缓存端口而没有在它上面连上，就清掉缓存（失败在哪都算：被拒、超时、TLS、连不上；最后从别处连上了也算）；在缓存端口上连上以后，`NoHandoff`、`CommandFailed` 也清掉它，`AlreadyConnected`、`NoNonce` 不动它。清掉以后，下一次搜索回到 mDNS 和扫描。
 
    重新配对成功以后，本进程立即请求一次拉起（`startIfPaired` 第二次调用时转给 `requestLaunch`，仍受 `minLaunchIntervalMs` 约束），不用等进程重启。写丢了的代价只有这些：下次搜索多花点时间，多要一次配对，或者"上次被拒"晚一次才准。
 4. **自动拉起是异步的，不改 WP12。** `HelperAutoLaunch` 挂在 HelperClient 上，作为一个普通监听者，`onLaunchNeeded` 保持原样：

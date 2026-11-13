@@ -8,6 +8,7 @@ import dev.phoneagent.core.adb.IdentityLoad
 import dev.phoneagent.core.adb.PairingResult
 import dev.phoneagent.core.adb.PortCache
 import dev.phoneagent.core.adb.PortSearchResult
+import dev.phoneagent.core.adb.PortSource
 
 /** Why no pairing is on record ([AdbPairingRecord.notPaired]). */
 internal enum class NotPairedReason {
@@ -105,16 +106,39 @@ internal class AdbPairingRecord(
     }
 
     /**
-     * A search that ended on UNAUTHORIZED (already tried twice by `AdbConnectPort`): adbd no longer
-     * knows our key, or something posing as adbd answered first. The pairing is kept and the next
-     * request tries again; the refusal is recorded, and the cached port is forgotten, so the next
-     * search asks mDNS and the scan.
+     * A search ended with [result]. A search that tried the cached port and did not connect on it
+     * forgets it, whatever the failure there (refused, no answer, TLS, unreachable): something posing
+     * as adbd may hold it, and each later search would wait on it first. The next search then asks
+     * mDNS and the scan; a port connected to is cached only by a handoff ([connectionEnded]).
      */
-    fun searchEnded(result: PortSearchResult) {
-        if ((result as? PortSearchResult.Failed)?.lastFailure?.reason == ConnectFailure.UNAUTHORIZED) {
-            Log.w(TAG, "adbd refused our key twice; the pairing is kept")
+    fun searchEnded(result: PortSearchResult) =
+        when (result) {
+            is PortSearchResult.Connected -> connectedThrough(result.source)
+            is PortSearchResult.Failed -> failed(result)
+        }
+
+    /**
+     * A search connected through [source]. The cached port, when there is one, is always tried
+     * first (`AdbConnectPort`): unless [source] is the cache, it did not take us, and is forgotten.
+     */
+    fun connectedThrough(source: PortSource) {
+        if (source != PortSource.CACHE && portCache.load() != null) prefs.edit { remove(KEY_PORT) }
+    }
+
+    /**
+     * A failed search: one that tried the cached port forgets it. One that ended on UNAUTHORIZED
+     * (already tried twice by `AdbConnectPort`): adbd no longer knows our key, or something posing
+     * as adbd answered first. The pairing is kept and the next request tries again; the refusal is
+     * recorded, and the cached port is forgotten too.
+     */
+    private fun failed(failed: PortSearchResult.Failed) {
+        val cached = portCache.load()
+        val triedCached = failed.tried.any { it.port == cached }
+        val refused = failed.lastFailure?.reason == ConnectFailure.UNAUTHORIZED
+        if (refused) Log.w(TAG, "adbd refused our key twice; the pairing is kept")
+        if (triedCached || refused) {
             prefs.edit {
-                putBoolean(KEY_REFUSED, true)
+                if (refused) putBoolean(KEY_REFUSED, true)
                 remove(KEY_PORT)
             }
         }
