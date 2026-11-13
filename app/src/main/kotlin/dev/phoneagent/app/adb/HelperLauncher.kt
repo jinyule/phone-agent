@@ -29,9 +29,6 @@ internal sealed interface LaunchOutcome {
     /** A helper was already connected when the launch was about to start: nothing was done. */
     data object AlreadyConnected : LaunchOutcome
 
-    /** This device is below Android 12. */
-    data object Unsupported : LaunchOutcome
-
     /** No pairing on record (never paired, a new identity, or adbd refused the key): the user must pair. */
     data object NotPaired : LaunchOutcome
 
