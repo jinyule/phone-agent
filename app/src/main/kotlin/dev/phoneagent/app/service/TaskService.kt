@@ -18,11 +18,10 @@ import androidx.core.content.ContextCompat
 import dev.phoneagent.app.MainActivity
 import dev.phoneagent.app.R
 import dev.phoneagent.app.task.TaskController
+import dev.phoneagent.app.task.TaskStatus
 import dev.phoneagent.app.task.TaskView
 import dev.phoneagent.app.task.Tasks
 import dev.phoneagent.core.agent.LoopConfig
-import dev.phoneagent.core.agent.Phase
-import dev.phoneagent.core.agent.WaitReason
 import dev.phoneagent.core.session.StopCause
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -77,7 +76,7 @@ class TaskService : Service() {
         if (intent?.action == ACTION_STOP) tasks.stop()
         // Every start through startForegroundService must reach startForeground, even a stop.
         val view = tasks.view.value
-        val text = textOf(view.chat?.phase)
+        val text = textOf(view.status)
         ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(text), FOREGROUND_TYPE)
         posted = text
         if (watching == null) watching = scope.launch { tasks.view.collect(::shown) }
@@ -92,7 +91,7 @@ class TaskService : Service() {
             return
         }
         wakeLock.acquire(WAKE_MS)
-        val text = textOf(view.chat?.phase)
+        val text = textOf(view.status)
         if (text == posted) return
         val manager = NotificationManagerCompat.from(this)
         if (manager.areNotificationsEnabled()) {
@@ -172,13 +171,16 @@ class TaskService : Service() {
             ContextCompat.startForegroundService(context, Intent(context, TaskService::class.java))
         }
 
-        /** What the notification says about a task in [phase]. */
-        internal fun textOf(phase: Phase?): Int =
-            when ((phase as? Phase.Waiting)?.reason) {
-                WaitReason.USER -> R.string.task_waiting_user
-                WaitReason.HANDOFF -> R.string.task_waiting_handoff
-                WaitReason.LOCK -> R.string.task_waiting_lock
-                null -> R.string.task_running
+        /**
+         * What the notification says while the task is [status]: what it waits for, or that it
+         * works (also while it starts, and when it has no work left before the service stops).
+         */
+        internal fun textOf(status: TaskStatus): Int =
+            when (status) {
+                TaskStatus.WAITING_ANSWER -> R.string.task_waiting_user
+                TaskStatus.WAITING_HANDOFF -> R.string.task_waiting_handoff
+                TaskStatus.WAITING_UNLOCK -> R.string.task_waiting_lock
+                TaskStatus.IDLE, TaskStatus.STARTING, TaskStatus.WORKING -> R.string.task_running
             }
     }
 }

@@ -6,6 +6,7 @@ import dev.phoneagent.core.agent.Phase
 import dev.phoneagent.core.agent.TaskRuntime
 import dev.phoneagent.core.agent.UserInput
 import dev.phoneagent.core.agent.UserReply
+import dev.phoneagent.core.agent.WaitReason
 import dev.phoneagent.core.ids.PromptId
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.session.SessionLog
@@ -103,7 +104,47 @@ internal data class TaskView(
      */
     val stoppable: Boolean
         get() = starting || queued > 0 || chat?.stoppable == true
+
+    /** What the task is doing; the chat's status row and the task's notification both say this. */
+    val status: TaskStatus
+        get() {
+            val waiting = (chat?.phase as? Phase.Waiting)?.reason
+            return when {
+                starting -> TaskStatus.STARTING
+                waiting != null -> waitingStatus(waiting)
+                busy -> TaskStatus.WORKING
+                else -> TaskStatus.IDLE
+            }
+        }
 }
+
+/** What a task is doing, as the user is told it. */
+internal enum class TaskStatus {
+    /** No work. */
+    IDLE,
+
+    /** A task or its next run is being opened. */
+    STARTING,
+
+    /** A command is on its way, or the run works. */
+    WORKING,
+
+    /** The run waits for the user's answer to a prompt. */
+    WAITING_ANSWER,
+
+    /** The run waits for the user to do a step on the phone. */
+    WAITING_HANDOFF,
+
+    /** The run waits for the screen to be unlocked. */
+    WAITING_UNLOCK,
+}
+
+private fun waitingStatus(reason: WaitReason): TaskStatus =
+    when (reason) {
+        WaitReason.USER -> TaskStatus.WAITING_ANSWER
+        WaitReason.HANDOFF -> TaskStatus.WAITING_HANDOFF
+        WaitReason.LOCK -> TaskStatus.WAITING_UNLOCK
+    }
 
 /**
  * The app's task (one at a time, M1): starts it with the first command, gives it the next ones,

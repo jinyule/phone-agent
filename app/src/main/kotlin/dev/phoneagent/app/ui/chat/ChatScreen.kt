@@ -243,11 +243,8 @@ private fun Status(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        when {
-            view.starting -> Text(stringResource(R.string.chat_starting), modifier = Modifier.weight(1f))
-            view.busy -> Text(stringResource(R.string.chat_working), modifier = Modifier.weight(1f))
-            else -> Text("", modifier = Modifier.weight(1f))
-        }
+        val said = taskStatusText(view.status)
+        Text(if (said == null) "" else stringResource(said), modifier = Modifier.weight(1f))
         if (view.stoppable) {
             OutlinedButton(onClick = actions::stop, modifier = Modifier.testTag(ChatTags.STOP)) {
                 Text(stringResource(R.string.chat_stop))

@@ -3,6 +3,7 @@ package dev.phoneagent.app.ui.chat
 import androidx.annotation.StringRes
 import dev.phoneagent.app.R
 import dev.phoneagent.app.task.TaskProblem
+import dev.phoneagent.app.task.TaskStatus
 import dev.phoneagent.core.ports.ConfirmReason
 import dev.phoneagent.core.ports.HandoffKind
 import dev.phoneagent.core.ports.Money
@@ -51,6 +52,21 @@ internal fun problemText(problem: TaskProblem): Int =
         TaskProblem.KEY_MISSING -> R.string.task_problem_key_missing
         TaskProblem.STORAGE -> R.string.task_problem_storage
         TaskProblem.UNEXPECTED -> R.string.task_problem_unexpected
+    }
+
+/**
+ * What the chat's status row says while the task is [status], `null` for nothing. A wait is told
+ * in the words of the task's notification (`TaskService.textOf`).
+ */
+@StringRes
+internal fun taskStatusText(status: TaskStatus): Int? =
+    when (status) {
+        TaskStatus.IDLE -> null
+        TaskStatus.STARTING -> R.string.chat_starting
+        TaskStatus.WORKING -> R.string.chat_working
+        TaskStatus.WAITING_ANSWER -> R.string.task_waiting_user
+        TaskStatus.WAITING_HANDOFF -> R.string.task_waiting_handoff
+        TaskStatus.WAITING_UNLOCK -> R.string.task_waiting_lock
     }
 
 /** [money] as digits with two decimals (`Money.minor` is hundredths of the unit, whatever the currency). */

@@ -10,6 +10,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.phoneagent.app.R
 import dev.phoneagent.app.task.FakeTask
 import dev.phoneagent.app.task.TaskController
+import dev.phoneagent.app.task.TaskStatus
 import dev.phoneagent.app.task.Tasks
 import dev.phoneagent.app.task.command
 import dev.phoneagent.core.agent.Phase
@@ -175,13 +176,15 @@ class TaskServiceTest {
 
     @Test
     fun theNotificationSaysWhatTheTaskWaitsFor() {
-        assertEquals(R.string.task_running, TaskService.textOf(null))
-        assertEquals(R.string.task_running, TaskService.textOf(Phase.Running(1, 1)))
-        assertEquals(R.string.task_waiting_user, TaskService.textOf(Phase.Waiting(WaitReason.USER, PromptId("p"))))
-        assertEquals(
-            R.string.task_waiting_handoff,
-            TaskService.textOf(Phase.Waiting(WaitReason.HANDOFF, PromptId("p"))),
-        )
-        assertEquals(R.string.task_waiting_lock, TaskService.textOf(Phase.Waiting(WaitReason.LOCK, null)))
+        val expected =
+            mapOf(
+                TaskStatus.IDLE to R.string.task_running,
+                TaskStatus.STARTING to R.string.task_running,
+                TaskStatus.WORKING to R.string.task_running,
+                TaskStatus.WAITING_ANSWER to R.string.task_waiting_user,
+                TaskStatus.WAITING_HANDOFF to R.string.task_waiting_handoff,
+                TaskStatus.WAITING_UNLOCK to R.string.task_waiting_lock,
+            )
+        assertEquals(expected, TaskStatus.entries.associateWith { TaskService.textOf(it) })
     }
 }
