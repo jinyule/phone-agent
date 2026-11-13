@@ -580,6 +580,27 @@ class TaskControllerTest {
         }
 
     @Test
+    fun aCommandThatOnlyWaitsToBeHandedCanBeStoppedAndIsDropped() =
+        runTest {
+            val tasks = controller()
+            tasks.send("a")
+            runCurrent()
+            finishTurn("a")
+            runCurrent()
+            tasks.newTask()
+            runCurrent()
+
+            tasks.send("b") // waits behind the new task; the old run is done, nothing is opened yet
+            assertFalse(tasks.view.value.starting)
+            assertTrue("Stop is offered while b waits", tasks.view.value.stoppable)
+            tasks.stop()
+            task.run.phase.value = Phase.Stopped(StopCause.USER)
+            runCurrent()
+            assertEquals("no task started for the dropped command", 1, starts)
+            assertEquals(TaskView(), tasks.view.value)
+        }
+
+    @Test
     fun answersGoToTheCurrentRun() =
         runTest {
             val tasks = controller()
