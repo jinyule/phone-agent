@@ -90,7 +90,7 @@ class BuiltinAdbSearchTest {
         for (outcome in listOf(LaunchOutcome.AlreadyConnected, LaunchOutcome.NoNonce("the boot count is unknown"))) {
             record.connectionEnded(cached, LaunchOutcome.Launched(4242, PortSource.MDNS))
             // As BuiltinAdb.search after the cached port failed and mDNS connected.
-            record.connectedThrough(PortSource.MDNS)
+            record.searchEnded(connectedSearch(PortSource.MDNS, announced))
             record.connectionEnded(announced, outcome)
             assertNull("$outcome", record.portCache.load())
             assertEquals("$outcome", listOf(loopback(announced)), search().tried)

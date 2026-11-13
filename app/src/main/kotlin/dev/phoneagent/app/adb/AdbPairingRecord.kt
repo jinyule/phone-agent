@@ -121,7 +121,7 @@ internal class AdbPairingRecord(
      * A search connected through [source]. The cached port, when there is one, is always tried
      * first (`AdbConnectPort`): unless [source] is the cache, it did not take us, and is forgotten.
      */
-    fun connectedThrough(source: PortSource) {
+    private fun connectedThrough(source: PortSource) {
         if (source != PortSource.CACHE && portCache.load() != null) prefs.edit { remove(KEY_PORT) }
     }
 

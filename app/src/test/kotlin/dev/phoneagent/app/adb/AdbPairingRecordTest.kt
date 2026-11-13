@@ -139,7 +139,7 @@ class AdbPairingRecordTest {
     fun `a search that connected elsewhere forgets the cached port`() {
         for (source in listOf(PortSource.MDNS, PortSource.SCAN)) {
             record.connectionEnded(PORT, launched)
-            record.connectedThrough(source)
+            record.searchEnded(connectedSearch(source, OTHER_PORT))
             assertNull("$source", AdbPairingRecord(prefs).portCache.load())
         }
     }
@@ -147,7 +147,7 @@ class AdbPairingRecordTest {
     @Test
     fun `a search that connected through the cached port keeps it`() {
         record.connectionEnded(PORT, launched)
-        record.connectedThrough(PortSource.CACHE)
+        record.searchEnded(connectedSearch(PortSource.CACHE, PORT))
         record.connectionEnded(PORT, LaunchOutcome.AlreadyConnected)
         assertEquals(PORT, AdbPairingRecord(prefs).portCache.load())
     }
@@ -158,7 +158,7 @@ class AdbPairingRecordTest {
         val changed = mutableListOf<String?>()
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key -> changed += key }
         prefs.registerOnSharedPreferenceChangeListener(listener)
-        for (source in PortSource.entries) record.connectedThrough(source)
+        for (source in PortSource.entries) record.searchEnded(connectedSearch(source, OTHER_PORT))
         prefs.unregisterOnSharedPreferenceChangeListener(listener)
         assertEquals(emptyList<String?>(), changed)
         assertNull(record.portCache.load())

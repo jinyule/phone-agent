@@ -4,9 +4,12 @@ import dev.phoneagent.app.helper.FakeHelper
 import dev.phoneagent.app.helper.HelperState
 import dev.phoneagent.app.helper.HelperState.LaunchReason
 import dev.phoneagent.core.adb.AdbCommand
+import dev.phoneagent.core.adb.AdbEndpoint
+import dev.phoneagent.core.adb.AdbSession
 import dev.phoneagent.core.adb.CommandResult
 import dev.phoneagent.core.adb.ConnectFailure
 import dev.phoneagent.core.adb.ConnectResult
+import dev.phoneagent.core.adb.PortSearchConfig
 import dev.phoneagent.core.adb.PortSearchResult
 import dev.phoneagent.core.adb.PortSource
 import java.util.concurrent.CopyOnWriteArrayList
@@ -84,6 +87,23 @@ internal class FakeSession(
     override fun close() {
         closed = true
     }
+}
+
+/**
+ * A search that connected to [port] through [source], for code that only reads where it connected
+ * ([AdbPairingRecord.searchEnded]). core's AdbSession can only be made by a real TLS handshake with
+ * adbd, so the session is allocated without running its constructor: it must never be used, closed
+ * or printed.
+ */
+internal fun connectedSearch(
+    source: PortSource,
+    port: Int,
+): PortSearchResult.Connected {
+    val unsafeClass = Class.forName("sun.misc.Unsafe")
+    val unsafe = unsafeClass.getDeclaredField("theUnsafe").apply { isAccessible = true }.get(null)
+    val allocate = unsafeClass.getMethod("allocateInstance", Class::class.java)
+    val session = allocate.invoke(unsafe, AdbSession::class.java) as AdbSession
+    return PortSearchResult.Connected(session, AdbEndpoint(PortSearchConfig.LOOPBACK, port), source)
 }
 
 /** The built-in client as [HelperLauncher] sees it. */
