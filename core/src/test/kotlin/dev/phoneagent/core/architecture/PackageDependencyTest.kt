@@ -24,12 +24,13 @@ import org.junit.jupiter.api.Test
  *   built-in adb client (`adb`, phase1 §2.1) is app setup code that must never become a tool
  *   (AGENTS.md §3.4), so it may not even implement a tool contract.
  *
- * References are imports (including wildcards), and fully qualified class names and function calls
- * in code, also with type arguments (`….f<A<B>>(x)`), including code inside string templates
- * (`${…}`). Comments and the text of string and char literals do not count. A file without a
- * package declaration is a violation: it cannot be placed.
- * Known limit: a fully qualified reference to a top-level property (`dev.phoneagent.core.x.value`,
- * not called) is not seen.
+ * References are imports (including wildcards) and fully qualified names in code, including code
+ * inside string templates (`${…}`); names quoted with backticks (`` core.`assembly`.X ``) count as
+ * written without them. A fully qualified name is placed in the longest of its prefixes that is a
+ * package of core (so a top-level property, `dev.phoneagent.core.x.value`, counts too); one in no
+ * known package counts by its first capitalized segment (a class) or when it is called, also with
+ * type arguments (`….f<A<B>>(x)`). Comments and the text of string and char literals do not count.
+ * A file without a package declaration is a violation: it cannot be placed.
  */
 class PackageDependencyTest {
     @Test
@@ -55,10 +56,14 @@ class PackageDependencyTest {
                 "ports/KnowsSession.kt: contract ports (layer 1) must not use session (layer 4)",
                 "screen/MarksRisk.kt: capability screen must not use capability policy.rules",
                 "tool/UsesAdb.kt: contract tool must not use capability adb",
+                "tools/BacktickImport.kt: capability tools must not use capability policy.rules",
+                "tools/BacktickName.kt: capability tools must not use the assembly",
+                "tools/CapabilityProperty.kt: capability tools must not use capability policy.rules",
                 "tools/FullyQualified.kt: capability tools must not use capability policy.rules",
                 "tools/FunctionCall.kt: capability tools must not use capability policy.rules",
                 "tools/GenericCall.kt: capability tools must not use capability policy.rules",
                 "tools/KnowsAssembly.kt: capability tools must not use the assembly",
+                "tools/PropertyAccess.kt: capability tools must not use the assembly",
                 "tools/RawTemplate.kt: capability tools must not use capability storage",
                 "tools/RunsAdb.kt: capability tools must not use capability adb",
             ),
@@ -70,7 +75,15 @@ class PackageDependencyTest {
     fun `the adb client is isolated in both directions`() {
         val scope = Konsist.scopeFromProduction("core")
         val adb = Unit.Capability("adb")
-        val files = scope.files.map { file -> file.packagee?.name?.let(Unit::of) to referencedUnits(file) }
+        val packages = packagesOf(scope)
+        val files =
+            scope.files.map { file ->
+                file.packagee
+                    ?.name
+                    ?.let(::unquoted)
+                    ?.let(Unit::of) to
+                    referencedUnits(file, packages)
+            }
         assertTrue(files.count { it.first == adb } >= 10, "the adb package is where this test expects it")
         val intoAdb = files.filter { (own, used) -> own != adb && adb in used }.map { it.first }
         val outOfAdb =
@@ -99,6 +112,35 @@ class PackageDependencyTest {
         assertEquals(
             listOf("$BASE.policy.rules"),
             fullyQualifiedPackages("val x =\n    dev.phoneagent.core.policy.rules\n        .Rules()"),
+        )
+    }
+
+    @Test
+    fun `backticks and properties do not hide a reference`() {
+        val tick = "`"
+        assertEquals("$BASE.policy.rules.Rules", unquoted("$BASE.${tick}policy$tick.${tick}rules$tick.Rules"))
+        assertEquals(
+            listOf("$BASE.assembly"),
+            fullyQualifiedPackages("val v = dev.phoneagent.core.${tick}assembly$tick.assemble(m)"),
+        )
+        val known = setOf("$BASE.assembly", "$BASE.policy", "$BASE.policy.rules")
+        assertEquals(
+            listOf("$BASE.assembly", "$BASE.policy.rules"),
+            fullyQualifiedPackages(
+                "val a = dev.phoneagent.core.assembly.config.ownPackages\n" +
+                    "val b = dev.phoneagent.core.policy.rules.tuning.totalsRead",
+                known,
+            ),
+        )
+        assertEquals(
+            listOf("$BASE.policy.rules"),
+            fullyQualifiedPackages("val r = dev.phoneagent.core.policy.rules.Rules()", known),
+            "the longest package wins",
+        )
+        assertEquals(
+            emptyList<String>(),
+            fullyQualifiedPackages("val p = dev.phoneagent.core.nowhere.value", known),
+            "in no known package, a property is not placed",
         )
     }
 
@@ -170,16 +212,27 @@ class PackageDependencyTest {
             .flatMap { file ->
                 val path = file.path.substringAfter(root)
                 val declared = file.packagee?.name ?: return@flatMap listOf("$path: no package declaration")
-                val own = Unit.of(declared) ?: return@flatMap emptyList()
-                referencedUnits(file)
+                val own = Unit.of(unquoted(declared)) ?: return@flatMap emptyList()
+                referencedUnits(file, packagesOf(scope))
                     .mapNotNull { problem(own, it) }
                     .map { "$path: $it" }
             }.sorted()
 
-    /** The core packages [file] refers to, by import or fully qualified. */
-    private fun referencedUnits(file: KoFileDeclaration): List<Unit> {
-        val imports = file.imports.map { packageOfImport(it.name, it.isWildcard) }
-        return (imports + fullyQualifiedPackages(file.text)).mapNotNull(Unit::of).distinct()
+    /** The core packages [file] refers to, by import or fully qualified; [packages] are those that exist. */
+    private fun referencedUnits(
+        file: KoFileDeclaration,
+        packages: Set<String>,
+    ): List<Unit> {
+        val imports = file.imports.map { packageOfImport(unquoted(it.name), it.isWildcard) }
+        return (imports + fullyQualifiedPackages(file.text, packages)).mapNotNull(Unit::of).distinct()
+    }
+
+    /** The packages of core's production code and of [scope]. */
+    private fun packagesOf(scope: KoScope): Set<String> =
+        (productionPackages + scope.files.mapNotNull { it.packagee?.name?.let(::unquoted) }).toSet()
+
+    private val productionPackages: List<String> by lazy {
+        Konsist.scopeFromProduction("core").files.mapNotNull { it.packagee?.name?.let(::unquoted) }
     }
 
     private fun problem(
@@ -284,25 +337,40 @@ class PackageDependencyTest {
             return segments.take(end).joinToString(".")
         }
 
+        /** [name] without the backticks that quote its segments (`` a.`b`.c `` is `a.b.c`). */
+        fun unquoted(name: String): String = name.replace("`", "")
+
         /**
-         * Packages of fully qualified references in code, also when formatted across lines: a name
-         * reaching a class (its first capitalized segment), or a function that is called, with or
-         * without type arguments (`f(…)`, `f { … }`, `f<A<B>>(…)`).
+         * Packages of fully qualified references in code, also when formatted across lines or quoted
+         * with backticks: the longest prefix of the name that is one of [packages]; for a name in none
+         * of them, the part before its first capitalized segment (a class), or before a function that
+         * is called, with or without type arguments (`f(…)`, `f { … }`, `f<A<B>>(…)`).
          */
-        fun fullyQualifiedPackages(text: String): List<String> {
-            val code = AROUND_DOT.replace(HEADER_LINE.replace(CodeOnly(text).code(), ""), ".")
+        fun fullyQualifiedPackages(
+            text: String,
+            packages: Set<String> = emptySet(),
+        ): List<String> {
+            val code = AROUND_DOT.replace(unquoted(HEADER_LINE.replace(CodeOnly(text).code(), "")), ".")
             return QUALIFIED
                 .findAll(code)
                 .mapNotNull { match ->
                     val segments = match.value.split('.')
+                    val known = longestPackage(segments, packages)
                     val firstType = segments.indexOfFirst { it.first().isUpperCase() }
                     when {
+                        known != null -> known
                         firstType >= 0 -> segments.take(firstType)
                         isCalled(code, match.range.last + 1) -> segments.dropLast(1)
                         else -> null
                     }?.joinToString(".")
                 }.toList()
         }
+
+        /** The longest prefix of [segments] that names one of [packages], or `null`. */
+        private fun longestPackage(
+            segments: List<String>,
+            packages: Set<String>,
+        ): List<String>? = (segments.size downTo 1).map(segments::take).firstOrNull { it.joinToString(".") in packages }
 
         /** Whether a call (`(` or `{`) follows at [from], after optional balanced type arguments. */
         private fun isCalled(
