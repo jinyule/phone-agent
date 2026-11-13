@@ -3,13 +3,8 @@
 package dev.phoneagent.core.replay
 
 import dev.phoneagent.core.agent.AgentSetup
-import dev.phoneagent.core.agent.Interceptor
-import dev.phoneagent.core.agent.Interceptors
-import dev.phoneagent.core.agent.Recovery
 import dev.phoneagent.core.agent.ReplayChecker
-import dev.phoneagent.core.agent.RequestFailure
 import dev.phoneagent.core.agent.RequestPlan
-import dev.phoneagent.core.agent.RetryInterceptor
 import dev.phoneagent.core.ids.SessionId
 import dev.phoneagent.core.ids.TaskId
 import dev.phoneagent.core.ids.ToolCallId
@@ -38,14 +33,13 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.job
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
-import kotlin.random.Random
 
 /**
  * The product loop of a session fixture (WP08 design §9), assembled as the app assembles it: the
  * policy capability ([PolicyRules] with the scenario's own packages, labels and tuning), the screen
  * components built on its lexicon, the phase-1 tools, the product system prompt with the
- * scenario's output cap and reasoning level, the default loop config and the default
- * `requestError` chain (its retries with seeded jitter, which N3 zeroes anyway), and the
+ * scenario's output cap and reasoning level, the default loop config and the loop's default
+ * interceptors (`AgentSetup`'s, not a copy; their retry jitter is random, which N3 zeroes), and the
  * scenario's app catalog. No SurfaceManager yet (design-review 7). It runs in [scope]'s virtual
  * time on an in-memory session directory.
  *
@@ -104,7 +98,6 @@ class ReplayHarness(
             screen = screen,
             apps = Catalog(scenario.device.apps),
             clock = Clock { scope.testScheduler.currentTime },
-            interceptors = Interceptors(requestError = seeded(Interceptors().requestError)),
             timeSource = scope.testScheduler.timeSource,
         )
 
@@ -121,10 +114,6 @@ class ReplayHarness(
 
     /** The log as persisted so far. */
     suspend fun log(): SessionLog = SessionStore.read(files)
-
-    /** [chain] with each [RetryInterceptor] replaced by one with seeded jitter, so a replay waits as long. */
-    private fun seeded(chain: List<Interceptor<RequestFailure, Recovery>>) =
-        chain.map { if (it is RetryInterceptor) RetryInterceptor(random = Random(0)) else it }
 
     private class Catalog(
         private val apps: List<AppEntry>,
