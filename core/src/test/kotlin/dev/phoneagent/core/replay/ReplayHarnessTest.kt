@@ -3,6 +3,7 @@ package dev.phoneagent.core.replay
 import dev.phoneagent.core.agent.AgentSetup
 import dev.phoneagent.core.agent.Interceptors
 import dev.phoneagent.core.assembly.ProductAssembly
+import dev.phoneagent.core.assembly.ProductConfig
 import dev.phoneagent.core.assembly.assemble
 import dev.phoneagent.core.model.ChatModel
 import dev.phoneagent.core.model.ModelInfo
@@ -85,6 +86,16 @@ class ReplayHarnessTest {
             assertNull(setup.surfaces)
             assertEquals(ReplaySamples.scenario.device.apps, setup.apps?.apps())
         }
+
+    @Test
+    fun `the product config is the scenario's names and tuning, every other config at its default`() {
+        val tuning = PolicyPins.tuning(tuned.assembly.tuning)
+        assertEquals(30, tuning.labelMax)
+        assertEquals(
+            ProductConfig(setOf("dev.phoneagent", "dev.phoneagent.debug"), setOf("PhoneAgent", "手机助理"), tuning),
+            ReplayHarness.config(tuned.assembly, tuning),
+        )
+    }
 
     @Test
     fun `every interception point runs the product's default chain`() =
