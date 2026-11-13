@@ -6,12 +6,16 @@ import dev.phoneagent.core.ids.SessionId
 import dev.phoneagent.core.ids.TaskId
 import dev.phoneagent.core.ids.ToolCallId
 import dev.phoneagent.core.policy.ActionIntent
+import dev.phoneagent.core.policy.FieldClass
 import dev.phoneagent.core.policy.IntentKind
 import dev.phoneagent.core.policy.rules.Step
 import dev.phoneagent.core.policy.rules.Steps
+import dev.phoneagent.core.ports.Direction
+import dev.phoneagent.core.ports.ElementRef
 import dev.phoneagent.core.ports.ElementRole
 import dev.phoneagent.core.ports.ElementState
 import dev.phoneagent.core.ports.ScreenSnapshot
+import dev.phoneagent.core.ports.SystemKey
 import dev.phoneagent.core.ports.Target
 import dev.phoneagent.core.ports.UiAction
 import dev.phoneagent.core.testing.FakeChatModel
@@ -27,20 +31,16 @@ import dev.phoneagent.core.tool.ToolCall
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObjectBuilder
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.put
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
-import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 /**
  * What the policy is told a call does must be what the tool does (policy-rules §7): every tool of
  * the assembled registry is known to the resolver or only reads (contracts addendum #1 §7), and
- * every spelling of an argument the tool accepts is read by the resolver as the action the tool
- * then performs.
+ * every spelling of an argument the tool accepts is read by the resolver as what the action the
+ * tool then performs means, written out here without the resolver.
  */
 class ResolverCoverageTest {
     private val assembly = assemble(FakeChatModel(), PRODUCT)
@@ -137,20 +137,70 @@ class ResolverCoverageTest {
                     """{"x1":100,"y1":100,"x2":900,"y2":100,"durationMs":300}""" to true,
                     """{"x1":"100","y1":100.0,"x2":900,"y2":"100","durationMs":"300"}""" to true,
                     """{"x1":100,"y1":100,"x2":999,"y2":100,"durationMs":300.0}""" to true,
+                    """{"x1":900,"y1":100,"x2":100,"y2":100,"durationMs":300}""" to true,
                     """{"x1":-1,"y1":100,"x2":900,"y2":100,"durationMs":300}""" to false,
                 ),
             "phone_key" to
                 listOf(
                     """{"key":"back"}""" to true,
                     """{"key":"enter"}""" to true,
+                    """{"key":"home"}""" to true,
                     """{"key":"BACK"}""" to false,
                     """{"key":" back"}""" to false,
                 ),
         )
 
+    /**
+     * What each action the spellings perform means on [probe], written out without the resolver:
+     * the kind, the app, and the element acted on. A swipe acts on the element it starts on, here
+     * 返回 (e1) at (100,100) and nothing at (900,100); Enter submits the field e3, Back and Home
+     * only move.
+     */
+    private val meanings: Map<UiAction, ActionIntent> =
+        mapOf(
+            UiAction.Tap(ref("e1")) to meant(IntentKind.NAVIGATE, "e1"),
+            UiAction.Tap(ref("e1"), long = true) to meant(IntentKind.DELETE, "e2"),
+            UiAction.Tap(Target.Point(100, 100)) to meant(IntentKind.NAVIGATE, "e1"),
+            UiAction.Tap(Target.Point(100, 100), long = true) to meant(IntentKind.DELETE, "e2"),
+            UiAction.Type(ref("e3"), "买菜") to meant(IntentKind.INPUT, "e3", FieldClass.PLAIN),
+            UiAction.Type(ref("e3"), "5") to meant(IntentKind.INPUT, "e3", FieldClass.PLAIN),
+            UiAction.Type(ref("e3"), "true") to meant(IntentKind.INPUT, "e3", FieldClass.PLAIN),
+            UiAction.Type(null, "买菜") to meant(IntentKind.INPUT, "e3", FieldClass.PLAIN),
+            UiAction.Type(ref("e3"), "买菜", submit = true) to meant(IntentKind.OUTWARD, "e3"),
+            UiAction.Type(ref("e3"), "买菜", append = true) to meant(IntentKind.INPUT, "e3", FieldClass.PLAIN),
+            UiAction.Scroll(null, Direction.DOWN) to meant(IntentKind.NAVIGATE, null),
+            UiAction.Scroll(ref("e4"), Direction.DOWN) to meant(IntentKind.NAVIGATE, "e4"),
+            UiAction.Scroll(ref("e4"), Direction.UP) to meant(IntentKind.NAVIGATE, "e4"),
+            swipe(100, 900) to meant(IntentKind.NAVIGATE, "e1"),
+            swipe(100, 999) to meant(IntentKind.NAVIGATE, "e1"),
+            swipe(900, 100) to meant(IntentKind.NAVIGATE, null),
+            UiAction.Key(SystemKey.BACK) to meant(IntentKind.NAVIGATE, null),
+            UiAction.Key(SystemKey.HOME) to meant(IntentKind.NAVIGATE, null),
+            UiAction.Key(SystemKey.ENTER) to meant(IntentKind.OUTWARD, null),
+        )
+
+    private fun ref(ref: String) = Target.Ref(ElementRef(ref))
+
+    /** A 300 ms swipe along y=100. */
+    private fun swipe(
+        fromX: Int,
+        toX: Int,
+    ) = UiAction.Swipe(Target.Point(fromX, 100), Target.Point(toX, 100), 300)
+
+    /** An action of [kind] on [probe] acting on the element [ref]. */
+    private fun meant(
+        kind: IntentKind,
+        ref: String?,
+        fieldClass: FieldClass? = null,
+    ): ActionIntent {
+        val target = ref?.let { r -> probe.elements.single { it.ref.value == r } }
+        return ActionIntent(kind, probe.pkg, target, fieldClass = fieldClass)
+    }
+
     @Test
-    fun `every spelling a screen tool accepts is read by the resolver as the action the tool performs`() =
+    fun `every spelling a screen tool accepts is read by the resolver as what its action means`() =
         runTest {
+            val performed = mutableSetOf<UiAction>()
             for ((name, cases) in spellings) {
                 val tool = checkNotNull(assembly.registry[name]) { name }
                 for ((args, accepts) in cases) {
@@ -159,13 +209,12 @@ class ResolverCoverageTest {
                     val action = screen.actions.singleOrNull()?.first
                     assertEquals(accepts, action != null, "$name $args: accepted")
                     if (action == null) continue
-                    assertEquals(
-                        intentOf(name, canonical(action), tool.risk),
-                        intentOf(name, args, tool.risk),
-                        "$name $args performed $action",
-                    )
+                    performed += action
+                    val meant = checkNotNull(meanings[action]) { "$name $args performed $action, not written out" }
+                    assertEquals(meant, intentOf(name, args, tool.risk), "$name $args performed $action")
                 }
             }
+            assertEquals(meanings.keys, performed, "every meaning written out is performed")
         }
 
     @Test
@@ -191,7 +240,18 @@ class ResolverCoverageTest {
             intentOf("phone_tap", """{"screen":"s30","ref":"e3"}""", RiskClass.WRITE),
             "the ref",
         )
-        assertTrue(kind("phone_key", """{"key":"enter"}""") != IntentKind.READ)
+        assertEquals(IntentKind.OUTWARD, kind("phone_key", """{"key":"enter"}"""), "Enter submits")
+        assertEquals(IntentKind.NAVIGATE, kind("phone_key", """{"key":"back"}"""), "Back only moves")
+
+        fun swipeTarget(
+            fromX: Int,
+            toX: Int,
+        ): String? {
+            val args = """{"x1":$fromX,"y1":100,"x2":$toX,"y2":100,"durationMs":300}"""
+            return intentOf("phone_swipe", args, checkNotNull(assembly.registry["phone_swipe"]).risk).target?.ref?.value
+        }
+        assertEquals("e1", swipeTarget(100, 900), "a swipe acts where it starts")
+        assertEquals(null, swipeTarget(900, 100), "nothing where the reversed swipe starts")
     }
 
     private fun intentOf(
@@ -199,67 +259,6 @@ class ResolverCoverageTest {
         args: String,
         risk: RiskClass,
     ): ActionIntent = assembly.intents.resolve(call(name, args), risk, probe)
-
-    /** The arguments that name [action] in the plainest spelling. */
-    private fun canonical(action: UiAction): String =
-        when (action) {
-            is UiAction.Tap -> {
-                buildJsonObject {
-                    put("screen", "s30")
-                    aim(action.target)
-                    put("long", action.long)
-                }
-            }
-
-            is UiAction.Type -> {
-                buildJsonObject {
-                    put("screen", "s30")
-                    action.target?.let { aim(it) }
-                    put("text", action.text)
-                    put("append", action.append)
-                    put("submit", action.submit)
-                }
-            }
-
-            is UiAction.Scroll -> {
-                buildJsonObject {
-                    put("screen", "s30")
-                    put("direction", action.direction.name.lowercase())
-                    action.target?.let { aim(it) }
-                }
-            }
-
-            is UiAction.Swipe -> {
-                buildJsonObject {
-                    put("x1", action.from.x)
-                    put("y1", action.from.y)
-                    put("x2", action.to.x)
-                    put("y2", action.to.y)
-                    put("durationMs", action.durationMs)
-                }
-            }
-
-            is UiAction.Key -> {
-                buildJsonObject { put("key", action.key.name.lowercase()) }
-            }
-
-            is UiAction.SetWheel -> {
-                error("no phase-1 tool turns a wheel: $action")
-            }
-        }.toString()
-
-    private fun JsonObjectBuilder.aim(target: Target) {
-        when (target) {
-            is Target.Ref -> {
-                put("ref", target.ref.value)
-            }
-
-            is Target.Point -> {
-                put("x", target.x)
-                put("y", target.y)
-            }
-        }
-    }
 
     private fun call(
         name: String,
