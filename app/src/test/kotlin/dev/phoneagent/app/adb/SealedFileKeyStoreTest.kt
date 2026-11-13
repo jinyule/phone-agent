@@ -1,5 +1,6 @@
 package dev.phoneagent.app.adb
 
+import android.util.AtomicFile
 import dev.phoneagent.core.adb.AdbIdentity
 import dev.phoneagent.core.adb.IdentityLoad
 import kotlinx.coroutines.runBlocking
@@ -14,6 +15,8 @@ import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
 import java.security.GeneralSecurityException
 import java.security.ProviderException
 import java.security.SecureRandom
@@ -128,6 +131,53 @@ class SealedFileKeyStoreTest {
             ),
             written,
         )
+    }
+
+    @Test
+    fun `a file that a directory stands in for fails the write as IOException and is left alone`() {
+        file.mkdirs()
+        File(file, "kept").writeText("not ours")
+        val thrown = runCatching { store.write(pkcs8) }.exceptionOrNull()
+        assertTrue("$thrown", thrown is IOException)
+        assertEquals("not ours", File(file, "kept").readText())
+    }
+
+    @Test
+    fun `a rename that is lost fails the write as IOException and keeps the old key`() {
+        store.write(pkcs8)
+        val lostRename = SealedFileKeyStore(file, wrap) { LostRename(it) }
+        val thrown = runCatching { lostRename.write(ByteArray(10)) }.exceptionOrNull()
+        assertTrue("$thrown", thrown is IOException)
+        assertArrayEquals(pkcs8, SealedFileKeyStore(file, wrap).read())
+    }
+
+    @Test
+    fun `a write that fails midway is undone, keeps the old key and fails as it failed`() {
+        store.write(pkcs8)
+        val failing = SealedFileKeyStore(file, wrap) { FailingWrite(it) }
+        val thrown = runCatching { failing.write(ByteArray(10)) }.exceptionOrNull()
+        assertEquals("disk full", thrown?.message)
+        assertArrayEquals(pkcs8, SealedFileKeyStore(file, wrap).read())
+        assertFalse("the half-written file is deleted", File(file.path + ".new").exists())
+    }
+
+    /** As a failed rename: `finishWrite` closes the new file, logs, and returns normally. */
+    private class LostRename(
+        file: File,
+    ) : AtomicFile(file) {
+        override fun finishWrite(str: FileOutputStream?) {
+            str?.close()
+        }
+    }
+
+    /** A write to the new file that fails, as on a full disk. */
+    private class FailingWrite(
+        file: File,
+    ) : AtomicFile(file) {
+        override fun startWrite(): FileOutputStream =
+            object : FileOutputStream(super.startWrite().fd) {
+                override fun write(b: ByteArray) = throw IOException("disk full")
+            }
     }
 
     /** A checked Keystore refusal, and an internal failure as the Keystore reports it: unchecked. */

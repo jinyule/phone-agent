@@ -50,32 +50,51 @@ internal interface KeyWrap {
  * reads as unusable bytes: `AdbIdentity.loadOrCreate` then replaces the identity and reports
  * `REPLACED`, and the device has to be paired again. A key that cannot be sealed fails [write] with
  * [IOException] and leaves the file as it was. Checked and Keystore-internal failures of [wrap] are
- * treated alike.
+ * treated alike. A key that did not reach the file fails [write] with [IOException] too: the file is
+ * read back, since `AtomicFile.finishWrite` only logs a failed sync, close or rename.
  */
 internal class SealedFileKeyStore(
     private val file: File,
     private val wrap: KeyWrap,
+    /** Makes the [AtomicFile] of [file]; tests make it fail. */
+    private val atomicFile: (File) -> AtomicFile = ::AtomicFile,
 ) : AdbKeyStore {
     override fun read(): ByteArray? = readOrNull()?.let(::unseal)
 
     override fun write(pkcs8: ByteArray) {
-        val sealed = seal(pkcs8)
+        val bytes = byteArrayOf(FORMAT) + seal(pkcs8)
         file.parentFile?.mkdirs()
-        val atomic = AtomicFile(file)
+        val atomic = atomicFile(file)
         val out = atomic.startWrite()
         try {
-            out.write(byteArrayOf(FORMAT) + sealed)
+            out.write(bytes)
         } catch (failed: IOException) {
             // Keeps the previous key, if any: a half-written file must never replace it.
             atomic.failWrite(out)
             throw failed
         }
         atomic.finishWrite(out)
+        requireStored(atomic, bytes)
+    }
+
+    /** Throws [IOException] unless [atomic] holds [bytes]. */
+    private fun requireStored(
+        atomic: AtomicFile,
+        bytes: ByteArray,
+    ) {
+        val stored =
+            try {
+                atomic.readFully()
+            } catch (unreadable: IOException) {
+                // The rename failed and nothing is there, or not a file.
+                throw IOException("the adb key was not stored", unreadable)
+            }
+        if (!stored.contentEquals(bytes)) throw IOException("the adb key was not stored: the file holds other bytes")
     }
 
     private fun readOrNull(): ByteArray? =
         try {
-            AtomicFile(file).readFully()
+            atomicFile(file).readFully()
         } catch (expectedAbsent: FileNotFoundException) {
             // Nothing stored yet: the first identity is created and written.
             null

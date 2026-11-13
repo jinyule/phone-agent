@@ -27,6 +27,7 @@
    - 文件格式是一个格式字节加上 IV 和密文，经 AtomicFile 写入；
    - 打不开（封存密钥丢了、文件坏了、格式未知）就当作不可用，`AdbIdentity.loadOrCreate` 会换新身份并报 `REPLACED`。
    - 封存失败时 `write` 抛 IOException，旧文件不动；自动拉起记一笔日志，等下一次请求再试。
+   - 没有写进文件也抛 IOException：`AtomicFile.finishWrite` 对同步、关闭、改名的失败只打日志，所以写完要读回来比对。否则下一个进程读到的是旧文件或者没有文件，会悄悄换掉身份。
    - Keystore 自己内部的失败是非检查型的 `ProviderException`，和检查型的 `GeneralSecurityException` 一样处理（凭据存储的 `KeystoreCipher` 也是这样）。
 3. **配对记录和端口缓存放在 SharedPreferences 里，用 `apply` 写**（`AdbPairingRecord`）。下面几种情况会清掉配对记录：
    - 新建或替换了身份；
