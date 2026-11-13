@@ -145,7 +145,7 @@ core/src/test/resources/sessions/<scenario>/
 - `steer-mid-reply`：回复流到一半被 steer 打断，前缀和 steer 进入下一个请求。authored 刺激带 `after`，就在回复流出的时候给出。
 
 **尚无 fixture 的路径**（回放这一层没有守护：单测各有覆盖，但没有请求文件能对上）：
-- 客户端压缩（带 Replace 的 `compaction/summary`、`compaction/prune`）：M1 的 core 里还没有生产者，所以"Anthropic 路径不做客户端压缩"（铁律 7）在回放层也没有守护（评审 D3 存活）。压缩器合入的 WP 同时补 fixture。
+- 客户端压缩（带 Replace 的 `compaction/summary`、`compaction/prune`）：这个分支上的 core 还没有生产者，所以"Anthropic 路径不做客户端压缩"（铁律 7）在回放层也没有守护（评审 D3 存活）。由 WP17 B 合入时补：它的 ContextPrune 是第一个生产者，同时补两个 fixture，一个是 OpenAI 路径上真的 prune，一个是 Anthropic 路径上不 prune、只追加（守铁律 7，评审的 D3 变异 `if (appendOnly)` 要被它杀死）。
 - `ask_user`（`question/*`）和 `hand_to_user`（`handoff/*`）：本轮未做，留给下一轮或 WP11；SurfaceManager 移屏失败的 hand-off 装载即失败。
 - 被扣下的屏（`screen/judged` WITHHELD）、带帧的 observe（vision、`screen/frame`、blobs）、`side/*` 请求：现有场景都不看图。帧的端口顺序和丢帧由 `RecordingRoundTripTest` 守护。
 - 停止、关闭和恢复（`task/stopped`、`session/resumed`）、中途切换档位、inject 输入：驱动支持，`SessionDriverTest` 覆盖了，但还没有 fixture。
