@@ -255,6 +255,32 @@ class TaskControllerTest {
         }
 
     @Test
+    fun twoStopsWhileARunIsOpenedStopItForTheFirstAndTheNextOpeningKeepsNeither() =
+        runTest {
+            startGate = CompletableDeferred()
+            val tasks = controller()
+            tasks.send("a")
+            runCurrent()
+            tasks.stop(StopCause.SHUTDOWN)
+            tasks.stop(StopCause.USER)
+            checkNotNull(startGate).complete(Unit)
+            runCurrent()
+            assertEquals("the first cause, as a run keeps it", listOf(StopCause.SHUTDOWN), task.run.stops)
+            task.run.phase.value = Phase.Stopped(StopCause.SHUTDOWN)
+            runCurrent()
+
+            val gate = CompletableDeferred<Unit>()
+            task.resumeGate = gate
+            tasks.send("b")
+            runCurrent()
+            tasks.stop(StopCause.USER)
+            gate.complete(Unit)
+            runCurrent()
+            assertEquals(2, task.runs.size)
+            assertEquals("the stop of this opening", listOf(StopCause.USER), task.run.stops)
+        }
+
+    @Test
     fun aStopWhileTheNextRunIsOpenedStopsItAndDropsTheCommand() =
         runTest {
             val tasks = controller()

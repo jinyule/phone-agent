@@ -186,12 +186,13 @@ internal class TaskController(
     /**
      * Stops the task's current run for [cause]: [StopCause.USER] by default, [StopCause.SHUTDOWN]
      * when the app's service goes away. Commands sent before it are dropped; a run being opened is
-     * stopped once it is open. The next command continues the task.
+     * stopped once it is open, for the cause of the first stop that came meanwhile (as a run keeps
+     * the first cause it is stopped for). The next command continues the task.
      */
     fun stop(cause: StopCause = StopCause.USER) {
         stops++
         if (opening) {
-            pendingStop = cause
+            pendingStop = pendingStop ?: cause
             return
         }
         val running = runtime ?: return
