@@ -762,7 +762,9 @@ screen s12 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · 坐标 0–
 - 已知限制：
   - 缓存状态的 App 进程会被系统冻结（cached apps freezer），冻结期间收不到助手的死亡通知，重新拉起要等进程下次运行；
   - 无线调试从关到开，不会触发拉起。断线恢复里的重新拉起要由设置向导或 TaskService 触发（WP15）。
-  - 到了早退上限以后，只有重新配对、进程重启，或者别的途径拉起的助手活过窗口，才会恢复自动拉起。拉起结果（包括 `TooManyEarlyExits`）现在只进日志，要由 WP15 接到界面上。
+  - 到了早退上限以后，只有重新配对、进程重启，或者别的途径拉起的助手活过窗口，才会恢复自动拉起。
+  - 本机冒充 adbd 的进程排在真 adbd 前面时（mDNS 先报它，或者扫描先碰到它），每一轮拉起都会报 `Unauthorized`；配对不会因此清掉，它停下或被卸载以后就恢复。抢占端口缓存最多拖住一次拉起。窗口的细节见 `docs/adr/2026-11-03-adb-trust-model.md`，按公钥做 TOFU 留给 WP15。
+  - 拉起结果（`TooManyEarlyExits`、`Unauthorized`、`NotPaired` 的原因）和"上次被拒"现在只进日志或 SharedPreferences，要由 WP15 接到界面上。
 
 ### 7.2 一步执行
 
