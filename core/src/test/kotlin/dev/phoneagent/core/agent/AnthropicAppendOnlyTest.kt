@@ -47,10 +47,14 @@ import org.junit.jupiter.api.Test
  * The Anthropic path is append-only on the wire (AGENTS §3 rule 7, model-layer §6): every request
  * the loop sends, mapped to its Messages body without `cache_control` (the API's prefix check
  * ignores it), keeps `system` and `tools` of the request before it, and that request's message
- * blocks are a prefix of its own. The one allowed exception is the pair around a
- * `context/reasoning-dropped`. The log of the run holds what a projection could break the prefix
- * with: runtime context, a compaction block, a prune and a summary written with Replace, a prefix
- * cut by a steer and one superseded by a retry, and a reasoning drop.
+ * blocks are a prefix of its own. The one exception is the request after a
+ * `context/reasoning-dropped`: the earlier request's blocks without its `thinking` and
+ * `redacted_thinking` blocks are a prefix of it, so text, tool use, tool results and compaction
+ * blocks, their roles and their order still stand. The log of the run holds what a projection
+ * could break the prefix with: runtime context, a compaction block, a prune and a summary written
+ * with Replace, a prefix cut by a steer and one superseded by a retry, and a reasoning drop. The
+ * interrupted prefixes here hold text only; how one filters opaque and compaction blocks is the
+ * rule sample `interrupted-compaction-left-out` (DeriveRuleSamples), not this test.
  */
 class AnthropicAppendOnlyTest {
     private val wire = MessagesWire(FakeChatModel.INFO.provider, FakeChatModel.INFO.model)
@@ -91,7 +95,7 @@ class AnthropicAppendOnlyTest {
         }
 
     @Test
-    fun `adjacent requests share system and tools and extend the message blocks, except around a drop`() =
+    fun `adjacent requests share system and tools and extend the message blocks, a drop removes only thinking`() =
         runTest {
             val model =
                 FakeChatModel(wire = Kit.wire(reasoning = null))
@@ -143,20 +147,29 @@ class AnthropicAppendOnlyTest {
             val requests = model.requests
             assertEquals(7, requests.size)
             assertEquals(listOf(0, 0, 0, 0, 0, 0, 1), drops)
-            var exceptions = 0
             for (n in 1 until requests.size) {
-                val (earlier, later) = body(requests[n - 1]) to body(requests[n])
-                assertEquals(earlier["system"], later["system"], "request ${n + 1}: system")
-                assertEquals(earlier["tools"], later["tools"], "request ${n + 1}: tools")
-                if (drops[n] != drops[n - 1]) {
-                    exceptions += 1
-                    continue
-                }
-                val (before, after) = blocks(earlier) to blocks(later)
-                assertEquals(before, after.take(before.size), "request ${n + 1} rewrites what request $n sent")
+                assertExtends(requests[n - 1], requests[n], n + 1, dropped = drops[n] != drops[n - 1])
             }
-            assertEquals(1, exceptions, "only the retry after the drop")
         }
+
+    /**
+     * Request [n] keeps `system` and `tools` of the [earlier] one, and its message blocks start with
+     * the earlier one's; after a drop ([dropped]), with the earlier one's without its thinking.
+     */
+    private fun assertExtends(
+        earlier: ChatRequest,
+        later: ChatRequest,
+        n: Int,
+        dropped: Boolean,
+    ) {
+        val (before, after) = body(earlier) to body(later)
+        assertEquals(before["system"], after["system"], "request $n: system")
+        assertEquals(before["tools"], after["tools"], "request $n: tools")
+        val sent = blocks(before)
+        val kept = if (dropped) sent.filterNot(::isThinking) else sent
+        if (dropped) assertTrue(kept.size < sent.size, "request ${n - 1} held thinking for the drop to remove")
+        assertEquals(kept, blocks(after).take(kept.size), "request $n rewrites what request ${n - 1} sent")
+    }
 
     /** The log holds every record kind this test is about. */
     private fun assertScenario(records: List<SessionRecord>) {
@@ -174,6 +187,10 @@ class AnthropicAppendOnlyTest {
         val rules = WireRules.of(request, CredentialKind.API_KEY)
         return withoutCache(wire.body(request, rules, ImageData.NONE)).jsonObject
     }
+
+    /** Whether a block of [blocks] is a `thinking` or `redacted_thinking` block: what a drop removes. */
+    private fun isThinking(block: JsonElement): Boolean =
+        block.jsonArray[1].jsonObject["type"] in setOf(JsonPrimitive("thinking"), JsonPrimitive("redacted_thinking"))
 
     /** Each message block with its role, in order: consecutive messages of one role merge on the wire. */
     private fun blocks(body: JsonObject): List<JsonElement> =
