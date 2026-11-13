@@ -2,6 +2,7 @@ package dev.phoneagent.core.replay
 
 import dev.phoneagent.core.ids.SnapshotId
 import dev.phoneagent.core.model.Part
+import dev.phoneagent.core.ports.ActionOutcome
 import dev.phoneagent.core.ports.AskResult
 import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.screen.SensitiveNumbers
@@ -98,17 +99,24 @@ object Gitleaks {
  * The manual privacy review of a recording (AGENTS §6), written to
  * `core/build/session-record/<scenario>/privacy-checklist.md`, never committed: first the screens
  * the runtime withheld from the model (`screen/judged` WITHHELD), whose text is in the fixture all
- * the same; then every screenshot, every other text read from the device, every input and answer
- * of the user, the app list, the app versions and the ROM build (`scenario.json`), and the
- * messages of what the device threw (`replay.override.json`), each with a box to tick once a
- * person saw that it comes from a test account. Texts in which [SensitiveNumbers] masks something
- * are flagged as suspected numbers.
+ * the same; then every screenshot, every other text read from the device, the reasons the device
+ * gave for an action or launch it failed or refused (`screen/action`, `screen/launch`), every
+ * input and answer of the user, the app list, the app versions and the ROM build
+ * (`scenario.json`), and the messages of what the device threw (`replay.override.json`), each
+ * with a box to tick once a person saw that it comes from a test account. Texts in which
+ * [SensitiveNumbers] masks something are flagged as suspected numbers.
  */
 object PrivacyChecklist {
     const val FILE: String = "privacy-checklist.md"
 
+    private const val NOT_SHOWN = "not shown to the model"
+
     /** The heading of the withheld screens, the first section. */
     const val WITHHELD: String = "Withheld screens: 没给模型看过 (never shown to the model, but in the fixture)"
+
+    /** The heading of the reasons the device gave for an action or launch it failed or refused. */
+    const val REASONS: String =
+        "Reasons the device gave (screen/action, screen/launch failed or refused; they may quote the screen)"
 
     /** Writes [text], a checklist ([PrivacyChecklist.text]), as [FILE] into [dir] (created). */
     fun write(
@@ -140,6 +148,7 @@ object PrivacyChecklist {
             section(WITHHELD, hidden.flatMap { screen -> texts(screen).map { withheldItem(screen, withheld, it) } })
             section("Screenshots (blobs)", frames(log))
             section("Text read from the device", shown.flatMap(::texts))
+            section(REASONS, reasons(log, withheld))
             section("What the user typed and answered", userTexts(log))
             section("Installed apps (scenario.json)", scenario.device.apps.map { "${it.label} (${it.packageName})" })
             section(
@@ -162,6 +171,47 @@ object PrivacyChecklist {
         withheld: Map<SnapshotId, String?>,
         text: String,
     ): String = "screen ${screen.id.value} of ${screen.pkg ?: "no app"} (withheld by ${withheld[screen.id]}): $text"
+
+    /**
+     * The reason of each action and launch the device failed or refused, which may quote the screen
+     * ([ActionOutcome.Status.Failed]): the model was given it only with a screen read back after it
+     * and judged shown, so an item says which screen that was, or that the model was not shown it.
+     */
+    private fun reasons(
+        log: SessionLog,
+        withheld: Map<SnapshotId, String?>,
+    ): List<String> =
+        log.records.mapNotNull { record ->
+            when (val event = record.event) {
+                is ScreenActed -> reason(event.outcome, "screen/action of ${event.callId.value}", withheld)
+                is ScreenLaunched -> reason(event.outcome, "screen/launch of ${event.callId.value}", withheld)
+                else -> null
+            }
+        }
+
+    private fun reason(
+        outcome: ActionOutcome,
+        source: String,
+        withheld: Map<SnapshotId, String?>,
+    ): String? {
+        val (status, reason) =
+            when (val status = outcome.status) {
+                is ActionOutcome.Status.Failed -> "failed" to status.reason
+
+                is ActionOutcome.Status.Refused -> "refused" to status.reason
+
+                // A stale ref's reason is a fixed hint that quotes nothing.
+                ActionOutcome.Status.Ok, is ActionOutcome.Status.StaleRef -> null
+            } ?: return null
+        val after = outcome.after
+        val seen =
+            when {
+                after == null -> "nothing read back, $NOT_SHOWN"
+                after.id in withheld -> "screen ${after.id.value} withheld by ${withheld[after.id]}, $NOT_SHOWN"
+                else -> "with screen ${after.id.value}"
+            }
+        return "$reason ($status, $source; $seen)"
+    }
 
     private fun thrown(override: ReplayOverride): List<String> =
         override.device.mapNotNull { fact ->

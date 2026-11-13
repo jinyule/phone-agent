@@ -138,6 +138,96 @@ class PrivacyChecklistTest {
         assertItem("赵六", text(ScreenLaunched(call, LaunchTarget.App("com.example.chat"), after(screen("s3", "赵六")))))
     }
 
+    private fun outcome(
+        status: ActionOutcome.Status,
+        after: ScreenSnapshot? = null,
+    ) = ActionOutcome(status, ActionOutcome.Effect.UNKNOWN, after = after)
+
+    @Test
+    fun `the reason of a failed action is an item, with the screen read back after it`() {
+        val text =
+            text(
+                ScreenActed(
+                    call,
+                    null,
+                    tap,
+                    outcome(ActionOutcome.Status.Failed("MARK-A1 发给张三失败"), screen("s2", "李四")),
+                ),
+                judged("s2", JudgmentOutcome.SHOWN),
+            )
+        assertEquals(
+            listOf("- [ ] MARK-A1 发给张三失败 (failed, screen/action of call-1; with screen s2)"),
+            section(PrivacyChecklist.REASONS, text),
+        )
+    }
+
+    @Test
+    fun `the reason of a refused action is an item, also with nothing read back`() {
+        val text = text(ScreenActed(call, null, tap, outcome(ActionOutcome.Status.Refused("MARK-A2 不能点 李四的头像"))))
+        assertEquals(
+            listOf(
+                "- [ ] MARK-A2 不能点 李四的头像 (refused, screen/action of call-1; nothing read back, not shown to the model)",
+            ),
+            section(PrivacyChecklist.REASONS, text),
+        )
+    }
+
+    @Test
+    fun `the reason of a failed action is an item, also with the screen read back withheld`() {
+        val text =
+            text(
+                ScreenActed(
+                    call,
+                    null,
+                    tap,
+                    outcome(ActionOutcome.Status.Failed("MARK-A3 余额 1000"), screen("s3", "余额 1000")),
+                ),
+                judged("s3", JudgmentOutcome.WITHHELD, "hard.finance_app"),
+            )
+        assertEquals(
+            listOf(
+                "- [ ] MARK-A3 余额 1000 (failed, screen/action of call-1; " +
+                    "screen s3 withheld by hard.finance_app, not shown to the model)",
+            ),
+            section(PrivacyChecklist.REASONS, text),
+        )
+    }
+
+    @Test
+    fun `the reason of a failed launch is an item, also with the screen read back withheld`() {
+        val launch = LaunchTarget.App("com.example.chat")
+        val text =
+            text(
+                ScreenLaunched(call, launch, outcome(ActionOutcome.Status.Failed("MARK-L1 王五的会话"), screen("s4", "王五"))),
+                judged("s4", JudgmentOutcome.WITHHELD, ScreenJudged.CONFIRM),
+            )
+        assertEquals(
+            listOf(
+                "- [ ] MARK-L1 王五的会话 (failed, screen/launch of call-1; " +
+                    "screen s4 withheld by ${ScreenJudged.CONFIRM}, not shown to the model)",
+            ),
+            section(PrivacyChecklist.REASONS, text),
+        )
+    }
+
+    @Test
+    fun `the reason of a refused launch is an item, also with nothing read back`() {
+        val launch = LaunchTarget.App("com.example.chat")
+        val text = text(ScreenLaunched(call, launch, outcome(ActionOutcome.Status.Refused("MARK-L2 赵六的设置"))))
+        assertEquals(
+            listOf("- [ ] MARK-L2 赵六的设置 (refused, screen/launch of call-1; nothing read back, not shown to the model)"),
+            section(PrivacyChecklist.REASONS, text),
+        )
+    }
+
+    @Test
+    fun `an action done or on a stale ref gives no reason item`() {
+        val stale = ActionOutcome.Status.StaleRef(ActionOutcome.StaleReason.FORGOTTEN)
+        val text =
+            text(ScreenActed(call, null, tap, after(screen("s2", "李四"))), ScreenActed(call, null, tap, outcome(stale)))
+        assertEquals(emptyList<String>(), section(PrivacyChecklist.REASONS, text))
+    }
+
     @Test
     fun `an installed app is an item`() {
         assertItem("Chat (com.example.chat)", text())
@@ -219,7 +309,7 @@ class PrivacyChecklistTest {
     @Test
     fun `a section with nothing in it says so`() {
         val none = ReplaySamples.scenario.copy(device = ReplaySamples.scenario.device.copy(apps = emptyList()))
-        assertEquals(8, text(scenario = none).lines().count { it == "(none)" })
+        assertEquals(9, text(scenario = none).lines().count { it == "(none)" })
     }
 
     @Test
