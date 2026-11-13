@@ -29,14 +29,16 @@ adb 的 TLS 两端都用自签名证书，各自的检查不一样：
    - 唯一的秘密是助手的 launch nonce，只走 `AdbSession.run` 的 stdin。它一次性、有时效，交接成功时就用掉。
    - 命令的输出（自检、诊断）只用来提示用户和排查问题，**不作为任何信任判断的依据**。
 
-3. **信任只在助手交接时建立，由 WP12 负责。** 助手经 Binder 把自己交给 App 时，HandoffGate / HandoffAdmission 依次检查：
-   1. 调用方 uid 必须是 2000（shell），否则拒绝为 `NOT_SHELL`（`HandoffGate.precheck`，`HandoffGateTest` 钉住）；
-   2. 助手自报的 uid/pid 要和调用方一致；
-   3. 口令要有效；
-   4. `identity()` 要指向调用进程；
-   5. 协议版本、versionCode、APK 要和本机安装的一致。
+3. **信任只在助手交接时建立，由 WP12 负责。** 交接入口有两层：
+   - 第一层是 manifest：交接用的 `HelperHandoffProvider` 要求 `INTERACT_ACROSS_USERS_FULL`（`AndroidManifest.xml`，`HelperHandoffProviderTest` 钉住）。shell 持有这个权限，普通 App 拿不到，根本调不进来；
+   - 第二层在代码里：助手经 Binder 把自己交给 App 时，HandoffGate / HandoffAdmission 依次检查：
+     1. 调用方 uid 必须是 2000（shell），否则拒绝为 `NOT_SHELL`（`HandoffGate.precheck`，`HandoffGateTest` 钉住）；
+     2. 助手自报的 uid/pid 要和调用方一致；
+     3. 口令要有效；
+     4. `identity()` 要指向调用进程；
+     5. 协议版本、versionCode、APK 要和本机安装的一致。
 
-   第 1 条是这个信任模型的支点。冒充 adbd 的进程即使拿到了口令，它的 uid 也不是 2000，交接不了。**这一条不能删，也不能放宽。** 改它要先改这份 ADR。
+   第二层的第 1 条是这个信任模型的支点：就算第一层因为 manifest 或 provider 的改动失效了，冒充 adbd 的进程即使拿到了口令，它的 uid 也不是 2000，照样交接不了。**这一条不能删，也不能放宽。** 改它要先改这份 ADR。
 
    这些名字在集成分支 4289f67 上核对过：`HandoffGate.precheck` 在 `privileged/.../handoff/HandoffGate.kt`，`HandoffReject.NOT_SHELL` 在 `HandoffContract.kt`，`HandoffGateTest.precheckRejectsCallersOtherThanShell` 钉住第 1 条。
 
@@ -81,7 +83,7 @@ adb 的 TLS 两端都用自签名证书，各自的检查不一样：
 
 - 本机恶意 App 可以让内置 ADB 拉起失败（拒绝服务），也可以伪造自检输出；用户看到的是交接超时，要按失败处理。
 - 口令一旦送出，就按"已经泄露"对待：一次性、有时效，交接成功时用掉。
-- 下面两种情况发生时，要重新评估这份 ADR：
+- 下面三种情况发生时，要重新评估这份 ADR：
   - WP12 的交接检查改了，尤其是调用方 uid 那一条；
   - adbd 以后提供了能认证服务端的连接方式；
   - 按公钥钉住在重启和撤销授权以后也稳定，并且在真机上复核过（这时再评估按公钥做 TOFU）。
