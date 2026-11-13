@@ -40,8 +40,8 @@ import dev.phoneagent.core.ports.ConfirmCard
 /**
  * The chat with the app's task: the conversation and its steps, the prompt the task waits for
  * (confirmation, question, handoff), what kept the last command from running, and the composer.
- * While the task waits for a question the composer answers it. Stop shows while the run runs or
- * waits; "new task" once the task has no work.
+ * While the task waits for a question the composer answers it. Stop shows while a run is opened,
+ * runs or waits; "new task" once the task has no work.
  */
 @Composable
 internal fun ChatScreen(
@@ -248,7 +248,7 @@ private fun Status(
             view.busy -> Text(stringResource(R.string.chat_working), modifier = Modifier.weight(1f))
             else -> Text("", modifier = Modifier.weight(1f))
         }
-        if (chat?.stoppable == true) {
+        if (view.stoppable) {
             OutlinedButton(onClick = actions::stop, modifier = Modifier.testTag(ChatTags.STOP)) {
                 Text(stringResource(R.string.chat_stop))
             }

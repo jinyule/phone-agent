@@ -61,6 +61,7 @@ class TaskControllerTest {
         cause: StopCause,
     ) {
         assertTrue("opening", tasks.view.value.starting)
+        assertTrue("Stop is offered while opening", tasks.view.value.stoppable)
         tasks.stop(cause)
         gate.complete(Unit)
         runCurrent()

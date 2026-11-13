@@ -96,6 +96,13 @@ internal data class TaskView(
     /** Whether the task has work: a command on its way, a turn open, or a run that runs or waits. */
     val busy: Boolean
         get() = starting || queued > 0 || handed > 0 || chat?.busy == true
+
+    /**
+     * Whether the task can be stopped: a run is being opened (the stop is kept until it is open,
+     * [TaskController.stop]), runs or waits.
+     */
+    val stoppable: Boolean
+        get() = starting || chat?.stoppable == true
 }
 
 /**
