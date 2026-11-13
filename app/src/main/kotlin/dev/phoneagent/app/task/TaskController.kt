@@ -159,6 +159,13 @@ private fun waitingStatus(reason: WaitReason): TaskStatus =
  * a gap in seq, or the task waits for a prompt the view does not know, the view is rebuilt from the
  * log.
  *
+ * Waits for a stop: [newTask], a command sent while a stop takes effect, and a run stopped as it
+ * opens all wait under the lock, with no time limit, until the stopped run is [Phase.Stopped]. This
+ * relies on a stop always getting there in bounded time: the run's work ends when cancelled and
+ * its log's close returns (`AgentLoop.shutDown` then sets the phase in a `finally`). A run that
+ * never gets there keeps the lock: the commands after it wait for good, the task stays busy, and
+ * only ending the process frees it.
+ *
  * Threading: [scope] runs on one thread (the main thread in the app), and every method is called
  * there; the controller's state is touched nowhere else. Runtimes run where [launcher] and the
  * [TaskSession] put them.
