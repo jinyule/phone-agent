@@ -108,6 +108,8 @@ inbox/spliced             added[].parts[].{reasoning}.model                     
 inbox/spliced             added[].parts[].{tool_call}.id                            ToolCallId call
 inbox/spliced             added[].parts[].{tool_result}.id                          ToolCallId call
 
+policy/rules              rulesVersion                                              Int        value
+
 policy/verdict            callId                                                    ToolCallId call
 policy/verdict            intent.target.ref                                         ElementRef kept
 policy/verdict            intent.target.bounds.left                                 Int        value
