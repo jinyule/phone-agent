@@ -756,11 +756,13 @@ screen s12 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · 坐标 0–
   - 进程启动时先等孤儿助手续接 `orphanResumeMs`（默认 5 s），之后还没连上才拉起；
   - 状态变成 NeedsLaunch（助手死了，或被判过期）就拉起，在协程里执行，不在监听者里；
   - 两次拉起的开始时间至少相隔 `minLaunchIntervalMs`（默认 10 s）；失败只记日志，等下一次请求。
+  - 助手交接以后 `earlyExitWindowMs`（默认 30 s）之内就死，算一次早退。连续早退时，拉起间隔按 `earlyExitBackoffMs` 拉长（默认 10 s → 30 s → 2 min）；连续早退达到 `maxEarlyExits`（默认 5 次）就不再自己拉起，每次请求记成 `LaunchOutcome.TooManyEarlyExits`。有助手活过窗口、重新配对、进程重启，计数都清零。
 - 拉起命令和 `scripts/start-helper.sh` 同形，口令只走 stdin。
 - App 读不到 `/proc/sys/net/ipv4/ip_local_port_range`（Android 16 上是 EACCES），扫描时退回 30000..65535，覆盖 Linux 默认的 32768..60999。
 - 已知限制：
   - 缓存状态的 App 进程会被系统冻结（cached apps freezer），冻结期间收不到助手的死亡通知，重新拉起要等进程下次运行；
   - 无线调试从关到开，不会触发拉起。断线恢复里的重新拉起要由设置向导或 TaskService 触发（WP15）。
+  - 到了早退上限以后，只有重新配对、进程重启，或者别的途径拉起的助手活过窗口，才会恢复自动拉起。拉起结果（包括 `TooManyEarlyExits`）现在只进日志，要由 WP15 接到界面上。
 
 ### 7.2 一步执行
 

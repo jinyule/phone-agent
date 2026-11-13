@@ -57,6 +57,15 @@ internal sealed interface LaunchOutcome {
     data class NoHandoff(
         val waitedMs: Long,
     ) : LaunchOutcome
+
+    /**
+     * Automatic launches only: nothing was tried, since each of the last [exits] helpers died within
+     * [LaunchConfig.earlyExitWindowMs] of its handoff. No helper is launched by itself until a
+     * pairing succeeds again, a helper outlives that window, or the process restarts.
+     */
+    data class TooManyEarlyExits(
+        val exits: Int,
+    ) : LaunchOutcome
 }
 
 /**

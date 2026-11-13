@@ -28,11 +28,22 @@ import java.io.IOException
  *   1..[MAX_WAIT_MS].
  * @property minLaunchIntervalMs the least time between the starts of two launches, so a helper that
  *   dies at once is not relaunched in a tight loop, 0..[MAX_WAIT_MS].
+ * @property earlyExitWindowMs a helper that dies within this long after its handoff exited early,
+ *   1..[MAX_WAIT_MS].
+ * @property earlyExitBackoffMs the least time between the starts of two launches after 1, 2, …
+ *   consecutive early exits; the last entry holds for all later ones. Not empty, non-decreasing,
+ *   each [minLaunchIntervalMs]..[MAX_WAIT_MS].
+ * @property maxEarlyExits after this many consecutive early exits no helper is launched by itself
+ *   ([LaunchOutcome.TooManyEarlyExits]) until a pairing succeeds again, a helper outlives
+ *   [earlyExitWindowMs], or the process restarts; 1..[MAX_EARLY_EXITS].
  */
 internal data class LaunchConfig(
     val orphanResumeMs: Long = 5_000,
     val handoffTimeoutMs: Long = 15_000,
     val minLaunchIntervalMs: Long = 10_000,
+    val earlyExitWindowMs: Long = 30_000,
+    val earlyExitBackoffMs: List<Long> = DEFAULT_EARLY_EXIT_BACKOFF_MS,
+    val maxEarlyExits: Int = 5,
 ) {
     init {
         require(orphanResumeMs in 0..MAX_WAIT_MS) { "orphanResumeMs must be 0..$MAX_WAIT_MS, got $orphanResumeMs" }
@@ -42,10 +53,30 @@ internal data class LaunchConfig(
         require(minLaunchIntervalMs in 0..MAX_WAIT_MS) {
             "minLaunchIntervalMs must be 0..$MAX_WAIT_MS, got $minLaunchIntervalMs"
         }
+        require(earlyExitWindowMs in 1..MAX_WAIT_MS) {
+            "earlyExitWindowMs must be 1..$MAX_WAIT_MS, got $earlyExitWindowMs"
+        }
+        require(
+            earlyExitBackoffMs.isNotEmpty() &&
+                earlyExitBackoffMs.all { it in minLaunchIntervalMs..MAX_WAIT_MS } &&
+                earlyExitBackoffMs.zipWithNext().all { (shorter, longer) -> shorter <= longer },
+        ) {
+            "earlyExitBackoffMs must be non-empty, non-decreasing and within " +
+                "$minLaunchIntervalMs..$MAX_WAIT_MS, got $earlyExitBackoffMs"
+        }
+        require(maxEarlyExits in 1..MAX_EARLY_EXITS) {
+            "maxEarlyExits must be 1..$MAX_EARLY_EXITS, got $maxEarlyExits"
+        }
     }
+
+    /** The least time between launch starts after [earlyExits] consecutive early exits. */
+    fun intervalAfter(earlyExits: Int): Long =
+        if (earlyExits == 0) minLaunchIntervalMs else earlyExitBackoffMs[minOf(earlyExits, earlyExitBackoffMs.size) - 1]
 
     companion object {
         const val MAX_WAIT_MS: Long = 120_000
+        const val MAX_EARLY_EXITS: Int = 100
+        val DEFAULT_EARLY_EXIT_BACKOFF_MS: List<Long> = listOf(10_000, 30_000, 120_000)
     }
 }
 
@@ -60,7 +91,13 @@ internal data class LaunchConfig(
  * runs at a time; requests that arrive meanwhile make one more run after it, and a run does nothing
  * when a helper is connected by then. Runs start at least [LaunchConfig.minLaunchIntervalMs] apart
  * (by [clock]). A failed launch is logged and not retried until the next request: a helper state
- * change, or [requestLaunch] (a pairing that succeeded again, [startIfPaired]).
+ * change, or [paired] ([startIfPaired] after a pairing succeeded again).
+ *
+ * A helper that dies within [LaunchConfig.earlyExitWindowMs] of its handoff (by anyone) exited
+ * early. Consecutive early exits stretch the time between launch starts
+ * ([LaunchConfig.earlyExitBackoffMs]), and at [LaunchConfig.maxEarlyExits] no launch is made: each
+ * request is logged as [LaunchOutcome.TooManyEarlyExits] instead. The count starts over when a
+ * helper dies after the window, at [paired], and with the process.
  */
 internal class HelperAutoLaunch(
     private val helper: HelperLauncher.Helper,
@@ -74,9 +111,15 @@ internal class HelperAutoLaunch(
     private var again = false
     private var lastStart: Long? = null
 
+    /** When the helper now connected handed off; null while none is. Guarded by [lock]. */
+    private var handedOffAt: Long? = null
+
+    /** Consecutive early exits. Guarded by [lock]. */
+    private var earlyExits = 0
+
     /** Starts watching; closing the result stops it (a launch already running finishes). */
     fun start(): AutoCloseable {
-        val listening = helper.addListener { state -> if (state is HelperState.NeedsLaunch) requestLaunch() }
+        val listening = helper.addListener(::changed)
         // A helper turned away before the listener was added (it hands off as this process
         // starts) is reported to no one.
         if (helper.state is HelperState.NeedsLaunch) requestLaunch()
@@ -91,11 +134,36 @@ internal class HelperAutoLaunch(
         }
     }
 
+    private fun changed(state: HelperState) {
+        if (state is HelperState.Connected) synchronized(lock) { handedOffAt = clock() }
+        if (state is HelperState.NeedsLaunch) {
+            exited(state.reason)
+            requestLaunch()
+        }
+    }
+
+    /** Counts an early exit of the connected helper, or starts the count over after a later one. */
+    private fun exited(reason: HelperState.LaunchReason) {
+        synchronized(lock) {
+            val since = handedOffAt ?: return
+            handedOffAt = null
+            // A stale helper turned away is not the connected one dying.
+            if (reason != HelperState.LaunchReason.HelperDied) return
+            earlyExits = if (clock() - since < config.earlyExitWindowMs) earlyExits + 1 else 0
+        }
+    }
+
+    /** A pairing succeeded: the early-exit count starts over, and a launch is requested at once. */
+    internal fun paired() {
+        synchronized(lock) { earlyExits = 0 }
+        requestLaunch()
+    }
+
     /**
      * Requests a launch: one runs now, or after the one running, at least
-     * [LaunchConfig.minLaunchIntervalMs] after the previous start; it does nothing when a helper is
-     * connected by then. Never waits; safe to call from any thread, also under the helper client's
-     * lock.
+     * [LaunchConfig.intervalAfter] the early exits so far after the previous start; it does nothing
+     * when a helper is connected by then. Never waits; safe to call from any thread, also under the
+     * helper client's lock.
      */
     internal fun requestLaunch() {
         synchronized(lock) {
@@ -132,7 +200,12 @@ internal class HelperAutoLaunch(
     }
 
     private suspend fun launchUnlessConnected() {
-        lastStart?.let { delay(it + config.minLaunchIntervalMs - clock()) }
+        val exits = synchronized(lock) { earlyExits }
+        if (exits >= config.maxEarlyExits) {
+            Log.w(TAG, "helper launch: ${LaunchOutcome.TooManyEarlyExits(exits)}")
+            return
+        }
+        lastStart?.let { delay(it + config.intervalAfter(exits) - clock()) }
         if (helper.state is HelperState.Connected) return
         lastStart = clock()
         Log.i(TAG, "helper launch: ${launchLogged()}")
@@ -154,7 +227,7 @@ internal class HelperAutoLaunch(
 
         /**
          * When the built-in client is supported and paired: the first call starts automatic launches
-         * in this process, and every later one requests a launch at once ([requestLaunch], so still
+         * in this process, and every later one requests a launch at once ([paired], so still
          * [LaunchConfig.minLaunchIntervalMs] after the previous start). Otherwise does nothing (the
          * developer path stays `scripts/start-helper.sh`). Called at process start and again after
          * a pairing succeeds: the user paired again after NotPaired or Unauthorized, and nothing
@@ -201,14 +274,14 @@ internal class AutoLaunchSlot {
     private var started: HelperAutoLaunch? = null
 
     /**
-     * Starts what [create] makes, the first time, and returns `true`; afterwards requests a launch
-     * from that instance ([HelperAutoLaunch.requestLaunch]) and returns `false`. It runs for the
-     * rest of the process: nothing closes it.
+     * Starts what [create] makes, the first time, and returns `true`; afterwards tells that instance
+     * a pairing succeeded ([HelperAutoLaunch.paired]: a launch is requested at once) and returns
+     * `false`. It runs for the rest of the process: nothing closes it.
      */
     @Synchronized
     fun startOrRequest(create: () -> HelperAutoLaunch): Boolean {
         started?.let {
-            it.requestLaunch()
+            it.paired()
             return false
         }
         started = create().also { it.start() }

@@ -40,6 +40,7 @@
    - 每次真正拉起之前，先看是不是已经连上；
    - 两次拉起的开始时间至少相隔 `minLaunchIntervalMs`（默认 10 s）；
    - 失败只记日志，不自动重试。
+   - 助手交接以后很快就死（`earlyExitWindowMs` 内，默认 30 s）算早退：它每次死都会产生 NeedsLaunch，不加限制就会每 10 s 重拉一次，一直循环下去。连续早退时拉起间隔按 `earlyExitBackoffMs` 拉长（默认 10 s → 30 s → 2 min）；到 `maxEarlyExits`（默认 5 次）就停下，每次请求记成 `LaunchOutcome.TooManyEarlyExits`。有助手活过窗口、重新配对、进程重启，计数都清零。窗口、退避序列、上限都是 `LaunchConfig` 的字段，构造时校验。
 5. **进程启动时先等孤儿助手** `orphanResumeMs`（默认 5 s）：
    - 孤儿助手一看到 App 进程就会交接，失败后依次等 1 s、3 s、10 s 再试（`HelperLifecycle.DEFAULT_RETRY_DELAYS_MS`），所以 5 s 能盖住第 0、1、4 s 的三次尝试；
    - 时间过了还没连上（NotConnected 或 NeedsLaunch），才拉起；
