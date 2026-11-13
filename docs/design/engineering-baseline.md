@@ -134,7 +134,7 @@ core/src/test/resources/sessions/<scenario>/
 - N6 设备相关的值放进 `scenario.json`；
 - N7 恢复 `{{fromRequest:…}}` 模板。
 
-归一化器的锁定测试：模型可见的每一类改动（文字、参数、工具名、结果、两个调用的结果互换、两个不同的 id、header、压缩范围、opaque、图片……）归一化后仍然不同，每种一个测试；交换律（先归一化再 `deriveMessages` 和反过来逐字节相同；在每个 fixture 上，也在 `SessionSamples` 的每个位置上，含压缩、reasoning 截断、图片、side 请求，以及 wire header 里带密钥的 N5）；字段登记表完整。
+归一化器的锁定测试：模型可见的每一类改动（文字、参数、工具名、结果、两个调用的结果互换、两个不同的 id、header、压缩范围、opaque、图片……）归一化后仍然不同，每种一个测试；交换律（先归一化再 `deriveMessages` 和反过来逐字节相同；在每个 fixture 上，也在 `SessionSamples` 的每个位置上，含压缩、reasoning 截断、图片、side 请求，以及 wire header 里带密钥的 N5）；字段登记表完整；会丢值的类别（time、duration、expiry）只有 N1–N3 这四个字段，清单钉死在测试里，再加一个要在这里写理由（没进 fixture 的字段被改成丢值类别，回放也看不出来）。
 
 **现有 fixture 守护的路径**（都是 authored，每个场景的 KDoc 写全它守护什么，见 `AuthoredScenarios`）：
 - `observe-tap`（Anthropic 协议）：读屏，用 `{{fromRequest:…}}` 从屏上取 ref，再点击。

@@ -97,6 +97,25 @@ class NormalizedFieldsTest {
     }
 
     @Test
+    fun `only the two clocks, the retry delay and the approval deadline lose their value`() {
+        // A field the normalizer zeroes or shifts hides a change of it from replay, whether or not a
+        // fixture holds it today; one more here needs a reason in engineering-baseline §3.2.
+        val losing = setOf(FieldClass.TIME, FieldClass.DURATION, FieldClass.EXPIRY)
+        assertEquals(
+            listOf(
+                "approval/asked expiresAt expiry",
+                "envelope time time",
+                "header createdAt time",
+                "request/retry delayMs duration",
+            ),
+            NormalizedFields.entries
+                .filter { it.fieldClass in losing }
+                .map { "${it.scope} ${it.path} ${it.fieldClass.label}" }
+                .sorted(),
+        )
+    }
+
+    @Test
     fun `the walker reaches fields through lists, maps, nullable and sealed members`() {
         val leaves = FieldInventory.of(serializer<WalkerSample>().descriptor).map { "${it.path} ${it.type}" }
         assertEquals(
