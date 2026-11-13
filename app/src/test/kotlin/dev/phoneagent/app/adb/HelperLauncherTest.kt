@@ -39,6 +39,7 @@ class HelperLauncherTest {
         runTest {
             session.onRun = { helper.set(FakeHelperPort.connected(pid = 777)) }
             assertEquals(LaunchOutcome.Launched(777, PortSource.MDNS), launcher().launch())
+            assertEquals(listOf(LaunchOutcome.Launched(777, PortSource.MDNS)), session.ended)
             val (ran, stdin) = session.runs.single()
             assertEquals(command, ran)
             assertArrayEquals(HelperLaunchCommand.stdin(FakeHelperPort.NONCE.dropLast(1) + "1"), stdin)
@@ -63,6 +64,7 @@ class HelperLauncherTest {
     fun `no handoff within the wait is NoHandoff, and the session is closed`() =
         runTest {
             assertEquals(LaunchOutcome.NoHandoff(HANDOFF_MS), launcher().launch())
+            assertEquals(listOf(LaunchOutcome.NoHandoff(HANDOFF_MS)), session.ended)
             assertEquals(HANDOFF_MS, testScheduler.currentTime)
             assertTrue(session.closed)
             assertTrue(helper.listeners.isEmpty())
@@ -111,6 +113,7 @@ class HelperLauncherTest {
                 session
             }
             assertEquals(LaunchOutcome.AlreadyConnected, launcher().launch())
+            assertEquals(listOf(LaunchOutcome.AlreadyConnected), session.ended)
             assertEquals(0, helper.nonces)
             assertTrue(session.runs.isEmpty())
             assertTrue(session.closed)
@@ -121,6 +124,7 @@ class HelperLauncherTest {
         runTest {
             helper.nonceRefusal = "the boot count is unknown"
             assertEquals(LaunchOutcome.NoNonce("the boot count is unknown"), launcher().launch())
+            assertEquals(listOf(LaunchOutcome.NoNonce("the boot count is unknown")), session.ended)
             assertTrue(session.runs.isEmpty())
             assertTrue(session.closed)
             assertTrue(helper.listeners.isEmpty())
@@ -132,8 +136,10 @@ class HelperLauncherTest {
             val failures =
                 listOf(CommandResult.Completed(1, "", "denied"), CommandResult.Failed(CommandFailure.CLOSED, "eof"))
             for (result in failures) {
-                adb.connection = { FakeSession(result = result) }
+                val failing = FakeSession(result = result)
+                adb.connection = { failing }
                 assertEquals(LaunchOutcome.CommandFailed(result), launcher().launch())
+                assertEquals(listOf(LaunchOutcome.CommandFailed(result)), failing.ended)
             }
             adb.connection =
                 {

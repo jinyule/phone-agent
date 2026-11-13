@@ -5,8 +5,8 @@
  * Copyright 2026 wangzan101. Licensed under the Apache License, Version 2.0.
  *
  * Modified by PhoneAgent contributors: English documentation; written against PhoneAgent's core.adb;
- * the scan covers loopback only; the pairing record is dropped on UNAUTHORIZED; no SystemProperties
- * port lookup and no manual port.
+ * the scan covers loopback only; UNAUTHORIZED is recorded but keeps the pairing; the port is cached
+ * only after a handoff; no SystemProperties port lookup and no manual port.
  */
 package dev.phoneagent.app.adb
 
@@ -42,8 +42,10 @@ import java.io.IOException
  * sealed in app-private storage, the pairing record and the port cache in [record], mDNS through
  * [finder], and the local scan on loopback only (the trust model, ADR 2026-11-03-adb-trust-model).
  * [search] uses `AdbConnectPort`, which already tries an UNAUTHORIZED endpoint a second time; one
- * that is still UNAUTHORIZED drops the pairing record, so nothing launches again until the user
- * pairs anew. Needs Android 12, for [ConscryptKeyExporter].
+ * that is still UNAUTHORIZED is recorded ([lastRefused]) and forgets the cached port, but keeps the
+ * pairing: anything on this device can answer so. A launch on a connection caches its port only
+ * when a helper handed off ([AdbPairingRecord.connectionEnded]). Needs Android 12, for
+ * [ConscryptKeyExporter].
  */
 @RequiresApi(Build.VERSION_CODES.S)
 internal class BuiltinAdb(
@@ -59,6 +61,9 @@ internal class BuiltinAdb(
     private var identity: AdbIdentity? = null
 
     override val isPaired: Boolean get() = record.isPaired
+
+    /** Whether adbd refused our key in a search, and no launch connected and no pairing succeeded since. */
+    val lastRefused: Boolean get() = record.lastRefused
 
     /** Whether wireless debugging is on; null when this app cannot read the setting. */
     override fun wirelessDebuggingOn(): Boolean? = wirelessDebugging()
@@ -89,24 +94,31 @@ internal class BuiltinAdb(
         code: PairingCode,
     ): PairingResult = client().pair(AdbEndpoint(PortSearchConfig.LOOPBACK, port), code).also(record::pairingEnded)
 
-    /** Connects to this device's adbd: cached port, mDNS, then the loopback scan. */
+    /**
+     * Connects to this device's adbd: cached port, mDNS, then the loopback scan. Caches nothing:
+     * only a launch that hands off does ([connect]).
+     */
     suspend fun search(): PortSearchResult =
-        AdbConnectPort(client(), record, finder, scan()).connect().also(record::searchEnded)
+        AdbConnectPort(client(), record.portCache, finder, scan()).connect().also(record::searchEnded)
 
     override suspend fun connect(): HelperLauncher.Connection =
         when (val search = search()) {
-            is PortSearchResult.Connected -> OpenSession(search.session, search.source)
+            is PortSearchResult.Connected -> OpenSession(search.session, search.source, search.endpoint.port, record)
             is PortSearchResult.Failed -> HelperLauncher.Connection.Failed(search)
         }
 
     private class OpenSession(
         private val session: AdbSession,
         override val source: PortSource,
+        private val port: Int,
+        private val record: AdbPairingRecord,
     ) : HelperLauncher.Connection.Open {
         override suspend fun run(
             command: AdbCommand,
             stdin: ByteArray,
         ): CommandResult = session.run(command, stdin)
+
+        override fun ended(outcome: LaunchOutcome) = record.connectionEnded(port, outcome)
 
         override fun close() = session.close()
     }

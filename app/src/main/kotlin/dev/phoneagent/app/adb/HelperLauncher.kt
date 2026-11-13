@@ -29,13 +29,17 @@ internal sealed interface LaunchOutcome {
     /** A helper was already connected when the launch was about to start: nothing was done. */
     data object AlreadyConnected : LaunchOutcome
 
-    /** No pairing on record (never paired, a new identity, or adbd refused the key): the user must pair. */
+    /** No pairing on record (never paired, or a new identity): the user must pair. */
     data object NotPaired : LaunchOutcome
 
     /** Wireless debugging is off; nothing was tried. */
     data object WirelessDebuggingOff : LaunchOutcome
 
-    /** adbd refused our key twice on the same endpoint (probably unpaired): the user must pair again. */
+    /**
+     * adbd refused our key twice on the same endpoint: the device forgot the pairing, or something
+     * on this device posing as adbd answered first. The pairing is kept and the next request tries
+     * again; when this persists, the user has to pair again.
+     */
     data object Unauthorized : LaunchOutcome
 
     /** No adbd answered: [search] says what was tried. */
@@ -103,6 +107,9 @@ internal class HelperLauncher(
                 command: AdbCommand,
                 stdin: ByteArray,
             ): CommandResult
+
+            /** How the launch on this session ended; called once, before [close]. */
+            fun ended(outcome: LaunchOutcome)
         }
 
         /** No adbd took us: [search] says what was tried. */
@@ -135,7 +142,7 @@ internal class HelperLauncher(
             }
         if (refusal != null) return refusal
         return when (val connection = adb.connect()) {
-            is Connection.Open -> connection.use { run(it) }
+            is Connection.Open -> connection.use { run(it).also(it::ended) }
             is Connection.Failed -> failed(connection.search)
         }
     }

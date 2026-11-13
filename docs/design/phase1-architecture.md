@@ -742,7 +742,7 @@ screen s12 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · 坐标 0–
 - **扫描只传回环地址** `127.0.0.1`：adbd 监听所有地址（AOSP `adb_wifi.cpp`），回环一定能连上，探测也不会发到局域网上。
 - **UNAUTHORIZED 是"可能未授权"**：TLS 握手刚完成时对端断开，和 adbd 拒绝我们的密钥分不清。所以：
   - 对同一个端点先重试一次（`AdbConnectPort` 已经这样做）；
-  - 仍然是 UNAUTHORIZED，才请用户重新配对。
+  - 仍然是 UNAUTHORIZED，才报 `Unauthorized`。本机进程也能这样回答，所以只记下"上次被拒"，配对保留；持续被拒时才请用户重新配对（`docs/adr/2026-11-03-adb-trust-model.md`）。
 
   我们自己的 TLS 栈按类型认出的错误（例如 bad_record_mac）算 TLS，不算 UNAUTHORIZED。对端发来的 alert 不在此列，但有时类型也是 `SSLProtocolException`，只能靠消息认出来：
   - Android 上 Conscrypt 收到任何 alert 都报成 `SSLProtocolException`（实测未配对的 key 收到 `SSLV3_ALERT_CERTIFICATE_UNKNOWN`）。认法是 BoringSSL 的原因：`SSLV3_*` / `TLSV1_*`（Android 12 起都是 `SSLV3_ALERT_*` / `TLSV1_ALERT_*`；Android 11 的表里 1110–1116 没有 `ALERT_`，例如 `TLSV1_CERTIFICATE_REQUIRED`），名字表里没有的写成 `SSL routines:OPENSSL_internal:reason(1NNN)`（例如 missing_extension 是 `reason(1109)`）。BoringSSL 自己的原因没有以这两个前缀开头的。不按原因码的数值判断：BoringSSL 自己的原因也有 1000 以上的（1122 `PAKE_AND_KEY_SHARE_NOT_ALLOWED`）。
@@ -751,7 +751,7 @@ screen s12 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · 坐标 0–
 **App 侧接线**（`app.adb`，取舍见 `docs/adr/2026-11-03-builtin-adb-app-wiring.md`）：
 - 需要 Android 12（API 31）：配对要用的 TLS exporter 只有 `SSLSockets.exportKeyingMaterial`，从 API 31 才有。Android 11 走兜底（Shizuku / USB 脚本）。
 - 身份私钥用 AndroidKeyStore 里的 AES-256-GCM 密钥封存，放在 `noBackupFilesDir`。封存密钥丢了（例如清除凭据），就换新身份，要求重新配对。
-- 配对记录和上次成功的端口放在 SharedPreferences 里。新身份、或者两次 UNAUTHORIZED，都会清掉配对记录；在用户重新配对之前，不再自动拉起。重新配对成功以后，本进程立即请求一次拉起（`HelperAutoLaunch.startIfPaired`，仍受最小间隔约束），不用等进程重启。
+- 配对记录、"上次被拒"和端口缓存放在 SharedPreferences 里。新身份会清掉配对记录，在用户重新配对之前不再自动拉起；两次 UNAUTHORIZED 只记下"上次被拒"，配对保留，下一次请求照样去连。端口缓存只在交接成功以后写，`Unauthorized`、`NoHandoff`、`CommandFailed` 都会清掉它，下一次搜索回到 mDNS 和扫描。重新配对成功以后，本进程立即请求一次拉起（`HelperAutoLaunch.startIfPaired`，仍受最小间隔约束），不用等进程重启。
 - 自动拉起（`HelperAutoLaunch`，只在已配对时开启）：
   - 进程启动时先等孤儿助手续接 `orphanResumeMs`（默认 5 s），之后还没连上才拉起；
   - 状态变成 NeedsLaunch（助手死了，或被判过期）就拉起，在协程里执行，不在监听者里；

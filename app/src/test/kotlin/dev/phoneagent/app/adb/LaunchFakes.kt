@@ -60,6 +60,9 @@ internal class FakeSession(
     val runs = mutableListOf<Pair<AdbCommand, ByteArray>>()
     var closed = false
 
+    /** What [ended] was told, in order. */
+    val ended = mutableListOf<LaunchOutcome>()
+
     override suspend fun run(
         command: AdbCommand,
         stdin: ByteArray,
@@ -68,6 +71,11 @@ internal class FakeSession(
         runs += command to stdin
         onRun()
         return result
+    }
+
+    override fun ended(outcome: LaunchOutcome) {
+        check(!closed) { "ended after close" }
+        ended += outcome
     }
 
     override fun close() {

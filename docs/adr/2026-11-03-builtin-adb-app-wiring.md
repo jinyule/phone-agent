@@ -29,11 +29,12 @@
    - 封存失败时 `write` 抛 IOException，旧文件不动；自动拉起记一笔日志，等下一次请求再试。
    - 没有写进文件也抛 IOException：`AtomicFile.finishWrite` 对同步、关闭、改名的失败只打日志，所以写完要读回来比对。否则下一个进程读到的是旧文件或者没有文件，会悄悄换掉身份。
    - Keystore 自己内部的失败是非检查型的 `ProviderException`，和检查型的 `GeneralSecurityException` 一样处理（凭据存储的 `KeystoreCipher` 也是这样）。
-3. **配对记录和端口缓存放在 SharedPreferences 里，用 `apply` 写**（`AdbPairingRecord`）。下面几种情况会清掉配对记录：
-   - 新建或替换了身份；
-   - 搜索以 UNAUTHORIZED 结束（`AdbConnectPort` 已经对同一个端点试过两次）。
+3. **配对记录、"上次被拒"和端口缓存放在 SharedPreferences 里，用 `apply` 写**（`AdbPairingRecord`）。本机任何进程都能冒充 adbd（`docs/adr/2026-11-03-adb-trust-model.md`），所以它能给出的结果都不当成定论：
+   - 新建或替换了身份，清掉配对记录。清掉以后不再自动拉起，直到用户重新配对；
+   - 搜索以 UNAUTHORIZED 结束（`AdbConnectPort` 已经对同一个端点试过两次）：配对记录保留，只记下"上次被拒"（`lastRefused`），拉起报 `Unauthorized`，下一次请求照样去连（受 `minLaunchIntervalMs` 约束）。配对成功、或者以后有一次拉起连上了，"上次被拒"就清掉；
+   - 端口缓存只在交接成功（`Launched`）以后写，`AdbConnectPort` 连上时自己的写入被丢掉（`portCache`）。`Unauthorized`、`NoHandoff`、`CommandFailed` 都清掉缓存，下一次搜索回到 mDNS 和扫描；`AlreadyConnected`、`NoNonce` 不动它。
 
-   清掉以后不再自动拉起，直到用户重新配对。重新配对成功以后，本进程立即请求一次拉起（`startIfPaired` 第二次调用时转给 `requestLaunch`，仍受 `minLaunchIntervalMs` 约束），不用等进程重启。写丢了只有两种代价：下次搜索多花点时间，或者多要一次配对。
+   重新配对成功以后，本进程立即请求一次拉起（`startIfPaired` 第二次调用时转给 `requestLaunch`，仍受 `minLaunchIntervalMs` 约束），不用等进程重启。写丢了的代价只有这些：下次搜索多花点时间，多要一次配对，或者"上次被拒"晚一次才准。
 4. **自动拉起是异步的，不改 WP12。** `HelperAutoLaunch` 挂在 HelperClient 上，作为一个普通监听者，`onLaunchNeeded` 保持原样：
    - 监听者和启动检查只负责发请求，拉起在协程里执行；
    - 同一时间只跑一次拉起，期间来的请求合并成之后再跑一次；
