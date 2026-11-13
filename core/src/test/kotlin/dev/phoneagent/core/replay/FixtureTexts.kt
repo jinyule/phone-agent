@@ -17,9 +17,12 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
+import kotlin.io.path.exists
 import kotlin.io.path.isDirectory
 import kotlin.io.path.isRegularFile
 import kotlin.io.path.name
@@ -187,13 +190,16 @@ object FixtureTexts {
     private val BLOB_FIELD = Regex(""""blob":"([0-9a-f]{64})"""")
 
     /**
-     * Deletes the fixture files in [dir]. Every entry is checked before anything is deleted, links
-     * not followed: at the top only the files a fixture holds ([ReplayFiles.KNOWN]), each a regular
-     * file and `blobs/` a directory; in `blobs/` only regular files named as blobs
-     * ([ReplayFiles.BLOB_NAME]). Anything else fails with [IllegalArgumentException], deleting
-     * nothing.
+     * The entries of the fixture in [dir], parents first, every one checked, links not followed: at
+     * the top only the files a fixture holds ([ReplayFiles.KNOWN]), each a regular file and `blobs/`
+     * a directory; in `blobs/` only regular files named as blobs ([ReplayFiles.BLOB_NAME]).
+     * Anything else fails with [IllegalArgumentException], the message [refused] gives for the
+     * entries at fault.
      */
-    private fun clear(dir: Path) {
+    private fun entries(
+        dir: Path,
+        refused: (List<String>) -> String,
+    ): List<Path> {
         val entries = Files.list(dir).use { it.toList() }
         val blobs =
             entries
@@ -213,11 +219,16 @@ object FixtureTexts {
                         LinkOption.NOFOLLOW_LINKS,
                     ) && ReplayFiles.BLOB_NAME.matches(it.name)
                 }
-        require(stray.isEmpty()) {
-            "$dir holds ${stray.map { dir.relativize(it).toString() }.sorted()}: not a fixture directory, left alone"
-        }
-        blobs.forEach(Files::delete)
-        entries.forEach(Files::delete)
+        require(stray.isEmpty()) { refused(stray.map { dir.relativize(it).toString() }.sorted()) }
+        return entries + blobs
+    }
+
+    /**
+     * Deletes the fixture files in [dir]. Every entry is checked ([entries]) before anything is
+     * deleted; anything else fails with [IllegalArgumentException], deleting nothing.
+     */
+    private fun clear(dir: Path) {
+        entries(dir) { "$dir holds $it: not a fixture directory, left alone" }.asReversed().forEach(Files::delete)
     }
 
     /**
@@ -252,21 +263,113 @@ object FixtureTexts {
     }
 
     /**
-     * Replaces the fixture in [dir] with the one [staged] holds, byte for byte. [staged] must load
-     * as a fixture ([ReplayFiles.load]) before [dir] is touched; [dir] is then cleared as [write]
-     * clears it, and each file copied.
+     * Replaces the fixture in [dir] with the one [staged] holds, byte for byte, or fails leaving
+     * [dir] byte for byte as it was. Before anything is written, [staged] must load as a fixture
+     * ([ReplayFiles.load]) and hold nothing but fixture files ([entries]: no link, no other file
+     * type), and [dir], when it exists, nothing else either. [staged] is then copied with [copy]
+     * into a sibling of [dir] (`.<name>.installing-<random>`) and each copy compared with its
+     * source; only then is [dir] moved aside into that sibling and the copy moved into its place,
+     * with [move], and the sibling deleted. A failure puts the old fixture back if it was moved
+     * aside and deletes the sibling, except when putting it back failed too: the sibling then holds
+     * the old fixture, and the failure says where. [copy] and [move] are replaceable so a test can
+     * fail one.
      */
     fun install(
         staged: Path,
         dir: Path,
+        copy: (Path, Path) -> Unit = { from, to -> Files.copy(from, to, LinkOption.NOFOLLOW_LINKS) },
+        move: (Path, Path) -> Unit = { from, to -> Files.move(from, to, StandardCopyOption.ATOMIC_MOVE) },
     ) {
         ReplayFiles.load(staged)
-        if (dir.isDirectory()) clear(dir)
-        Files.createDirectories(dir)
-        val paths = Files.walk(staged).use { it.toList() }
-        for (from in paths.drop(1)) {
-            val to = dir.resolve(staged.relativize(from).toString())
-            if (from.isDirectory()) Files.createDirectory(to) else Files.copy(from, to)
+        val incoming = entries(staged) { "$staged holds $it: not a fixture, not installed, $dir left alone" }
+        val replacing = dir.exists(LinkOption.NOFOLLOW_LINKS)
+        if (replacing) entries(dir) { "$dir holds $it: not a fixture directory, left alone" }
+        val parent = Files.createDirectories(dir.toAbsolutePath().parent)
+        val work = Files.createTempDirectory(parent, ".${dir.name}.installing-")
+        val replaced = work.resolve(REPLACED).takeIf { replacing }
+        try {
+            swapIn(copyChecked(staged, incoming, work.resolve(COPIED), copy), dir, replaced, move)
+        } finally {
+            // The sibling is kept only when it holds the old fixture, which then is not in place.
+            val keep =
+                replaced != null && replaced.exists(LinkOption.NOFOLLOW_LINKS) && !dir.exists(LinkOption.NOFOLLOW_LINKS)
+            if (!keep) deleteTree(work)
         }
     }
+
+    /**
+     * Copies [entries] of [staged] into [into] (created) with [copy], then checks each copy is of
+     * its source's type, a file holding its bytes. Returns [into].
+     */
+    private fun copyChecked(
+        staged: Path,
+        entries: List<Path>,
+        into: Path,
+        copy: (Path, Path) -> Unit,
+    ): Path {
+        Files.createDirectory(into)
+        val pairs = entries.map { it to into.resolve(staged.relativize(it).toString()) }
+        for ((from, to) in pairs) {
+            if (from.isDirectory(LinkOption.NOFOLLOW_LINKS)) Files.createDirectory(to) else copy(from, to)
+        }
+        for ((from, to) in pairs) {
+            val same =
+                if (from.isDirectory(LinkOption.NOFOLLOW_LINKS)) {
+                    to.isDirectory(LinkOption.NOFOLLOW_LINKS)
+                } else {
+                    to.isRegularFile(LinkOption.NOFOLLOW_LINKS) && Files.mismatch(from, to) == -1L
+                }
+            check(same) { "the copy of $from in $into is not the same: not installed" }
+        }
+        return into
+    }
+
+    /**
+     * Moves [dir] to [replaced] when it exists (`null` when it does not), then [copied] to [dir];
+     * when the second move fails, moves [replaced] back.
+     */
+    private fun swapIn(
+        copied: Path,
+        dir: Path,
+        replaced: Path?,
+        move: (Path, Path) -> Unit,
+    ) {
+        if (replaced != null) move(dir, replaced)
+        try {
+            move(copied, dir)
+        } catch (failed: IOException) {
+            // The old fixture goes back before the failure is reported; if that fails too, the caller keeps it.
+            if (replaced != null) restore(replaced, dir, failed, move)
+            throw failed
+        }
+    }
+
+    private fun restore(
+        replaced: Path,
+        dir: Path,
+        failed: IOException,
+        move: (Path, Path) -> Unit,
+    ) {
+        try {
+            move(replaced, dir)
+        } catch (restoring: IOException) {
+            // Reported with the first failure: the old fixture is left in [replaced], not deleted.
+            failed.addSuppressed(IOException("the old fixture of $dir is left in $replaced", restoring))
+        }
+    }
+
+    /** Deletes [root] and everything under it, links not followed (a link is deleted, not what it points to). */
+    private fun deleteTree(root: Path) {
+        Files
+            .walk(root)
+            .use { walk -> walk.toList() }
+            .asReversed()
+            .forEach(Files::delete)
+    }
 }
+
+/** Where [FixtureTexts.install] copies the staged fixture, in its sibling of the fixture directory. */
+private const val COPIED = "copied"
+
+/** Where [FixtureTexts.install] moves the fixture it replaces, in the same sibling. */
+private const val REPLACED = "replaced"
