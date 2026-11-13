@@ -99,11 +99,13 @@ internal data class TaskView(
         get() = starting || queued > 0 || handed > 0 || chat?.busy == true
 
     /**
-     * Whether the task can be stopped: a command waits to be handed (a stop drops it), a run is
-     * being opened (the stop is kept until it is open, [TaskController.stop]), runs or waits.
+     * Whether the task can be stopped: a command waits to be handed or waits in the run's inbox
+     * (a stop drops it), a run is being opened (the stop is kept until it is open,
+     * [TaskController.stop]), runs or waits. So a task told as working ([status]) can be stopped,
+     * unless only its log has a turn open.
      */
     val stoppable: Boolean
-        get() = starting || queued > 0 || chat?.stoppable == true
+        get() = starting || queued > 0 || handed > 0 || chat?.stoppable == true
 
     /** What the task is doing; the chat's status row and the task's notification both say this. */
     val status: TaskStatus

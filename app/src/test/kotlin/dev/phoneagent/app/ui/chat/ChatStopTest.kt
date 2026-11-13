@@ -22,6 +22,7 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestCoroutineScheduler
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -29,6 +30,8 @@ import org.junit.runner.RunWith
 /**
  * The chat's Stop while a run is opened (the task's first one, or the next one after a stop): it
  * shows, and a tap is the stop the task keeps until the run is open, which then takes no command.
+ * And while a command is handed to a run that has not taken it into a turn: the chat says the task
+ * works, Stop shows, and a tap stops the run.
  */
 @RunWith(AndroidJUnit4::class)
 class ChatStopTest {
@@ -66,6 +69,30 @@ class ChatStopTest {
     private fun stop() = compose.onNodeWithTag(ChatTags.STOP)
 
     private fun newTask() = compose.onNodeWithText(context.getString(R.string.chat_new_task))
+
+    @Test
+    fun stopShowsWhileAHandedCommandWaitsForTheRunToTakeItAndATapStopsTheRun() {
+        startGate.complete(Unit)
+        showChat()
+        chat.send("open settings")
+        settle()
+        assertEquals(listOf("open settings"), task.run.followups)
+        assertEquals(Phase.Idle, task.run.phase.value)
+        val view = tasks.view.value
+        assertEquals(1, view.handed)
+        assertEquals(0, view.queued)
+        assertFalse(view.starting)
+        compose.onNodeWithText(context.getString(R.string.chat_working)).assertExists()
+
+        stop().performClick()
+        settle()
+        assertEquals(listOf(StopCause.USER), task.run.stops)
+
+        task.run.phase.value = Phase.Stopped(StopCause.USER)
+        settle()
+        stop().assertDoesNotExist()
+        newTask().assertExists()
+    }
 
     @Test
     fun stopShowsWhileTheTaskIsCreatedAndATapStopsItsFirstRunBeforeItTakesTheCommand() {
