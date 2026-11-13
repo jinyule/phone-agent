@@ -59,7 +59,8 @@ internal data class LaunchConfig(
  * waits for a handoff, which needs that lock. Requests only start a coroutine in [scope]. One launch
  * runs at a time; requests that arrive meanwhile make one more run after it, and a run does nothing
  * when a helper is connected by then. Runs start at least [LaunchConfig.minLaunchIntervalMs] apart
- * (by [clock]). A failed launch is logged and not retried until the next request.
+ * (by [clock]). A failed launch is logged and not retried until the next request: a helper state
+ * change, or [requestLaunch] (a pairing that succeeded again, [startIfPaired]).
  */
 internal class HelperAutoLaunch(
     private val helper: HelperLauncher.Helper,
@@ -75,14 +76,14 @@ internal class HelperAutoLaunch(
 
     /** Starts watching; closing the result stops it (a launch already running finishes). */
     fun start(): AutoCloseable {
-        val listening = helper.addListener { state -> if (state is HelperState.NeedsLaunch) request() }
+        val listening = helper.addListener { state -> if (state is HelperState.NeedsLaunch) requestLaunch() }
         // A helper turned away before the listener was added (it hands off as this process
         // starts) is reported to no one.
-        if (helper.state is HelperState.NeedsLaunch) request()
+        if (helper.state is HelperState.NeedsLaunch) requestLaunch()
         val startup =
             scope.launch {
                 delay(config.orphanResumeMs)
-                if (helper.state !is HelperState.Connected) request()
+                if (helper.state !is HelperState.Connected) requestLaunch()
             }
         return AutoCloseable {
             listening.close()
@@ -90,7 +91,13 @@ internal class HelperAutoLaunch(
         }
     }
 
-    private fun request() {
+    /**
+     * Requests a launch: one runs now, or after the one running, at least
+     * [LaunchConfig.minLaunchIntervalMs] after the previous start; it does nothing when a helper is
+     * connected by then. Never waits; safe to call from any thread, also under the helper client's
+     * lock.
+     */
+    internal fun requestLaunch() {
         synchronized(lock) {
             if (running) {
                 again = true
@@ -143,23 +150,22 @@ internal class HelperAutoLaunch(
     companion object {
         private const val TAG = "PhoneAgentHelperLaunch"
 
-        @Volatile
-        private var started: AutoCloseable? = null
+        private val slot = AutoLaunchSlot()
 
         /**
-         * Starts automatic launches in this process, once, when the built-in client is supported and
-         * paired; otherwise does nothing (the developer path stays `scripts/start-helper.sh`). Called
-         * at process start and again after a pairing succeeds.
+         * When the built-in client is supported and paired: the first call starts automatic launches
+         * in this process, and every later one requests a launch at once ([requestLaunch], so still
+         * [LaunchConfig.minLaunchIntervalMs] after the previous start). Otherwise does nothing (the
+         * developer path stays `scripts/start-helper.sh`). Called at process start and again after
+         * a pairing succeeds: the user paired again after NotPaired or Unauthorized, and nothing
+         * else would request the launch, since the helper state does not change.
          */
         fun startIfPaired(context: Context) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
             val adb = BuiltinAdb.of(context)
             if (!adb.isPaired) return
-            synchronized(this) {
-                if (started == null) {
-                    started = create(context.applicationContext, adb).start()
-                    Log.i(TAG, "automatic helper launches on")
-                }
+            if (slot.startOrRequest { create(context.applicationContext, adb) }) {
+                Log.i(TAG, "automatic helper launches on")
             }
         }
 
@@ -187,5 +193,25 @@ internal class HelperAutoLaunch(
 
                 override fun issueLaunchNonce(): String = client.issueLaunchNonce()
             }
+    }
+}
+
+/** Holds the process's one [HelperAutoLaunch]; [startOrRequest] makes and starts it on first use. */
+internal class AutoLaunchSlot {
+    private var started: HelperAutoLaunch? = null
+
+    /**
+     * Starts what [create] makes, the first time, and returns `true`; afterwards requests a launch
+     * from that instance ([HelperAutoLaunch.requestLaunch]) and returns `false`. It runs for the
+     * rest of the process: nothing closes it.
+     */
+    @Synchronized
+    fun startOrRequest(create: () -> HelperAutoLaunch): Boolean {
+        started?.let {
+            it.requestLaunch()
+            return false
+        }
+        started = create().also { it.start() }
+        return true
     }
 }

@@ -16,6 +16,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -38,6 +39,9 @@ class HelperAutoLaunchTest {
     private var launchedInListener = false
     private var failNext: Exception? = null
 
+    /** What the next launches return, in order; then NoHandoff. */
+    private val outcomes = ArrayDeque<LaunchOutcome>()
+
     private fun TestScope.autoLaunch(
         helper: FakeHelperPort,
         config: LaunchConfig = lateStartup,
@@ -52,7 +56,7 @@ class HelperAutoLaunchTest {
                 failNext = null
                 throw it
             }
-            LaunchOutcome.NoHandoff(launchMs)
+            outcomes.removeFirstOrNull() ?: LaunchOutcome.NoHandoff(launchMs)
         }
         return HelperAutoLaunch(helper, launch, scope, config) { testScheduler.currentTime }
     }
@@ -186,6 +190,53 @@ class HelperAutoLaunchTest {
             helper.needsLaunch()
             advanceTimeBy(2 * INTERVAL_MS)
             assertEquals(listOf(0L, next), starts)
+        }
+
+    /**
+     * After [refusal] the helper state stays NeedsLaunch, so only the second [AutoLaunchSlot] call
+     * (startIfPaired after the user paired again) asks for the next launch.
+     */
+    private fun TestScope.pairingAgainAfter(refusal: LaunchOutcome) {
+        val helper = FakeHelperPort()
+        val slot = AutoLaunchSlot()
+        var made = 0
+        assertTrue(
+            slot.startOrRequest {
+                made++
+                autoLaunch(helper)
+            },
+        )
+        outcomes += refusal
+        helper.needsLaunch()
+        advanceTimeBy(2_000)
+        assertEquals(listOf(0L), starts)
+        assertFalse(slot.startOrRequest { error("a second instance") })
+        advanceTimeBy(INTERVAL_MS - 2_000)
+        assertEquals(listOf(0L), starts)
+        runCurrent()
+        assertEquals(listOf(0L, INTERVAL_MS), starts)
+        advanceTimeBy(5 * INTERVAL_MS)
+        assertEquals(listOf(0L, INTERVAL_MS), starts)
+        assertEquals(1, made)
+    }
+
+    @Test
+    fun `pairing again after NotPaired launches once more, the interval after the first`() =
+        runTest { pairingAgainAfter(LaunchOutcome.NotPaired) }
+
+    @Test
+    fun `pairing again after Unauthorized launches once more, the interval after the first`() =
+        runTest { pairingAgainAfter(LaunchOutcome.Unauthorized) }
+
+    @Test
+    fun `without pairing again nothing follows a refused launch`() =
+        runTest {
+            val helper = FakeHelperPort()
+            AutoLaunchSlot().startOrRequest { autoLaunch(helper) }
+            outcomes += LaunchOutcome.Unauthorized
+            helper.needsLaunch()
+            advanceTimeBy(5 * INTERVAL_MS)
+            assertEquals(listOf(0L), starts)
         }
 
     @Test
