@@ -147,6 +147,9 @@ internal class FakeTask(
     val runs = mutableListOf(FakeRuntime())
     var gate: CompletableDeferred<Unit>? = null
 
+    /** Holds read number n (from 1) until completed, instead of [gate]. */
+    val readGates = mutableMapOf<Int, CompletableDeferred<Unit>>()
+
     /** Holds [resume] until completed. */
     var resumeGate: CompletableDeferred<Unit>? = null
     var readFailure: Exception? = null
@@ -165,7 +168,7 @@ internal class FakeTask(
     override suspend fun log(): SessionLog {
         reads++
         val seen = log.toList()
-        gate?.await()
+        (readGates[reads] ?: gate)?.await()
         readFailure?.let { throw it }
         return SessionLog(SessionHeader(SessionFormat.FORMAT_ID, SessionFormat.CURRENT_VERSION, SESSION, TASK, 0), seen)
     }

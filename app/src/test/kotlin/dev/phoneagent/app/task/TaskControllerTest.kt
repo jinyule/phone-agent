@@ -402,6 +402,100 @@ class TaskControllerTest {
         }
 
     @Test
+    fun anOlderLogReadEndingLastDoesNotTakeBackANewerPrompt() =
+        runTest {
+            val tasks = controller()
+            val slow = CompletableDeferred<Unit>()
+            task.readGates[2] = slow
+            tasks.send("a")
+            runCurrent()
+            task.append(TurnStarted(1), silently = true)
+            task.append(command("a"))
+            runCurrent()
+            assertEquals("the gap starts a read that ends at seq 3", 2, task.reads)
+
+            val card = ConfirmCard(ToolCallId("call-1"), ConfirmReason.SPEND, "pay")
+            task.append(ApprovalAsked(prompt, card, 1000), silently = true)
+            task.run.phase.value = Phase.Waiting(WaitReason.USER, prompt)
+            runCurrent()
+            assertEquals(
+                PendingPrompt.Confirm(prompt, card),
+                tasks.view.value.chat
+                    ?.waitingFor,
+            )
+
+            slow.complete(Unit)
+            runCurrent()
+            assertEquals(
+                "still answerable",
+                PendingPrompt.Confirm(prompt, card),
+                tasks.view.value.chat
+                    ?.waitingFor,
+            )
+            assertEquals(ChatState.of(task.log, task.run.phase.value), tasks.view.value.chat)
+        }
+
+    @Test
+    fun overlappingReadsThatBothHeardRecordsEndInTheWholeLogWhicheverEndsFirst() =
+        runTest {
+            // The phase's read (2) ends at seq 5 and the events' read (3) at seq 6; both hear seq 6,
+            // and read 2 also hears seq 7, folded in once read 3 is shown.
+            val wrong =
+                listOf(listOf(3, 2), listOf(2, 3)).filter { order ->
+                    val log = FakeTask()
+                    val tasks = TaskController(backgroundScope) { log.started }
+                    val gates = (2..3).associateWith { CompletableDeferred<Unit>() }
+                    log.readGates += gates
+                    tasks.send("a")
+                    runCurrent()
+                    log.append(TurnStarted(1))
+                    log.append(command("a"))
+                    log.append(reply("one"))
+                    runCurrent()
+                    val card = ConfirmCard(ToolCallId("c"), ConfirmReason.SPEND, "pay")
+                    log.append(ApprovalAsked(prompt, card, 1000), silently = true)
+                    log.run.phase.value = Phase.Waiting(WaitReason.USER, prompt)
+                    runCurrent()
+                    log.append(reply("two"))
+                    runCurrent()
+                    log.append(reply("three"))
+                    runCurrent()
+                    check(log.reads == 3) { "reads ${log.reads}" }
+                    for (read in order) {
+                        gates.getValue(read).complete(Unit)
+                        runCurrent()
+                    }
+                    tasks.view.value.chat != ChatState.of(log.log, log.run.phase.value)
+                }
+            assertEquals("orders whose view is not the whole log", emptyList<List<Int>>(), wrong)
+        }
+
+    @Test
+    fun theNewTasksLogIsShownThoughItIsShorterThanTheOldOnes() =
+        runTest {
+            val second = FakeTask()
+            var opened = 0
+            val tasks = TaskController(backgroundScope) { if (opened++ == 0) task.started else second.started }
+            tasks.send("a")
+            runCurrent()
+            finishTurn("a")
+            task.append(reply("done"), silently = true)
+            task.append(reply("again"))
+            runCurrent()
+            assertEquals("a gap: the old task's log was read to seq 6", 2, task.reads)
+            tasks.newTask()
+            runCurrent()
+
+            tasks.send("b")
+            runCurrent()
+            assertEquals(
+                "a read of a 1-record log after one of 6",
+                ChatState.of(second.log, Phase.Idle),
+                tasks.view.value.chat,
+            )
+        }
+
+    @Test
     fun aNewTaskForgetsTheOldOneOnceItHasNoWork() =
         runTest {
             val tasks = controller()

@@ -138,8 +138,13 @@ internal class TaskController(
     private var opening = false
     private var pendingStop: StopCause? = null
     private var watching: Job? = null
+
+    /** Records heard while a log read was under way; kept until no read is. */
     private val heard = TreeMap<Long, SessionRecord>()
     private var reading = 0
+
+    /** Where the newest log read shown ended (its last seq); a read that ends before it is stale. */
+    private var shownLog = 0L
 
     /**
      * Gives [text] (trimmed; ignored when blank) to the task: starts one first if there is none,
@@ -198,6 +203,7 @@ internal class TaskController(
                 runtime = null
                 stopping = null
                 heard.clear()
+                shownLog = 0L
                 current.value = TaskView()
             }
         }
@@ -296,6 +302,11 @@ internal class TaskController(
      * Rebuilds the view from [task]'s log and the records heard while it was read. A record is in
      * the file before its event is sent, so only a record appended during the read can be missing
      * from it (cut off as a torn last line).
+     *
+     * Reads overlap (a gap and an unknown prompt each start one) and may end in any order: a read
+     * whose log ends before that of a read already shown is dropped, since showing it could take
+     * back records only that newer log holds (ones whose events were lost). Order by where the log
+     * ends, not by when the read started: reads run off this thread.
      */
     private suspend fun rebuild(task: TaskSession) {
         reading++
@@ -305,12 +316,14 @@ internal class TaskController(
             } finally {
                 reading--
             }
-        if (log != null) {
-            log.records.forEach { heard.putIfAbsent(it.seq, it) }
+        if (log != null && log.lastSeq >= shownLog) {
+            shownLog = log.lastSeq
+            val records = TreeMap(heard)
+            log.records.forEach { records.putIfAbsent(it.seq, it) }
             val phase = runtime?.phase?.value ?: Phase.Idle
-            showChat(ChatState.of(heard.values, phase, task.cards).through(log.lastSeq))
+            showChat(ChatState.of(records.values, phase, task.cards).through(log.lastSeq))
         }
-        if (reading == 0) heard.clear() else log?.let { heard.headMap(it.lastSeq, true).clear() }
+        if (reading == 0) heard.clear()
     }
 
     /**
