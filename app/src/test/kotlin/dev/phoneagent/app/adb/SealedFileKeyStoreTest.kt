@@ -18,6 +18,7 @@ import org.robolectric.shadows.ShadowLog
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.SyncFailedException
 import java.security.GeneralSecurityException
 import java.security.ProviderException
 import java.security.SecureRandom
@@ -205,6 +206,19 @@ class SealedFileKeyStoreTest {
         assertEquals("disk full", thrown?.message)
         assertArrayEquals(pkcs8, SealedFileKeyStore(file, wrap).read())
         assertFalse("the half-written file is deleted", File(file.path + ".new").exists())
+    }
+
+    @Test
+    fun `a write that does not sync is undone, keeps the old key and fails as IOException`() {
+        store.write(pkcs8)
+        var synced = 0
+        val unsynced = SealedFileKeyStore(file, wrap, sync = { throw SyncFailedException("sync failed") })
+        val thrown = runCatching { unsynced.write(ByteArray(10)) }.exceptionOrNull()
+        assertTrue("$thrown", thrown is SyncFailedException)
+        assertArrayEquals(pkcs8, SealedFileKeyStore(file, wrap).read())
+        assertFalse("the unsynced file is deleted", File(file.path + ".new").exists())
+        SealedFileKeyStore(file, wrap, sync = { synced++ }).write(ByteArray(10))
+        assertEquals(1, synced)
     }
 
     /** As a failed rename: `finishWrite` closes the new file, logs, and returns normally. */

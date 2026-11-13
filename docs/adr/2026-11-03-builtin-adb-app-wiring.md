@@ -31,7 +31,7 @@
      - 空文件，或者格式字节不认识。
    - 其他打开失败（检查型的 `GeneralSecurityException`、Keystore 内部的 `ProviderException`）可能是一时的：`read` 抛 IOException，文件不动，下一次请求再试，和 core 的 `AdbKeyStore.read` 约定一致。一次偶发的 Keystore 失败不能永久换掉身份。
    - 封存失败时 `write` 抛 IOException，旧文件不动；自动拉起记一笔日志，等下一次请求再试。
-   - 没有写进文件也抛 IOException：`AtomicFile.finishWrite` 对同步、关闭、改名的失败只打日志，所以写完要读回来比对。否则下一个进程读到的是旧文件或者没有文件，会悄悄换掉身份。
+   - 没有写进文件也抛 IOException：`AtomicFile.finishWrite` 对同步、关闭、改名的失败只打日志。所以在 `finishWrite` 之前自己先同步一次（`fd.sync()`），失败就 `failWrite` 回滚、抛 IOException；写完还要读回来比对，兜住关闭和改名的失败。否则下一个进程读到的是旧文件或者没有文件，会悄悄换掉身份。
    - Keystore 自己内部的失败是非检查型的 `ProviderException`，封存和打开时都和检查型的 `GeneralSecurityException` 一样处理（凭据存储的 `KeystoreCipher` 也是这样）。
 3. **配对记录、"上次被拒"和端口缓存放在 SharedPreferences 里，用 `apply` 写**（`AdbPairingRecord`）。本机任何进程都能冒充 adbd（`docs/adr/2026-11-03-adb-trust-model.md`），所以它能给出的结果都不当成定论：
    - 新建或替换了身份，清掉配对记录。清掉以后不再自动拉起，直到用户重新配对。配对成功时连同身份指纹（`AdbIdentity.fingerprint`，公钥的 SHA-256）一起记下，加载身份时比对：不是配对时那个身份，也按替换处理。身份文件和配对记录是两处存储，写完新身份、还没清配对记录时进程死了，下一个进程会把新身份读成"已存储"，靠指纹才认得出来；

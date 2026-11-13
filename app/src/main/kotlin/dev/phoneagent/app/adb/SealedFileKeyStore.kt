@@ -17,6 +17,7 @@ import android.util.Log
 import dev.phoneagent.core.adb.AdbKeyStore
 import java.io.File
 import java.io.FileNotFoundException
+import java.io.FileOutputStream
 import java.io.IOException
 import java.security.GeneralSecurityException
 import java.security.KeyStore
@@ -63,12 +64,16 @@ internal interface KeyWrap {
  * reports `REPLACED`, and the device has to be paired again. Any other failure to open, checked or
  * Keystore-internal, fails [read] with [IOException] and leaves the file, so a later read may open
  * it. A key that cannot be sealed fails [write] with [IOException] and leaves the file as it was. A
- * key that did not reach the file fails [write] with [IOException] too: the file is read back,
- * since `AtomicFile.finishWrite` only logs a failed sync, close or rename.
+ * key that did not reach the disk fails [write] with [IOException] too, and leaves the file as it
+ * was: the new file is synced before `AtomicFile.finishWrite`, which only logs a failed sync, and a
+ * failed sync undoes the write; the file is read back afterwards, since `finishWrite` only logs a
+ * failed close or rename as well.
  */
 internal class SealedFileKeyStore(
     private val file: File,
     private val wrap: KeyWrap,
+    /** Flushes what was written to [out] to the disk, or throws [IOException]; tests make it fail. */
+    private val sync: (out: FileOutputStream) -> Unit = { it.fd.sync() },
     /** Makes the [AtomicFile] of [file]; tests make it fail. */
     private val atomicFile: (File) -> AtomicFile = ::AtomicFile,
 ) : AdbKeyStore {
@@ -80,14 +85,23 @@ internal class SealedFileKeyStore(
         val atomic = atomicFile(file)
         val out = atomic.startWrite()
         try {
-            out.write(bytes)
+            writeDurably(out, bytes)
         } catch (failed: IOException) {
-            // Keeps the previous key, if any: a half-written file must never replace it.
+            // Keeps the previous key, if any: a half-written or unsynced file must never replace it.
             atomic.failWrite(out)
             throw failed
         }
         atomic.finishWrite(out)
         requireStored(atomic, bytes)
+    }
+
+    /** Writes [bytes] to [out] and syncs it; a failed sync throws `SyncFailedException`, an [IOException]. */
+    private fun writeDurably(
+        out: FileOutputStream,
+        bytes: ByteArray,
+    ) {
+        out.write(bytes)
+        sync(out)
     }
 
     /** Throws [IOException] unless [atomic] holds [bytes]. */
