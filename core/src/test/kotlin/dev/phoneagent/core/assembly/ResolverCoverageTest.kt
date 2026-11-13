@@ -153,8 +153,8 @@ class ResolverCoverageTest {
     /**
      * What each action the spellings perform means on [probe], written out without the resolver:
      * the kind, the app, and the element acted on. A swipe acts on the element it starts on, here
-     * 返回 (e1) at (100,100) and nothing at (900,100); Enter submits the field e3, Back and Home
-     * only move.
+     * 返回 (e1) at (100,100) and nothing at (900,100). Enter is outward and acts on no element
+     * (nothing on the probe page has focus); Back and Home only move.
      */
     private val meanings: Map<UiAction, ActionIntent> =
         mapOf(
