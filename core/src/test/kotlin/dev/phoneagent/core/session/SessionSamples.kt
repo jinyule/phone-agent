@@ -175,6 +175,25 @@ object SessionSamples {
             ),
         )
 
+    /**
+     * A side request whose context edits are server-side with every field set. Not in [events]:
+     * the fixture's side requests stay client-side, so this one is round-tripped on its own.
+     */
+    val serverSideCall: SideRequest =
+        sideCall.copy(
+            request =
+                sideCall.request.copy(
+                    contextEdits =
+                        ContextEditPolicy.ServerSide(
+                            clearToolUsesAboveTokens = 100_000,
+                            keepToolUses = 3,
+                            compactAboveTokens = 150_000,
+                            clearAtLeastTokens = 20_000,
+                            compactInstructions = "Summarize what the screen showed so far.",
+                        ),
+                ),
+        )
+
     private val allowed =
         PolicyVerdictRecorded(
             call,
