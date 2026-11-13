@@ -104,6 +104,9 @@ internal data class TaskView(
  *
  * Commands are handled one after the other under one lock, so two quick sends cannot start two
  * tasks, and a command sent while [stop] takes effect waits for the stop and goes to the next run.
+ * A stop drops every command sent before it: those handed to the run (the runtime clears its
+ * inbox) and those not handed yet. A stop that comes while a run is being opened is kept, and the
+ * run is stopped as soon as it is open, before anything is handed to it.
  * A view that missed events still shows the truth (`TaskRuntime.events`): when a record comes after
  * a gap in seq, or the task waits for a prompt the view does not know, the view is rebuilt from the
  * log.
@@ -122,9 +125,18 @@ internal class TaskController(
     /** The chat as it is now. */
     val view: StateFlow<TaskView> = current.asStateFlow()
 
+    private val shownProblem: (TaskProblem) -> Unit = { problem -> current.update { it.copy(problem = problem) } }
+
     private var session: TaskSession? = null
     private var runtime: TaskRuntime? = null
     private var stopping: TaskRuntime? = null
+
+    /** Counts the stops; a command sent before the latest one is dropped. */
+    private var stops = 0
+
+    /** Whether a run is being opened; [pendingStop] is the stop to give it once it is open. */
+    private var opening = false
+    private var pendingStop: StopCause? = null
     private var watching: Job? = null
     private val heard = TreeMap<Long, SessionRecord>()
     private var reading = 0
@@ -136,11 +148,12 @@ internal class TaskController(
     fun send(text: String) {
         val command = text.trim()
         if (command.isEmpty()) return
+        val sentAfter = stops
         current.update { it.copy(queued = it.queued + 1, problem = null) }
         scope.launch {
             lock.withLock {
                 try {
-                    val target = runtimeForCommand()
+                    val target = runtimeForCommand(sentAfter)
                     if (target != null) {
                         current.update { it.copy(handed = it.handed + 1) }
                         target.followup(UserInput(listOf(Part.Text(command))))
@@ -160,9 +173,15 @@ internal class TaskController(
 
     /**
      * Stops the task's current run for [cause]: [StopCause.USER] by default, [StopCause.SHUTDOWN]
-     * when the app's service goes away. The next command continues the task.
+     * when the app's service goes away. Commands sent before it are dropped; a run being opened is
+     * stopped once it is open. The next command continues the task.
      */
     fun stop(cause: StopCause = StopCause.USER) {
+        stops++
+        if (opening) {
+            pendingStop = cause
+            return
+        }
         val running = runtime ?: return
         stopping = running
         running.stop(cause)
@@ -184,37 +203,50 @@ internal class TaskController(
         }
     }
 
-    /** The run that takes the next command: the current one, or the next one opened. */
-    private suspend fun runtimeForCommand(): TaskRuntime? {
+    /**
+     * The run that takes a command sent after stop number [sentAfter]: the current one, or the next
+     * one opened; `null` when none opens or a stop came after the command. Waits for a stop to take
+     * effect first.
+     */
+    private suspend fun runtimeForCommand(sentAfter: Int): TaskRuntime? {
         val running = runtime
         if (running != null && running === stopping) running.phase.first { it is Phase.Stopped }
-        if (running != null && running.phase.value !is Phase.Stopped) return running
-        val known = session
-        current.update { it.copy(starting = true) }
-        val opened = guarded { if (known != null) StartedTask(known, known.resume(scope)) else launcher.start(scope) }
-        current.update { it.copy(starting = false) }
-        return opened?.also { watch(it.session, it.runtime) }?.runtime
+        val target =
+            when {
+                sentAfter != stops -> null
+                running != null && running.phase.value !is Phase.Stopped -> running
+                else -> opened()
+            }
+        return target?.takeIf { sentAfter == stops }
     }
 
-    /** [action]'s result, or `null` with the problem shown. Cancellation propagates. */
-    @Suppress("TooGenericExceptionCaught") // Any failure becomes a problem shown; only its class is logged.
-    private suspend fun <T : Any> guarded(action: suspend () -> T): T? =
+    /**
+     * Opens the task's next run (its first one when there is no task) and shows it; a stop that
+     * came meanwhile stops it, and this returns once it is [Phase.Stopped].
+     */
+    private suspend fun opened(): TaskRuntime? {
+        val known = session
+        opening = true
+        current.update { it.copy(starting = true) }
         try {
-            action()
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (unavailable: TaskUnavailableException) {
-            current.update { it.copy(problem = unavailable.reason) }
-            null
-        } catch (io: IOException) {
-            Log.w(TAG, "task log unusable (${io.javaClass.name})")
-            current.update { it.copy(problem = TaskProblem.STORAGE) }
-            null
-        } catch (failure: Exception) {
-            Log.w(TAG, "task failed (${failure.javaClass.name})")
-            current.update { it.copy(problem = TaskProblem.UNEXPECTED) }
-            null
+            val next =
+                guarded(shownProblem) {
+                    if (known != null) StartedTask(known, known.resume(scope)) else launcher.start(scope)
+                }
+            next?.let { watch(it.session, it.runtime) }
+            val cause = pendingStop
+            if (next != null && cause != null) {
+                stopping = next.runtime
+                next.runtime.stop(cause)
+                next.runtime.phase.first { it is Phase.Stopped }
+            }
+            return next?.runtime
+        } finally {
+            opening = false
+            pendingStop = null
+            current.update { it.copy(starting = false) }
         }
+    }
 
     /**
      * Shows [next], the current run of [task]: subscribes to its events first, then reads the log,
@@ -269,7 +301,7 @@ internal class TaskController(
         reading++
         val log =
             try {
-                guarded { task.log() }
+                guarded(shownProblem) { task.log() }
             } finally {
                 reading--
             }
@@ -292,8 +324,29 @@ internal class TaskController(
             view.copy(chat = chat, handed = handed)
         }
     }
-
-    private companion object {
-        const val TAG = "PhoneAgentTask"
-    }
 }
+
+private const val TAG = "PhoneAgentTask"
+
+/** [action]'s result, or `null` with the [problem] reported. Cancellation propagates. */
+@Suppress("TooGenericExceptionCaught") // Any failure becomes a problem shown; only its class is logged.
+private suspend fun <T : Any> guarded(
+    problem: (TaskProblem) -> Unit,
+    action: suspend () -> T,
+): T? =
+    try {
+        action()
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (unavailable: TaskUnavailableException) {
+        problem(unavailable.reason)
+        null
+    } catch (io: IOException) {
+        Log.w(TAG, "task log unusable (${io.javaClass.name})")
+        problem(TaskProblem.STORAGE)
+        null
+    } catch (failure: Exception) {
+        Log.w(TAG, "task failed (${failure.javaClass.name})")
+        problem(TaskProblem.UNEXPECTED)
+        null
+    }

@@ -146,6 +146,9 @@ internal class FakeTask(
     val log = mutableListOf(SessionRecord(1, 0, TaskStarted(SecurityLevel.STANDARD, unattended = false)))
     val runs = mutableListOf(FakeRuntime())
     var gate: CompletableDeferred<Unit>? = null
+
+    /** Holds [resume] until completed. */
+    var resumeGate: CompletableDeferred<Unit>? = null
     var readFailure: Exception? = null
     var reads = 0
 
@@ -154,7 +157,10 @@ internal class FakeTask(
     /** The started task, its first run. */
     val started: StartedTask get() = StartedTask(this, runs.first())
 
-    override suspend fun resume(scope: CoroutineScope): FakeRuntime = FakeRuntime().also { runs += it }
+    override suspend fun resume(scope: CoroutineScope): FakeRuntime {
+        resumeGate?.await()
+        return FakeRuntime().also { runs += it }
+    }
 
     override suspend fun log(): SessionLog {
         reads++

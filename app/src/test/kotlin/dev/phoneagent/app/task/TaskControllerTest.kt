@@ -39,14 +39,45 @@ class TaskControllerTest {
     private val task = FakeTask()
     private var starts = 0
     private var startFailure: Exception? = null
+    private var startGate: CompletableDeferred<Unit>? = null
     private val prompt = PromptId("prompt-1")
 
     private fun TestScope.controller(): TaskController =
         TaskController(backgroundScope) {
             starts++
+            startGate?.await()
             startFailure?.let { failure -> throw failure }
             task.started
         }
+
+    /**
+     * A stop for [cause] while a run is opened (held by [gate]): the run is stopped once open and
+     * nothing is handed to it; the task stays busy until the run is [Phase.Stopped], then has no
+     * work left for the service to keep up.
+     */
+    private fun TestScope.stoppedWhileOpening(
+        tasks: TaskController,
+        gate: CompletableDeferred<Unit>,
+        cause: StopCause,
+    ) {
+        assertTrue("opening", tasks.view.value.starting)
+        tasks.stop(cause)
+        gate.complete(Unit)
+        runCurrent()
+        val opened = task.run
+        assertEquals(listOf(cause), opened.stops)
+        assertTrue("busy until the run has stopped", tasks.view.value.busy)
+
+        opened.phase.value = Phase.Stopped(cause)
+        runCurrent()
+        assertEquals(emptyList<String>(), opened.followups)
+        assertFalse(tasks.view.value.busy)
+        assertEquals(
+            Phase.Stopped(cause),
+            tasks.view.value.chat
+                ?.phase,
+        )
+    }
 
     private fun reply(text: String) =
         AssistantMessage(1, ProviderId("p"), ModelId("m"), listOf(Part.Text(text)), StopReason.END_TURN)
@@ -196,6 +227,68 @@ class TaskControllerTest {
 
             finishTurn("b")
             runCurrent()
+            assertFalse(tasks.view.value.busy)
+        }
+
+    @Test
+    fun aStopWhileTheTaskIsCreatedStopsItsFirstRunAndDropsTheCommand() =
+        runTest {
+            startGate = CompletableDeferred()
+            val tasks = controller()
+            tasks.send("a")
+            runCurrent()
+            stoppedWhileOpening(tasks, checkNotNull(startGate), StopCause.USER)
+        }
+
+    @Test
+    fun aShutdownWhileTheTaskIsCreatedStopsItsFirstRunAsAShutdown() =
+        runTest {
+            startGate = CompletableDeferred()
+            val tasks = controller()
+            tasks.send("a")
+            runCurrent()
+            stoppedWhileOpening(tasks, checkNotNull(startGate), StopCause.SHUTDOWN)
+        }
+
+    @Test
+    fun aStopWhileTheNextRunIsOpenedStopsItAndDropsTheCommand() =
+        runTest {
+            val tasks = controller()
+            tasks.send("a")
+            runCurrent()
+            task.run.phase.value = Phase.Stopped(StopCause.USER)
+            runCurrent()
+
+            val gate = CompletableDeferred<Unit>()
+            task.resumeGate = gate
+            tasks.send("b")
+            runCurrent()
+            stoppedWhileOpening(tasks, gate, StopCause.USER)
+            assertEquals(2, task.runs.size)
+        }
+
+    @Test
+    fun aStopDropsTheCommandsSentBeforeItThatWereNotHandedYet() =
+        runTest {
+            val tasks = controller()
+            tasks.send("a")
+            tasks.stop()
+            runCurrent()
+            assertEquals("no task opened for a dropped command", 0, starts)
+            assertFalse(tasks.view.value.busy)
+
+            tasks.send("b")
+            runCurrent()
+            val first = task.run
+            first.phase.value = Phase.Running(1, 1)
+            runCurrent()
+            tasks.send("c")
+            tasks.stop()
+            runCurrent()
+            assertEquals(listOf("b"), first.followups)
+            first.phase.value = Phase.Stopped(StopCause.USER)
+            runCurrent()
+            assertEquals("no run opened for c", 1, task.runs.size)
             assertFalse(tasks.view.value.busy)
         }
 
