@@ -25,7 +25,8 @@ import kotlin.io.path.writeText
  * anything else leaves the directory as it was ([FixtureTexts.install], as record mode and
  * refresh write). An install takes only a staged fixture of fixture files, and replaces the
  * directory whole or not at all: a failed copy or move leaves it, and everything beside it, byte
- * for byte as it was.
+ * for byte as it was. A fixture directory that is itself a link is refused by both, what it
+ * points to left alone.
  */
 class FixtureInstallTest {
     @TempDir
@@ -233,6 +234,31 @@ class FixtureInstallTest {
         val left = Path.of(kept.message.orEmpty().substringAfter(" is left in "))
         assertTrue(left.parent.name.startsWith(".fixture.installing-"), kept.message)
         assertEquals(old, tree(left))
+    }
+
+    /** [dir] as a link to a fixture elsewhere, one with an override; runs [write] over it and expects a refusal. */
+    private fun linkRefused(write: () -> Unit) {
+        val elsewhere = ReplaySamples.writeFixture(temp.resolve("elsewhere"))
+        Files.writeString(elsewhere.resolve(ReplayFiles.OVERRIDE), "{}\n")
+        Files.createSymbolicLink(dir, elsewhere)
+        val before = tree()
+        val failure = assertThrows<IllegalArgumentException> { write() }
+        assertTrue("$dir is a link to $elsewhere" in failure.message.orEmpty(), failure.message)
+        assertEquals(before, tree(), "neither the link nor what it points to changes")
+    }
+
+    @Test
+    fun `install refuses a fixture directory that is a link, leaving what it points to as it was`() {
+        val staged = staged()
+        linkRefused { FixtureTexts.install(staged, dir) }
+    }
+
+    @Test
+    fun `write refuses a fixture directory that is a link, leaving what it points to as it was`() {
+        val committed = ReplaySamples.normalized()
+        val texts = FixtureTexts.Normalized(committed.session, committed.requests, emptyMap(), Normalizer())
+        val blobs = mapOf(ReplaySamples.blob to ReplaySamples.frameBytes)
+        linkRefused { FixtureTexts.write(dir, ReplaySamples.scenario, texts, ReplayOverride(), blobs) }
     }
 
     @Test

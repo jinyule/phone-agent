@@ -25,6 +25,7 @@ import java.nio.file.StandardCopyOption
 import kotlin.io.path.exists
 import kotlin.io.path.isDirectory
 import kotlin.io.path.isRegularFile
+import kotlin.io.path.isSymbolicLink
 import kotlin.io.path.name
 
 /**
@@ -224,6 +225,16 @@ object FixtureTexts {
     }
 
     /**
+     * Fails with [IllegalArgumentException] when [dir] is itself a link (not followed): what it
+     * points to is outside the fixtures, and nothing in it is deleted or written.
+     */
+    private fun requireNotLink(dir: Path) {
+        require(!dir.isSymbolicLink()) {
+            "$dir is a link to ${Files.readSymbolicLink(dir)}: not a fixture directory, left alone"
+        }
+    }
+
+    /**
      * Deletes the fixture files in [dir]. Every entry is checked ([entries]) before anything is
      * deleted; anything else fails with [IllegalArgumentException], deleting nothing.
      */
@@ -233,7 +244,8 @@ object FixtureTexts {
 
     /**
      * Writes a fixture into [dir], replacing what it held: [scenario], [texts] with their sidecars,
-     * an [override] when it has facts, and the [blobs] the texts reference.
+     * an [override] when it has facts, and the [blobs] the texts reference. [dir] must not be a
+     * link and must hold only fixture files ([clear]); otherwise this fails, changing nothing.
      */
     fun write(
         dir: Path,
@@ -242,6 +254,7 @@ object FixtureTexts {
         override: ReplayOverride,
         blobs: Map<BlobRef, ByteArray>,
     ) {
+        requireNotLink(dir)
         if (dir.isDirectory()) clear(dir)
         Files.createDirectories(dir)
         Files.writeString(dir.resolve(ReplayFiles.SCENARIO), ReplayFiles.encode(scenario))
@@ -264,9 +277,9 @@ object FixtureTexts {
 
     /**
      * Replaces the fixture in [dir] with the one [staged] holds, byte for byte, or fails leaving
-     * [dir] byte for byte as it was. Before anything is written, [staged] must load as a fixture
-     * ([ReplayFiles.load]) and hold nothing but fixture files ([entries]: no link, no other file
-     * type), and [dir], when it exists, nothing else either. [staged] is then copied with [copy]
+     * [dir] byte for byte as it was. Before anything is written, [dir] must not be a link,
+     * [staged] must load as a fixture ([ReplayFiles.load]) and hold nothing but fixture files
+     * ([entries]: no link, no other file type), and [dir], when it exists, nothing else either. [staged] is then copied with [copy]
      * into a sibling of [dir] (`.<name>.installing-<random>`) and each copy compared with its
      * source; only then is [dir] moved aside into that sibling and the copy moved into its place,
      * with [move], and the sibling deleted. A failure puts the old fixture back if it was moved
@@ -280,6 +293,7 @@ object FixtureTexts {
         copy: (Path, Path) -> Unit = { from, to -> Files.copy(from, to, LinkOption.NOFOLLOW_LINKS) },
         move: (Path, Path) -> Unit = { from, to -> Files.move(from, to, StandardCopyOption.ATOMIC_MOVE) },
     ) {
+        requireNotLink(dir)
         ReplayFiles.load(staged)
         val incoming = entries(staged) { "$staged holds $it: not a fixture, not installed, $dir left alone" }
         val replacing = dir.exists(LinkOption.NOFOLLOW_LINKS)
