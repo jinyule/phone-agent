@@ -22,6 +22,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.Implementation
 import org.robolectric.annotation.Implements
 import org.robolectric.shadow.api.Shadow
+import org.robolectric.shadows.ShadowLog
 import org.robolectric.shadows.ShadowNsdManager
 import java.net.InetAddress
 import java.util.concurrent.Executor
@@ -145,6 +146,26 @@ class NsdAdbServiceFinderTest {
             runCurrent()
             assertEquals(emptyList<Int>(), ports.await())
             assertEquals(emptyList<NsdManager.DiscoveryListener>(), discoveryListeners())
+        }
+
+    @Test
+    fun `other devices' service names never reach the log, only how many were skipped`() =
+        runTest {
+            val names = listOf("adb-R58N12ABCDE-x7Yz1q", "adb-EMULATOR36X6X11X0-Qm3vZp")
+            val others = names.map(::service)
+            val ports = search(finder())
+            found(*others.toTypedArray())
+            runCurrent()
+            resolve(others[0], "192.0.2.1", 40002)
+            runCurrent()
+            resolve(others[1], "192.0.2.2", 40003)
+            advanceTimeBy(TIMEOUT_MS)
+            runCurrent()
+            assertEquals(emptyList<Int>(), ports.await())
+            val logs = ShadowLog.getLogs()
+            val logged = logs.map { "${it.msg} ${it.throwable}" }
+            for (name in names) assertFalse(name, logged.any { name in it })
+            assertTrue("$logged", logs.any { it.msg == "skipped 2 $type services of other devices" })
         }
 
     @Test

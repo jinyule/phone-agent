@@ -86,19 +86,27 @@ internal class NsdAdbServiceFinder(
         val found = Channel<NsdServiceInfo>(Channel.UNLIMITED)
         val discovery = Discovery(found)
         nsd.discoverServices(service.type, NsdManager.PROTOCOL_DNS_SD, discovery)
-        val ports = LinkedHashSet<Int>()
+        val search = Search()
         try {
-            withTimeoutOrNull(timeoutMs) { collect(found, ports) }
+            withTimeoutOrNull(timeoutMs) { collect(found, search) }
         } finally {
             discovery.stop()
+            // A count only: adbd's service names hold the device's serial number.
+            if (search.others > 0) Log.i(TAG, "skipped ${search.others} ${service.type} services of other devices")
         }
-        return ports.toList()
+        return search.ports.toList()
     }
 
-    /** Resolves what [found] delivers until it closes or [NsdConfig.settleMs] after the first port. */
+    /** What one [findPorts] found: this device's ports, and how many services were other devices'. */
+    private class Search {
+        val ports = LinkedHashSet<Int>()
+        var others = 0
+    }
+
+    /** Resolves what [found] delivers until it closes or [NsdConfig.settleMs] after the last port. */
     private suspend fun collect(
         found: Channel<NsdServiceInfo>,
-        ports: MutableSet<Int>,
+        search: Search,
     ) {
         var next = found.receiveCatching().getOrNull()
         while (next != null) {
@@ -106,9 +114,9 @@ internal class NsdAdbServiceFinder(
                 Log.i(TAG, "an mDNS resolve did not end in time; this search goes on without mDNS")
                 return
             }
-            resolve(next)?.let { ports += it }
+            resolve(next, search)
             next =
-                if (ports.isEmpty()) {
+                if (search.ports.isEmpty()) {
                     found.receiveCatching().getOrNull()
                 } else {
                     withTimeoutOrNull(config.settleMs) { found.receiveCatching().getOrNull() }
@@ -116,12 +124,13 @@ internal class NsdAdbServiceFinder(
         }
     }
 
-    /** The port of [info] when it resolves in time to an address of this device, else null. */
-    private suspend fun resolve(info: NsdServiceInfo): Int? {
-        val resolved = withTimeoutOrNull(config.resolveTimeoutMs) { resolution(info) }
-        val local = resolved?.let { addresses(it).any(isLocal) } == true
-        if (resolved != null && !local) Log.i(TAG, "${info.serviceName} is another device's; skipped")
-        return resolved?.port?.takeIf { local }
+    /** Adds the port of [info] to [search] when it resolves in time to an address of this device. */
+    private suspend fun resolve(
+        info: NsdServiceInfo,
+        search: Search,
+    ) {
+        val resolved = withTimeoutOrNull(config.resolveTimeoutMs) { resolution(info) } ?: return
+        if (addresses(resolved).any(isLocal)) search.ports += resolved.port else search.others++
     }
 
     private suspend fun resolution(info: NsdServiceInfo): NsdServiceInfo? =
