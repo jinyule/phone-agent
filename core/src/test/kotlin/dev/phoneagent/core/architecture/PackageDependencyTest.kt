@@ -56,8 +56,10 @@ class PackageDependencyTest {
                 "ports/KnowsSession.kt: contract ports (layer 1) must not use session (layer 4)",
                 "screen/MarksRisk.kt: capability screen must not use capability policy.rules",
                 "tool/UsesAdb.kt: contract tool must not use capability adb",
+                "tools/BacktickApostrophe.kt: capability tools must not use the assembly",
                 "tools/BacktickImport.kt: capability tools must not use capability policy.rules",
                 "tools/BacktickName.kt: capability tools must not use the assembly",
+                "tools/BacktickQuote.kt: capability tools must not use the assembly",
                 "tools/CapabilityProperty.kt: capability tools must not use capability policy.rules",
                 "tools/FullyQualified.kt: capability tools must not use capability policy.rules",
                 "tools/FunctionCall.kt: capability tools must not use capability policy.rules",
@@ -156,6 +158,11 @@ class PackageDependencyTest {
                 "val c = '$q'; val d = dev.phoneagent.core.screen.F()" to listOf("$BASE.screen"),
                 "val s = $q$q${q}x$q$q$q$q; val d = dev.phoneagent.core.screen.F()" to listOf("$BASE.screen"),
                 "val c = '\\''; val d = dev.phoneagent.core.screen.F()" to listOf("$BASE.screen"),
+                "class B<`T'`>; val d = dev.phoneagent.core.screen.F()" to listOf("$BASE.screen"),
+                "class B<`T$q`>; val d = dev.phoneagent.core.screen.F()" to listOf("$BASE.screen"),
+                "val s = $q`$q; val d = dev.phoneagent.core.screen.F()" to listOf("$BASE.screen"),
+                "val c = '`'; val d = dev.phoneagent.core.screen.F()" to listOf("$BASE.screen"),
+                "val s = $q`x` dev.phoneagent.core.screen.F$q" to emptyList(),
                 "val s = ${q}esc \\$q dev.phoneagent.core.screen.F$q" to emptyList(),
                 "val s = $q${'$'}name dev.phoneagent.core.screen.F$q" to emptyList(),
                 "/* outer /* nested */ dev.phoneagent.core.screen.F */ val x = 1" to emptyList(),
@@ -417,7 +424,8 @@ class PackageDependencyTest {
 /**
  * Kotlin source with comments and the text of string and char literals left out. Code inside
  * `${…}` templates is kept, also in raw strings and in strings nested in templates; a simple
- * `$name` template is text. Nested block comments and escapes are handled.
+ * `$name` template is text. Nested block comments and escapes are handled. A name in backticks is
+ * code as it is: a quote in it starts no literal.
  */
 private class CodeOnly(
     private val text: String,
@@ -443,6 +451,10 @@ private class CodeOnly(
 
                 text.startsWith("/*", at) -> {
                     skipBlockComment()
+                }
+
+                c == '`' -> {
+                    copyQuotedName()
                 }
 
                 text.startsWith(RAW_QUOTE, at) -> {
@@ -501,6 +513,14 @@ private class CodeOnly(
         out.append(' ')
         copyCode(inTemplate = true)
         out.append(' ')
+    }
+
+    /** Copies a name in backticks whole: it holds no backtick and no line break. */
+    private fun copyQuotedName() {
+        val close = text.indexOf('`', at + 1)
+        val end = if (close < 0) text.length else close + 1
+        out.append(text, at, end)
+        at = end
     }
 
     private fun skipChar() {
