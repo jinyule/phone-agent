@@ -751,7 +751,7 @@ screen s12 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · 坐标 0–
 **App 侧接线**（`app.adb`，取舍见 `docs/adr/2026-11-03-builtin-adb-app-wiring.md`）：
 - 需要 Android 12（API 31）：配对要用的 TLS exporter 只有 `SSLSockets.exportKeyingMaterial`，从 API 31 才有。Android 11 走兜底（Shizuku / USB 脚本）。
 - 身份私钥用 AndroidKeyStore 里的 AES-256-GCM 密钥封存，放在 `noBackupFilesDir`。确定打不开（封存密钥丢了，例如清除凭据；密文认证不过；格式不对或空文件）才换新身份，要求重新配对，拉起报 `NotPaired(IDENTITY_REPLACED)`；Keystore 一时的失败只让这一次读失败，不换身份。
-- 配对记录、"上次被拒"和端口缓存放在 SharedPreferences 里。新身份会清掉配对记录，在用户重新配对之前不再自动拉起；两次 UNAUTHORIZED 只记下"上次被拒"，配对保留，下一次请求照样去连。端口缓存只在交接成功以后写，`Unauthorized`、`NoHandoff`、`CommandFailed` 都会清掉它，下一次搜索回到 mDNS 和扫描。重新配对成功以后，本进程立即请求一次拉起（`HelperAutoLaunch.startIfPaired`，仍受最小间隔约束），不用等进程重启。
+- 配对记录、"上次被拒"和端口缓存放在 SharedPreferences 里。新身份会清掉配对记录，在用户重新配对之前不再自动拉起（配对时记下身份指纹，加载时比对，所以换身份和清记录之间进程死了也认得出来）；两次 UNAUTHORIZED 只记下"上次被拒"，配对保留，下一次请求照样去连。端口缓存只在交接成功以后写，`Unauthorized`、`NoHandoff`、`CommandFailed` 都会清掉它，下一次搜索回到 mDNS 和扫描。重新配对成功以后，本进程立即请求一次拉起（`HelperAutoLaunch.startIfPaired`，仍受最小间隔约束），不用等进程重启。
 - 自动拉起（`HelperAutoLaunch`，只在已配对时开启）：
   - 进程启动时先等孤儿助手续接 `orphanResumeMs`（默认 5 s），之后还没连上才拉起；
   - 状态变成 NeedsLaunch（助手死了，或被判过期）就拉起，在协程里执行，不在监听者里；

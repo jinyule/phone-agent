@@ -40,17 +40,17 @@ class AdbPairingRecordTest {
     @Test
     fun `a pairing is recorded and survives a new record on the same preferences`() {
         assertFalse(record.isPaired)
-        record.pairingEnded(PairingResult.Failed(PairingFailure.WRONG_CODE, "x"))
+        record.pairingEnded(PairingResult.Failed(PairingFailure.WRONG_CODE, "x"), KEY)
         assertFalse(record.isPaired)
-        record.pairingEnded(PairingResult.Paired(PairedDevice("adb-guid")))
+        record.pairingEnded(PairingResult.Paired(PairedDevice("adb-guid")), KEY)
         assertTrue(AdbPairingRecord(prefs).isPaired)
     }
 
     @Test
     fun `a created or replaced identity drops the pairing, a stored one keeps it`() {
         for (origin in IdentityLoad.Origin.entries) {
-            record.pairingEnded(PairingResult.Paired(PairedDevice("adb-guid")))
-            record.identityLoaded(origin)
+            record.pairingEnded(PairingResult.Paired(PairedDevice("adb-guid")), KEY)
+            record.identityLoaded(origin, KEY)
             assertEquals("$origin", origin == IdentityLoad.Origin.STORED, record.isPaired)
         }
     }
@@ -58,32 +58,53 @@ class AdbPairingRecordTest {
     @Test
     fun `without a pairing ever the reason is never paired, also after a new identity`() {
         assertEquals(NotPairedReason.NEVER_PAIRED, record.notPaired)
-        record.identityLoaded(IdentityLoad.Origin.CREATED)
-        record.identityLoaded(IdentityLoad.Origin.REPLACED)
+        record.identityLoaded(IdentityLoad.Origin.CREATED, KEY)
+        record.identityLoaded(IdentityLoad.Origin.REPLACED, KEY)
         assertEquals(NotPairedReason.NEVER_PAIRED, AdbPairingRecord(prefs).notPaired)
-        record.pairingEnded(PairingResult.Paired(PairedDevice("adb-guid")))
+        record.pairingEnded(PairingResult.Paired(PairedDevice("adb-guid")), KEY)
         assertNull(record.notPaired)
     }
 
     @Test
     fun `a replaced identity is the reason until a pairing succeeds`() {
-        record.pairingEnded(PairingResult.Paired(PairedDevice("adb-guid")))
-        record.identityLoaded(IdentityLoad.Origin.REPLACED)
+        record.pairingEnded(PairingResult.Paired(PairedDevice("adb-guid")), KEY)
+        record.identityLoaded(IdentityLoad.Origin.REPLACED, KEY)
         assertEquals(NotPairedReason.IDENTITY_REPLACED, AdbPairingRecord(prefs).notPaired)
-        record.identityLoaded(IdentityLoad.Origin.STORED)
-        record.identityLoaded(IdentityLoad.Origin.CREATED)
+        record.identityLoaded(IdentityLoad.Origin.STORED, KEY)
+        record.identityLoaded(IdentityLoad.Origin.CREATED, KEY)
         assertEquals(NotPairedReason.IDENTITY_REPLACED, record.notPaired)
-        record.pairingEnded(PairingResult.Paired(PairedDevice("adb-guid")))
+        record.pairingEnded(PairingResult.Paired(PairedDevice("adb-guid")), KEY)
         assertNull(record.notPaired)
-        record.identityLoaded(IdentityLoad.Origin.STORED)
+        record.identityLoaded(IdentityLoad.Origin.STORED, KEY)
         assertNull(record.notPaired)
     }
 
     @Test
     fun `a key created while paired counts as a replaced identity`() {
-        record.pairingEnded(PairingResult.Paired(PairedDevice("adb-guid")))
-        record.identityLoaded(IdentityLoad.Origin.CREATED)
+        record.pairingEnded(PairingResult.Paired(PairedDevice("adb-guid")), KEY)
+        record.identityLoaded(IdentityLoad.Origin.CREATED, KEY)
         assertEquals(NotPairedReason.IDENTITY_REPLACED, AdbPairingRecord(prefs).notPaired)
+    }
+
+    @Test
+    fun `a stored identity other than the one that paired drops the pairing as replaced`() {
+        record.pairingEnded(PairingResult.Paired(PairedDevice("adb-guid")), KEY)
+        record.identityLoaded(IdentityLoad.Origin.STORED, KEY)
+        assertTrue(record.isPaired)
+        record.identityLoaded(IdentityLoad.Origin.STORED, OTHER_KEY)
+        assertEquals(NotPairedReason.IDENTITY_REPLACED, AdbPairingRecord(prefs).notPaired)
+        record.pairingEnded(PairingResult.Paired(PairedDevice("adb-guid")), OTHER_KEY)
+        record.identityLoaded(IdentityLoad.Origin.STORED, OTHER_KEY)
+        assertTrue(record.isPaired)
+    }
+
+    @Test
+    fun `a pairing recorded without a fingerprint is judged by the origin alone`() {
+        prefs.edit().putBoolean("paired", true).commit()
+        record.identityLoaded(IdentityLoad.Origin.STORED, OTHER_KEY)
+        assertTrue(record.isPaired)
+        record.identityLoaded(IdentityLoad.Origin.REPLACED, OTHER_KEY)
+        assertEquals(NotPairedReason.IDENTITY_REPLACED, record.notPaired)
     }
 
     @Test
@@ -94,7 +115,7 @@ class AdbPairingRecordTest {
 
     @Test
     fun `a search that ended on UNAUTHORIZED keeps the pairing and records the refusal`() {
-        record.pairingEnded(PairingResult.Paired(PairedDevice("adb-guid")))
+        record.pairingEnded(PairingResult.Paired(PairedDevice("adb-guid")), KEY)
         record.searchEnded(failed(ConnectFailure.UNAUTHORIZED))
         val next = AdbPairingRecord(prefs)
         assertTrue(next.isPaired)
@@ -121,16 +142,16 @@ class AdbPairingRecordTest {
     @Test
     fun `a pairing that succeeds clears the refusal, one that fails keeps it`() {
         record.searchEnded(failed(ConnectFailure.UNAUTHORIZED))
-        record.pairingEnded(PairingResult.Failed(PairingFailure.WRONG_CODE, "x"))
+        record.pairingEnded(PairingResult.Failed(PairingFailure.WRONG_CODE, "x"), KEY)
         assertTrue(record.lastRefused)
-        record.pairingEnded(PairingResult.Paired(PairedDevice("adb-guid")))
+        record.pairingEnded(PairingResult.Paired(PairedDevice("adb-guid")), KEY)
         assertFalse(AdbPairingRecord(prefs).lastRefused)
     }
 
     @Test
     fun `after a refusal the next launch connects again`() =
         runTest {
-            record.pairingEnded(PairingResult.Paired(PairedDevice("adb-guid")))
+            record.pairingEnded(PairingResult.Paired(PairedDevice("adb-guid")), KEY)
             var connects = 0
             val adb =
                 object : HelperLauncher.Adb {
@@ -202,6 +223,9 @@ class AdbPairingRecordTest {
     }
 
     private companion object {
+        /** Fingerprints of two identities. */
+        const val KEY = "1c45ed4a"
+        const val OTHER_KEY = "9e0b77d2"
         const val PORT = 37_133
         const val OTHER_PORT = 41_017
         const val HANDOFF_MS = 1_000L

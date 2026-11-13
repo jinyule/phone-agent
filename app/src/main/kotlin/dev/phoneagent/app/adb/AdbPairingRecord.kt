@@ -23,9 +23,9 @@ internal enum class NotPairedReason {
 
 /**
  * What the built-in adb client remembers between processes, in [prefs]: whether the current
- * identity is paired and, when not, why; whether adbd refused it the last time; and the port a
- * helper last handed off through. All are written with `apply`: a lost write only makes the next
- * search longer, or asks for one pairing more.
+ * identity is paired and, when not, why, and the fingerprint of the identity that paired; whether
+ * adbd refused it the last time; and the port a helper last handed off through. All are written
+ * with `apply`: a lost write only makes the next search longer, or asks for one pairing more.
  *
  * Anything on this device can pose as adbd (ADR 2026-11-03-adb-trust-model), so nothing it can
  * answer is taken as final: a refusal keeps the pairing, and a port is cached only after a helper,
@@ -66,22 +66,38 @@ internal class AdbPairingRecord(
         }
 
     /**
-     * A created or replaced identity is one the device does not know: a pairing on record is
-     * dropped, as [NotPairedReason.IDENTITY_REPLACED]. Without one, the reason stays as it was.
+     * The identity loaded as [origin], with [fingerprint] (`AdbIdentity.fingerprint`). A created or
+     * replaced identity, or a stored one other than the identity that paired, is one the device does
+     * not know: a pairing on record is dropped, as [NotPairedReason.IDENTITY_REPLACED]. The
+     * fingerprint covers a process that died after the identity file was replaced and before this
+     * call: the next process loads the new identity as stored. A pairing recorded without a
+     * fingerprint (by a build before it was kept) is judged by [origin] alone. Without a pairing,
+     * the reason stays as it was.
      */
-    fun identityLoaded(origin: IdentityLoad.Origin) {
-        if (origin == IdentityLoad.Origin.STORED || !isPaired) return
-        Log.w(TAG, "the paired adb identity was replaced ($origin); pair again")
+    fun identityLoaded(
+        origin: IdentityLoad.Origin,
+        fingerprint: String,
+    ) {
+        if (!isPaired) return
+        val paired = prefs.getString(KEY_FINGERPRINT, null)
+        val other = paired != null && paired != fingerprint
+        if (origin == IdentityLoad.Origin.STORED && !other) return
+        Log.w(TAG, "the paired adb identity was replaced (${if (other) "another key" else "$origin"}); pair again")
         prefs.edit {
             putBoolean(KEY_PAIRED, false)
             putString(KEY_NOT_PAIRED, NotPairedReason.IDENTITY_REPLACED.name)
         }
     }
 
-    fun pairingEnded(result: PairingResult) {
+    /** A pairing with the identity of [fingerprint] ended as [result]; success records it. */
+    fun pairingEnded(
+        result: PairingResult,
+        fingerprint: String,
+    ) {
         if (result is PairingResult.Paired) {
             prefs.edit {
                 putBoolean(KEY_PAIRED, true)
+                putString(KEY_FINGERPRINT, fingerprint)
                 remove(KEY_NOT_PAIRED)
                 putBoolean(KEY_REFUSED, false)
             }
@@ -134,6 +150,7 @@ internal class AdbPairingRecord(
 private const val TAG = "PhoneAgentBuiltinAdb"
 private const val KEY_PAIRED = "paired"
 private const val KEY_NOT_PAIRED = "not_paired"
+private const val KEY_FINGERPRINT = "fingerprint"
 private const val KEY_REFUSED = "refused"
 private const val KEY_PORT = "port"
 private const val MAX_PORT = 65_535

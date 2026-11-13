@@ -72,14 +72,14 @@ internal class BuiltinAdb(
     override fun wirelessDebuggingOn(): Boolean? = wirelessDebugging()
 
     /**
-     * The identity, loaded (or created) once per process. A new identity drops the pairing record:
-     * the device does not know its key.
+     * The identity, loaded (or created) once per process. A new identity, or one other than the
+     * identity that paired, drops the pairing record: the device does not know its key.
      */
     suspend fun identity(): IdentityLoad =
         identityLock.withLock {
             identity?.let { return@withLock IdentityLoad(it, IdentityLoad.Origin.STORED) }
             val load = AdbIdentity.loadOrCreate(store, identityName)
-            record.identityLoaded(load.origin)
+            record.identityLoaded(load.origin, load.identity.fingerprint)
             identity = load.identity
             load
         }
@@ -91,11 +91,16 @@ internal class BuiltinAdb(
     suspend fun findPairingPort(): Int? =
         finder.findPorts(AdbService.PAIRING, PortSearchConfig.DEFAULT_MDNS_TIMEOUT_MS).firstOrNull()
 
-    /** Pairs with the dialog at [port] on this device; success records the pairing. */
+    /** Pairs with the dialog at [port] on this device; success records the pairing and the identity's fingerprint. */
     suspend fun pair(
         port: Int,
         code: PairingCode,
-    ): PairingResult = client().pair(AdbEndpoint(PortSearchConfig.LOOPBACK, port), code).also(record::pairingEnded)
+    ): PairingResult {
+        val identity = identity().identity
+        return AdbClient(identity, ConscryptKeyExporter)
+            .pair(AdbEndpoint(PortSearchConfig.LOOPBACK, port), code)
+            .also { record.pairingEnded(it, identity.fingerprint) }
+    }
 
     /**
      * Connects to this device's adbd: cached port, mDNS, then the loopback scan. Caches nothing:

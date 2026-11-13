@@ -34,7 +34,7 @@
    - 没有写进文件也抛 IOException：`AtomicFile.finishWrite` 对同步、关闭、改名的失败只打日志，所以写完要读回来比对。否则下一个进程读到的是旧文件或者没有文件，会悄悄换掉身份。
    - Keystore 自己内部的失败是非检查型的 `ProviderException`，封存和打开时都和检查型的 `GeneralSecurityException` 一样处理（凭据存储的 `KeystoreCipher` 也是这样）。
 3. **配对记录、"上次被拒"和端口缓存放在 SharedPreferences 里，用 `apply` 写**（`AdbPairingRecord`）。本机任何进程都能冒充 adbd（`docs/adr/2026-11-03-adb-trust-model.md`），所以它能给出的结果都不当成定论：
-   - 新建或替换了身份，清掉配对记录。清掉以后不再自动拉起，直到用户重新配对；
+   - 新建或替换了身份，清掉配对记录。清掉以后不再自动拉起，直到用户重新配对。配对成功时连同身份指纹（`AdbIdentity.fingerprint`，公钥的 SHA-256）一起记下，加载身份时比对：不是配对时那个身份，也按替换处理。身份文件和配对记录是两处存储，写完新身份、还没清配对记录时进程死了，下一个进程会把新身份读成"已存储"，靠指纹才认得出来；
    - 没有配对记录时，原因也记下来（`notPaired`），拉起报 `NotPaired(reason)`，给界面解释用：从来没配对过是 `NEVER_PAIRED`；已经配对的身份被换掉（`REPLACED`，或者配对时文件没了、新建了身份）是 `IDENTITY_REPLACED`，一直保留到配对成功。身份是在连接时才加载的，所以那一次搜索失败也报 `NotPaired`，不报 `Unauthorized`；
    - 搜索以 UNAUTHORIZED 结束（`AdbConnectPort` 已经对同一个端点试过两次）：配对记录保留，只记下"上次被拒"（`lastRefused`），拉起报 `Unauthorized`，下一次请求照样去连（受 `minLaunchIntervalMs` 约束）。配对成功、或者以后有一次拉起连上了，"上次被拒"就清掉；
    - 端口缓存只在交接成功（`Launched`）以后写，`AdbConnectPort` 连上时自己的写入被丢掉（`portCache`）。`Unauthorized`、`NoHandoff`、`CommandFailed` 都清掉缓存，下一次搜索回到 mDNS 和扫描；`AlreadyConnected`、`NoNonce` 不动它。
