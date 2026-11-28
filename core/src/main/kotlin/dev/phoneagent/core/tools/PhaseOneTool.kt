@@ -63,7 +63,7 @@ internal abstract class PhaseOneTool(
                     .filterIsInstance<Part.Image>()
                     .firstOrNull()
                     ?.blob,
-            state = stateOf(result.status),
+            state = stateOf(result),
         )
     }
 
@@ -89,14 +89,22 @@ internal abstract class PhaseOneTool(
         get() = risk != RiskClass.READ
 
     /**
+     * Whether [result], an ERROR, leaves it open whether the call took effect, so that its card
+     * shows [StepState.UNKNOWN] rather than [StepState.FAILED]. By default never: an ERROR usually
+     * did not take effect (see [StepState.FAILED]). hand_to_user says so for an ERROR it did not
+     * report itself.
+     */
+    internal open fun uncertain(result: ToolResult): Boolean = false
+
+    /**
      * The card state of a result. A call that [mayChangePhone] and was stopped
      * ([ToolStatus.CANCELLED]) or timed out while it may already have acted shows as
      * [StepState.UNKNOWN], like [ToolStatus.OUTCOME_UNKNOWN], so the user is not told it failed and
-     * does it again. For a call that cannot have changed the phone these three fail.
-     * [ToolStatus.NOT_STARTED] never ran and fails.
+     * does it again. For a call that cannot have changed the phone these three fail. An ERROR
+     * fails unless it is [uncertain]. [ToolStatus.NOT_STARTED] never ran and fails.
      */
-    private fun stateOf(status: ToolStatus): StepState =
-        when (status) {
+    private fun stateOf(result: ToolResult): StepState =
+        when (result.status) {
             ToolStatus.OK -> StepState.SUCCEEDED
 
             ToolStatus.REFUSED -> StepState.REFUSED
@@ -106,7 +114,8 @@ internal abstract class PhaseOneTool(
             ToolStatus.CANCELLED,
             -> if (mayChangePhone) StepState.UNKNOWN else StepState.FAILED
 
-            ToolStatus.ERROR,
+            ToolStatus.ERROR -> if (uncertain(result)) StepState.UNKNOWN else StepState.FAILED
+
             ToolStatus.INVALID_ARGS,
             ToolStatus.SKIPPED,
             ToolStatus.NOT_STARTED,

@@ -22,8 +22,11 @@ import kotlinx.serialization.Serializable
  *
  * The prompt and its result are in the session log before a method returns, and the time spent
  * waiting does not count against `Tool.timeoutMs`. At most one prompt per task is pending; a
- * second call waits for the first. User behaviour never throws; a failure to record the prompt
- * throws the session log's `IOException`.
+ * second call waits for the first. A failure to record the prompt throws the session log's
+ * `IOException`. When the task cannot be taken back (the call cut its own handoff off or it
+ * failed, and the take-back ended any way but returning; or the hand-over did not settle),
+ * [handOff] throws [ScreenUnavailableException] (the move only) in place of the cancellation or
+ * failure; tools must let it propagate and not go on acting. An Error propagates as it is.
  */
 public interface UserInteraction : ToolInteraction {
     /**
@@ -46,7 +49,26 @@ public interface ToolInteraction {
     /**
      * Moves the task to the main display for the user to do a [kind] step, explained by [reason]
      * (non-blank, user's language), and moves it back. The screen has changed afterwards whatever
-     * the result: observe before acting.
+     * the result: observe before acting. When the port cannot take it back after the user's turn
+     * (`SurfaceManager.takeBack` throws an IOException), this returns
+     * [HandoffResult.NOT_TAKEN_BACK]: the app stays on the main display, whatever the user answered.
+     *
+     * A handoff that ends without its `handoff/end` (the call cuts it off: its budget, a
+     * cancellation inside the tool; or an unexpected failure) is taken back at once. When that
+     * cannot be done (the take-back ends any way but returning: an exception, a cancellation of
+     * the port's own, its own timeout; or it takes too long, or was itself cut off), this throws
+     * [ScreenUnavailableException] naming the move only, in place of the cancellation or failure:
+     * the task may still be with the user, so tools must let it propagate and not go on acting.
+     * So does a hand-over that did not settle, cut off or not: it settles only when
+     * `SurfaceManager.handToUser` returns a ticket or throws [ScreenUnavailableException] (nothing
+     * moved: the handoff then ends FAILED and this returns it). When the port throws an
+     * IOException (not cut off), `handoff/end` FAILED is recorded; any other unsettled end
+     * (another exception, the port's own timeout or cancellation) is closed with
+     * `prompt/withdrawn`, as a cut is. Either way where the app is is unknown and the call ends
+     * as ERROR with the screen note. An Error from the port is closed with `prompt/withdrawn`
+     * too: it propagates as it is, with the failed take-back suppressed on it, the task stops, and
+     * the stop fills the call in as CANCELLED. A stopping task leaves the app with the user and
+     * throws the cancellation.
      */
     public suspend fun handOff(
         kind: HandoffKind,
@@ -152,8 +174,20 @@ public enum class HandoffResult {
     /** Nobody can take over (unattended task); nothing was moved. */
     UNAVAILABLE,
 
-    /** Moving the task between displays failed; details are in `handoff/end`. */
+    /**
+     * The task could not be handed over: nothing moved, the user was never asked, and the app is
+     * where it was (`SurfaceManager.handToUser`). In the log, `handoff/end` FAILED also follows a
+     * hand-over whose port threw any other IOException; handOff then throws instead of returning
+     * it (the app may have moved). Details are in `handoff/end`.
+     */
     FAILED,
+
+    /**
+     * After the user's turn the task could not be taken back (`SurfaceManager.takeBack` threw an
+     * IOException): the app stays on the main display, and what the user did is unknown, whatever
+     * they answered. Details are in `handoff/end`.
+     */
+    NOT_TAKEN_BACK,
 }
 
 /**

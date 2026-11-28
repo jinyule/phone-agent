@@ -256,9 +256,20 @@ class SessionCodecTest {
             AssistantMessage(1, p.provider, p.model, listOf(p.image), dev.phoneagent.core.model.StopReason.END_TURN)
         }
         assertThrows<IllegalArgumentException> { UserMessage(UserMessageKind.USER, listOf(p.toolCallPart)) }
-        assertThrows<IllegalArgumentException> {
-            HandoffEnded(p.prompt, dev.phoneagent.core.ports.HandoffResult.DONE, detail = "x")
-        }
+        // A detail only names a move that failed: the hand-over (FAILED) or the take-back.
+        assertEquals(
+            mapOf(
+                "DONE" to false,
+                "DECLINED" to false,
+                "EXPIRED" to false,
+                "UNAVAILABLE" to false,
+                "FAILED" to true,
+                "NOT_TAKEN_BACK" to true,
+            ),
+            dev.phoneagent.core.ports.HandoffResult.entries.associate { result ->
+                result.name to runCatching { HandoffEnded(p.prompt, result, detail = "x") }.isSuccess
+            },
+        )
         assertThrows<IllegalArgumentException> { InboxSpliced(InboxQueue.NEXT_STEP, removed = -1) }
         assertThrows<IllegalArgumentException> { InboxEntry(InboxEntryKind.STEER, listOf(p.reasoning)) }
         assertThrows<IllegalArgumentException> { CompactionSummary(listOf(p.toolCallPart)) }

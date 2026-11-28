@@ -1,0 +1,24 @@
+blankReason: 未执行：`reason` 参数必须用用户的语言说明这一步要做什么。
+changedSinceApproval: 未执行：用户批准之后屏幕变了，这次批准已经对不上当前的操作。请先观察屏幕，再重试。
+confirmExpired: 未执行：没有人及时确认这个操作。
+confirmUnavailable: 未执行：这个操作需要用户确认，但现在没有人能确认。
+handoffDeclined: 未完成：用户没有做这一步，把它交还了回来。
+handoffDone: 用户已经自己完成了这一步。继续之前请先观察屏幕。
+handoffExpired: 未完成：没有人及时接手这一步。
+handoffFailed: 未完成：把这一步交给用户时出错了。
+handoffUnavailable: 未完成：这一步需要用户来做，但现在没有人能接手。
+interceptorFault: 未按判定执行：有扩展篡改了这次调用。
+invalidArgs: 未执行：参数不符合工具的 schema：
+invalidJson: 未执行：参数不是合法的 JSON：
+maxTokens: 未执行：这条回复达到了输出长度上限，被截断了。这个调用的参数（你看到的可能是 {}）不完整，不是你原本要发的那一份。如果仍然需要，请重新发起这次调用。
+mayHaveTakenEffect: 这个操作可能已经生效：请先调用 phone_observe 确认，再做决定。
+notStarted: 未执行：这一步在调用开始之前就失败了。
+outcomeUnknown: 这一步在调用运行期间失败了，结果未知。
+rejected: 未执行：用户拒绝了这个操作。除非用户要求，不要再重复。
+screenUnknown: 交接之后还没有读到屏幕：请先调用 phone_observe。
+skipped: 未执行：每条回复只执行第一个工具调用（每步一个动作）。如果仍然需要，请在之后的步骤里再调用。
+stoppedBeforeRun: 未执行：任务已经停止。
+stoppedWhileRunning: 这次调用运行期间，任务被停止了。
+timeout: 工具没有在限定时间内完成，已被取消。
+toolError: 工具执行出错，异常类型：
+unknownTool: 未执行：没有这个名字的可用工具：

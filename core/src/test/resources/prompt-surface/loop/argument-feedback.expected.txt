@@ -1,0 +1,21 @@
+c1 missing {"reason":"测试"}
+INVALID_ARGS 未执行：没有这个名字的可用工具：missing
+
+c2 fill_form {not json
+INVALID_ARGS 未执行：参数不是合法的 JSON：Unexpected JSON token at offset 1: Expected quotation mark '"', but had 'n' instead at path: $
+JSON input: {not json
+
+c3 fill_form {"reason":"测试"}
+INVALID_ARGS 未执行：参数不符合工具的 schema：缺少必填参数 arguments.n
+
+c4 fill_form {"reason":"测试","n":"3"}
+INVALID_ARGS 未执行：参数不符合工具的 schema：arguments.n 的类型必须是 integer，实际是 "3"
+
+c5 fill_form {"reason":"测试","n":0,"mode":"medium","name":"","tags":["a","b","c"],"extra":1}
+INVALID_ARGS 未执行：参数不符合工具的 schema：arguments.n 必须 >= 1，实际是 0；arguments.mode 必须是 ["fast","slow"] 之一，实际是 "medium"；arguments.name 至少要有 1 个字符，实际有 0 个；arguments.tags 最多只能有 2 项，实际有 3 项；arguments.extra 不是已知的参数
+
+c6 fill_form {"reason":"测试","n":11,"name":"五个汉字呀","tags":[1]}
+INVALID_ARGS 未执行：参数不符合工具的 schema：arguments.n 必须 <= 10，实际是 11；arguments.name 最多只能有 4 个字符，实际有 5 个；arguments.tags[0] 的类型必须是 string，实际是 1
+
+c7 fill_form {"reason":"  ","n":1}
+INVALID_ARGS 未执行：`reason` 参数必须用用户的语言说明这一步要做什么。

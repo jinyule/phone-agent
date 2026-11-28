@@ -3,15 +3,18 @@ package dev.phoneagent.core.agent
 import dev.phoneagent.core.ids.PromptId
 import dev.phoneagent.core.ids.TaskId
 import dev.phoneagent.core.model.Part
+import dev.phoneagent.core.policy.SecurityLevel
 import dev.phoneagent.core.session.StopCause
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
  * One task's driver: a turn/step state machine fed by a two-queue inbox (phase1 §3.7, D12).
  *
  * All input methods are non-suspending, thread-safe and return immediately; their effect is
- * recorded (`inbox/spliced`) before it is acted on. Calls after the task reached [Phase.Done]
- * or [Phase.Stopped] are ignored.
+ * recorded (`inbox/spliced`) before it is acted on. [Phase.Idle] and [Phase.Done] both accept
+ * input (a followup starts the next turn); calls after this runtime reached [Phase.Stopped] are
+ * ignored (the session may go on in a new runtime, see [stop]).
  */
 public interface TaskRuntime {
     /** The task. */
@@ -20,12 +23,22 @@ public interface TaskRuntime {
     /** Current phase; conflated, so observers may skip intermediate values. */
     public val phase: StateFlow<Phase>
 
+    /**
+     * Read-only observation (phase1 §3.8): every record as it is appended, streaming fragments and
+     * trajectory cards. Collecting never changes behaviour. A collector that falls behind loses the
+     * oldest events, so anything a UI must not miss is recovered from [phase] or the session log.
+     */
+    public val events: SharedFlow<LoopEvent>
+
     /** Queues [input] for the next turn (one message per turn). Wakes the driver. */
     public fun followup(input: UserInput)
 
     /**
-     * Queues [input] for the next step boundary and keeps the current turn from ending. Cancels an
-     * in-flight model request (its delivered prefix is kept); never interrupts a running tool.
+     * Queues [input] for the next step boundary. While it is queued, a plain final answer does not
+     * end the current turn: another step gives the model the steer. An explicit end
+     * (`end_not_done`), a failure, a `preStep` refusal, the output cap or a limit still ends the
+     * turn; the steer then stays queued and starts the next turn. Cancels an in-flight model request
+     * (its delivered prefix is kept); never interrupts a running tool.
      */
     public fun steer(input: UserInput)
 
@@ -33,20 +46,39 @@ public interface TaskRuntime {
     public fun inject(context: ContextInput)
 
     /**
+     * Changes the task's security level to [level] for every call judged after it is recorded
+     * (`task/level-changed`, in order with the other input). The only way a level changes.
+     */
+    public fun changeLevel(level: SecurityLevel)
+
+    /**
      * Stops this task's current run only, for [cause]; clears the inbox, so continuing takes a new
-     * command of the user. Pending tool calls end CANCELLED (`ToolStatus.CANCELLED` says what the
-     * model is told), and `task/stopped` is recorded last, once everything that may still append
-     * was cancelled and joined (inbox recording included). After it this instance appends
-     * nothing and takes no more input. No cause ends the session (D14): the task continues on a
-     * new instance, which writes `session/resumed` first, when the user's next input opens a new
-     * turn, never on its own.
+     * command of the user. An in-flight model request is cancelled (its delivered prefix kept as
+     * interrupted), a pending prompt is withdrawn, and pending or running tool calls end CANCELLED
+     * (`ToolStatus.CANCELLED` says what the model is told). Input accepted before the stop is
+     * recorded, then recorded as removed, never lost; the same holds when the runtime's scope is
+     * cancelled ([StopCause.SHUTDOWN]). `task/stopped(cause)` is recorded last, after the turn's
+     * `turn/end`, once everything that may still append was cancelled and joined (inbox recording
+     * included).
+     *
+     * Two levels: this runtime instance ends for good, appends nothing more, and ignores later
+     * calls to any of its methods. No cause ends the session (D14): the task continues on a new
+     * instance ([AgentLoop.resume] on the same log), which writes `session/resumed` first, when the
+     * user's next input opens a new turn, never on its own.
      */
     public fun stop(cause: StopCause)
 
     /**
-     * Answers the pending prompt [promptId]. Returns `false`, changing nothing, when the prompt
-     * is not pending (answered, expired, withdrawn, unknown) or [reply] does not fit its kind
-     * (see [UserReply]); the UI then drops its card.
+     * Answers the pending prompt [promptId]. Returns `true` exactly when [reply] became the
+     * prompt's answer. Returns `false`, changing nothing, when the prompt is not pending (answered,
+     * expired, withdrawn, unknown) or [reply] does not fit its kind (see [UserReply]); the UI then
+     * drops its card. A prompt stops taking replies the moment it is closed: a stop, a shutdown or
+     * its expiry closes it before the task acts on that, and a reply taken just before the expiry
+     * counts.
+     *
+     * A UI that did not see a prompt being asked recovers it from the session log:
+     * [Phase.Waiting.promptId] is the id of its `approval/asked`, `question/asked` or
+     * `handoff/start` record, which holds the whole card, question or handoff.
      */
     public fun answer(
         promptId: PromptId,
@@ -56,7 +88,10 @@ public interface TaskRuntime {
 
 /** Driver state. */
 public sealed interface Phase {
-    /** Nothing queued. */
+    /**
+     * Nothing queued: not started yet, or the last turn ended without a final answer (failure,
+     * limit, `preStep` refusal, output cap). Nothing continues on its own (D14); a followup does.
+     */
     public data object Idle : Phase
 
     /** Working on [turn] (from 1), [step] (from 1 within the turn). */
@@ -75,10 +110,16 @@ public sealed interface Phase {
         val promptId: PromptId?,
     ) : Phase
 
-    /** Finished; the model ended the task. */
+    /**
+     * The last turn ended with the model's final answer or `end_not_done` and nothing is queued.
+     * Not terminal: a followup starts the next turn.
+     */
     public data object Done : Phase
 
-    /** Stopped before finishing. */
+    /**
+     * This runtime stopped (by [TaskRuntime.stop], a shutdown or a session log failure). Terminal
+     * for this runtime only; the task continues in a new one (see [TaskRuntime.stop]).
+     */
     public data class Stopped(
         /** Why. */
         val cause: StopCause,

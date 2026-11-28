@@ -672,6 +672,41 @@ class AndroidScreenTest {
         }
 
     @Test
+    fun everySnapshotSaysTheDetailItWasReadAt() =
+        runTest {
+            // ScreenSnapshot.detail: the observation as asked, the read-backs after an action and
+            // a launch at the detail of the screen they are based on.
+            val read =
+                SnapshotDetail.entries.flatMap { detail ->
+                    show(button("OK", Rect(0, 1000, 500, 1100)))
+                    val observed = screen().snapshot(SnapshotOptions(detail = detail))
+
+                    val tapping = screen()
+                    val planned = tapping.snapshot(SnapshotOptions(detail = detail))
+                    val tapped = tapping.act(UiAction.Tap(planned.ref("OK")), planned.id).after
+
+                    host.sizes = mapOf(0 to Size(GEOMETRY.width, GEOMETRY.height))
+                    system.onStart = {
+                        show(button("Inbox", Rect(0, 0, 500, 100), "com.mail"), pkg = "com.mail")
+                        StartResult.Started
+                    }
+                    val launching = screen()
+                    launching.snapshot(SnapshotOptions(detail = detail))
+                    val launched = launching.launch(LaunchTarget.App("com.mail")).after
+                    listOf(
+                        "observe $detail" to observed.detail,
+                        "tap $detail" to tapped?.detail,
+                        "launch $detail" to launched?.detail,
+                    )
+                }
+
+            assertEquals(
+                SnapshotDetail.entries.flatMap { listOf("observe $it" to it, "tap $it" to it, "launch $it" to it) },
+                read,
+            )
+        }
+
+    @Test
     fun snapshotOptionsChooseTheDetail() =
         runTest {
             val inner = node("android.widget.LinearLayout", Rect(0, 0, 1000, 500))

@@ -190,12 +190,17 @@ public data class HandoffStarted(
 ) : SessionEvent
 
 /**
- * `handoff/end`: the task is back on the agent display (or never left it); the next step must
- * observe first.
+ * `handoff/end`: the handoff ended: the task is back on the agent display, never left it
+ * ([HandoffResult.FAILED]: it could not be handed over), or could not be taken back
+ * ([HandoffResult.NOT_TAKEN_BACK]: it stays on the main display); the next step must observe
+ * first. FAILED may also follow a hand-over whose port threw an IOException: the app may have
+ * moved, so where it is is unknown. [detail] names the move that failed (`hand over failed: …`
+ * for FAILED, `take back failed: …` for NOT_TAKEN_BACK).
  *
  * @property promptId the prompt.
  * @property result the result returned to the waiting call.
- * @property detail why it failed, for diagnostics; `null` unless [result] is [HandoffResult.FAILED].
+ * @property detail why it failed, for diagnostics; `null` unless [result] is [HandoffResult.FAILED]
+ *   or [HandoffResult.NOT_TAKEN_BACK].
  */
 @Serializable
 @SerialName("handoff/end")
@@ -205,13 +210,18 @@ public data class HandoffEnded(
     val detail: String? = null,
 ) : SessionEvent {
     init {
-        require(detail == null || result == HandoffResult.FAILED) { "handoff/end: detail only for FAILED" }
+        val moveFailed = result == HandoffResult.FAILED || result == HandoffResult.NOT_TAKEN_BACK
+        require(detail == null || moveFailed) { "handoff/end: detail only for a failed move" }
     }
 }
 
 /**
- * `prompt/withdrawn`: the prompt at [promptId] (card, question or handoff) was withdrawn because
- * the task stopped while it waited. The waiting call was cancelled and got no result.
+ * `prompt/withdrawn`: the prompt at [promptId] (card, question or handoff) was withdrawn without an
+ * answer. Either the task stopped (or died) while it waited, and the waiting call was cancelled
+ * and got no result; or the prompt was cut off while the task went on (the call's budget, a
+ * cancellation inside the tool, a failure), and the call goes on to its result, which follows this
+ * record. A handoff cut off so has its app taken back first, or its call ends with a failed
+ * take-back (`ToolInteraction.handOff`).
  */
 @Serializable
 @SerialName("prompt/withdrawn")

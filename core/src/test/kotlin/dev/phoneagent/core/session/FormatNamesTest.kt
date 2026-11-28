@@ -169,7 +169,6 @@ class FormatNamesTest {
          */
         val IN_MEMORY_ONLY =
             setOf(
-                "ports.SnapshotDetail",
                 "ports.SurfaceCapability",
                 "ports.SurfaceUnavailableReason",
                 "tool.RiskClass",

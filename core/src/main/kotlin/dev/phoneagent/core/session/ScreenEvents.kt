@@ -44,7 +44,10 @@ public data class ScreenObserved(
  * @property callId the tool call.
  * @property on the snapshot it was planned on, or `null`.
  * @property action the action as sent.
- * @property outcome what the port returned.
+ * @property outcome what the port returned, also when it returned after its call was cancelled.
+ *   When the action threw or was cancelled, `Status.Failed` naming the exception's class only
+ *   ("did not finish" when cut off), `Effect.UNKNOWN`, no read-back: it may have reached the
+ *   device.
  */
 @Serializable
 @SerialName("screen/action")
@@ -60,7 +63,10 @@ public data class ScreenActed(
  *
  * @property callId the tool call.
  * @property target what was opened.
- * @property outcome what the port returned.
+ * @property outcome what the port returned, also when it returned after its call was cancelled.
+ *   When the launch threw or was cancelled, `Status.Failed` naming the exception's class only
+ *   ("did not finish" when cut off), `Effect.UNKNOWN`, no read-back: it may have reached the
+ *   device.
  */
 @Serializable
 @SerialName("screen/launch")

@@ -48,7 +48,13 @@ public enum class SurfaceKind {
  * @property quality how much the tree can be trusted; decides whether a frame is attached.
  * @property flags page-level facts the formatter, policy and loop react to.
  * @property fingerprint stable digest of window, roles, names and bounds; equal fingerprints = no visible change.
+ * @property detail the detail the port actually read this screen at, filled in by the port: for
+ *   [ScreenPort.snapshot] the one asked for, for a read-back after an action or launch the one the
+ *   port read it at. Metadata for the runtime (a re-check reads its fresh screen at the detail of
+ *   the screen the call was planned on); the screen format does not print it. Left out of the
+ *   encoding when [SnapshotDetail.BRIEF], so a log without it reads as BRIEF.
  */
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 public data class ScreenSnapshot(
     val id: SnapshotId,
@@ -60,6 +66,7 @@ public data class ScreenSnapshot(
     val quality: TreeQuality,
     val flags: Set<ScreenFlag>,
     val fingerprint: String,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val detail: SnapshotDetail = SnapshotDetail.BRIEF,
 ) {
     init {
         val duplicate =

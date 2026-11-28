@@ -24,7 +24,10 @@ internal class ScreenObserver(
     // Highest ref number handed out by this port (RefCarrier never reuses one).
     private var lastRef = 0
 
-    /** Reads the display and registers the result as a new snapshot; refs carry over from the latest one. */
+    /**
+     * Reads the display at [detail] and registers the result as a new snapshot, which says it was
+     * read at [detail]; refs carry over from the latest one.
+     */
     suspend fun observe(
         host: ScreenHost,
         geometry: DisplayGeometry,
@@ -50,6 +53,7 @@ internal class ScreenObserver(
                 quality = analyzer.quality(elements, surface, flags),
                 flags = flags,
                 fingerprint = analyzer.fingerprint(read.pkg, activity, elements, ocr = null),
+                detail = detail,
             )
         history.put(Observed(snapshot, detail, carried.tree))
         return snapshot
