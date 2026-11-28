@@ -55,7 +55,7 @@ phone-agent/
 │   tools/       第一阶段工具（§5）与系统提示 SystemPrompt；屏幕文字只经 ScreenPresenter 拿，不引用 screen
 │   guard/       LoopGuard、OutwardPacing、效果判定
 │   ports/       ScreenPort / SurfaceManager / StoragePort / Clock 等接口
-│   adb/         无线调试配对与 ADB 连接（纯 Kotlin，可 JVM 测）
+│   adb/         无线调试配对与 ADB 连接，只跑 App 写死的命令（纯 Kotlin，可 JVM 测；隔离，见下）
 │   protocol/    MCP / JSON-RPC 类型
 │   testFixtures FakeChatModel、ScriptedScreen、ReplayChatModel/ReplayScreen、金样工具
 ├─ privileged/   shell 助手：PrivilegedCore + HelperMain（经 app_process 加载，依赖尽量少）
@@ -74,6 +74,7 @@ phone-agent/
 
 - **契约包**：`ids`、`model`、`ports`、`tool`、`policy`、`session`、`agent`，分层排列，只能引用更低的层；
 - **能力包**：其余所有包，例如 `model.openai`、`model.anthropic`、`policy.rules`、`screen`、`tools`、`storage`。能力包只引用契约包和自己。
+- **隔离能力包**：`adb`（内置无线 ADB 客户端）。它是 App 的设置代码，只用来配对、连接，并运行 App 写死的命令（拉起助手、自检），永远不是工具（AGENTS.md §3.4）。所以它和别的包互不引用：core 里其他包都不能用它，它自己也不引用任何契约包（包括 `tool`，免得被实现成工具）。公开 API 里没有交互式 shell，也没有任意 adb 服务，只有 `AdbSession.run(AdbCommand)`：跑完一条命令，返回输出和退出码。`PackageDependencyTest` 守住这两个方向，并带反例。
 
 分层和理由见 ADR `2026-11-01-core-contracts`。
 
@@ -93,7 +94,7 @@ phone-agent/
 │ 建虚拟屏 · 跨屏启动 · 注入输入 · 挪任务 · 主屏监视 · appops 静音             │
 │ App 死后不退出：超时后 releaseAll（释放屏、解除静音），等 App 回来重新交接     │
 └───────────────▲─────────────────────────────────────────────────────────────┘
-                │ 拉起方式：① 内置 ADB 客户端经 adbd 的 exec: 服务
+                │ 拉起方式：① 内置 ADB 客户端经 adbd 的 shell,v2（没有时用 exec:）服务
                 │          ② Shizuku UserService  ③ 开发者在 USB 下运行启动脚本
 ```
 
@@ -633,7 +634,7 @@ screen s12 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · 坐标 0–
         ① 开发者选项（引导去"关于手机"连点版本号；读系统设置自动打勾）
         ② 打开无线调试（要求连着 Wi-Fi；第一次在某个网络上要勾"始终允许"）
         ③ 配对码：用高优先级通知里的内联输入框填 6 位码（分屏也不需要）
-        ④ 内置 ADB：mDNS 发现端口 → SPAKE2 配对 → TLS 连接 → exec 拉起助手
+        ④ 内置 ADB：mDNS 发现端口 → SPAKE2 配对 → TLS 连接 → 运行固定命令拉起助手
         ⑤ 助手交接 Binder → grantSelf(WRITE_SECURE_SETTINGS)
         ⑥ 自动开启无障碍服务 → 能力探针（建小屏 + 注入一次无害点击）
         ⑦ 完成（失败时指出最可能要回去重做的一步）
@@ -644,6 +645,21 @@ screen s12 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · 坐标 0–
 1. 在连着 Wi-Fi、且这个网络已被允许的前提下，写 `adb_wifi_enabled=1`；
 2. 重新连接（先试上次的端口，再 mDNS，最后扫本机端口），拉起助手；
 3. 如果系统马上把开关拨回关着，就认为这个网络还没被允许，停下不再反复写，改为提示用户。
+
+**内置 ADB 客户端的约定**（`core.adb`）：
+- **信任模型**：连接时不认证 adbd，和 AOSP 的 adb host 一样。本机任何能冒充 adbd 的进程，都能收到拉起命令和 stdin 里的口令。所以：
+  - 命令行里不放秘密；
+  - 助手要通过交接检查（调用方 uid 2000 + 口令）才被信任。
+
+  能防什么、不能防什么，见 `docs/adr/2026-11-03-adb-trust-model.md`。
+- **扫描只传回环地址** `127.0.0.1`：adbd 监听所有地址（AOSP `adb_wifi.cpp`），回环一定能连上，探测也不会发到局域网上。
+- **UNAUTHORIZED 是"可能未授权"**：TLS 握手刚完成时对端断开，和 adbd 拒绝我们的密钥分不清。所以：
+  - 对同一个端点先重试一次（`AdbConnectPort` 已经这样做）；
+  - 仍然是 UNAUTHORIZED，才请用户重新配对。
+
+  我们自己的 TLS 栈按类型认出的错误（例如 bad_record_mac）算 TLS，不算 UNAUTHORIZED。对端发来的 alert 不在此列，但有时类型也是 `SSLProtocolException`，只能靠消息认出来：
+  - Android 上 Conscrypt 收到任何 alert 都报成 `SSLProtocolException`（实测未配对的 key 收到 `SSLV3_ALERT_CERTIFICATE_UNKNOWN`）。认法是 BoringSSL 的原因：`SSLV3_*` / `TLSV1_*`（Android 12 起都是 `SSLV3_ALERT_*` / `TLSV1_ALERT_*`；Android 11 的表里 1110–1116 没有 `ALERT_`，例如 `TLSV1_CERTIFICATE_REQUIRED`），名字表里没有的写成 `SSL routines:OPENSSL_internal:reason(1NNN)`（例如 missing_extension 是 `reason(1109)`）。BoringSSL 自己的原因没有以这两个前缀开头的。不按原因码的数值判断：BoringSSL 自己的原因也有 1000 以上的（1122 `PAKE_AND_KEY_SHARE_NOT_ALLOWED`）。
+  - JDK 收到 unexpected_message 或不认识的编号时报成 `SSLProtocolException`，消息里是 `Received fatal alert: ` / `Unknown alert description (`。
 
 ### 7.2 一步执行
 

@@ -49,11 +49,45 @@ Mika
       -> privileged/src/main/kotlin/dev/phoneagent/privileged/cap/MainScreenLog.kt
     app/src/main/java/com/wangzan101/mika/cap/phone/shell/AudioMuteLedger.kt
       -> privileged/src/main/kotlin/dev/phoneagent/privileged/cap/AudioMuteLedger.kt
+    core/src/main/kotlin/com/wangzan101/mika/core/adb/Ed25519.kt
+      -> core/src/main/kotlin/dev/phoneagent/core/adb/EdPoint.kt
+    core/src/main/kotlin/com/wangzan101/mika/core/adb/Spake2.kt
+      -> core/src/main/kotlin/dev/phoneagent/core/adb/Spake2.kt
+    core/src/main/kotlin/com/wangzan101/mika/core/adb/PairingAuth.kt
+      -> core/src/main/kotlin/dev/phoneagent/core/adb/PairingAuth.kt
+    core/src/main/kotlin/com/wangzan101/mika/core/adb/AdbIdentity.kt
+      -> core/src/main/kotlin/dev/phoneagent/core/adb/AdbIdentity.kt
+    core/src/main/kotlin/com/wangzan101/mika/core/adb/AdbTls.kt
+      -> core/src/main/kotlin/dev/phoneagent/core/adb/AdbTls.kt
+    core/src/main/kotlin/com/wangzan101/mika/core/adb/AdbMessage.kt
+      -> core/src/main/kotlin/dev/phoneagent/core/adb/AdbMessage.kt
+    core/src/main/kotlin/com/wangzan101/mika/core/adb/AdbPairing.kt
+      -> core/src/main/kotlin/dev/phoneagent/core/adb/AdbPairing.kt
+    core/src/main/kotlin/com/wangzan101/mika/core/adb/AdbConnection.kt
+      -> core/src/main/kotlin/dev/phoneagent/core/adb/AdbConnection.kt
+    core/src/main/kotlin/com/wangzan101/mika/core/adb/LocalPortScan.kt
+      -> core/src/main/kotlin/dev/phoneagent/core/adb/LocalPortScan.kt
+    core/src/main/kotlin/com/wangzan101/mika/core/adb/AdbConnectPort.kt
+      -> core/src/main/kotlin/dev/phoneagent/core/adb/AdbConnectPort.kt
+    core/src/test/kotlin/com/wangzan101/mika/core/adb/TestTls.kt
+      -> core/src/test/kotlin/dev/phoneagent/core/adb/TestTls.kt (TestTls)
+      -> core/src/test/kotlin/dev/phoneagent/core/adb/FakePairingServer.kt (FakePairingServer)
+    core/src/test/kotlin/com/wangzan101/mika/core/adb/AdbConnectionTest.kt
+      -> core/src/test/kotlin/dev/phoneagent/core/adb/FakeAdbd.kt (FakeAdbd)
 
   The Mika files carry no header of their own. Each adapted file starts with
   a header naming the Mika file, the commit, the copyright and license of the
   original work, and a "Modified by PhoneAgent contributors:" line saying
   what changed.
+
+  Tests whose structure and choice of cases follow Mika's tests of the same
+  commit; their code is written anew, and their vectors are public RFC data:
+    core/src/test/kotlin/com/wangzan101/mika/core/adb/CryptoTest.kt
+      -> core/src/test/kotlin/dev/phoneagent/core/adb/EdPointTest.kt
+      -> core/src/test/kotlin/dev/phoneagent/core/adb/Spake2Test.kt
+      -> core/src/test/kotlin/dev/phoneagent/core/adb/PairingAuthTest.kt
+    core/src/test/kotlin/com/wangzan101/mika/core/adb/AdbPairingTest.kt
+      -> core/src/test/kotlin/dev/phoneagent/core/adb/AdbIdentityTest.kt
 
 --------------------------------------------------------------------------------
 scrcpy (through Mika's ShellContext.kt)

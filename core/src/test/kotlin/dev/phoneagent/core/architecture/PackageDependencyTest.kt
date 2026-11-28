@@ -2,6 +2,7 @@ package dev.phoneagent.core.architecture
 
 import com.lemonappdev.konsist.api.Konsist
 import com.lemonappdev.konsist.api.container.KoScope
+import com.lemonappdev.konsist.api.declaration.KoFileDeclaration
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -17,6 +18,9 @@ import org.junit.jupiter.api.Test
  * - Contract packages never reference capabilities (so `agent` does not know concrete capabilities),
  *   and capabilities reference only contracts and themselves, never each other. Only the app wires
  *   capabilities together.
+ * - The capabilities in [ISOLATED] reference no other core package at all, contracts included: the
+ *   built-in adb client (`adb`, phase1 §2.1) is app setup code that must never become a tool
+ *   (AGENTS.md §3.4), so it may not even implement a tool contract.
  *
  * References are imports (including wildcards), and fully qualified class names and function calls
  * in code, also with type arguments (`….f<A<B>>(x)`), including code inside string templates
@@ -40,18 +44,38 @@ class PackageDependencyTest {
         assertEquals(
             listOf(
                 "NoPackage.kt: no package declaration",
+                "adb/ImplementsTool.kt: isolated capability adb must not use contract tool",
                 "agent/KnowsAdapter.kt: contract agent must not use capability model.openai",
                 "agent/TemplateBypass.kt: contract agent must not use capability storage",
                 "model/openai/KnowsScreen.kt: capability model.openai must not use capability screen",
                 "ports/KnowsSession.kt: contract ports (layer 1) must not use session (layer 4)",
                 "screen/MarksRisk.kt: capability screen must not use capability policy.rules",
+                "tool/UsesAdb.kt: contract tool must not use capability adb",
                 "tools/FullyQualified.kt: capability tools must not use capability policy.rules",
                 "tools/FunctionCall.kt: capability tools must not use capability policy.rules",
                 "tools/GenericCall.kt: capability tools must not use capability policy.rules",
                 "tools/RawTemplate.kt: capability tools must not use capability storage",
+                "tools/RunsAdb.kt: capability tools must not use capability adb",
             ),
             violations(scope, root),
         )
+    }
+
+    @Test
+    fun `the adb client is isolated in both directions`() {
+        val scope = Konsist.scopeFromProduction("core")
+        val adb = Unit.Capability("adb")
+        val files = scope.files.map { file -> file.packagee?.name?.let(Unit::of) to referencedUnits(file) }
+        assertTrue(files.count { it.first == adb } >= 10, "the adb package is where this test expects it")
+        val intoAdb = files.filter { (own, used) -> own != adb && adb in used }.map { it.first }
+        val outOfAdb =
+            files
+                .filter { (own, _) -> own == adb }
+                .flatMap { it.second }
+                .filter { it != adb }
+                .distinct()
+        assertEquals(emptyList<Unit?>(), intoAdb, "packages using adb")
+        assertEquals(emptyList<Unit>(), outOfAdb, "core packages adb uses")
     }
 
     @Test
@@ -137,14 +161,16 @@ class PackageDependencyTest {
                 val path = file.path.substringAfter(root)
                 val declared = file.packagee?.name ?: return@flatMap listOf("$path: no package declaration")
                 val own = Unit.of(declared) ?: return@flatMap emptyList()
-                val imports = file.imports.map { packageOfImport(it.name, it.isWildcard) }
-                val referenced = imports + fullyQualifiedPackages(file.text)
-                referenced
-                    .mapNotNull(Unit::of)
-                    .distinct()
+                referencedUnits(file)
                     .mapNotNull { problem(own, it) }
                     .map { "$path: $it" }
             }.sorted()
+
+    /** The core packages [file] refers to, by import or fully qualified. */
+    private fun referencedUnits(file: KoFileDeclaration): List<Unit> {
+        val imports = file.imports.map { packageOfImport(it.name, it.isWildcard) }
+        return (imports + fullyQualifiedPackages(file.text)).mapNotNull(Unit::of).distinct()
+    }
 
     private fun problem(
         own: Unit,
@@ -176,9 +202,17 @@ class PackageDependencyTest {
         used: Unit,
     ): String? =
         when {
+            own.id in ISOLATED && used != own -> "isolated capability ${own.id} must not use ${used.description}"
             used is Unit.Capability && used != own -> "capability ${own.id} must not use capability ${used.id}"
             else -> null
         }
+
+    private val Unit.description: String
+        get() =
+            when (this) {
+                is Unit.Contract -> "contract $label"
+                is Unit.Capability -> "capability $id"
+            }
 
     private val Unit.Contract.label: String get() = name.ifEmpty { "core" }
 
@@ -187,6 +221,9 @@ class PackageDependencyTest {
 
     private companion object {
         const val BASE = "dev.phoneagent.core"
+
+        /** Capabilities that use no other core package (see the class comment). */
+        val ISOLATED = setOf("adb")
 
         /** Contract packages and their layer; a package may only use strictly lower layers. */
         val CONTRACT_LAYERS =
