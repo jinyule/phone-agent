@@ -10,6 +10,20 @@
         android:name="android.permission.WRITE_SECURE_SETTINGS"
         tools:ignore="ProtectedPermissions" />
 
+    <!-- phone_intent alarm / timer (AlarmClock.ACTION_SET_ALARM, ACTION_SET_TIMER). -->
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
+
+    <!--
+      Package visibility: phone_apps lists every app of the user and AndroidScreen names the
+      foreground package and activity, including picker and permission screens of system
+      packages. <queries> would hide apps without a launcher entry and the activities of packages
+      that no declared intent matches. PhoneAgent is sideloaded, so Play's restriction on this
+      permission does not apply.
+    -->
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+
     <!-- Session logs, screenshots and credentials never leave the device (phase1-architecture §3.9). -->
     <application
         android:allowBackup="false"
@@ -37,5 +51,18 @@
             android:exported="true"
             android:multiprocess="false"
             android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
+        <service
+            android:name=".service.AgentAccessibilityService"
+            android:exported="true"
+            android:label="@string/accessibility_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/agent_accessibility_service" />
+        </service>
     </application>
 </manifest>

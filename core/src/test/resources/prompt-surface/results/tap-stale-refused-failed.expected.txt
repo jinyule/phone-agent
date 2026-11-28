@@ -1,4 +1,4 @@
-目标已经不在画面上了（画面变了，编号过期），这一步没有执行。下面是最新一屏，请用它的 screen 和编号：
+编号过期了（its row changed since it was planned; if that row's text keeps changing, use its position instead），这一步没有执行。下面是最新一屏，请用它的 screen 和编号：
 screen s13 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · 坐标 0–999
 状态：键盘已弹出
 [顶部]

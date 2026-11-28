@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <!-- Started by AndroidScreenDeviceTest from the app process (another uid), so they are exported. -->
+        <activity
+            android:name="dev.phoneagent.app.adapters.screen.SecureActivity"
+            android:exported="true" />
+        <activity
+            android:name="dev.phoneagent.app.adapters.screen.FieldActivity"
+            android:exported="true" />
+    </application>
+</manifest>

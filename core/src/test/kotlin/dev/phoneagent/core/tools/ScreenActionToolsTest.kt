@@ -3,6 +3,7 @@ package dev.phoneagent.core.tools
 import dev.phoneagent.core.ids.SnapshotId
 import dev.phoneagent.core.ports.ActionOutcome
 import dev.phoneagent.core.ports.ActionOutcome.Effect
+import dev.phoneagent.core.ports.ActionOutcome.StaleReason
 import dev.phoneagent.core.ports.ActionOutcome.Status
 import dev.phoneagent.core.ports.Direction
 import dev.phoneagent.core.ports.ElementRef
@@ -341,7 +342,12 @@ class ScreenActionToolsTest {
             assertTrue(blind.text().contains("phone_observe"), blind.text())
             assertNull(blind.detail("screen"))
             // Every outcome with a screen after it shows it, so details.screen always names a screen the model saw.
-            for (status in listOf(Status.Ok, Status.Failed("x"), Status.Refused("y"), Status.StaleRef)) {
+            for (status in listOf(
+                Status.Ok,
+                Status.Failed("x"),
+                Status.Refused("y"),
+                Status.StaleRef(StaleReason.MOVED),
+            )) {
                 val result =
                     run(
                         "phone_tap",
@@ -382,13 +388,26 @@ class ScreenActionToolsTest {
                 refused.text(),
             )
 
-            val staleBlind = run("phone_tap", args, screen(ActionOutcome(Status.StaleRef, Effect.UNKNOWN)))
+            val staleBlind =
+                run("phone_tap", args, screen(ActionOutcome(Status.StaleRef(StaleReason.NOT_FOUND), Effect.UNKNOWN)))
             assertEquals(ToolStatus.ERROR, staleBlind.status)
-            assertTrue(staleBlind.text().endsWith("先 phone_observe 读最新一屏，再用新的 screen 和编号。"))
+            assertEquals(
+                "编号过期了（it is no longer on the screen），这一步没有执行。先 phone_observe 读最新一屏，再用新的 screen 和编号。",
+                staleBlind.text(),
+            )
+            assertEquals("NOT_FOUND", staleBlind.detail("staleReason"))
 
-            val stale = run("phone_tap", args, screen(ActionOutcome(Status.StaleRef, Effect.UNKNOWN, after)))
+            val stale =
+                run(
+                    "phone_tap",
+                    args,
+                    screen(ActionOutcome(Status.StaleRef(StaleReason.UNRELIABLE), Effect.UNKNOWN, after)),
+                )
             assertTrue(stale.text().contains("下面是最新一屏，请用它的 screen 和编号：\nscreen s13 · com.tencent.mm"), stale.text())
+            assertTrue(stale.text().startsWith("编号过期了（${StaleReason.UNRELIABLE.hint}），这一步没有执行。"), stale.text())
             assertEquals("stale_ref", stale.detail("outcome"))
+            assertEquals("UNRELIABLE", stale.detail("staleReason"))
+            assertNull(failed.detail("staleReason"))
             assertEquals("s13", stale.detail("screen"))
             assertNull(staleBlind.detail("screen"))
             assertEquals("failed", failed.detail("outcome"))

@@ -249,7 +249,7 @@ class PromptSurfaceTest {
         runTest {
             val stale =
                 ActionOutcome(
-                    ActionOutcome.Status.StaleRef,
+                    ActionOutcome.Status.StaleRef(ActionOutcome.StaleReason.ROW_CHANGED),
                     ActionOutcome.Effect.UNKNOWN,
                     Samples.chatWith("s13", sent = "张三：在吗"),
                 )
@@ -267,6 +267,18 @@ class PromptSurfaceTest {
                         run("phone_tap", tap, outcome)
                     }.joinToString("\n\n=====\n\n")
             Golden.assertMatches("results/tap-stale-refused-failed.expected.txt", text)
+        }
+
+    @Test
+    fun `results - every reason a ref went stale`() =
+        runTest {
+            val text =
+                ActionOutcome.StaleReason.entries
+                    .map { reason ->
+                        val outcome = ActionOutcome(ActionOutcome.Status.StaleRef(reason), ActionOutcome.Effect.UNKNOWN)
+                        "$reason\n" + run("phone_tap", """{"screen":"s12","ref":"e7"}""", outcome)
+                    }.joinToString("\n\n=====\n\n")
+            Golden.assertMatches("results/tap-stale-reasons.expected.txt", text)
         }
 
     @Test

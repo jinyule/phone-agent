@@ -76,6 +76,26 @@ Mika
       -> core/src/test/kotlin/dev/phoneagent/core/adb/FakeAdbd.kt (FakeAdbd)
     core/src/main/kotlin/com/wangzan101/mika/core/model/LeakedToolMarkup.kt
       -> core/src/main/kotlin/dev/phoneagent/core/model/openai/LeakedToolMarkup.kt
+    app/src/main/java/com/wangzan101/mika/cap/phone/a11y/ScreenAccessibility.kt
+      -> app/src/main/kotlin/dev/phoneagent/app/service/AgentAccessibilityService.kt
+         (the runtime re-request of FLAG_INCLUDE_NOT_IMPORTANT_VIEWS in onServiceConnected)
+      -> app/src/main/kotlin/dev/phoneagent/app/service/ServiceScreenHost.kt
+      -> app/src/main/kotlin/dev/phoneagent/app/service/Screenshots.kt
+         (the per-display window lookup, the suspending gesture dispatch, the display of an
+         event before API 33, and the screenshot that waits out the system interval once and
+         copies the hardware buffer into a software bitmap)
+    app/src/main/java/com/wangzan101/mika/cap/phone/a11y/SystemPickers.kt
+      -> app/src/main/kotlin/dev/phoneagent/app/adapters/screen/ScreenSystem.kt
+         (the system picker intents resolved to packages, AndroidScreenSystem.resolvePickers)
+    app/src/main/java/com/wangzan101/mika/cap/phone/a11y/ScreenReader.kt
+      -> app/src/main/kotlin/dev/phoneagent/app/adapters/screen/ScreenReader.kt
+      -> app/src/main/kotlin/dev/phoneagent/app/adapters/screen/NodeFacts.kt
+         (the skipped window types, contentWindows, topPackage and the depth limit; the
+         hint-as-text check of NodeText.fieldText and the descendant label of unnamed
+         clickable containers)
+    app/src/main/java/com/wangzan101/mika/cap/phone/a11y/NodeIds.kt
+      -> app/src/main/kotlin/dev/phoneagent/app/adapters/screen/RefMatcher.kt
+         (the bounded registry of recent snapshots, SnapshotHistory)
 
   The Mika files carry no header of their own. Each adapted file starts with
   a header naming the Mika file, the commit, the copyright and license of the

@@ -27,7 +27,10 @@ public data class ActionOutcome(
         @SerialName("ok")
         public data object Ok : Status
 
-        /** Attempted but did not happen; [reason] is for the model, in English. */
+        /**
+         * Not done as requested: it may have partly happened, or whether it happened cannot be
+         * told; [reason] says what is known, for the model, in English.
+         */
         @Serializable
         @SerialName("failed")
         public data class Failed(
@@ -43,10 +46,56 @@ public data class ActionOutcome(
             val reason: String,
         ) : Status
 
-        /** The target ref no longer matches any element; the model must observe again. */
+        /**
+         * The target ref no longer matches an element, or not reliably: nothing was done on the
+         * device, and the model must use a fresh screen. [reason] says why.
+         */
         @Serializable
         @SerialName("stale_ref")
-        public data object StaleRef : Status
+        public data class StaleRef(
+            /** Why the planned element was not found again. */
+            val reason: StaleReason,
+        ) : Status
+    }
+
+    /**
+     * Why a ref planned on an earlier snapshot was not found again ([Status.StaleRef]). [hint] is
+     * what the model is told, in English, with the target as "it"; it quotes nothing of the screen.
+     */
+    @Serializable
+    public enum class StaleReason(
+        /** The model-facing explanation (tools show it with the stale result). */
+        public val hint: String,
+    ) {
+        /** The snapshot the action was planned on is no longer remembered. */
+        FORGOTTEN("the screen it was planned on is too old to check against"),
+
+        /** What tells it apart outside lists changed (a label of its window), or its window is gone. */
+        WINDOW_CHANGED("the screen around it changed since it was planned"),
+
+        /** A label of its row changed, or the row is gone. */
+        ROW_CHANGED(
+            "its row changed since it was planned; if that row's text keeps changing, use its position instead",
+        ),
+
+        /** It, or the element now alike, was read only in part or sits in a row cut down to its controls. */
+        UNRELIABLE(
+            "it cannot be told apart reliably, because the screen was read only in part or its row is cut off; " +
+                "scroll it into view or use its position instead",
+        ),
+
+        /**
+         * It is there, but not where it was when planned; or a press on it would now go elsewhere
+         * than the planned snapshot gives it: to another element, to one where that gave none, or
+         * to none where that gave one.
+         */
+        MOVED("it moved since it was planned"),
+
+        /** Several elements are alike and none can be told for it. */
+        AMBIGUOUS("several elements now match it"),
+
+        /** Nothing on the screen now is it. */
+        NOT_FOUND("it is no longer on the screen"),
     }
 
     /** Observed effect of the action. */
