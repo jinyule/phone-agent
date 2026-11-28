@@ -12,7 +12,7 @@ adb 的 TLS 两端都用自签名证书，各自的检查不一样：
 - **配对时**：SPAKE2 用配对码，经 TLS exporter 绑定到这条 TLS 通道。不知道配对码的一方完成不了配对，所以配对是认证过的。
 - **连接时**：adbd 拿我们证书里的公钥去比对已配对的公钥（AOSP `adbd_tls_verify_cert`）。反过来，AOSP 的 adb host 不检查 adbd 的证书。我们和它一样，用 `TrustAll`（`AdbTls`）。
 
-找端口的顺序是：上次的端口 → mDNS → 扫本机端口（`AdbConnectPort`、`LocalPortScan`）。扫描时，凡是用 STLS 回答我们 CNXN 的端口，都当成 adbd。
+找端口的顺序是：上次交接成功的端口 → mDNS → 扫本机端口（`AdbConnectPort`、`LocalPortScan`）。扫描时，凡是用 STLS 回答我们 CNXN 的端口，都当成 adbd。
 
 由此带来一个问题：**本机任何能回 STLS、能做 TLS 1.3 的进程，都能冒充 adbd**。普通 App 就能做到：在回环上监听一个临时端口，或者注册一条 `_adb-tls-connect._tcp` 的 mDNS 服务。冒充成功以后，它会收到拉起命令和 stdin 里的口令。
 
@@ -22,21 +22,23 @@ adb 的 TLS 两端都用自签名证书，各自的检查不一样：
 
 ## 决定
 
-1. **连接时不认证 adbd**，和 AOSP host 一致。adb 协议在连接阶段没有能复用配对结果的认证手段，客户端也拿不到可以比对的 adbd 身份（见 Alternatives considered 里的 TOFU）。
+1. **连接时不认证 adbd**，和 AOSP host 一致。adb 协议在连接阶段没有能复用配对结果的认证手段。客户端可以拿到 adbd 的公钥（TLS 证书里的 SPKI），但它够不够稳定、能不能拿来比对，还没有验证完（见 Alternatives considered 里的 TOFU）。
 
 2. **经 adb 送出的东西，都按"可能落到别的进程手里"来设计：**
    - 命令行（`AdbCommand`）不放任何秘密。原因有二：`toString` 会打印整条命令，日志也会记下来；在设备上，`ps` 对所有进程可见。
    - 唯一的秘密是助手的 launch nonce，只走 `AdbSession.run` 的 stdin。它一次性、有时效，交接成功时就用掉。
    - 命令的输出（自检、诊断）只用来提示用户和排查问题，**不作为任何信任判断的依据**。
 
-3. **信任只在助手交接时建立，由 WP12 负责。** 助手经 Binder 把自己交给 App 时，HandoffGate / HandoffAdmission 依次检查：
-   1. 调用方 uid 必须是 2000（shell），否则拒绝为 `NOT_SHELL`（`HandoffGate.precheck`，`HandoffGateTest` 钉住）；
-   2. 助手自报的 uid/pid 要和调用方一致；
-   3. 口令要有效；
-   4. `identity()` 要指向调用进程；
-   5. 协议版本、versionCode、APK 要和本机安装的一致。
+3. **信任只在助手交接时建立，由 WP12 负责。** 交接入口有两层：
+   - 第一层是 manifest：交接用的 `HelperHandoffProvider` 要求 `INTERACT_ACROSS_USERS_FULL`（`AndroidManifest.xml`，`HelperHandoffProviderTest` 钉住）。shell 持有这个权限，普通 App 拿不到，根本调不进来；
+   - 第二层在代码里：助手经 Binder 把自己交给 App 时，HandoffGate / HandoffAdmission 依次检查：
+     1. 调用方 uid 必须是 2000（shell），否则拒绝为 `NOT_SHELL`（`HandoffGate.precheck`，`HandoffGateTest` 钉住）；
+     2. 助手自报的 uid/pid 要和调用方一致；
+     3. 口令要有效；
+     4. `identity()` 要指向调用进程；
+     5. 协议版本、versionCode、APK 要和本机安装的一致。
 
-   第 1 条是这个信任模型的支点。冒充 adbd 的进程即使拿到了口令，它的 uid 也不是 2000，交接不了。**这一条不能删，也不能放宽。** 改它要先改这份 ADR。
+   第二层的第 1 条是这个信任模型的支点：就算第一层因为 manifest 或 provider 的改动失效了，冒充 adbd 的进程即使拿到了口令，它的 uid 也不是 2000，照样交接不了。**这一条不能删，也不能放宽。** 改它要先改这份 ADR。
 
    这些名字在集成分支 4289f67 上核对过：`HandoffGate.precheck` 在 `privileged/.../handoff/HandoffGate.kt`，`HandoffReject.NOT_SHELL` 在 `HandoffContract.kt`，`HandoffGateTest.precheckRejectsCallersOtherThanShell` 钉住第 1 条。
 
@@ -58,14 +60,20 @@ adb 的 TLS 两端都用自签名证书，各自的检查不一样：
 - 拒绝服务：助手没有被拉起，App 只会看到交接超时，可能还有连接或命令失败。
 - 伪造命令输出：自检会被骗，所以自检结果不作信任依据（决定 2）。
 - 已经以 shell 身份（uid 2000）运行的进程（例如用户从电脑上开的 adb 会话）拿到口令以后，可以冒充助手完成交接。不过 shell 身份本身就是这条通道要拿的权限，不算越权。
+- 让我们记下"被拒绝"：它在 TLS 里拒掉我们的证书，搜索就以 UNAUTHORIZED 结束，拉起报 `Unauthorized`，App 记下"上次被拒"（`AdbPairingRecord.lastRefused`）。它能反复这样做。但配对记录不清掉，下一次请求照样去连（受最小间隔约束），所以它停下或被卸载以后就恢复，用不着重新配对。
+- 占住端口缓存。缓存只在交接成功（`Launched`）以后才写。搜索试过缓存端口而没有在它上面连上，就清掉（不论在那里是被拒、没有回答、TLS 失败还是连不上，也不论最后有没有从 mDNS 或扫描连上别的端口）；在它上面连上了，`NoHandoff`、`CommandFailed` 也清掉它（`AdbPairingRecord`）。剩下的窗口有两层：
+  - 缓存这一层：它只能在真 adbd 让出这个端口以后（例如无线调试关掉再打开，端口就换了）抢到它。每抢到一次，最多拖住一次拉起：那一次要么在它那里连不上，要么连上了却没有交接、或者命令失败，都会清掉缓存，下一次搜索回到 mDNS 和扫描；
+  - 搜索这一层：core 第一次 UNAUTHORIZED（对同一个端点重试过一次）就结束搜索（`AdbConnectPort`），不再试后面的端口。它排在真 adbd 前面时（mDNS 先报它，或者扫描先碰到它），每一轮都能让拉起失败；但配对不会被持久清掉，它停下或被卸载以后就恢复。按公钥做 TOFU 才能挡住这一层（见 Alternatives considered）。
 
 ## Alternatives considered
 
-- **TOFU（按设备 GUID 记住 adbd 的证书，以后只接受同一张）**：
+- **TOFU（按设备 GUID 记住 adbd 的身份，以后只接受同一个）**：
   - 配对时，PeerInfo 里会带上设备 GUID，可以拿它当索引；
-  - 但我们还没在真机上确认过：adbd 的连接证书在重启、开关无线调试、撤销授权之后，是否保持不变。证书一变，用户就会碰到误报，而且我们还设计不好误报时怎么让用户处理；
+  - 按证书钉不住。WP13 B 段在模拟器（Android 16）上实测（2026-11-13）：adbd 每次连接都重签一张证书（subject 和 issuer 都是 `C=US, O=Android, CN=Adb`，serial=01，notBefore 就是连接那一秒），所以同一次开启无线调试期间，每次连接拿到的证书指纹都不同；
+  - 11-03 记下的"同一次开启期间两次连接证书相同"，可能是两次连接落在了同一秒里：同一秒、同一把密钥签出来的证书逐字节相同；
+  - 按公钥看，SPKI 的 SHA-256 在同一次开启期间不变，关掉再打开无线调试以后也不变（都是 `1c45ed4a…`）。重启和撤销授权以后会不会变，没有测（不允许重启设备）；
   - 口令的泄露已经由 WP12 的 uid 检查兜住了，TOFU 只能多挡住拒绝服务和伪造输出；
-  - 留到真机验证证书是否稳定以后再评估（B 段或之后）。
+  - 所以现在不做。按公钥做 TOFU 留到 WP15 或真机验证时评估。
 - **只用 mDNS，不扫描**：
   - 普通 App 也能注册同名的 mDNS 服务，所以只用 mDNS 并不能消除冒充；
   - mDNS 注册会丢，有的网络会屏蔽组播（phase1 §7.1 的断线恢复要靠扫描兜底）；
@@ -77,8 +85,10 @@ adb 的 TLS 两端都用自签名证书，各自的检查不一样：
 
 ## 后果
 
-- 本机恶意 App 可以让内置 ADB 拉起失败（拒绝服务），也可以伪造自检输出；用户看到的是交接超时，要按失败处理。
+- 本机恶意 App 可以让内置 ADB 拉起失败（拒绝服务），也可以伪造自检输出；用户看到的是交接超时、命令失败或被拒（`Unauthorized`），要按失败处理。
+- UNAUTHORIZED 不再等于"未配对"：配对记录保留，只记下"上次被拒"，持续被拒时由界面（WP15）提示用户重新配对。端口缓存只记交接成功过的端口。
 - 口令一旦送出，就按"已经泄露"对待：一次性、有时效，交接成功时用掉。
-- 下面两种情况发生时，要重新评估这份 ADR：
+- 下面三种情况发生时，要重新评估这份 ADR：
   - WP12 的交接检查改了，尤其是调用方 uid 那一条；
-  - adbd 以后提供了能认证服务端的连接方式，或者真机证实了它的证书足够稳定（这时 TOFU 值得做）。
+  - adbd 以后提供了能认证服务端的连接方式；
+  - 按公钥钉住在重启和撤销授权以后也稳定，并且在真机上复核过（这时再评估按公钥做 TOFU）。

@@ -356,8 +356,12 @@ class HelperClient internal constructor(
         }
 
         private fun logLaunchNeeded(state: HelperState.NeedsLaunch) {
-            // The in-app ADB launcher (WP13) replaces this; until then a developer runs the script.
-            Log.w(TAG, "a new helper is needed (${state.reason}); run scripts/start-helper.sh")
+            // Once the built-in adb client is paired, HelperAutoLaunch launches it (as a listener).
+            Log.w(
+                TAG,
+                "a new helper is needed (${state.reason}); launched if the built-in adb is paired, " +
+                    "else run scripts/start-helper.sh",
+            )
         }
     }
 }

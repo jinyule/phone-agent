@@ -94,7 +94,7 @@ phone-agent/
 │ 建虚拟屏 · 跨屏启动 · 注入输入 · 挪任务 · 主屏监视 · appops 静音             │
 │ App 死后不退出：超时后 releaseAll（释放屏、解除静音），等 App 回来重新交接     │
 └───────────────▲─────────────────────────────────────────────────────────────┘
-                │ 拉起方式：① 内置 ADB 客户端经 adbd 的 shell,v2（没有时用 exec:）服务
+                │ 拉起方式：① 内置 ADB 客户端（Android 12+）经 adbd 的 shell,v2（没有时用 exec:）服务
                 │          ② Shizuku UserService  ③ 开发者在 USB 下运行启动脚本
 ```
 
@@ -742,11 +742,29 @@ screen s12 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · 坐标 0–
 - **扫描只传回环地址** `127.0.0.1`：adbd 监听所有地址（AOSP `adb_wifi.cpp`），回环一定能连上，探测也不会发到局域网上。
 - **UNAUTHORIZED 是"可能未授权"**：TLS 握手刚完成时对端断开，和 adbd 拒绝我们的密钥分不清。所以：
   - 对同一个端点先重试一次（`AdbConnectPort` 已经这样做）；
-  - 仍然是 UNAUTHORIZED，才请用户重新配对。
+  - 仍然是 UNAUTHORIZED，才报 `Unauthorized`。本机进程也能这样回答，所以只记下"上次被拒"，配对保留；持续被拒时才请用户重新配对（`docs/adr/2026-11-03-adb-trust-model.md`）。
 
   我们自己的 TLS 栈按类型认出的错误（例如 bad_record_mac）算 TLS，不算 UNAUTHORIZED。对端发来的 alert 不在此列，但有时类型也是 `SSLProtocolException`，只能靠消息认出来：
   - Android 上 Conscrypt 收到任何 alert 都报成 `SSLProtocolException`（实测未配对的 key 收到 `SSLV3_ALERT_CERTIFICATE_UNKNOWN`）。认法是 BoringSSL 的原因：`SSLV3_*` / `TLSV1_*`（Android 12 起都是 `SSLV3_ALERT_*` / `TLSV1_ALERT_*`；Android 11 的表里 1110–1116 没有 `ALERT_`，例如 `TLSV1_CERTIFICATE_REQUIRED`），名字表里没有的写成 `SSL routines:OPENSSL_internal:reason(1NNN)`（例如 missing_extension 是 `reason(1109)`）。BoringSSL 自己的原因没有以这两个前缀开头的。不按原因码的数值判断：BoringSSL 自己的原因也有 1000 以上的（1122 `PAKE_AND_KEY_SHARE_NOT_ALLOWED`）。
   - JDK 收到 unexpected_message 或不认识的编号时报成 `SSLProtocolException`，消息里是 `Received fatal alert: ` / `Unknown alert description (`。
+
+**App 侧接线**（`app.adb`，取舍见 `docs/adr/2026-11-03-builtin-adb-app-wiring.md`）：
+- 需要 Android 12（API 31）：配对要用的 TLS exporter 只有 `SSLSockets.exportKeyingMaterial`，从 API 31 才有。Android 11 走兜底（Shizuku / USB 脚本）。
+- 身份私钥用 AndroidKeyStore 里的 AES-256-GCM 密钥封存，放在 `noBackupFilesDir`。确定打不开（封存密钥丢了，例如清除凭据；密文认证不过；格式不对或空文件）才换新身份，要求重新配对，拉起报 `NotPaired(IDENTITY_REPLACED)`；Keystore 一时的失败只让这一次读失败，不换身份；只有用户主动配对时，读不出的旧身份会被改名留底、换成新身份。
+- 配对记录、"上次被拒"和端口缓存放在 SharedPreferences 里。新身份会清掉配对记录，在用户重新配对之前不再自动拉起（配对时记下身份指纹，加载时比对，所以换身份和清记录之间进程死了也认得出来）；两次 UNAUTHORIZED 只记下"上次被拒"，配对保留，下一次请求照样去连。端口缓存只在交接成功以后写；搜索试过缓存端口而没有在它上面连上就清掉，在它上面连上以后 `NoHandoff`、`CommandFailed` 也清掉，下一次搜索回到 mDNS 和扫描。重新配对成功以后，本进程立即请求一次拉起（`HelperAutoLaunch.startIfPaired`，仍受最小间隔约束），不用等进程重启。
+- 自动拉起（`HelperAutoLaunch`，只在已配对时开启）：
+  - 进程启动时先等孤儿助手续接 `orphanResumeMs`（默认 5 s），之后还没连上才拉起；
+  - 状态变成 NeedsLaunch（助手死了，或被判过期）就拉起，在协程里执行，不在监听者里；
+  - 两次拉起的开始时间至少相隔 `minLaunchIntervalMs`（默认 10 s）；失败只记日志，等下一次请求。
+  - 助手交接以后 `earlyExitWindowMs`（默认 30 s）之内就死，算一次早退。连续早退时，拉起间隔按 `earlyExitBackoffMs` 拉长（默认 10 s → 30 s → 2 min）；连续早退达到 `maxEarlyExits`（默认 5 次）就不再自己拉起，每次请求记成 `LaunchOutcome.TooManyEarlyExits`。有助手活过窗口、重新配对、进程重启，计数都清零。正在等间隔的拉起，在助手状态变化和重新配对时醒来，重新看上限、计数和间隔，所以等待期间到了上限就不再拉，重新配对以后按清零后的间隔拉。
+- 拉起命令和 `scripts/start-helper.sh` 同形，口令只走 stdin。
+- App 读不到 `/proc/sys/net/ipv4/ip_local_port_range`（Android 16 上是 EACCES），扫描时退回 30000..65535，覆盖 Linux 默认的 32768..60999。
+- 已知限制：
+  - 缓存状态的 App 进程会被系统冻结（cached apps freezer），冻结期间收不到助手的死亡通知，重新拉起要等进程下次运行；
+  - 无线调试从关到开，不会触发拉起。断线恢复里的重新拉起要由设置向导或 TaskService 触发（WP15）。
+  - 到了早退上限以后，只有重新配对、进程重启，或者别的途径拉起的助手活过窗口，才会恢复自动拉起。
+  - 本机冒充 adbd 的进程排在真 adbd 前面时（mDNS 先报它，或者扫描先碰到它），每一轮拉起都会报 `Unauthorized`；配对不会因此清掉，它停下或被卸载以后就恢复。抢占端口缓存最多拖住一次拉起。窗口的细节见 `docs/adr/2026-11-03-adb-trust-model.md`，按公钥做 TOFU 留给 WP15。
+  - 拉起结果（`TooManyEarlyExits`、`Unauthorized`、`NotPaired` 的原因）和"上次被拒"现在只进日志或 SharedPreferences，要由 WP15 接到界面上。
 
 ### 7.2 一步执行
 

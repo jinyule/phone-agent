@@ -1,0 +1,323 @@
+package dev.phoneagent.app.adb
+
+import dev.phoneagent.app.helper.HelperState
+import dev.phoneagent.core.adb.AdbCommand
+import dev.phoneagent.core.adb.CommandFailure
+import dev.phoneagent.core.adb.CommandResult
+import dev.phoneagent.core.adb.ConnectFailure
+import dev.phoneagent.core.adb.PortSource
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.shadows.ShadowLog
+
+/** HelperState.Connected holds a Binder: Robolectric. */
+@OptIn(ExperimentalCoroutinesApi::class)
+@RunWith(RobolectricTestRunner::class)
+class HelperLauncherTest {
+    private val helper = FakeHelperPort()
+    private val session = FakeSession()
+    private val adb = FakeAdb { session }
+    private val command = AdbCommand("read n; launch")
+
+    private fun launcher() = HelperLauncher(adb, helper, command, HANDOFF_MS)
+
+    @Test
+    fun `a launch runs the command with the nonce on stdin and ends at the handoff`() =
+        runTest {
+            session.onRun = { helper.set(FakeHelperPort.connected(pid = 777)) }
+            assertEquals(LaunchOutcome.Launched(777, PortSource.MDNS), launcher().launch())
+            assertEquals(listOf(LaunchOutcome.Launched(777, PortSource.MDNS)), session.ended)
+            val (ran, stdin) = session.runs.single()
+            assertEquals(command, ran)
+            assertArrayEquals(HelperLaunchCommand.stdin(FakeHelperPort.NONCE.dropLast(1) + "1"), stdin)
+            assertTrue(session.closed)
+            assertTrue(helper.listeners.isEmpty())
+        }
+
+    @Test
+    fun `the handoff may come after the command ended, within the wait`() =
+        runTest {
+            session.onRun = {
+                launch {
+                    delay(HANDOFF_MS - 1)
+                    helper.set(FakeHelperPort.connected())
+                }
+            }
+            assertTrue(launcher().launch() is LaunchOutcome.Launched)
+            assertEquals(HANDOFF_MS - 1, testScheduler.currentTime)
+        }
+
+    @Test
+    fun `no handoff within the wait is NoHandoff, and the session is closed`() =
+        runTest {
+            assertEquals(LaunchOutcome.NoHandoff(HANDOFF_MS), launcher().launch())
+            assertEquals(listOf(LaunchOutcome.NoHandoff(HANDOFF_MS)), session.ended)
+            assertEquals(HANDOFF_MS, testScheduler.currentTime)
+            assertTrue(session.closed)
+            assertTrue(helper.listeners.isEmpty())
+        }
+
+    @Test
+    fun `nothing is tried with a connected helper, without pairing or with wireless debugging off`() =
+        runTest {
+            val connected = FakeHelperPort(FakeHelperPort.connected())
+            assertEquals(LaunchOutcome.AlreadyConnected, HelperLauncher(adb, connected, command, HANDOFF_MS).launch())
+            adb.notPaired = NotPairedReason.NEVER_PAIRED
+            assertEquals(LaunchOutcome.NotPaired(NotPairedReason.NEVER_PAIRED), launcher().launch())
+            adb.notPaired = NotPairedReason.IDENTITY_REPLACED
+            assertEquals(LaunchOutcome.NotPaired(NotPairedReason.IDENTITY_REPLACED), launcher().launch())
+            adb.notPaired = null
+            adb.wireless = false
+            assertEquals(LaunchOutcome.WirelessDebuggingOff, launcher().launch())
+            assertEquals(0, adb.connects)
+            assertEquals(0, helper.nonces + connected.nonces)
+        }
+
+    @Test
+    fun `wireless debugging that cannot be read is tried`() =
+        runTest {
+            adb.wireless = null
+            session.onRun = { helper.set(FakeHelperPort.connected()) }
+            assertTrue(launcher().launch() is LaunchOutcome.Launched)
+        }
+
+    @Test
+    fun `a refused key is Unauthorized, other failed searches NoConnection, both without a nonce`() =
+        runTest {
+            adb.connection = { FakeAdb.failed(ConnectFailure.UNAUTHORIZED) }
+            assertEquals(LaunchOutcome.Unauthorized, launcher().launch())
+            for (reason in listOf(null, ConnectFailure.TLS, ConnectFailure.UNREACHABLE, ConnectFailure.TIMEOUT)) {
+                val failed = FakeAdb.failed(reason)
+                adb.connection = { failed }
+                assertEquals("$reason", LaunchOutcome.NoConnection(failed.search), launcher().launch())
+            }
+            assertEquals(0, helper.nonces)
+        }
+
+    @Test
+    fun `a search that loaded a new identity is NotPaired, whatever adbd answered`() =
+        runTest {
+            for (reason in listOf(ConnectFailure.UNAUTHORIZED, ConnectFailure.UNREACHABLE)) {
+                adb.notPaired = null
+                adb.connection = {
+                    adb.notPaired = NotPairedReason.IDENTITY_REPLACED
+                    FakeAdb.failed(reason)
+                }
+                assertEquals("$reason", LaunchOutcome.NotPaired(NotPairedReason.IDENTITY_REPLACED), launcher().launch())
+            }
+        }
+
+    @Test
+    fun `a helper connected while connecting makes the launch moot`() =
+        runTest {
+            adb.connection = {
+                helper.set(FakeHelperPort.connected())
+                session
+            }
+            assertEquals(LaunchOutcome.AlreadyConnected, launcher().launch())
+            assertEquals(listOf(LaunchOutcome.AlreadyConnected), session.ended)
+            assertEquals(0, helper.nonces)
+            assertTrue(session.runs.isEmpty())
+            assertTrue(session.closed)
+        }
+
+    @Test
+    fun `without a nonce nothing runs and the session is closed`() =
+        runTest {
+            helper.nonceRefusal = "the boot count is unknown"
+            assertEquals(LaunchOutcome.NoNonce("the boot count is unknown"), launcher().launch())
+            assertEquals(listOf(LaunchOutcome.NoNonce("the boot count is unknown")), session.ended)
+            assertTrue(session.runs.isEmpty())
+            assertTrue(session.closed)
+            assertTrue(helper.listeners.isEmpty())
+        }
+
+    @Test
+    fun `a command that fails or exits non-zero is CommandFailed, and no exit status counts as success`() =
+        runTest {
+            val failures =
+                listOf(
+                    CommandResult.Completed(1, "no", "denied") to LaunchOutcome.CommandFailed(1, null, 8),
+                    CommandResult.Failed(CommandFailure.CLOSED, "eof") to
+                        LaunchOutcome.CommandFailed(null, CommandFailure.CLOSED, 3),
+                )
+            for ((result, outcome) in failures) {
+                val failing = FakeSession(result = result)
+                adb.connection = { failing }
+                assertEquals(outcome, launcher().launch())
+                assertEquals(listOf(outcome), failing.ended)
+            }
+            adb.connection =
+                {
+                    FakeSession(
+                        result = CommandResult.Completed(null, "", ""),
+                    ) { helper.set(FakeHelperPort.connected()) }
+                }
+            assertTrue(launcher().launch() is LaunchOutcome.Launched)
+        }
+
+    /** Runs one launch through [HelperAutoLaunch], which logs its outcome, and checks that it logged [ended]. */
+    private fun TestScope.launchLogged(ended: String) {
+        fun lines() = ShadowLog.getLogs().count { it.msg.startsWith("helper launch: $ended") }
+        val before = lines()
+        val scope = CoroutineScope(StandardTestDispatcher(testScheduler))
+        val config = LaunchConfig(orphanResumeMs = 0, handoffTimeoutMs = HANDOFF_MS, minLaunchIntervalMs = 0)
+        HelperAutoLaunch(helper, launcher()::launch, scope, config) { testScheduler.currentTime }.requestLaunch()
+        advanceTimeBy(HANDOFF_MS + 1)
+        assertEquals("${ShadowLog.getLogs()}", before + 1, lines())
+    }
+
+    /** Checks that no log line or logged failure (with its causes) since the test began holds a nonce [helper] gave. */
+    private fun assertNoNonceLogged() {
+        val logged =
+            ShadowLog.getLogs().flatMap { item ->
+                listOf(item.msg.orEmpty()) + generateSequence(item.throwable) { it.cause }.map { "$it" }
+            }
+        assertTrue(helper.issued.isNotEmpty())
+        for (nonce in helper.issued) {
+            for (text in logged) assertFalse(text, nonce in text)
+        }
+    }
+
+    /** One launch on [connection] through [HelperAutoLaunch], ending as [ended], logs no nonce. */
+    private fun TestScope.launchWithoutLoggingTheNonce(
+        connection: () -> HelperLauncher.Connection,
+        ended: String,
+    ) {
+        adb.connection = connection
+        launchLogged(ended)
+        assertEquals(1, helper.issued.size)
+        assertNoNonceLogged()
+    }
+
+    @Test
+    fun `a launch that hands off logs no nonce`() =
+        runTest {
+            launchWithoutLoggingTheNonce({ FakeSession { helper.set(FakeHelperPort.connected()) } }, "Launched")
+        }
+
+    @Test
+    fun `a launch without a handoff logs no nonce`() =
+        runTest { launchWithoutLoggingTheNonce({ FakeSession() }, "NoHandoff") }
+
+    @Test
+    fun `a launch whose command fails logs no nonce`() =
+        runTest {
+            launchWithoutLoggingTheNonce(
+                { FakeSession(result = CommandResult.Completed(1, "", "app_process: not found")) },
+                "CommandFailed",
+            )
+        }
+
+    @Test
+    fun `no outcome logs the nonce, also when the command echoes it`() =
+        runTest {
+            val echoes =
+                listOf<(ByteArray) -> CommandResult>(
+                    { CommandResult.Completed(1, it.decodeToString(), "") },
+                    { CommandResult.Completed(1, "", "read: ${it.decodeToString()}") },
+                    { CommandResult.Failed(CommandFailure.CLOSED, "after ${it.decodeToString()}") },
+                )
+            for (echo in echoes) {
+                adb.connection = { FakeSession().also { it.answer = echo } }
+                launchLogged("CommandFailed")
+            }
+            adb.connection = { FakeSession() }
+            launchLogged("NoHandoff")
+            adb.connection = {
+                FakeSession().also { session ->
+                    session.answer = { stdin ->
+                        helper.set(FakeHelperPort.connected())
+                        CommandResult.Completed(0, stdin.decodeToString(), stdin.decodeToString())
+                    }
+                }
+            }
+            launchLogged("Launched")
+            adb.connection = {
+                helper.set(FakeHelperPort.connected())
+                FakeSession()
+            }
+            helper.set(HelperState.NotConnected)
+            launchLogged("AlreadyConnected")
+            helper.set(HelperState.NotConnected)
+            adb.connection = { FakeSession() }
+            helper.nonceRefusal = "the boot count is unknown"
+            launchLogged("NoNonce")
+            helper.nonceRefusal = null
+            for ((reason, ended) in listOf(ConnectFailure.UNAUTHORIZED to "Unauthorized", null to "NoConnection")) {
+                adb.connection = { FakeAdb.failed(reason) }
+                launchLogged(ended)
+            }
+            adb.notPaired = NotPairedReason.NEVER_PAIRED
+            launchLogged("NotPaired")
+            adb.notPaired = null
+            adb.wireless = false
+            launchLogged("WirelessDebuggingOff")
+            assertEquals(5, helper.issued.size)
+            assertNoNonceLogged()
+        }
+
+    @Test
+    fun `no outcome's text holds what the command printed`() {
+        val nonce = FakeHelperPort.NONCE
+        val outcomes =
+            listOf(
+                LaunchOutcome.Launched(777, PortSource.MDNS),
+                LaunchOutcome.AlreadyConnected,
+                LaunchOutcome.NotPaired(NotPairedReason.IDENTITY_REPLACED),
+                LaunchOutcome.WirelessDebuggingOff,
+                LaunchOutcome.Unauthorized,
+                LaunchOutcome.NoConnection(FakeAdb.failed(ConnectFailure.TIMEOUT).search),
+                LaunchOutcome.NoNonce("the boot count is unknown"),
+                LaunchOutcome.CommandFailed.of(CommandResult.Completed(1, nonce, "")),
+                LaunchOutcome.CommandFailed.of(CommandResult.Completed(1, "", "read: $nonce")),
+                LaunchOutcome.CommandFailed.of(CommandResult.Failed(CommandFailure.TIMEOUT, "after $nonce")),
+                LaunchOutcome.NoHandoff(HANDOFF_MS),
+                LaunchOutcome.TooManyEarlyExits(5),
+            )
+        assertEquals(OUTCOMES, outcomes.map(::kind).toSet().size)
+        for (outcome in outcomes) assertFalse("$outcome", nonce in "$outcome")
+        assertEquals("CommandFailed(exitCode=1, failure=null, outputChars=70)", "${outcomes[8]}")
+        assertEquals("CommandFailed(exitCode=null, failure=TIMEOUT, outputChars=70)", "${outcomes[9]}")
+    }
+
+    /** Which outcome [outcome] is; a new outcome does not compile until it is listed here. */
+    private fun kind(outcome: LaunchOutcome): String =
+        when (outcome) {
+            is LaunchOutcome.Launched -> "Launched"
+            LaunchOutcome.AlreadyConnected -> "AlreadyConnected"
+            is LaunchOutcome.NotPaired -> "NotPaired"
+            LaunchOutcome.WirelessDebuggingOff -> "WirelessDebuggingOff"
+            LaunchOutcome.Unauthorized -> "Unauthorized"
+            is LaunchOutcome.NoConnection -> "NoConnection"
+            is LaunchOutcome.NoNonce -> "NoNonce"
+            is LaunchOutcome.CommandFailed -> "CommandFailed"
+            is LaunchOutcome.NoHandoff -> "NoHandoff"
+            is LaunchOutcome.TooManyEarlyExits -> "TooManyEarlyExits"
+        }
+
+    @Test
+    fun `a handoff wait of zero is a configuration error`() {
+        val failure = runCatching { HelperLauncher(adb, helper, command, 0) }.exceptionOrNull()
+        assertTrue(failure is IllegalArgumentException)
+        assertFalse(helper.state is HelperState.Connected)
+    }
+}
+
+private const val HANDOFF_MS = 15_000L
+
+/** The kinds of [LaunchOutcome]. */
+private const val OUTCOMES = 10
