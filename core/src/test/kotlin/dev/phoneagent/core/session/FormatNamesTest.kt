@@ -2,6 +2,7 @@ package dev.phoneagent.core.session
 
 import dev.phoneagent.core.model.ModelCapabilities
 import dev.phoneagent.core.model.ProviderProfile
+import dev.phoneagent.core.model.openai.WireOptions
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
@@ -38,6 +39,7 @@ class FormatNamesTest {
             serializer<SessionEvent>(),
             serializer<ProviderProfile>(),
             serializer<ModelCapabilities>(),
+            serializer<WireOptions>(),
         ).map { it.descriptor }
 
     @Test

@@ -14,6 +14,9 @@ enum model.Role: USER, ASSISTANT, TOOL
 enum model.StopReason: END_TURN, TOOL_USE, MAX_TOKENS, OTHER
 enum model.ThinkingBinding: NONE, PREFIX_BOUND
 enum model.VerifiedCapability: TOOL_CALL, VISION, GROUNDING, REASONING_ECHO
+enum model.openai.LeakedCallFormat: DSML, TOOL_CALL_TAG
+enum model.openai.MaxTokensField: MAX_TOKENS, MAX_COMPLETION_TOKENS
+enum model.openai.ReasoningEffortStyle: NONE, REASONING_EFFORT, OPENROUTER
 enum policy.FieldClass: PLAIN, PASSWORD, VERIFICATION_CODE, PAYMENT_PASSWORD, BANK_CARD, ID_NUMBER
 enum policy.IntentKind: READ, NAVIGATE, INPUT, OUTWARD, SPEND, DELETE, SETTINGS
 enum policy.SecurityLevel: CAUTIOUS, STANDARD, AUTONOMOUS

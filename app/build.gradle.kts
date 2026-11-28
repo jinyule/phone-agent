@@ -1,5 +1,7 @@
 plugins {
     id("phoneagent.android.application")
+    // The model settings file (model-settings.json) is kotlinx JSON of core's own types.
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -34,6 +36,7 @@ dependencies {
     testImplementation(libs.androidx.test.ext.junit)
     testImplementation(libs.androidx.compose.ui.test.junit4)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.okhttp.mockwebserver3)
 
     // On-device checks of the accessibility ScreenPort (run with `am instrument`, see AndroidScreenDeviceTest).
     androidTestImplementation(libs.androidx.test.runner)

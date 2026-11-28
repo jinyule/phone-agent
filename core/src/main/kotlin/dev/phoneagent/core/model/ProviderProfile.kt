@@ -3,6 +3,7 @@ package dev.phoneagent.core.model
 import dev.phoneagent.core.ids.ProviderId
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.net.URI
 import java.net.URISyntaxException
 
@@ -13,12 +14,14 @@ import java.net.URISyntaxException
  * @property id stable id, referenced by session logs.
  * @property displayName user-chosen label.
  * @property protocol wire protocol.
- * @property baseUrl `https://host[/path]` without trailing `/`, query, fragment or user info. Plain
- *   `http://` only for local servers such as Ollama: loopback, private, link-local and
- *   unique-local address literals, `localhost` and `*.local` (no DNS lookup decides it).
+ * @property baseUrl `https://host[:port][/path]` without trailing `/`, query, fragment or user info,
+ *   and one the HTTP client (OkHttp) parses: a port in 1..65535 and a valid host. Plain `http://`
+ *   only for local servers such as Ollama: loopback, private, link-local and unique-local address
+ *   literals, `localhost` and `*.local` (no DNS lookup decides it).
  * @property credential how to authenticate; secrets are referenced, never stored here.
- * @property headers extra non-secret request headers; names that look like credentials (containing
- *   `key`, `token`, `secret`, `auth` or `cookie`) are refused. [toString] shows names only.
+ * @property headers extra non-secret request headers, with values the HTTP client accepts (tab and
+ *   printable ASCII); names that look like credentials (containing `key`, `token`, `secret`, `auth`
+ *   or `cookie`) are refused. [toString] shows names only.
  * @property reasoningField Chat Completions response field carrying reasoning (e.g. `reasoning_content`),
  *   or `null` when the provider has none or it is unknown.
  * @property echoReasoning send [reasoningField] content back in later requests.
@@ -61,8 +64,14 @@ private fun baseUrlProblem(url: String): String? {
     val uri = if (BASE_URL.matches(url)) parsed(url) else null
     return when {
         uri == null || uri.host == null -> "baseUrl must be http(s)://host[/path] without trailing '/'"
+
         uri.rawUserInfo != null -> "baseUrl must not carry user info; use `credential`"
+
+        // The adapters and the probe build their URLs with OkHttp; what it refuses fails here.
+        url.toHttpUrlOrNull() == null -> "baseUrl must have a valid host and a port in 1..65535"
+
         uri.scheme == "http" && !isLocalHost(uri.host) -> "plain http is only for local servers"
+
         else -> null
     }
 }

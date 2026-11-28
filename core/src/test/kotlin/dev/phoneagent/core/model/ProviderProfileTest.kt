@@ -2,6 +2,8 @@ package dev.phoneagent.core.model
 
 import dev.phoneagent.core.ids.ProviderId
 import kotlinx.serialization.json.Json
+import okhttp3.Headers.Companion.toHeaders
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -103,6 +105,69 @@ class ProviderProfileTest {
         val text = profile.toString()
         assertFalse("org-private" in text || "PhoneAgent" in text, text)
         assertTrue("X-Title" in text && "OpenAI-Organization" in text && "deepseek" in text, text)
+    }
+
+    @Test
+    fun `addresses the HTTP client refuses are refused here, without echoing them`() {
+        val outcomes =
+            listOf(
+                "http://127.0.0.1:0/v1",
+                "http://127.0.0.1:65536/v1",
+                "http://192.168.1.5:99999/v1",
+                "https://api.example.test:99999",
+            ).associateWith { url -> runCatching { base.copy(baseUrl = url) }.exceptionOrNull() }
+        assertEquals(emptyList<String>(), outcomes.filterValues { it !is IllegalArgumentException }.keys.toList())
+        outcomes.forEach { (url, error) ->
+            assertFalse(url.substringAfter("://") in error?.message.orEmpty(), "echoed: ${error?.message}")
+        }
+        listOf("http://127.0.0.1:1/v1", "http://127.0.0.1:65535/v1", "https://api.example.test:8443/v1")
+            .forEach { url -> assertEquals(url, base.copy(baseUrl = url).baseUrl) }
+    }
+
+    @Test
+    fun `every accepted address is one the HTTP client accepts`() {
+        val accepted =
+            listOf(
+                "https://api.example.test",
+                "https://api.example.test:443/v1/beta",
+                "http://[::1]:11434/v1",
+                "http://[fd12:3456::1]",
+                "http://desktop.local",
+                "http://my_box.local:11434",
+                "https://xn--bcher-kva.example/v1",
+                "https://b\u00fccher.example/v1",
+                "http://127.0.0.1:65535",
+                "http://127.0.0.1:0",
+                "http://127.0.0.1:65536",
+                "https://api.example.test:-1",
+                "https://api.example.test:",
+            ).filter { url -> runCatching { base.copy(baseUrl = url) }.isSuccess }
+        assertEquals(
+            emptyList<String>(),
+            accepted.filter { "$it/models".toHttpUrlOrNull() == null },
+            "accepted here but refused by OkHttp",
+        )
+    }
+
+    @Test
+    fun `header values the HTTP client refuses are refused here, naming the header only`() {
+        val nul = Char(0).toString()
+        val outcomes =
+            listOf("caf\u00e9", "line\nbreak", "a${nul}b", "del${Char(127)}").associateWith { value ->
+                runCatching { base.copy(headers = mapOf("X-Note" to value)) }.exceptionOrNull()
+            }
+        assertEquals(
+            emptyList<String>(),
+            outcomes.filterValues { it !is IllegalArgumentException }.keys.map { it.toByteArray().toList() },
+            "values accepted (as bytes)",
+        )
+        outcomes.forEach { (value, error) ->
+            assertTrue("X-Note" in error?.message.orEmpty(), "${error?.message}")
+            assertFalse(value in error?.message.orEmpty(), "echoed: ${error?.message}")
+        }
+        val fine = mapOf("X-Note" to "tab\there ~!", "X-Title" to "PhoneAgent")
+        assertEquals(fine, base.copy(headers = fine).headers)
+        fine.toHeaders()
     }
 
     @Test

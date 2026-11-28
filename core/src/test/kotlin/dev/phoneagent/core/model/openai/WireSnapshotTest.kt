@@ -215,7 +215,6 @@ class WireSnapshotTest {
                 listOf(
                     "wire.mappingVersion" to own.copy(mappingVersion = OPENAI_MAPPING_VERSION + 1),
                     "wire.credential" to own.copy(credential = CredentialKind.NONE),
-                    "wire.headers" to own.copy(headers = mapOf("X-Team" to bad)),
                     "wire.reasoningEffort" to own.copy(reasoningEffort = WireSetting("model", "other")),
                     "wire.reasoningEffort" to own.copy(reasoningEffort = WireSetting("reasoning_effort", "extreme")),
                     "wire.maxTokensField" to own.copy(maxTokensField = "max_output_tokens"),
@@ -227,6 +226,8 @@ class WireSnapshotTest {
                     "wire.options" to
                         own.copy(recoverLeakedToolCalls = true, options = mapOf(LEAKED_CALL_FORMATS to "dsml")),
                 )
+            // A header value HTTP cannot carry cannot even be recorded (WireProfileTest).
+            assertThrows<IllegalArgumentException> { own.copy(headers = mapOf("X-Team" to bad)) }
             for ((param, wire) in refused) {
                 val error = assertThrows<ModelError.InvalidRequest>(param) { chat.complete(request(wire)) }
                 assertEquals(param, error.param)

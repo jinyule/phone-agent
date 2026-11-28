@@ -149,8 +149,8 @@ internal class WireRules private constructor(
     companion object {
         /**
          * The rules of a [profile] model with [capabilities] and [options]; throws
-         * [IllegalArgumentException] for header values HTTP cannot carry and for [options] that
-         * do not fit the route ([WireOptions.requireFits]).
+         * [IllegalArgumentException] for [options] that do not fit the route
+         * ([WireOptions.requireFits]).
          */
         fun of(
             profile: ProviderProfile,

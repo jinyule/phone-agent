@@ -1,6 +1,7 @@
 package dev.phoneagent.core.model
 
 import kotlinx.serialization.Serializable
+import okhttp3.Headers
 
 /**
  * Everything besides the neutral content of a [ChatRequest] that shapes the bytes an adapter
@@ -157,12 +158,29 @@ public fun ReasoningLevel.clampTo(supported: List<ReasoningLevel>?): ReasoningLe
 internal fun headerProblem(headers: Map<String, String>): String? {
     val invalid = headers.keys.filterNot { HEADER_NAME.matches(it) }
     val credentialLike = headers.keys.filter { name -> CREDENTIAL_WORDS.any { it in name.lowercase() } }
+    val badValues = headers.filterValues { value -> !isHttpHeaderValue(value) }.keys
     return when {
         invalid.isNotEmpty() -> "invalid header names $invalid"
         credentialLike.isNotEmpty() -> "credentials go in `credential`, not headers $credentialLike"
+        badValues.isNotEmpty() -> "values of headers $badValues are not valid HTTP (tab and printable ASCII only)"
         else -> null
     }
 }
+
+/**
+ * Whether OkHttp sends [value] as a header value. Its own check is used, so the two cannot drift;
+ * its exception quotes the value, so only the outcome is kept.
+ */
+private fun isHttpHeaderValue(value: String): Boolean =
+    try {
+        Headers.Builder().add(PROBE_HEADER, value)
+        true
+    } catch (ignoredRefused: IllegalArgumentException) {
+        // Refused by OkHttp; its message holds the value and is dropped.
+        false
+    }
+
+private const val PROBE_HEADER = "X-Probe"
 
 private val HEADER_NAME = Regex("[A-Za-z0-9-]+")
 private val CREDENTIAL_WORDS = listOf("key", "token", "secret", "auth", "cookie")
