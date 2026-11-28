@@ -1,0 +1,47 @@
+{
+  "source": "constructed from docs: lmstudio.ai/docs/developer/openai-compat (separate reasoning_content, numeric-string call ids, usage on the finish chunk)",
+  "reasoningField": "reasoning_content",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "reasoning",
+          "provider": "test",
+          "model": "test-model",
+          "kind": "CHAT_REASONING_FIELD",
+          "opaque": {
+            "reasoning_content": "Use get_weather."
+          },
+          "summary": "Use get_weather."
+        },
+        {
+          "type": "tool_call",
+          "id": "123456789",
+          "name": "get_weather",
+          "argsJson": "{\"city\":\"Paris\"}"
+        }
+      ],
+      "stopReason": "TOOL_USE",
+      "usage": {
+        "inputTokens": 200,
+        "outputTokens": 30
+      },
+      "providerMetadata": {
+        "id": "chatcmpl-test",
+        "model": "qwen3-8b",
+        "finish_reason": "tool_calls"
+      }
+    },
+    "deltas": {
+      "text": "",
+      "reasoning": "Use get_weather.",
+      "calls": [
+        {
+          "id": "123456789",
+          "name": "get_weather",
+          "args": "{\"city\":\"Paris\"}"
+        }
+      ]
+    }
+  }
+}

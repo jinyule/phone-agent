@@ -1,0 +1,10 @@
+{
+  "source": "constructed: stream closed after an output item but before response.completed",
+  "protocol": "responses",
+  "expect": {
+    "error": {
+      "kind": "NETWORK",
+      "message": "network: stream ended before response.completed"
+    }
+  }
+}

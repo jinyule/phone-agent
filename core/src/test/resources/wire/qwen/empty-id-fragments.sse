@@ -1,0 +1,12 @@
+data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1793500000,"model":"qwen-plus","choices":[{"index":0,"delta":{"role":"assistant","content":null,"reasoning_content":"Call the tool."},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1793500000,"model":"qwen-plus","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_qw1","type":"function","function":{"name":"get_weather","arguments":"{\"city\": "}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1793500000,"model":"qwen-plus","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"","type":"function","function":{"arguments":"\"Paris\"}"}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1793500000,"model":"qwen-plus","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1793500000,"model":"qwen-plus","choices":[],"usage":{"prompt_tokens":300,"completion_tokens":25,"total_tokens":325,"prompt_tokens_details":{"cached_tokens":0}}}
+
+data: [DONE]
+

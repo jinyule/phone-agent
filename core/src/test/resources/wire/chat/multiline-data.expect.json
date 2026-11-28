@@ -1,0 +1,23 @@
+{
+  "source": "constructed: one JSON chunk split over two data lines, data without a space, no final blank line",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "text",
+          "text": "split"
+        }
+      ],
+      "stopReason": "END_TURN",
+      "providerMetadata": {
+        "id": "m",
+        "finish_reason": "stop"
+      }
+    },
+    "deltas": {
+      "text": "split",
+      "reasoning": "",
+      "calls": []
+    }
+  }
+}

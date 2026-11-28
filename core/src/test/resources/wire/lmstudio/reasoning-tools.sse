@@ -1,0 +1,10 @@
+data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1793500000,"model":"qwen3-8b","choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"Use get_weather."},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1793500000,"model":"qwen3-8b","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"123456789","type":"function","function":{"name":"get_weather","arguments":""}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1793500000,"model":"qwen3-8b","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"city\":\"Paris\"}"}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1793500000,"model":"qwen3-8b","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":200,"completion_tokens":30,"total_tokens":230}}
+
+data: [DONE]
+

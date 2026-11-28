@@ -1,0 +1,18 @@
+: OPENROUTER PROCESSING
+
+: OPENROUTER PROCESSING
+
+data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1793500000,"model":"deepseek/deepseek-r1","choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning":"Think"},"finish_reason":null}],"provider":"Chutes"}
+
+data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1793500000,"model":"deepseek/deepseek-r1","choices":[{"index":0,"delta":{"content":"","reasoning":"ing done."},"finish_reason":null}],"provider":"Chutes"}
+
+data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1793500000,"model":"deepseek/deepseek-r1","choices":[{"index":0,"delta":{"content":"Pari"},"finish_reason":null}],"provider":"Chutes"}
+
+data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1793500000,"model":"deepseek/deepseek-r1","choices":[{"index":0,"delta":{"content":"s."},"finish_reason":null}],"provider":"Chutes"}
+
+data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1793500000,"model":"deepseek/deepseek-r1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"provider":"Chutes"}
+
+data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1793500000,"model":"deepseek/deepseek-r1","choices":[{"index":0,"delta":{"content":""},"finish_reason":null}],"usage":{"prompt_tokens":12,"completion_tokens":9,"total_tokens":21}}
+
+data: [DONE]
+

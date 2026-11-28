@@ -1,0 +1,10 @@
+{
+  "source": "constructed from codex-rs tests: response.failed with rate_limit_exceeded and the wait in the message",
+  "protocol": "responses",
+  "expect": {
+    "error": {
+      "kind": "RATE_LIMITED",
+      "message": "rate limited (retry after 11054 ms)"
+    }
+  }
+}

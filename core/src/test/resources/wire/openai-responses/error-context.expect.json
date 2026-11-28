@@ -1,0 +1,10 @@
+{
+  "source": "constructed from docs: top-level error event with context_length_exceeded",
+  "protocol": "responses",
+  "expect": {
+    "error": {
+      "kind": "CONTEXT_OVERFLOW",
+      "message": "context overflow: Your input exceeds the context window of this model."
+    }
+  }
+}

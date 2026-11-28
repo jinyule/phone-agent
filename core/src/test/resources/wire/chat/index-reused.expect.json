@@ -1,0 +1,43 @@
+{
+  "source": "constructed: gateway reusing index 0 for a second parallel call (new id marks the new call)",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "tool_call",
+          "id": "call_p1",
+          "name": "get_weather",
+          "argsJson": "{\"city\":\"Paris\"}"
+        },
+        {
+          "type": "tool_call",
+          "id": "call_p2",
+          "name": "get_weather",
+          "argsJson": "{\"city\":\"Tokyo\"}"
+        }
+      ],
+      "stopReason": "TOOL_USE",
+      "providerMetadata": {
+        "id": "chatcmpl-test",
+        "model": "test-model",
+        "finish_reason": "tool_calls"
+      }
+    },
+    "deltas": {
+      "text": "",
+      "reasoning": "",
+      "calls": [
+        {
+          "id": "call_p1",
+          "name": "get_weather",
+          "args": "{\"city\":\"Paris\"}"
+        },
+        {
+          "id": "call_p2",
+          "name": "get_weather",
+          "args": "{\"city\":\"Tokyo\"}"
+        }
+      ]
+    }
+  }
+}

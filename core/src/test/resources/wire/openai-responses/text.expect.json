@@ -1,0 +1,31 @@
+{
+  "source": "constructed from docs: platform.openai.com Responses streaming events (output_text deltas, response.completed)",
+  "protocol": "responses",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "text",
+          "text": "Paris is sunny."
+        }
+      ],
+      "stopReason": "END_TURN",
+      "usage": {
+        "inputTokens": 500,
+        "outputTokens": 80,
+        "cacheReadTokens": 384,
+        "reasoningTokens": 48
+      },
+      "providerMetadata": {
+        "id": "resp_test",
+        "model": "gpt-test",
+        "status": "completed"
+      }
+    },
+    "deltas": {
+      "text": "Paris is sunny.",
+      "reasoning": "",
+      "calls": []
+    }
+  }
+}

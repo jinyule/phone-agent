@@ -1,0 +1,27 @@
+{
+  "source": "constructed from reports: Qwen-style <tool_call> JSON block in the answer text; with recovery on, words before the markup keep the whole text",
+  "recover": [
+    "TOOL_CALL_TAG"
+  ],
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "text",
+          "text": "Let me look.\n<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"city\": \"Paris\"}}\n</tool_call>"
+        }
+      ],
+      "stopReason": "END_TURN",
+      "providerMetadata": {
+        "id": "chatcmpl-test",
+        "model": "test-model",
+        "finish_reason": "stop"
+      }
+    },
+    "deltas": {
+      "text": "Let me look.\n<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"city\": \"Paris\"}}\n</tool_call>",
+      "reasoning": "",
+      "calls": []
+    }
+  }
+}

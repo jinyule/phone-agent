@@ -1,0 +1,21 @@
+{
+  "id": "resp_test",
+  "object": "response",
+  "created_at": 1793500000,
+  "model": "gpt-test",
+  "status": "completed",
+  "output": [
+    {
+      "id": "fc_1",
+      "type": "function_call",
+      "status": "completed",
+      "arguments": "{\"city\": \"Paris\", \"reason\": \"check the weather\"}",
+      "call_id": "call_resp1",
+      "name": "get_weather"
+    }
+  ],
+  "usage": {
+    "input_tokens": 30,
+    "output_tokens": 7
+  }
+}

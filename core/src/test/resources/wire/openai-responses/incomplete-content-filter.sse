@@ -1,0 +1,6 @@
+event: response.created
+data: {"type":"response.created","response":{"id":"resp_test","object":"response","created_at":1793500000,"model":"gpt-test","status":"in_progress","output":[]}}
+
+event: response.incomplete
+data: {"type":"response.incomplete","response":{"id":"resp_test","object":"response","created_at":1793500000,"model":"gpt-test","status":"incomplete","output":[],"incomplete_details":{"reason":"content_filter"}}}
+

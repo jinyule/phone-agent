@@ -1,0 +1,38 @@
+{
+  "source": "constructed: server ignoring stream:true and answering the whole response object",
+  "protocol": "responses",
+  "contentType": "application/json",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "tool_call",
+          "id": "call_resp1",
+          "name": "get_weather",
+          "argsJson": "{\"city\": \"Paris\", \"reason\": \"check the weather\"}"
+        }
+      ],
+      "stopReason": "TOOL_USE",
+      "usage": {
+        "inputTokens": 30,
+        "outputTokens": 7
+      },
+      "providerMetadata": {
+        "id": "resp_test",
+        "model": "gpt-test",
+        "status": "completed"
+      }
+    },
+    "deltas": {
+      "text": "",
+      "reasoning": "",
+      "calls": [
+        {
+          "id": "call_resp1",
+          "name": "get_weather",
+          "args": "{\"city\": \"Paris\", \"reason\": \"check the weather\"}"
+        }
+      ]
+    }
+  }
+}

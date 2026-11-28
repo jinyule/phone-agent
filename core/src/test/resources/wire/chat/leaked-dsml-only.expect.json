@@ -1,0 +1,38 @@
+{
+  "source": "constructed from reports: a DeepSeek reply that is nothing but DSML tool markup, recovered when the DSML format is on",
+  "recover": [
+    "DSML"
+  ],
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "tool_call",
+          "id": "call_gen_1",
+          "name": "get_weather",
+          "argsJson": "{\"city\":\"Paris\",\"days\":3}"
+        }
+      ],
+      "stopReason": "TOOL_USE",
+      "providerMetadata": {
+        "id": "chatcmpl-test",
+        "model": "test-model",
+        "finish_reason": "stop",
+        "recovered_tool_calls": [
+          "call_gen_1"
+        ]
+      }
+    },
+    "deltas": {
+      "text": "",
+      "reasoning": "",
+      "calls": [
+        {
+          "id": "call_gen_1",
+          "name": "get_weather",
+          "args": "{\"city\":\"Paris\",\"days\":3}"
+        }
+      ]
+    }
+  }
+}

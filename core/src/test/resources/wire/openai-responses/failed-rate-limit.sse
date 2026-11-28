@@ -1,0 +1,6 @@
+event: response.created
+data: {"type":"response.created","response":{"id":"resp_test","object":"response","created_at":1793500000,"model":"gpt-test","status":"in_progress","output":[]}}
+
+event: response.failed
+data: {"type":"response.failed","response":{"id":"resp_test","object":"response","created_at":1793500000,"model":"gpt-test","status":"failed","output":[],"error":{"code":"rate_limit_exceeded","message":"Rate limit reached for gpt-test on tokens per min (TPM). Please try again in 11.054s."}}}
+

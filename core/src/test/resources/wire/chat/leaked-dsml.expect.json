@@ -1,0 +1,27 @@
+{
+  "source": "constructed from reports: DeepSeek writes DSML tool markup into the answer text; with recovery on, words before the markup keep the whole text",
+  "recover": [
+    "DSML"
+  ],
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "text",
+          "text": "I will check.\n\n<｜DSML｜function_calls>\n<｜DSML｜invoke name=\"get_weather\">\n<｜DSML｜parameter name=\"city\" string=\"true\">Paris</｜DSML｜parameter>\n<｜DSML｜parameter name=\"days\" string=\"false\">3</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜function_calls>"
+        }
+      ],
+      "stopReason": "END_TURN",
+      "providerMetadata": {
+        "id": "chatcmpl-test",
+        "model": "test-model",
+        "finish_reason": "stop"
+      }
+    },
+    "deltas": {
+      "text": "I will check.\n\n<｜DSML｜function_calls>\n<｜DSML｜invoke name=\"get_weather\">\n<｜DSML｜parameter name=\"city\" string=\"true\">Paris</｜DSML｜parameter>\n<｜DSML｜parameter name=\"days\" string=\"false\">3</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜function_calls>",
+      "reasoning": "",
+      "calls": []
+    }
+  }
+}

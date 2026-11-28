@@ -1,0 +1,63 @@
+{
+  "model": "test-model",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You operate a phone."
+    },
+    {
+      "role": "user",
+      "content": "Send the message."
+    },
+    {
+      "role": "assistant",
+      "content": "Sending it.",
+      "tool_calls": [
+        {
+          "id": "m1",
+          "type": "function",
+          "function": {
+            "name": "tap",
+            "arguments": "{\"x\":1,\"y\""
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "m1",
+      "content": "Not run: the reply was cut off, so these arguments are incomplete."
+    },
+    {
+      "role": "user",
+      "content": "Go on."
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "tap",
+        "description": "Taps a point.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "city": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "city"
+          ]
+        }
+      }
+    }
+  ],
+  "tool_choice": "auto",
+  "parallel_tool_calls": false,
+  "max_tokens": 256,
+  "stream": true,
+  "stream_options": {
+    "include_usage": true
+  }
+}

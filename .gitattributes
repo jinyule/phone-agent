@@ -7,3 +7,6 @@ gradlew text eol=lf
 *.png binary
 *.jpg binary
 *.webp binary
+
+# Recorded and constructed wire streams are byte-exact: keep CRLF and the blank line that ends an event.
+core/src/test/resources/wire/**/*.sse -text -whitespace

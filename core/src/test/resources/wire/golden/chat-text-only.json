@@ -1,0 +1,116 @@
+{
+  "model": "test-model",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You operate a phone.\n\nBe careful."
+    },
+    {
+      "role": "user",
+      "content": "Open settings.\n\n[image omitted: this model cannot see images]"
+    },
+    {
+      "role": "assistant",
+      "content": "Tapping the gear.",
+      "tool_calls": [
+        {
+          "id": "call_1",
+          "type": "function",
+          "function": {
+            "name": "tap",
+            "arguments": "{\"x\":1,\"y\":2}"
+          }
+        },
+        {
+          "id": "call_2",
+          "type": "function",
+          "function": {
+            "name": "get_weather",
+            "arguments": "not json, kept verbatim"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "content": "Tapped.\n\n[image omitted: this model cannot see images]"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_2",
+      "content": "error: unknown city"
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_3",
+          "type": "function",
+          "function": {
+            "name": "tap",
+            "arguments": "{}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_3",
+      "content": "[image omitted: this model cannot see images]"
+    },
+    {
+      "role": "assistant",
+      "content": "Settings are open."
+    },
+    {
+      "role": "user",
+      "content": "Thanks.\n\nNow Wi-Fi."
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_weather",
+        "description": "Current weather of a city.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "city": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "city"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "tap",
+        "description": "Taps a point.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "city": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "city"
+          ]
+        }
+      }
+    }
+  ],
+  "tool_choice": "auto",
+  "max_completion_tokens": 2048,
+  "reasoning": {
+    "effort": "low"
+  },
+  "stream": true
+}

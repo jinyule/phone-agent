@@ -1,0 +1,3 @@
+event: error
+data: {"type":"error","sequence_number":1,"code":"context_length_exceeded","message":"Your input exceeds the context window of this model.","param":null}
+

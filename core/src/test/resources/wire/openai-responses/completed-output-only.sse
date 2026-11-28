@@ -1,0 +1,6 @@
+event: response.created
+data: {"type":"response.created","response":{"id":"resp_test","object":"response","created_at":1793500000,"model":"gpt-test","status":"in_progress","output":[]}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_test","object":"response","created_at":1793500000,"model":"gpt-test","status":"completed","output":[{"id":"msg_1","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"Paris is sunny.","annotations":[]}]}],"usage":{"input_tokens":10,"output_tokens":4}}}
+

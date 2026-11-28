@@ -1,0 +1,47 @@
+{
+  "source": "live capture 2026-11-01 from Ollama (model qwen3.8:27b-mlx) at /v1/chat/completions with stream_options.include_usage and parallel_tool_calls:false; no credentials involved",
+  "reasoningField": "reasoning",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "reasoning",
+          "provider": "test",
+          "model": "test-model",
+          "kind": "CHAT_REASONING_FIELD",
+          "opaque": {
+            "reasoning": "The user wants the current weather in Paris. I need to call the get_weather tool with city=\"Paris\"."
+          },
+          "summary": "The user wants the current weather in Paris. I need to call the get_weather tool with city=\"Paris\"."
+        },
+        {
+          "type": "tool_call",
+          "id": "call_c03vy18j",
+          "name": "get_weather",
+          "argsJson": "{\"city\":\"Paris\"}"
+        }
+      ],
+      "stopReason": "TOOL_USE",
+      "usage": {
+        "inputTokens": 291,
+        "outputTokens": 50
+      },
+      "providerMetadata": {
+        "id": "chatcmpl-290",
+        "model": "qwen3.8:27b-mlx",
+        "finish_reason": "tool_calls"
+      }
+    },
+    "deltas": {
+      "text": "",
+      "reasoning": "The user wants the current weather in Paris. I need to call the get_weather tool with city=\"Paris\".",
+      "calls": [
+        {
+          "id": "call_c03vy18j",
+          "name": "get_weather",
+          "args": "{\"city\":\"Paris\"}"
+        }
+      ]
+    }
+  }
+}

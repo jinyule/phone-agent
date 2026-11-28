@@ -1,0 +1,127 @@
+{
+  "model": "test-model",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Check the screen."
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_a",
+          "type": "function",
+          "function": {
+            "name": "tap",
+            "arguments": "{}"
+          }
+        },
+        {
+          "id": "call_b",
+          "type": "function",
+          "function": {
+            "name": "get_weather",
+            "arguments": "{}"
+          }
+        },
+        {
+          "id": "call_c",
+          "type": "function",
+          "function": {
+            "name": "tap",
+            "arguments": "{}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_a",
+      "content": "Tapped."
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_b",
+      "content": "Sunny."
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_c",
+      "content": "[images follow in the next message]"
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Images from tool call call_a:"
+        },
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "data:image/jpeg;base64,U0hPVA=="
+          }
+        },
+        {
+          "type": "text",
+          "text": "Images from tool call call_c:"
+        },
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "data:image/jpeg;base64,U0hPVA=="
+          }
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": "Done."
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_weather",
+        "description": "Current weather of a city.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "city": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "city"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "tap",
+        "description": "Taps a point.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "city": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "city"
+          ]
+        }
+      }
+    }
+  ],
+  "tool_choice": "auto",
+  "parallel_tool_calls": false,
+  "stream": true,
+  "stream_options": {
+    "include_usage": true
+  }
+}

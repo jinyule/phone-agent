@@ -1,0 +1,16 @@
+﻿: OPENROUTER PROCESSING
+
+data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1793500000,"model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+: keep-alive
+
+data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1793500000,"model":"test-model","choices":[{"index":0,"delta":{"content":"Hell"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1793500000,"model":"test-model","choices":[{"index":0,"delta":{"content":"o th"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1793500000,"model":"test-model","choices":[{"index":0,"delta":{"content":"ere."},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1793500000,"model":"test-model","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+

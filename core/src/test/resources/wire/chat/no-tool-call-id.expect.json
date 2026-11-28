@@ -1,0 +1,32 @@
+{
+  "source": "constructed: gateway omitting tool call ids (the adapter assigns one)",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "tool_call",
+          "id": "call_gen_1",
+          "name": "get_weather",
+          "argsJson": "{\"city\": \"Paris\"}"
+        }
+      ],
+      "stopReason": "TOOL_USE",
+      "providerMetadata": {
+        "id": "chatcmpl-test",
+        "model": "test-model",
+        "finish_reason": "tool_calls"
+      }
+    },
+    "deltas": {
+      "text": "",
+      "reasoning": "",
+      "calls": [
+        {
+          "id": "call_gen_1",
+          "name": "get_weather",
+          "args": "{\"city\": \"Paris\"}"
+        }
+      ]
+    }
+  }
+}

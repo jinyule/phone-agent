@@ -1,0 +1,28 @@
+{
+  "source": "constructed from docs: finish_reason length when max_tokens is reached",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "text",
+          "text": "This answer is cut"
+        }
+      ],
+      "stopReason": "MAX_TOKENS",
+      "usage": {
+        "inputTokens": 10,
+        "outputTokens": 5
+      },
+      "providerMetadata": {
+        "id": "chatcmpl-test",
+        "model": "test-model",
+        "finish_reason": "length"
+      }
+    },
+    "deltas": {
+      "text": "This answer is cut",
+      "reasoning": "",
+      "calls": []
+    }
+  }
+}

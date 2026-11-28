@@ -1,0 +1,10 @@
+{
+  "source": "constructed from docs: response.incomplete with reason content_filter",
+  "protocol": "responses",
+  "expect": {
+    "error": {
+      "kind": "REFUSAL",
+      "message": "model refused (content_filter)"
+    }
+  }
+}

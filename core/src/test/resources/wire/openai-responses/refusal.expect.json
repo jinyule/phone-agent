@@ -1,0 +1,10 @@
+{
+  "source": "constructed from docs: a message whose only content part is a refusal",
+  "protocol": "responses",
+  "expect": {
+    "error": {
+      "kind": "REFUSAL",
+      "message": "model refused (refusal)"
+    }
+  }
+}

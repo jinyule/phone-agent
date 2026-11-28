@@ -1,0 +1,38 @@
+{
+  "source": "constructed from reports: a reply that is nothing but a Qwen-style <tool_call> JSON block, recovered when that format is on",
+  "recover": [
+    "TOOL_CALL_TAG"
+  ],
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "tool_call",
+          "id": "call_gen_1",
+          "name": "get_weather",
+          "argsJson": "{\"city\":\"Paris\"}"
+        }
+      ],
+      "stopReason": "TOOL_USE",
+      "providerMetadata": {
+        "id": "chatcmpl-test",
+        "model": "test-model",
+        "finish_reason": "stop",
+        "recovered_tool_calls": [
+          "call_gen_1"
+        ]
+      }
+    },
+    "deltas": {
+      "text": "",
+      "reasoning": "",
+      "calls": [
+        {
+          "id": "call_gen_1",
+          "name": "get_weather",
+          "args": "{\"city\":\"Paris\"}"
+        }
+      ]
+    }
+  }
+}

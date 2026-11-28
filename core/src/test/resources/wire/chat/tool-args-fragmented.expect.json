@@ -1,0 +1,38 @@
+{
+  "source": "constructed from docs: OpenAI tool call arguments split over many chunks",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "tool_call",
+          "id": "call_frag1",
+          "name": "get_weather",
+          "argsJson": "{\"city\": \"Paris\", \"reason\": \"check the weather\"}"
+        }
+      ],
+      "stopReason": "TOOL_USE",
+      "usage": {
+        "inputTokens": 120,
+        "outputTokens": 30,
+        "cacheReadTokens": 64,
+        "reasoningTokens": 12
+      },
+      "providerMetadata": {
+        "id": "chatcmpl-test",
+        "model": "test-model",
+        "finish_reason": "tool_calls"
+      }
+    },
+    "deltas": {
+      "text": "",
+      "reasoning": "",
+      "calls": [
+        {
+          "id": "call_frag1",
+          "name": "get_weather",
+          "args": "{\"city\": \"Paris\", \"reason\": \"check the weather\"}"
+        }
+      ]
+    }
+  }
+}

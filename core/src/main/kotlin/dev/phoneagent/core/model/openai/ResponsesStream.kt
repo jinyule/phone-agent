@@ -1,0 +1,495 @@
+package dev.phoneagent.core.model.openai
+
+import dev.phoneagent.core.ids.ModelId
+import dev.phoneagent.core.ids.ProviderId
+import dev.phoneagent.core.ids.ToolCallId
+import dev.phoneagent.core.model.ChatResponse
+import dev.phoneagent.core.model.Delta
+import dev.phoneagent.core.model.ModelError
+import dev.phoneagent.core.model.Part
+import dev.phoneagent.core.model.ReasoningKind
+import dev.phoneagent.core.model.StopReason
+import dev.phoneagent.core.model.Usage
+import dev.phoneagent.core.model.openai.WireSupport.TEXT_SEPARATOR
+import dev.phoneagent.core.model.openai.WireSupport.array
+import dev.phoneagent.core.model.openai.WireSupport.int
+import dev.phoneagent.core.model.openai.WireSupport.obj
+import dev.phoneagent.core.model.openai.WireSupport.str
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+
+/**
+ * Assembles one Responses reply from its event stream (model-layer §3.2). Text, reasoning and
+ * argument deltas go to `onDelta` (what they missed is shown at the end, [DeltaLedger.catchUp]).
+ * Reasoning comes as summaries or as raw reasoning text; the first of the two seen is the one
+ * shown, both as deltas and as the reasoning parts' summaries, so the two never mix;
+ * the parts come from the output items in `output_index` order, finished on the stream
+ * (`response.output_item.done`) or listed in the final `response.output` ([OutputItems]). Only
+ * `response.completed` or `response.incomplete`, each with its response object, complete a
+ * stream: a body that ends before them was cut ([ModelError.Network]); a terminal event without
+ * the object, and a final response that fails [ResponsesOutput.terminal] (the same check for a
+ * whole JSON reply), is [ModelError.BadResponse]. An incomplete
+ * reply stops with [StopReason.MAX_TOKENS] or [StopReason.OTHER] (a content filter is a
+ * [ModelError.Refusal]); on the ChatGPT plan only `response.completed` succeeds.
+ * `response.failed` and `error` events become [ModelError]s. A reply whose content holds a
+ * request secret fails as [CredentialEcho] ([EchoGuard]), the deltas checked as they are shown and
+ * the argument text shown for each call checked whole at the end (the final output may replace
+ * it). A reply that fails otherwise after showing argument text that holds a secret fails as
+ * [CredentialEcho] too ([failed]).
+ */
+internal class ResponsesStream(
+    private val provider: ProviderId,
+    private val model: ModelId,
+    private val plan: Boolean,
+    private val redactor: Redactor,
+    onDelta: (Delta) -> Unit,
+) {
+    private val guard = redactor.guard()
+    private val ledger = DeltaLedger(onDelta, guard)
+    private var reasoningSection: String? = null
+    private var reasoningChannel: String? = null
+    private val items = OutputItems()
+    private val callIdsByItem = mutableMapOf<String, String>()
+    private var final: FinalResponse? = null
+
+    /** Consumes one SSE event; `true` once the response is final. */
+    fun accept(event: SseEvent): Boolean {
+        val data = event.data.trim()
+        if (data != "[DONE]") {
+            val root = parse(data)
+            val type = root.str("type") ?: event.event.orEmpty()
+            if (!delta(type, root)) lifecycle(type, root)
+        }
+        return final != null
+    }
+
+    /** Consumes a whole response object (servers that ignore `stream:true`); it must be completed or incomplete. */
+    fun acceptJson(body: String) {
+        val root = parse(body)
+        root.obj("error")?.let { throw failure(it) }
+        final = ResponsesOutput.terminal(root, event = null)
+    }
+
+    /**
+     * What a reply that failed with [error] fails with: [CredentialEcho.error] when the argument
+     * text shown before the failure holds a secret ([DeltaLedger.showsSecretInArguments]), so the
+     * UI takes it back; else [error].
+     */
+    fun failed(error: ModelError): ModelError = if (ledger.showsSecretInArguments()) CredentialEcho.error() else error
+
+    /** The reply; throws [ModelError] for cut streams, refusals and malformed replies. */
+    fun finish(): ChatResponse {
+        val last = final ?: throw ModelError.Network("stream ended before response.completed")
+        val response = last.response
+        val incomplete = last.incomplete
+        val output = items.merged(last.output)
+        val reason = response.obj("incomplete_details")?.str("reason")
+        val rawFirst = reasoningChannel == RAW_REASONING_DELTA
+        val parts = ResponsesOutput.parts(output, provider, model, rawFirst)
+        guard.parts(parts)
+        ledger.checkShownArguments()
+        val hasCalls = parts.any { it is Part.ToolCall }
+        ResponsesOutput.checkRefusal(output, parts, incomplete && reason == "content_filter")
+        if (incomplete && plan) {
+            val shown = reason?.let { "reason ${Unquoted.named(it, INCOMPLETE_REASONS)}" } ?: "no reason"
+            throw ModelError.BadResponse(
+                "ChatGPT plan replies must end with response.completed; this one is incomplete ($shown)",
+            )
+        }
+        val diverged = ledger.catchUp(parts)
+        val stop =
+            when {
+                // An unfinished reply is never a tool step or a finished turn, whatever it holds.
+                incomplete -> if (reason == "max_output_tokens") StopReason.MAX_TOKENS else StopReason.OTHER
+
+                hasCalls -> StopReason.TOOL_USE
+
+                else -> StopReason.END_TURN
+            }
+        val meta = ResponsesOutput.metadata(response, reason, diverged, redactor)
+        return ChatResponse(parts, stop, ResponsesOutput.usage(response), meta)
+    }
+
+    /** Display deltas; `false` when [type] is not one. */
+    private fun delta(
+        type: String,
+        root: JsonObject,
+    ): Boolean {
+        val text = root.str("delta")?.takeIf { it.isNotEmpty() }
+        when (type) {
+            "response.output_text.delta" -> text?.let(ledger::text)
+            SUMMARY_DELTA, RAW_REASONING_DELTA -> text?.let { reasoning(type, root, it) }
+            "response.output_item.added" -> root.obj("item")?.let(::started)
+            "response.function_call_arguments.delta" -> arguments(root.str("item_id"), text)
+            else -> return false
+        }
+        return true
+    }
+
+    /** Items and terminal events; anything else (`response.created`, `*.done` of deltas …) is ignored. */
+    private fun lifecycle(
+        type: String,
+        root: JsonObject,
+    ) {
+        when (type) {
+            "response.output_item.done" -> {
+                root.obj("item")?.let { items.done(root.int("output_index"), it) }
+            }
+
+            "response.completed", "response.incomplete" -> {
+                val response =
+                    root.obj("response") ?: throw ModelError.BadResponse("$type event without a response object")
+                final = ResponsesOutput.terminal(response, type.removePrefix("response."))
+            }
+
+            "response.failed", "error" -> {
+                val error = if (type == "error") root.obj("error") else root.obj("response")?.obj("error")
+                throw failure(error ?: root)
+            }
+        }
+    }
+
+    private fun parse(data: String): JsonObject =
+        try {
+            Json.parseToJsonElement(data) as? JsonObject ?: throw ModelError.BadResponse("event is not a JSON object")
+        } catch (ignoredQuotingParseError: SerializationException) {
+            // Neither its message nor the data is quoted: an escape no parser has read can hide a secret.
+            throw ModelError.BadResponse("event is not JSON (${Unquoted.size(data)})")
+        }
+
+    private fun failure(error: JsonObject): ModelError =
+        ProviderErrors.fromStream(ProviderError.of(error, redactor), plan)
+
+    /**
+     * Shows a reasoning fragment of the first channel ([type]) seen; each summary or reasoning-text
+     * part is a section of its own, after a blank line.
+     */
+    private fun reasoning(
+        type: String,
+        root: JsonObject,
+        fragment: String,
+    ) {
+        if (reasoningChannel == null) reasoningChannel = type
+        if (type != reasoningChannel) return
+        val section = "${root.str("item_id")}/${root.int("summary_index") ?: root.int("content_index")}"
+        if (section != reasoningSection && ledger.hasReasoning) ledger.reasoning(TEXT_SEPARATOR)
+        reasoningSection = section
+        ledger.reasoning(fragment)
+    }
+
+    private fun started(item: JsonObject) {
+        val callId = item.str("call_id")
+        val name = item.str("name")
+        if (item.str("type") == "function_call" && callId != null && name != null) {
+            item.str("id")?.let { callIdsByItem[it] = callId }
+            ledger.started(ToolCallId(callId), name)
+        }
+    }
+
+    private fun arguments(
+        itemId: String?,
+        fragment: String?,
+    ) {
+        val callId = itemId?.let(callIdsByItem::get)
+        if (callId != null && fragment != null) ledger.args(ToolCallId(callId), fragment)
+    }
+}
+
+/**
+ * A final response that passed [ResponsesOutput.terminal].
+ *
+ * @property output its `output` items (none when absent or `null`).
+ * @property incomplete whether it ended `incomplete` rather than `completed`.
+ */
+internal class FinalResponse(
+    val response: JsonObject,
+    val output: List<JsonObject>,
+    val incomplete: Boolean,
+)
+
+/**
+ * The output items of one reply by `output_index` (model-layer §3.2): those the stream finished,
+ * then the final `response.output` (by position) merged in, so items only one of them has are
+ * kept. An item without an index takes the next position. Where both have an item, the final one
+ * wins key by key, except that JSON `null` never replaces a value. The two versions must agree on
+ * what the item means ([meaning]); a contradiction is [ModelError.BadResponse].
+ */
+internal class OutputItems {
+    private val byIndex = sortedMapOf<Int, JsonObject>()
+    private var next = 0
+
+    /** Records an item from `response.output_item.done`. */
+    fun done(
+        index: Int?,
+        item: JsonObject,
+    ) = put(index ?: next, item)
+
+    /** All items in index order, with [final] (the response's `output`) merged in. */
+    fun merged(final: List<JsonObject>): List<JsonObject> {
+        final.forEachIndexed(::put)
+        return byIndex.values.toList()
+    }
+
+    private fun put(
+        index: Int,
+        item: JsonObject,
+    ) {
+        val known = byIndex[index]
+        byIndex[index] = if (known == null) item else agreed(index, known, item)
+        next = maxOf(next, index + 1)
+    }
+
+    /** [known] with [later]'s non-null values over it, once both mean the same. */
+    private fun agreed(
+        index: Int,
+        known: JsonObject,
+        later: JsonObject,
+    ): JsonObject {
+        val type = present(known["type"]) ?: present(later["type"])
+        val a = meaning(known, type)
+        val b = meaning(later, type)
+        val clash = a.keys.firstOrNull { key -> a[key] != null && b[key] != null && a[key] != b[key] }
+        if (clash != null) throw ModelError.BadResponse("output item $index has two different '$clash' values")
+        return JsonObject(known + later.filterValues { it !is JsonNull })
+    }
+
+    private companion object {
+        val CALL = listOf("call_id", "name", "arguments")
+        val REASONING = listOf("id", "encrypted_content")
+        val CONTENT = listOf("type", "text", "refusal")
+
+        /**
+         * What an item means, read as an item of [type]: its type, then for a message the type,
+         * text and refusal of each content part, for a function call its call id, name and
+         * arguments (not its item id), for reasoning its id and encrypted content. Absent and
+         * `null` values are both `null`.
+         */
+        fun meaning(
+            item: JsonObject,
+            type: JsonElement?,
+        ): Map<String, JsonElement?> {
+            val fields =
+                when ((type as? JsonPrimitive)?.content) {
+                    "message" -> mapOf("content" to content(present(item["content"])))
+                    "function_call" -> CALL.associateWith { present(item[it]) }
+                    "reasoning" -> REASONING.associateWith { present(item[it]) }
+                    else -> emptyMap()
+                }
+            return mapOf("type" to present(item["type"])) + fields
+        }
+
+        /** A message's content parts cut down to [CONTENT]; anything but an array as it is. */
+        fun content(content: JsonElement?): JsonElement? =
+            (content as? JsonArray)?.let { parts ->
+                JsonArray(
+                    parts.map { part ->
+                        (part as? JsonObject)?.let { obj ->
+                            JsonObject(CONTENT.mapNotNull { key -> present(obj[key])?.let { key to it } }.toMap())
+                        } ?: part
+                    },
+                )
+            } ?: content
+
+        fun present(value: JsonElement?): JsonElement? = value?.takeIf { it !is JsonNull }
+    }
+}
+
+private const val SUMMARY_DELTA = "response.reasoning_summary_text.delta"
+private const val RAW_REASONING_DELTA = "response.reasoning_text.delta"
+
+/** The `incomplete_details.reason` values a diagnosis names; others are described, not quoted. */
+private val INCOMPLETE_REASONS = setOf("max_output_tokens", "content_filter")
+
+/** Pure readers of a finished Responses `output` and `response` object. */
+internal object ResponsesOutput {
+    private const val COMPLETED = "completed"
+    private const val INCOMPLETE = "incomplete"
+    private const val NOT_ITEMS = "response output is not an array of items"
+
+    /** The `status` values a diagnosis names; others are described, not quoted. */
+    private val STATES = setOf(COMPLETED, INCOMPLETE, "failed", "cancelled", "in_progress", "queued")
+
+    /**
+     * [response] as a final response, the same rules for a stream's terminal event and a whole
+     * JSON reply. Its state is the one the terminal [event] names (`completed` / `incomplete`), or
+     * for a whole reply ([event] `null`) its own `status`, which must be one of the two; a
+     * `status` that says otherwise than the event is a contradiction (absent or `null` is not).
+     * `output`, unless absent or `null`, must be an array of items, objects with a string `type`.
+     * Anything else is [ModelError.BadResponse], naming a `status` it does not know by its shape only.
+     */
+    fun terminal(
+        response: JsonObject,
+        event: String?,
+    ): FinalResponse {
+        val status = response["status"]?.takeIf { it !is JsonNull }
+        val named = (status as? JsonPrimitive)?.takeIf { it.isString }?.content
+        val state = event ?: named
+        val shown = status?.let { "status ${Unquoted.named(it, STATES)}" } ?: "no status"
+        val output = response["output"]?.takeIf { it !is JsonNull }
+        val items = (output as? JsonArray)?.map { it as? JsonObject }
+        val problem =
+            when {
+                state != COMPLETED && state != INCOMPLETE -> "whole response has $shown, not completed or incomplete"
+                status != null && named != state -> "response.$state event with $shown"
+                output != null && (items == null || items.any { it?.str("type") == null }) -> NOT_ITEMS
+                else -> null
+            }
+        if (problem != null) throw ModelError.BadResponse(problem)
+        return FinalResponse(response, items.orEmpty().filterNotNull(), state == INCOMPLETE)
+    }
+
+    /**
+     * The parts of [output], in order: `reasoning` items verbatim (with their summary for the UI),
+     * one text part per `message`, `function_call`s. Hosted tool items are never requested and
+     * anything else is not model-visible content, so both are skipped.
+     *
+     * @param rawFirst show a reasoning item's raw reasoning text rather than its summary when it has both.
+     */
+    fun parts(
+        output: List<JsonObject>,
+        provider: ProviderId,
+        model: ModelId,
+        rawFirst: Boolean,
+    ): List<Part> =
+        output.mapIndexedNotNull { index, item ->
+            when (item.str("type")) {
+                "reasoning" -> {
+                    Part.Reasoning(provider, model, ReasoningKind.RESPONSES_ENCRYPTED, item, summary(item, rawFirst))
+                }
+
+                "message" -> {
+                    text(item)?.let(Part::Text)
+                }
+
+                "function_call" -> {
+                    call(item, index)
+                }
+
+                else -> {
+                    null
+                }
+            }
+        }
+
+    /** Throws [ModelError.Refusal] when the reply was filtered or is nothing but a refusal. */
+    fun checkRefusal(
+        output: List<JsonObject>,
+        parts: List<Part>,
+        filtered: Boolean,
+    ) {
+        if (filtered) throw ModelError.Refusal("content_filter")
+        val answered = parts.any { it is Part.Text || it is Part.ToolCall }
+        if (!answered && output.any(::isRefusal)) throw ModelError.Refusal("refusal")
+    }
+
+    /** `response.usage`, clamped like Chat Completions usage. */
+    fun usage(response: JsonObject): Usage? {
+        val usage = response.obj("usage")
+        val input = usage?.int("input_tokens")?.coerceAtLeast(0)
+        return if (usage == null || input == null) {
+            null
+        } else {
+            val output = (usage.int("output_tokens") ?: 0).coerceAtLeast(0)
+            val cached = (usage.obj("input_tokens_details")?.int("cached_tokens") ?: 0).coerceIn(0, input)
+            val reasoning = usage.obj("output_tokens_details")?.int("reasoning_tokens")?.coerceIn(0, output)
+            Usage(input, output, cacheReadTokens = cached, reasoningTokens = reasoning)
+        }
+    }
+
+    /**
+     * Response id, reported model, status, incomplete reason and contradicted delta channels, for
+     * the log. A provider string that holds a credential ([Redactor.verbatim]) is left out whole.
+     */
+    fun metadata(
+        response: JsonObject,
+        incompleteReason: String?,
+        diverged: List<String>,
+        redactor: Redactor,
+    ): JsonObject? {
+        val meta =
+            buildJsonObject {
+                response.str("id")?.let(redactor::verbatim)?.let { put("id", it) }
+                response.str("model")?.let(redactor::verbatim)?.let { put("model", it) }
+                response.str("status")?.let(redactor::verbatim)?.let { put("status", it) }
+                incompleteReason?.let(redactor::verbatim)?.let { put("incomplete_reason", it) }
+                if (diverged.isNotEmpty()) putJsonArray(PREVIEW_DIVERGED) { diverged.forEach { add(it) } }
+            }
+        return meta.takeIf { it.isNotEmpty() }
+    }
+
+    /** A reasoning item's readable text: its summary or its raw reasoning text ([rawFirst] picks between both). */
+    private fun summary(
+        item: JsonObject,
+        rawFirst: Boolean,
+    ): String? =
+        if (rawFirst) {
+            texts(item, "content") ?: texts(item, "summary")
+        } else {
+            texts(item, "summary") ?: texts(item, "content")
+        }
+
+    private fun texts(
+        item: JsonObject,
+        key: String,
+    ): String? =
+        item
+            .array(key)
+            ?.mapNotNull { (it as? JsonObject)?.str("text") }
+            ?.joinToString(TEXT_SEPARATOR)
+            ?.takeIf { it.isNotEmpty() }
+
+    private fun text(item: JsonObject): String? =
+        item
+            .array("content")
+            ?.mapNotNull { (it as? JsonObject)?.takeIf { c -> c.str("type") == "output_text" }?.str("text") }
+            ?.joinToString("")
+            ?.takeIf { it.isNotEmpty() }
+
+    /** The call [item] (output item [index]); one it cannot use fails by what it lacks, never quoting it. */
+    private fun call(
+        item: JsonObject,
+        index: Int,
+    ): Part.ToolCall {
+        val id = item.str("call_id")
+        val name = item.str("name")
+        if (id == null || name == null) {
+            val missing = listOfNotNull("call_id".takeIf { id == null }, "name".takeIf { name == null })
+            throw ModelError.BadResponse(
+                "output item $index is a function_call without ${missing.joinToString(" or ")}",
+            )
+        }
+        return try {
+            Part.ToolCall(ToolCallId(id), name, argumentsOf(item["arguments"]))
+        } catch (e: IllegalArgumentException) {
+            throw ModelError.BadResponse(
+                "output item $index is a function_call with an unusable call_id (${Unquoted.size(id)})",
+                Unquoted.bare(e),
+            )
+        }
+    }
+
+    /**
+     * A call's argument text: a string as it is; absent, `null` or empty is `{}`; any other JSON
+     * value (an object, or a number, boolean or array for the tool layer's check to refuse) as its
+     * JSON text, never replaced.
+     */
+    private fun argumentsOf(raw: JsonElement?): String =
+        when (raw) {
+            null, JsonNull -> "{}"
+            is JsonPrimitive -> if (raw.isString) raw.content.ifEmpty { "{}" } else raw.toString()
+            is JsonObject, is JsonArray -> raw.toString()
+        }
+
+    private fun isRefusal(item: JsonObject): Boolean =
+        item.str("type") == "message" &&
+            item.array("content").orEmpty().any { (it as? JsonObject)?.str("type") == "refusal" }
+}

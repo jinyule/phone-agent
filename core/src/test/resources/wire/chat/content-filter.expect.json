@@ -1,0 +1,9 @@
+{
+  "source": "constructed from docs: Azure OpenAI ends a filtered completion with finish_reason content_filter",
+  "expect": {
+    "error": {
+      "kind": "REFUSAL",
+      "message": "model refused (content_filter)"
+    }
+  }
+}

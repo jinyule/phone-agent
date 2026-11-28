@@ -74,6 +74,8 @@ Mika
       -> core/src/test/kotlin/dev/phoneagent/core/adb/FakePairingServer.kt (FakePairingServer)
     core/src/test/kotlin/com/wangzan101/mika/core/adb/AdbConnectionTest.kt
       -> core/src/test/kotlin/dev/phoneagent/core/adb/FakeAdbd.kt (FakeAdbd)
+    core/src/main/kotlin/com/wangzan101/mika/core/model/LeakedToolMarkup.kt
+      -> core/src/main/kotlin/dev/phoneagent/core/model/openai/LeakedToolMarkup.kt
 
   The Mika files carry no header of their own. Each adapted file starts with
   a header naming the Mika file, the commit, the copyright and license of the
