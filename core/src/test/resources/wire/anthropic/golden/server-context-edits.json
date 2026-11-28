@@ -74,6 +74,10 @@
           "keep": {
             "type": "tool_uses",
             "value": 3
+          },
+          "clear_at_least": {
+            "type": "input_tokens",
+            "value": 40000
           }
         },
         {
@@ -81,7 +85,8 @@
           "trigger": {
             "type": "input_tokens",
             "value": 150000
-          }
+          },
+          "instructions": "只写摘要，不要调用工具。"
         }
       ]
     },

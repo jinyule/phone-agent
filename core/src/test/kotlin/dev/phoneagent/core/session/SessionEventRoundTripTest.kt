@@ -11,6 +11,7 @@ import dev.phoneagent.core.tool.ToolControl
 import kotlinx.serialization.descriptors.elementNames
 import kotlinx.serialization.serializer
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
@@ -25,6 +26,18 @@ class SessionEventRoundTripTest {
         val line = codec.encode(record)
         assertTrue('\n' !in line, "one line per record")
         assertEquals(DecodedLine.Event(record), codec.decode(line, version = 1, lineNumber = 2))
+    }
+
+    @Test
+    fun `a side request keeps every server-side field through encode and decode`() {
+        val side = SessionSamples.serverSideCall
+        val edits = side.request.contextEdits as ContextEditPolicy.ServerSide
+        assertNotNull(edits.clearAtLeastTokens)
+        assertNotNull(edits.compactInstructions)
+        val record = SessionRecord(2, 0, side, sources = listOf(1))
+        val decoded = codec.decode(codec.encode(record), version = 1, lineNumber = 2)
+        assertEquals(DecodedLine.Event(record), decoded)
+        assertEquals(side.request, ((decoded as DecodedLine.Event).record.event as SideRequest).request)
     }
 
     @Test

@@ -87,7 +87,8 @@ public sealed class ModelError(
 
     /** The request does not fit the context window; compact and retry. */
     public class ContextOverflow(
-        detail: String,
+        /** What the provider said, and why nothing trimmed the context when the adapter knows. */
+        public val detail: String,
     ) : ModelError("context overflow: $detail") {
         override val kind: ModelErrorKind get() = ModelErrorKind.CONTEXT_OVERFLOW
     }

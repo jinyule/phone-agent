@@ -485,6 +485,17 @@ object DeriveRuleSamples : RuleSampleKit() {
                 ),
         )
 
+    private val cutAfterCompaction = reply(1, compaction, thinking("N"), Part.Text("我先打"), stop = null)
+
+    private val interruptedCompaction =
+        steered(
+            "interrupted-compaction-left-out",
+            "An interrupted prefix joins the model view without any Part.Reasoning, a compaction block included: " +
+                "the reply is incomplete, so the server compacts again on the next request (model-layer §5).",
+            cutAfterCompaction,
+            listOf(Message(Role.ASSISTANT, listOf(Part.Text("我先打")))),
+        )
+
     /** Every case. */
     val cases: List<Case> =
         listOf(
@@ -498,5 +509,6 @@ object DeriveRuleSamples : RuleSampleKit() {
             interruptedThinkingAndText,
             supersededWithThinking,
             compactionKept,
+            interruptedCompaction,
         ) + RunRuleSamples.cases
 }

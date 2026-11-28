@@ -137,7 +137,10 @@ internal class MessagesWire(
         }
     }
 
-    /** Server-side clearing and compaction (beta shapes of the Java SDK 3.3.0); `null` when nothing is enabled. */
+    /**
+     * Server-side clearing and compaction (the shapes of the Claude API docs, context editing and
+     * compaction at a token threshold); `null` when nothing is enabled.
+     */
     private fun contextManagement(policy: ContextEditPolicy): JsonObject? {
         val server = policy as? ContextEditPolicy.ServerSide ?: return null
         val edits =
@@ -147,12 +150,14 @@ internal class MessagesWire(
                         put("type", "clear_tool_uses_20250919")
                         put("trigger", count("input_tokens", tokens))
                         put("keep", count("tool_uses", server.keepToolUses))
+                        server.clearAtLeastTokens?.let { put("clear_at_least", count("input_tokens", it)) }
                     }
                 },
                 server.compactAboveTokens?.let { tokens ->
                     buildJsonObject {
                         put("type", "compact_20260112")
                         put("trigger", count("input_tokens", tokens))
+                        server.compactInstructions?.let { put("instructions", it) }
                     }
                 },
             )

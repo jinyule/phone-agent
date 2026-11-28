@@ -257,14 +257,21 @@ data class WireProfile(
   - `options` 只认这八个名字：`anthropic.version`、`anthropic.auth`、`anthropic.thinking`、`anthropic.thinking_display`、`anthropic.prefix_mismatch`、`anthropic.fallbacks`、`anthropic.eager_input_streaming`、`anthropic.strict_tools`。
   - 未知名字、版本不符、凭据类型不符，都在发送前报 `InvalidRequest`。
   - beta 按需拼进 `anthropic-beta`。
-  - 推荐设置：所有端点都开 adaptive thinking、`display:"summarized"` 和 `eager_input_streaming`；官方端点（`https://api.anthropic.com`）上再加 `drop_block` 和服务端降级（只对有降级的模型）。网关不发 Claude API 专有的 beta。
+  - 推荐设置：所有端点都开 adaptive thinking、`display:"summarized"` 和 `eager_input_streaming`；官方端点（`https://api.anthropic.com`）上再加 `drop_block`、服务端降级（只对有降级的模型）和服务端 compaction（只对预设认识的模型，见下面"服务端上下文管理"）。网关不发 Claude API 专有的 beta。
   - 官方端点只有一种判定（`AnthropicPresets.isOfficial`），生成快照和发送前的核对都用它：base URL 规范化以后正好是 `https://api.anthropic.com`，也就是 HTTPS、这个主机（大小写不限）、端口 443（写不写都行）、根路径，没有别的。别的端口（如 `:8443`）或带路径（如 `/proxy`）的地址都算另一个端点。
   - 快照由 `ChatModel.prepare(reasoning)` 生成（§2"线路快照"）：`AnthropicAdapters.model(profile, model, capabilities, blobs, settings)` 创建模型时就拿到用户保存的 `AnthropicSettings`（不给就用推荐设置），profile 的 headers 在这时复制一份冻结；`prepare` 先钳制档位再映射，同一档位总是得到相同的快照；`complete()` 不生成快照。
-  - 端点、模型、设置三者的兼容性在创建模型时统一校验（`prepare` 按契约不抛异常），发送阶段不静默删掉记下的字段。不兼容就报 `InvalidRequest(param = "settings.serverFallback")` 或 `settings.prefixMismatch`。不兼容指两种情况：网关上开了 Claude API 专有的降级或 `prefixMismatch`；没有服务端降级的模型（Haiku 5.5，以及预设不认识的模型）开了降级，Haiku 5.5 上 `fallbacks` 本身就是 400。
+  - 端点、模型、设置三者的兼容性在创建模型时统一校验（`prepare` 按契约不抛异常），发送阶段不静默删掉记下的字段。不兼容就报 `InvalidRequest(param = "settings.serverFallback")`、`settings.prefixMismatch` 或 `settings.serverContext`。不兼容指三种情况：网关上开了 Claude API 专有的降级、`prefixMismatch` 或服务端上下文管理；没有服务端降级的模型（Haiku 5.5，以及预设不认识的模型）开了降级，Haiku 5.5 上 `fallbacks` 本身就是 400；预设不认识的模型开了服务端上下文管理。
   - 一份档案服务多个模型时，保存的设置先经 `AnthropicSettings.effectiveFor(profile, model)` 按模型算出有效设置，再创建模型，快照记下的就是实际发出的设置。
-  - 发送前再核对一次端点：快照开着 `fallbacks` 或 `prefixMismatch`，而 `profile.baseUrl` 不是官方端点（任务进行中把 base URL 从官方端点改成了网关），就报不可重试的 `InvalidRequest(param = "wire.options")`，写明快照是为另一个端点生成的、需要重新生成。不静默删字段：发出的内容必须能从日志里的快照重建（AGENTS §3 第 1 条）。
+  - 发送前再核对一次端点：快照开着 `fallbacks` 或 `prefixMismatch`，而 `profile.baseUrl` 不是官方端点（任务进行中把 base URL 从官方端点改成了网关），就报不可重试的 `InvalidRequest(param = "wire.options")`，写明快照是为另一个端点生成的、需要重新生成；请求的 `contextEdits` 是 `ServerSide` 而端点不是官方端点，同样报 `InvalidRequest(param = "contextEdits")`。不静默删字段：发出的内容必须能从日志里的快照和请求头重建（AGENTS §3 第 1 条）。
   - **WP09 的义务**：档案的端点变了，就生成并记一份新快照（新的 `request/header`），不拿旧快照接着发。
   - 快照总是写 `disableParallelToolCalls = true`，写 `false` 的快照在发送前报 `InvalidRequest(param = "wire.disableParallelToolCalls")`；带工具时据此发 `tool_choice.disable_parallel_tool_use:true`（主循环每步只执行一个动作）。
+- **服务端上下文管理**（§5）：`AnthropicSettings.serverContext`，类型是 `ContextEditPolicy.ServerSide`，`null` 表示不开。
+  - 和降级、`prefixMismatch` 走同一套三关（WP17 的 D2）：推荐设置只在官方端点、预设认识的模型（`AnthropicPresets.hasServerContext`：Opus 5.5、Sonnet 5.5、Haiku 5.5，文档里这三个都支持 context editing 和按阈值的 compaction）上打开；`effectiveFor` 在别的端点和模型上关掉；`requireFits` 遇到明确开了而端点或模型不支持的，在创建模型时报 `settings.serverContext`；发送前再核对端点。不做自由填写的 beta 清单。
+  - `prepare` 把它作为 `RequestSettings.contextEdits` 给出（没开就是 `ClientSide`），调用方写进 `ChatRequest.contextEdits`，随 `request/header` 或 `side/request` 记进日志；它不进快照的 `options`。
+  - 加载时校验：至少开一项；开了清理（`clear_tool_uses`）就必须设 `clearAtLeastTokens`（> 0），让每次清理都清掉一大块，而不是越过阈值以后每步清一点、每步都让缓存失效；compaction 的触发值不低于 50 000（Claude API 文档的下限，`ServerSide.MIN_COMPACT_ABOVE_TOKENS`）；两个阈值都要低于模型的上下文窗口（`capabilities.contextTokens`），在创建模型时校验。
+  - 推荐值：只开 compaction，触发值 150 000（文档的默认值），带 `instructions`（`AnthropicSettings.COMPACTION_INSTRUCTIONS`）。`instructions` 会整个替换服务端默认的摘要提示，所以它要写明 GUI 任务接着做下去需要的状态：用户仍然有效的目标和约束（关键原话照引，撤回和改过的标出来，不全文照抄）、做过的步骤和结果（以屏幕为准；不能重做的对外动作，以及失败、被拒、结果不确定的动作单独标出）、当前的 App 和页面、还没了结的确认和用户的回答（确认写明针对的动作、对象、金额和条件）。它还给摘要划了边界：摘要里的确认不是新的授权，不能代替当时要求的确认、接管或拒绝；每件事标明来源（用户、屏幕或工具、运行信息），屏幕文字和摘要本身都不写成用户的指令；隐私优先于照原样写，掩码和省略标记原样保留，不猜不补全不拼接，不写密码、验证码和密钥。另外要求摘要以后先读屏，最后是"不要调用任何工具"：请求总带着工具，文档在带工具的摘要请求上说过，不写这一句时模型偶尔会去调工具而不写摘要。Opus 5.5、Sonnet 5.5、Haiku 5.5 带自定义 `instructions` 时只按可见的对话写摘要，不读之前的思考块。这段文字模型可见，金样是 `prompt-surface/compaction-instructions.expected.md` 和 `wire/anthropic/golden/official-defaults.json`。
+  - 线路：`context_management.edits` 里按 clear、compact 的顺序放 `clear_tool_uses_20250919`（`trigger`、`keep`，设了就带 `clear_at_least`）和 `compact_20260112`（`trigger`，设了就带 `instructions`），各自的 beta 按需拼进 `anthropic-beta`。
+  - 只能在真实 Claude 上验证、本机做不了的（本机网关后面是 gpt-6-luna）：clear 和 compact 能不能放在同一个请求里；回传 compaction 块时，fixture 里按 SDK 类型构造的字段会不会被拒；真实的 `prefix_binding_mismatch` 错误文字能不能命中 `BINDING_PHRASES`；开着清理时的缓存命中。在验证之前，这几项按"构造的 fixture"处理。
 - **传输**：和 OpenAI 适配器一致。
   - 每次 attempt 只发一个请求：关掉连接失败重试和重定向跟随。默认也不复用空闲连接（§3.1"连接复用"）。
   - 3xx 报不可重试的 `InvalidRequest(param = null)`，`detail` 里带截断后的目标地址：按 §2 的 `Redactor.quote` 引用：原样或标准转义写出的本次密钥打码成 `***`，其余地址保留；剩下的文字有转义、解码后含密钥或凭据形状，就整段换成固定说明。
@@ -364,12 +371,26 @@ OpenAI 在 DevDay 2026 推出的这个通道，面向"开源、在本地运行"�
 
 | 协议 | 做法 |
 |---|---|
-| **Anthropic** | **不在客户端改写历史。** 用服务端 context editing（beta `context-management-2025-06-27`，`clear_tool_uses_20250919`）清理旧的工具结果，包括里面的截图；接近上下文上限时用服务端 compaction（beta `compact-2026-01-12`），**并且必须把返回的完整 `response.content`（包括 compaction 块）追加回历史**。另外设置兜底：`thinking.block_binding.prefix_mismatch_behavior:"drop_block"`（beta `thinking-binding-controls-2026-08-01`），把返回的 `input_transformations` 记进 session 日志 |
+| **Anthropic** | **不在客户端改写历史。** 官方端点默认用服务端 compaction（beta `compact-2026-01-12`，`compact_20260112`，输入到 150 000 token 时触发，带自定义 `instructions`），**并且必须把返回的完整 `response.content`（包括 compaction 块）追加回历史**。服务端 context editing（beta `context-management-2025-06-27`，`clear_tool_uses_20250919`）清理旧的工具结果，包括里面的截图；它默认关，用户可以在设置里打开，打开时必须设 `clear_at_least`。另外设置兜底：`thinking.block_binding.prefix_mismatch_behavior:"drop_block"`（beta `thinking-binding-controls-2026-08-01`），把返回的 `input_transformations` 记进 session 日志。配置和三关见 §3.3"服务端上下文管理" |
 | **Responses / Chat Completions** | 可以在客户端做确定性裁剪（Replace），但**只在越过阈值时做一次，不要每步都做**，因为每次都会让前缀缓存失效。截图保留最近 N 张（默认 3 张） |
+
+**为什么默认只开 compaction**（WP17 的 D4）：
+- context editing 是腾窗口的手段，不是省钱的手段：每次清理都会改写已经缓存的对话，平台文档实测的那次运行里它花的比省的多。compaction 在长会话里大约省下三分之一。
+- clear 和 compact 能不能放在同一个请求里，没有在真实 Claude 上验证过。默认只开一个，就不会让所有官方端点的用户都去冒这个险。
+
+**考虑过的另一种做法：按需 compaction**（beta `compact-2026-09-04`，顶层 `compaction` 参数）。文档更推荐它：由客户端决定什么时候压缩，可以保留最近几轮原文，也可以在后台压缩。现在不用，原因是：
+- 它是另一套接口：要一个单独的压缩请求，拿到块以后把被压缩的消息从历史前面去掉、把块放在最前面。这是对历史的有意改写，要在 `deriveMessages` 里新增一种从日志推导的投影、一种新事件，并重新论证铁律 7；
+- 按阈值的 compaction 只要在普通请求上加一个参数，历史照样只追加，现有的日志和推导不用改。
+- 以后要保留最近几轮原文、或者不想让任务停下来等摘要时，再评估它。
+
+**已知缺口**：
+- **不发 beta 的端点**（网关和其他 Anthropic 协议端点）：历史只追加，服务端也不裁剪，长任务会一直涨到 `ContextOverflow` 然后失败。适配器在失败文字里写明原因（端点不是 Claude API，没有服务端 compaction；或者是官方端点但设置里关了 compaction）。要不要对这类端点放开客户端裁剪，要改铁律 7 的措辞并写 ADR，留到 M2 收尾时再决定（WP17 的 D5）。
+- **请求体只增不减**：服务端会丢掉 compaction 块之前的内容，客户端照样每步全发。API 有硬限制（每个请求最多 600 张图，请求体最多 128 MB）。文档允许客户端自己丢掉 compaction 块之前的消息，但这样做会不会让块之后的 thinking 签名失效，文档没写清楚，要在真实 Claude 上验证，不在 WP17 里做（D11）。
+- **跨 provider**：换了另一个 Anthropic 档案（provider id 不同）以后，旧 provider 的 compaction 块不回传，新端点看到的是没压缩的完整历史。
 
 **模型分工与缓存**：缓存和思考块都按模型隔离。轻量模型（意图判断、结局判定）和看图模型（描述界面、看图定位）**一律作为旁路请求**，用自己的短上下文，**不在主对话里切换模型**。
 
-**恢复兜底**：如果收到 `PrefixBindingMismatch` 这类 400，去掉历史里所有的推理块（thinking、redacted_thinking，以及其他协议里 `ReasoningKind.isReasoning` 的块）后重试一次，并记日志（`context/reasoning-dropped`）。**compaction 块不去掉**：它装的是压缩后的历史，去掉它服务端就要重新处理压缩前的整段历史，可能撞上上下文上限，成本也会突增；文字和工具调用同样保留。这是一次性的恢复手段，不是常规路径。
+**恢复兜底**：如果收到 `PrefixBindingMismatch` 这类 400，去掉历史里所有的推理块（thinking、redacted_thinking，以及其他协议里 `ReasoningKind.isReasoning` 的块）后重试一次，并记日志（`context/reasoning-dropped`）。**compaction 块不去掉**：它装的是压缩后的历史，去掉它服务端就要重新处理压缩前的整段历史，可能撞上上下文上限，成本也会突增；文字和工具调用同样保留。这是一次性的恢复手段，不是常规路径：由 `ReasoningDropRecovery` 做，它在默认的 `requestError` 链里，每次失配最多重试一次（规则见 phase1 §3.8）。
 
 **中断前缀里的 compaction 块**：被中断的回复（`assistant/message(interrupted=true)`）进入模型视图时，去掉其中所有的 `Part.Reasoning`，compaction 块也在内。回复不完整，其中的 compaction 块不回传，之后的请求由服务端重新压缩。视图是对日志的纯函数，前缀进入视图以后，每次请求里它的样子都相同，所以不违反"Anthropic 历史只追加"。契约写在 `SessionEvent` 的 KDoc（模型视图一节），WP17 复查。
 

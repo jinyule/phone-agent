@@ -17,14 +17,15 @@ public interface ChatModel {
 
     /**
      * The settings of a request to this model at [reasoning]: the effective level, clamped to
-     * `info.capabilities.reasoningLevels` with [clampTo], and the wire snapshot with that level
-     * already mapped ([WireProfile.reasoningEffort]) by this adapter's rules. Clamping and mapping
-     * are one step, here; callers never compute either themselves.
+     * `info.capabilities.reasoningLevels` with [clampTo], the wire snapshot with that level
+     * already mapped ([WireProfile.reasoningEffort]) by this adapter's rules, and who trims old
+     * context. Clamping and mapping are one step, here; callers never compute either themselves.
      *
      * Callers: the agent for the main conversation (the result is recorded in `request/header`)
      * and capability packages for side requests (recorded in `side/request`). Both put
-     * [RequestSettings.reasoning] into `ChatRequest.reasoning` and [RequestSettings.wire] into
-     * `ChatRequest.wire`. Replay takes both from the log and never calls this.
+     * [RequestSettings.reasoning] into `ChatRequest.reasoning`, [RequestSettings.wire] into
+     * `ChatRequest.wire` and [RequestSettings.contextEdits] into `ChatRequest.contextEdits`.
+     * Replay takes all three from the log and never calls this.
      *
      * Stable for the life of this instance: the same [reasoning] always gives an equal result,
      * whatever live settings or [complete] do meanwhile, and collections in the snapshot are
@@ -54,10 +55,14 @@ public interface ChatModel {
  *
  * @property reasoning the effective level for `ChatRequest.reasoning`, or `null` when none is sent.
  * @property wire the frozen wire settings for `ChatRequest.wire`, with [reasoning] mapped.
+ * @property contextEdits who trims old context, for `ChatRequest.contextEdits`: the server, when
+ *   the model's settings turn on server-side context management (Anthropic Messages only), else
+ *   the client.
  */
 public data class RequestSettings(
     val reasoning: ReasoningLevel?,
     val wire: WireProfile,
+    val contextEdits: ContextEditPolicy = ContextEditPolicy.ClientSide,
 )
 
 /**

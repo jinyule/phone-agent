@@ -4,6 +4,7 @@ import dev.phoneagent.core.model.BlobSource
 import dev.phoneagent.core.model.ChatModel
 import dev.phoneagent.core.model.ChatRequest
 import dev.phoneagent.core.model.ChatResponse
+import dev.phoneagent.core.model.ContextEditPolicy
 import dev.phoneagent.core.model.Delta
 import dev.phoneagent.core.model.ModelError
 import dev.phoneagent.core.model.ModelInfo
@@ -27,13 +28,15 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
  *
  * [prepare] gives the snapshot of [settings] for [info]'s model behind [profile], frozen when the
  * model is made: the profile's headers are copied then, so a later edit of the profile changes no
- * snapshot. Settings that do not fit the endpoint and the model are refused here, on creation
- * ([AnthropicSettings.requireFits], [ModelError.InvalidRequest] naming the setting), since
- * [prepare] never throws.
+ * snapshot. It gives [AnthropicSettings.serverContext] as the request's `contextEdits`
+ * (`ClientSide` when it is `null`). Settings that do not fit the endpoint and the model are
+ * refused here, on creation ([AnthropicSettings.requireFits], [ModelError.InvalidRequest] naming
+ * the setting), since [prepare] never throws.
  *
- * A snapshot whose Claude API betas (server fallback, prefix mismatch behavior) [profile]'s
- * endpoint does not take, because it was made for another one, is refused before anything is
- * sent rather than sent with fields left out: what goes out must follow from the logged snapshot.
+ * A request whose Claude API betas (server fallback, prefix mismatch behavior, server-side
+ * context management) [profile]'s endpoint does not take, because its snapshot and edits were
+ * made for another one, is refused before anything is sent rather than sent with fields left
+ * out: what goes out must follow from the logged request.
  */
 internal class MessagesModel(
     private val profile: ProviderProfile,
@@ -46,14 +49,40 @@ internal class MessagesModel(
     private val wire = MessagesWire(profile.id, info.model)
     private val official = AnthropicPresets.isOfficial(profile.baseUrl)
     private val snapshot = AnthropicWire.snapshot(profile, info.model, info.capabilities, null, settings)
+    private val contextEdits = settings.serverContext ?: ContextEditPolicy.ClientSide
 
     override fun prepare(reasoning: ReasoningLevel?): RequestSettings {
         val level = reasoning?.clampTo(info.capabilities.reasoningLevels)
         val effort = level?.let { WireSetting(AnthropicWire.EFFORT_FIELD, AnthropicWire.effortOf(it)) }
-        return RequestSettings(level, snapshot.copy(reasoningEffort = effort))
+        return RequestSettings(level, snapshot.copy(reasoningEffort = effort), contextEdits)
     }
 
     override suspend fun complete(
+        request: ChatRequest,
+        onDelta: (Delta) -> Unit,
+    ): ChatResponse =
+        try {
+            send(request, onDelta)
+        } catch (overflow: ModelError.ContextOverflow) {
+            // The history of this path is append-only, so the failure says why nothing trimmed it.
+            throw explained(overflow, request)
+        }
+
+    /**
+     * [overflow] with the reason it was not prevented (model-layer §5) when [request] had no
+     * server-side compaction: this endpoint has none, or the settings turn it off.
+     */
+    private fun explained(
+        overflow: ModelError.ContextOverflow,
+        request: ChatRequest,
+    ): ModelError.ContextOverflow {
+        val compacts = (request.contextEdits as? ContextEditPolicy.ServerSide)?.compactAboveTokens != null
+        if (compacts) return overflow
+        val reason = if (official) NO_COMPACTION_SET else NO_COMPACTION_HERE
+        return ModelError.ContextOverflow("${overflow.detail}; $reason")
+    }
+
+    private suspend fun send(
         request: ChatRequest,
         onDelta: (Delta) -> Unit,
     ): ChatResponse {
@@ -63,6 +92,13 @@ internal class MessagesModel(
                 "wire.options",
                 "the snapshot was made for another endpoint: it sends Claude API betas (server fallback, " +
                     "prefix mismatch behavior) this endpoint does not take; make a new snapshot for it",
+            )
+        }
+        if (request.contextEdits is ContextEditPolicy.ServerSide && !official) {
+            invalid(
+                "contextEdits",
+                "the request asks for server-side context management (context editing, compaction), a " +
+                    "Claude API beta this endpoint does not take; prepare the request for this model",
             )
         }
         val images = if (rules.inlineImages) ImageData.load(request, blobs) else ImageData.NONE
@@ -133,3 +169,13 @@ internal class MessagesModel(
         ) : Outcome
     }
 }
+
+/** Why an overflow on the Claude API was not prevented: compaction is turned off. */
+private const val NO_COMPACTION_SET =
+    "server-side compaction is off in this model's settings and the history of Anthropic requests " +
+        "is only appended to, so nothing trimmed it: turn compaction on or start a new task"
+
+/** Why an overflow on another endpoint was not prevented: it has no compaction. */
+private const val NO_COMPACTION_HERE =
+    "this endpoint is not the Claude API, so it has no server-side compaction, and the history of " +
+        "Anthropic requests is only appended to, so nothing trimmed it: start a new task"

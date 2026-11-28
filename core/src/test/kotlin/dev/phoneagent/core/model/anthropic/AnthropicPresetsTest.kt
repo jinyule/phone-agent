@@ -43,6 +43,19 @@ class AnthropicPresetsTest {
     }
 
     @Test
+    fun `server-side context management is for the known models only`() {
+        for (model in listOf(
+            AnthropicPresets.MAIN_MODEL,
+            AnthropicPresets.SONNET_MODEL,
+            AnthropicPresets.LIGHT_MODEL,
+        )) {
+            assertTrue(AnthropicPresets.hasServerContext(model), "$model")
+        }
+        assertFalse(AnthropicPresets.hasServerContext(ModelId("claude-opus-4-1")))
+        assertFalse(AnthropicPresets.hasServerContext(ModelId("gpt-6-luna")))
+    }
+
+    @Test
     fun `levels are explicit per role`() {
         assertEquals(ReasoningLevel.HIGH, AnthropicPresets.defaultReasoning(ModelRole.MAIN))
         assertEquals(ReasoningLevel.HIGH, AnthropicPresets.defaultReasoning(ModelRole.VISION))

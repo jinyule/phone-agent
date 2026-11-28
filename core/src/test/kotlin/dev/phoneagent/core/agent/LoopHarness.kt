@@ -4,6 +4,7 @@ package dev.phoneagent.core.agent
 
 import dev.phoneagent.core.ids.SessionId
 import dev.phoneagent.core.ids.TaskId
+import dev.phoneagent.core.model.ChatModel
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.model.PromptBlock
 import dev.phoneagent.core.policy.ActionIntent
@@ -43,7 +44,8 @@ import kotlinx.coroutines.test.TestScope
  * Builds and runs one [AgentLoop] inside a `runTest` scope: virtual time for timeouts and the
  * clock, an in-memory session directory, a scripted model; `advanceUntilIdle()` runs the loop
  * until it waits (for input, the user, or a barrier). Defaults: every verdict Allow, intents
- * follow the tool's risk class on the current screen's package, no retries.
+ * follow the tool's risk class on the current screen's package, no retries. [observe] may wrap
+ * the model to watch each request, inside the replay check.
  */
 @Suppress("LongParameterList") // Every parameter has a default; tests name the few they change.
 internal class LoopHarness(
@@ -60,6 +62,7 @@ internal class LoopHarness(
     val interceptors: Interceptors = Interceptors(requestError = emptyList()),
     val storage: InMemoryStoragePort = InMemoryStoragePort(),
     strictReplay: Boolean = true,
+    observe: (ChatModel) -> ChatModel = { it },
 ) {
     val files = SessionFiles(storage, StoragePath("sessions/s1"))
 
@@ -70,7 +73,7 @@ internal class LoopHarness(
     val replay = ReplayChecker(files, strictReplay)
     val plan =
         RequestPlan(
-            replay.wrap(model),
+            replay.wrap(observe(model)),
             listOf(PromptBlock("identity", "You drive a phone.")),
             tools.map { it.def },
         )

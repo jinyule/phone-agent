@@ -56,9 +56,37 @@ class ModelContractsTest {
     @Test
     fun `server-side context edits validate thresholds`() {
         ContextEditPolicy.ServerSide(null, 0, null)
+        ContextEditPolicy.ServerSide(1, 0, null)
         assertThrows<IllegalArgumentException> { ContextEditPolicy.ServerSide(0, 1, null) }
         assertThrows<IllegalArgumentException> { ContextEditPolicy.ServerSide(null, -1, null) }
         assertThrows<IllegalArgumentException> { ContextEditPolicy.ServerSide(null, 1, 0) }
+    }
+
+    @Test
+    fun `the compaction trigger is at least the API's lowest`() {
+        val lowest = ContextEditPolicy.ServerSide.MIN_COMPACT_ABOVE_TOKENS
+        assertEquals(50_000, lowest)
+        ContextEditPolicy.ServerSide(null, 3, lowest)
+        val below = assertThrows<IllegalArgumentException> { ContextEditPolicy.ServerSide(null, 3, lowest - 1) }
+        assertTrue(below.message!!.contains("49999"), below.message)
+    }
+
+    @Test
+    fun `clear_at_least and instructions are positive, not blank, and only with their edit`() {
+        ContextEditPolicy.ServerSide(100_000, 3, null, clearAtLeastTokens = 1)
+        ContextEditPolicy.ServerSide(null, 3, 150_000, compactInstructions = "keep the goal")
+        assertThrows<IllegalArgumentException> {
+            ContextEditPolicy.ServerSide(100_000, 3, null, clearAtLeastTokens = 0)
+        }
+        assertThrows<IllegalArgumentException> {
+            ContextEditPolicy.ServerSide(null, 3, 150_000, clearAtLeastTokens = 1)
+        }
+        assertThrows<IllegalArgumentException> {
+            ContextEditPolicy.ServerSide(null, 3, 150_000, compactInstructions = " \n ")
+        }
+        assertThrows<IllegalArgumentException> {
+            ContextEditPolicy.ServerSide(100_000, 3, null, compactInstructions = "keep the goal")
+        }
     }
 
     @Test

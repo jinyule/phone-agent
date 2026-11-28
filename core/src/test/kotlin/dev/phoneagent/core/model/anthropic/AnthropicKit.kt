@@ -149,16 +149,21 @@ internal object Kit {
     ): ChatModel = adapters(credentials).model(profile(server.base(), credential), MODEL, CAPABILITIES, blobs)
 
     /** A model whose profile is the Claude API itself, with every request rerouted to [server] ([rerouted]). */
-    fun official(server: MockWebServer): ChatModel = rerouted(server, AnthropicPresets.OFFICIAL_BASE_URL)
+    fun official(
+        server: MockWebServer,
+        settings: AnthropicSettings? = null,
+    ): ChatModel = rerouted(server, AnthropicPresets.OFFICIAL_BASE_URL, settings = settings)
 
     /**
      * A model whose profile has [baseUrl], with every request rerouted to [server] by an
-     * application interceptor (before anything of the adapter's client sees it).
+     * application interceptor (before anything of the adapter's client sees it); [settings]
+     * `null` makes it with the defaults for that profile.
      */
     fun rerouted(
         server: MockWebServer,
         baseUrl: String,
         credentials: CredentialResolver = Keys(),
+        settings: AnthropicSettings? = null,
     ): ChatModel {
         val target = server.base().toHttpUrl()
         val client =
@@ -183,7 +188,9 @@ internal object Kit {
                             .build(),
                     )
                 }.build()
-        return adapters(credentials, client).model(profile(baseUrl), MODEL, CAPABILITIES, blobs())
+        val profile = profile(baseUrl)
+        val saved = settings ?: AnthropicSettings.defaultsFor(profile, MODEL)
+        return adapters(credentials, client).model(profile, MODEL, CAPABILITIES, blobs(), saved)
     }
 
     /** Blobs from a map; unknown refs fail like a missing file. */

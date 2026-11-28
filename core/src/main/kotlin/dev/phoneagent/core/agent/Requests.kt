@@ -89,7 +89,8 @@ internal class Requests(
 
     /**
      * The frozen request of [plan] over the log, with the settings `prepare` gives for the plan's
-     * model and level; writes `request/header` only when it changed.
+     * model and level (wire snapshot, effective level, context edits); writes `request/header`
+     * only when it changed.
      */
     private suspend fun assemble(plan: RequestPlan): ChatRequest {
         val info = plan.model.info
@@ -103,7 +104,7 @@ internal class Requests(
                 plan.system,
                 plan.tools,
                 plan.cache,
-                plan.contextEdits,
+                settings.contextEdits,
                 plan.maxOutputTokens,
                 settings.reasoning,
             )

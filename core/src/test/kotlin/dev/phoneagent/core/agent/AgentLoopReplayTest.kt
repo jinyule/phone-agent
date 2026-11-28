@@ -4,9 +4,12 @@ package dev.phoneagent.core.agent
 
 import dev.phoneagent.core.agent.PolicySamples.sendCard
 import dev.phoneagent.core.ids.ModelId
+import dev.phoneagent.core.model.ChatResponse
 import dev.phoneagent.core.model.ModelError
 import dev.phoneagent.core.model.ModelProtocol
 import dev.phoneagent.core.model.Part
+import dev.phoneagent.core.model.ReasoningKind
+import dev.phoneagent.core.model.StopReason
 import dev.phoneagent.core.policy.Verdict
 import dev.phoneagent.core.session.CompactionSummary
 import dev.phoneagent.core.session.StopCause
@@ -22,6 +25,8 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import kotlin.random.Random
@@ -45,6 +50,36 @@ class AgentLoopReplayTest {
             harness.start().followup(text("go"))
             advanceUntilIdle()
             harness.assertReplayed(2)
+        }
+
+    @Test
+    fun `a reasoning drop and the retry without the stale thinking`() =
+        runTest {
+            val thinking =
+                Part.Reasoning(
+                    FakeChatModel.INFO.provider,
+                    FakeChatModel.INFO.model,
+                    ReasoningKind.ANTHROPIC_THINKING,
+                    buildJsonObject { put("type", "thinking") },
+                )
+            val model =
+                FakeChatModel()
+                    .replies(ChatResponse(listOf(thinking, call("c1", "look")), StopReason.TOOL_USE))
+                    .fails(ModelError.PrefixBindingMismatch("signature no longer valid"))
+                    .answers("好了")
+            val harness =
+                LoopHarness(
+                    this,
+                    model,
+                    tools = listOf(FakeTool("look")),
+                    interceptors = Interceptors(),
+                    strictReplay = false,
+                )
+            val loop = harness.start()
+            loop.followup(text("go"))
+            advanceUntilIdle()
+            assertEquals(Phase.Done, loop.phase.value)
+            harness.assertReplayed(3)
         }
 
     @Test

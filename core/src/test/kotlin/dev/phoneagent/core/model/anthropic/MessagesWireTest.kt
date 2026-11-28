@@ -129,10 +129,28 @@ class MessagesWireTest {
         assertNull(body["context_management"])
         val betas =
             wire.betas(
-                Kit.request(contextEdits = ContextEditPolicy.ServerSide(null, 0, 9)),
+                Kit.request(contextEdits = ContextEditPolicy.ServerSide(null, 0, 50_000)),
                 WireRules.of(Kit.request(wire = Kit.wire()), CredentialKind.API_KEY),
             )
         assertEquals(listOf(MessagesWire.BETA_FALLBACK, MessagesWire.BETA_BINDING, MessagesWire.BETA_COMPACT), betas)
+    }
+
+    @Test
+    fun `clear_at_least and instructions are sent only when set`() {
+        val bare = ContextEditPolicy.ServerSide(100_000, keepToolUses = 2, compactAboveTokens = 60_000)
+        val edits = body(Kit.request(contextEdits = bare))["context_management"]!!.jsonObject["edits"]!!.jsonArray
+        assertEquals(
+            listOf(
+                """{"type":"clear_tool_uses_20250919","trigger":{"type":"input_tokens","value":100000},""" +
+                    """"keep":{"type":"tool_uses","value":2}}""",
+                """{"type":"compact_20260112","trigger":{"type":"input_tokens","value":60000}}""",
+            ),
+            edits.map { it.toString() },
+        )
+        val full = bare.copy(clearAtLeastTokens = 30_000, compactInstructions = "摘要")
+        val set = body(Kit.request(contextEdits = full))["context_management"]!!.jsonObject["edits"]!!.jsonArray
+        assertEquals("""{"type":"input_tokens","value":30000}""", set[0].jsonObject["clear_at_least"].toString())
+        assertEquals(JsonPrimitive("摘要"), set[1].jsonObject["instructions"])
     }
 
     @Test

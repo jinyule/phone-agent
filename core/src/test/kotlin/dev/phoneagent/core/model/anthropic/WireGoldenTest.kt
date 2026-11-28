@@ -111,8 +111,14 @@ class WireGoldenTest {
         )
 
     @Test
-    fun `official defaults with tools, effort and every breakpoint`() =
-        golden("official-defaults", Kit.request(wire = Kit.wire()))
+    fun `official defaults with tools, effort, every breakpoint and compaction`() =
+        golden(
+            "official-defaults",
+            Kit.request(
+                wire = Kit.wire(),
+                contextEdits = checkNotNull(AnthropicSettings.defaultsFor(Kit.profile(), Kit.MODEL).serverContext),
+            ),
+        )
 
     @Test
     fun `thinking is echoed verbatim and only to its own provider`() =
@@ -209,7 +215,7 @@ class WireGoldenTest {
         )
 
     @Test
-    fun `server-side clearing and compaction`() =
+    fun `server-side clearing with clear_at_least and compaction with instructions`() =
         golden(
             "server-context-edits",
             Kit.request(
@@ -218,6 +224,8 @@ class WireGoldenTest {
                         clearToolUsesAboveTokens = 100_000,
                         keepToolUses = 3,
                         compactAboveTokens = 150_000,
+                        clearAtLeastTokens = 40_000,
+                        compactInstructions = "只写摘要，不要调用工具。",
                     ),
                 reasoning = ReasoningLevel.MINIMAL,
                 wire = Kit.wire(reasoning = ReasoningLevel.MINIMAL),
