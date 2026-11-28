@@ -391,7 +391,7 @@ WP09 装配时要加集成测试：`ToolRegistry` 里每个工具，要么 resol
 
 **单位**：标签和文字的长度都按归一化后的字符数（§3.2：NFKC、小写、简体，去掉空白和不可见字符，即 `Text.compact`），各字段另有的量法写在表里；`maxScreenText` 是工作量的上限，按原始长度（UTF-16 字符，归一化之前）算；距离是 0–999 的归一化坐标。
 
-`RULES_VERSION` 和实际用的 `PolicyTuning` 由装配方（WP09）在任务开始时记进 session 日志，回放时比对（铁律 1：verdict 要能从日志重建）；policy 自己不记日志。
+`RULES_VERSION` 和实际用的 `PolicyTuning` 由装配方（`core.assembly`）交给 runtime，每次运行开头记进 session 日志（`policy/rules`，`task/start` 之后和每个 `session/resumed` 之后，`tuning` 按字段名写全部字段，phase1 §3.9），回放时比对（铁律 1：verdict 要能从日志重建）；policy 自己不记日志。记录用 `PolicyTuning.byName()`：按声明顺序给出每个字段的名字和值，构造时的范围校验用的也是这份名单，所以新加的字段不会只校验不记录。
 
 | 字段 | 默认值 | 范围 | 含义 |
 |---|---|---|---|

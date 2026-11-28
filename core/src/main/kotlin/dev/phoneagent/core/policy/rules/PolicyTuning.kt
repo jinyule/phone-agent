@@ -56,41 +56,50 @@ public data class PolicyTuning(
     val totalsRead: Int = 8,
 ) {
     init {
-        val lengths =
-            listOf(
-                "labelMax" to labelMax,
-                "contextMax" to contextMax,
-                "shortText" to shortText,
-                "totalTextMax" to totalTextMax,
-                "labelRead" to labelRead,
-            )
-        val distances =
-            listOf(
-                "titleBand" to titleBand,
-                "clearNear" to clearNear,
-                "rowSwipeMin" to rowSwipeMin,
-                "rowMinWidth" to rowMinWidth,
-                "carouselMax" to carouselMax,
-            )
-        val limits =
-            listOf(
-                "maxElements" to maxElements,
-                "maxScreenText" to maxScreenText,
-                "maxDepth" to maxDepth,
-                "totalsRead" to totalsRead,
-            )
-        for ((name, value) in lengths) {
+        for ((name, value) in lengths()) {
             require(value in 1..MAX_LENGTH) { "PolicyTuning.$name must be in 1..$MAX_LENGTH, got $value" }
         }
-        for ((name, value) in limits) {
+        for ((name, value) in limits()) {
             require(value in 1..MAX_LIMIT) { "PolicyTuning.$name must be in 1..$MAX_LIMIT, got $value" }
         }
-        for ((name, value) in distances) {
+        for ((name, value) in distances()) {
             require(ScreenCoordinates.isValid(value)) {
                 "PolicyTuning.$name must be in 0..${ScreenCoordinates.MAX}, got $value"
             }
         }
     }
+
+    /**
+     * Every threshold by its field name, in declaration order: what a run records (`policy/rules`),
+     * so a replay can tell the values its verdicts were judged with.
+     */
+    public fun byName(): Map<String, Int> = (lengths() + distances() + limits()).toMap()
+
+    private fun lengths(): List<Pair<String, Int>> =
+        listOf(
+            "labelMax" to labelMax,
+            "contextMax" to contextMax,
+            "shortText" to shortText,
+            "totalTextMax" to totalTextMax,
+            "labelRead" to labelRead,
+        )
+
+    private fun distances(): List<Pair<String, Int>> =
+        listOf(
+            "titleBand" to titleBand,
+            "clearNear" to clearNear,
+            "rowSwipeMin" to rowSwipeMin,
+            "rowMinWidth" to rowMinWidth,
+            "carouselMax" to carouselMax,
+        )
+
+    private fun limits(): List<Pair<String, Int>> =
+        listOf(
+            "maxElements" to maxElements,
+            "maxScreenText" to maxScreenText,
+            "maxDepth" to maxDepth,
+            "totalsRead" to totalsRead,
+        )
 
     /** Constants. */
     public companion object {

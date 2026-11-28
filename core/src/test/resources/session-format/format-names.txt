@@ -56,7 +56,7 @@ sealed ports.AskResult: answered, declined, expired, unavailable
 sealed ports.LaunchTarget: app, link, system
 sealed ports.Target: point, ref
 sealed ports.UiAction: key, scroll, set_wheel, swipe, tap, type
-sealed session.SessionEvent: approval/asked, approval/decided, assistant/attempt, assistant/message, compaction/end, compaction/prune, compaction/start, compaction/summary, handoff/end, handoff/start, inbox/spliced, policy/verdict, prompt/withdrawn, question/answered, question/asked, context/reasoning-dropped, request/header, request/retry, screen/action, screen/frame, screen/judged, screen/launch, screen/snapshot, session/resumed, side/request, side/response, step/end, step/start, task/level-changed, task/start, task/stopped, tool/call, tool/executed, tool/result, tool/started, turn/end, turn/start, user/message
+sealed session.SessionEvent: approval/asked, approval/decided, assistant/attempt, assistant/message, compaction/end, compaction/prune, compaction/start, compaction/summary, handoff/end, handoff/start, inbox/spliced, policy/rules, policy/verdict, prompt/withdrawn, question/answered, question/asked, context/reasoning-dropped, request/header, request/retry, screen/action, screen/frame, screen/judged, screen/launch, screen/snapshot, session/resumed, side/request, side/response, step/end, step/start, task/level-changed, task/start, task/stopped, tool/call, tool/executed, tool/result, tool/started, turn/end, turn/start, user/message
 sealed session.SideOutcome: completed, failed
 sealed session.SurfaceOp: append, replace
 sealed tool.ToolControl: end_turn
@@ -72,6 +72,7 @@ event context/reasoning-dropped ignorable=false
 event handoff/end ignorable=true
 event handoff/start ignorable=true
 event inbox/spliced ignorable=false
+event policy/rules ignorable=true
 event policy/verdict ignorable=false
 event prompt/withdrawn ignorable=true
 event question/answered ignorable=true

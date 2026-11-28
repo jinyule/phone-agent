@@ -7,7 +7,6 @@
     <!-- Navigation -->
     <string name="nav_chat">对话</string>
     <string name="nav_models">模型</string>
-    <string name="chat_placeholder">能运行任务以后，对话会显示在这里。</string>
 
     <!-- Model settings: state -->
     <string name="settings_loading">正在读取模型设置…</string>
@@ -108,4 +107,135 @@
     <string name="kind_network">连不上服务商。</string>
     <string name="kind_server">服务商出错。</string>
     <string name="kind_bad_response">服务商的回复无法使用。</string>
+
+    <!-- Chat -->
+    <string name="chat_empty">告诉 PhoneAgent 要在这台手机上做什么。</string>
+    <string name="chat_input_hint">要做什么？</string>
+    <string name="chat_answer_hint">输入你的回答</string>
+    <string name="chat_send">发送</string>
+    <string name="chat_stop">停止</string>
+    <string name="chat_new_task">新任务</string>
+    <string name="chat_starting">正在开始…</string>
+    <string name="chat_working">正在执行…</string>
+    <string name="chat_open_models">去设置模型</string>
+    <string name="task_problem_no_model">请先设置模型。</string>
+    <string name="task_problem_key_missing">请在模型设置里重新填写模型的 key。</string>
+    <string name="task_problem_storage">任务记录无法保存或读取。请检查存储空间后再试。</string>
+    <string name="task_problem_unexpected">出了点问题，任务没有开始。</string>
+    <string name="stopped_user">已停止。发消息可以接着做。</string>
+    <string name="stopped_shutdown">应用被关闭，任务已停止。发消息可以接着做。</string>
+    <string name="stopped_limit">达到上限，任务已停止。发消息可以接着做。</string>
+    <string name="stopped_error">出错，任务已停止。发消息可以接着做。</string>
+
+    <!-- Chat: steps. UNKNOWN is never a failure: the step may have taken effect. -->
+    <string name="step_running">进行中</string>
+    <string name="step_succeeded">完成</string>
+    <string name="step_failed">没有成功</string>
+    <string name="step_refused">被拒绝</string>
+    <string name="step_unknown">结果不确定，可能已经生效</string>
+    <string name="step_withheld">按安全规则，这一屏的内容不给助手看。</string>
+    <string name="place_with_user">App 现在在你的屏幕上。</string>
+    <string name="place_left_with_user">交接中停止了，App 留在你那边。</string>
+    <string name="place_maybe_with_user">App 可能在你那边。</string>
+    <string name="detail_line">%1$s：%2$s</string>
+
+    <!-- Chat: tools -->
+    <string name="tool_phone_observe">读屏幕</string>
+    <string name="tool_phone_tap">点按</string>
+    <string name="tool_phone_type">输入</string>
+    <string name="tool_phone_scroll">滚动</string>
+    <string name="tool_phone_swipe">滑动</string>
+    <string name="tool_phone_key">按键</string>
+    <string name="tool_phone_launch">打开</string>
+    <string name="tool_phone_apps">查找 App</string>
+    <string name="tool_phone_intent">调用系统功能</string>
+    <string name="tool_phone_wait">等待</string>
+    <string name="tool_ask_user">问你</string>
+    <string name="tool_hand_to_user">交给你</string>
+    <string name="tool_request_confirmation">请你确认</string>
+    <string name="tool_end_not_done">无法完成</string>
+
+    <!-- Chat: step details -->
+    <string name="detail_detail">详细程度</string>
+    <string name="detail_image">截图</string>
+    <string name="detail_ref">元素</string>
+    <string name="detail_x">横坐标</string>
+    <string name="detail_y">纵坐标</string>
+    <string name="detail_long">长按</string>
+    <string name="detail_text">文字</string>
+    <string name="detail_append">追加</string>
+    <string name="detail_submit">提交</string>
+    <string name="detail_direction">方向</string>
+    <string name="detail_x1">起点横坐标</string>
+    <string name="detail_y1">起点纵坐标</string>
+    <string name="detail_x2">终点横坐标</string>
+    <string name="detail_y2">终点纵坐标</string>
+    <string name="detail_duration">用时（毫秒）</string>
+    <string name="detail_key">按键</string>
+    <string name="detail_app">App</string>
+    <string name="detail_link">链接</string>
+    <string name="detail_cold">从首页打开</string>
+    <string name="detail_query">搜索</string>
+    <string name="detail_kind">类型</string>
+    <string name="detail_time">时间</string>
+    <string name="detail_label">名称</string>
+    <string name="detail_seconds">秒数</string>
+    <string name="detail_title">标题</string>
+    <string name="detail_start">开始</string>
+    <string name="detail_end">结束</string>
+    <string name="detail_location">地点</string>
+    <string name="detail_number">号码</string>
+    <string name="detail_place">目的地</string>
+    <string name="detail_page">页面</string>
+    <string name="detail_package">包名</string>
+    <string name="detail_condition">条件</string>
+    <string name="detail_timeout">最长等待（毫秒）</string>
+    <string name="detail_question">问题</string>
+    <string name="detail_options">选项</string>
+    <string name="detail_answer">回答</string>
+    <string name="detail_cause">原因</string>
+    <string name="detail_summary">说明</string>
+    <string name="detail_action">要做的事</string>
+    <string name="detail_target">对象</string>
+    <string name="detail_content">内容</string>
+    <string name="detail_amount">金额</string>
+    <string name="detail_handoff">交接</string>
+    <string name="handoff_done">你已完成</string>
+    <string name="handoff_declined">你没有做，交回来了</string>
+    <string name="handoff_expired">等待超时</string>
+    <string name="handoff_unavailable">没能交给你</string>
+    <string name="handoff_failed">交接失败</string>
+    <string name="handoff_not_taken_back">没能把 App 拿回来，它还在你那边</string>
+
+    <!-- Chat: prompts -->
+    <string name="confirm_title">要允许吗？</string>
+    <string name="confirm_spend">会花钱</string>
+    <string name="confirm_outward">会发送或发布内容</string>
+    <string name="confirm_delete">会删除内容</string>
+    <string name="confirm_settings">会修改设置</string>
+    <string name="confirm_first_in_app">第一次在这个 App 里操作</string>
+    <string name="confirm_requested">助手请你确认</string>
+    <string name="confirm_amount">%1$s %2$s</string>
+    <string name="confirm_approve">允许</string>
+    <string name="confirm_reject">不允许</string>
+    <string name="ask_title">有个问题问你</string>
+    <string name="ask_type_hint">也可以在下面输入你的回答。</string>
+    <string name="ask_skip">跳过</string>
+    <string name="handoff_kind_login">请你登录</string>
+    <string name="handoff_kind_password">请你输入密码</string>
+    <string name="handoff_kind_captcha">请你完成验证</string>
+    <string name="handoff_kind_payment">请你完成付款</string>
+    <string name="handoff_kind_secure_page">这一页助手看不到</string>
+    <string name="handoff_kind_choose">请你来选</string>
+    <string name="handoff_kind_other">轮到你了</string>
+    <string name="handoff_did_it">我做完了</string>
+    <string name="handoff_give_back">我不做了</string>
+
+    <!-- Task service notification -->
+    <string name="task_channel">正在运行的任务</string>
+    <string name="task_running">正在执行你的任务</string>
+    <string name="task_waiting_user">等你回答</string>
+    <string name="task_waiting_handoff">轮到你在手机上操作</string>
+    <string name="task_waiting_lock">等屏幕解锁</string>
+    <string name="task_stop">停止</string>
 </resources>

@@ -29,6 +29,14 @@
          and finds its port by mDNS, and sockets need INTERNET even for loopback. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- TaskService: a task keeps the process and the CPU up while it has work, and its
+         notification (what it does, Stop) is how the user reaches it while the agent drives the
+         screen. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <!-- Session logs, screenshots and credentials never leave the device (phase1-architecture §3.9). -->
     <application
         android:name=".PhoneAgentApplication"
@@ -42,7 +50,8 @@
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -58,6 +67,17 @@
             android:exported="true"
             android:multiprocess="false"
             android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
+        <!-- specialUse: an agent that operates the phone for the user on request fits none of the
+             other foreground service types. Not exported: only the app starts it. -->
+        <service
+            android:name=".service.TaskService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="An on-device agent that operates apps on the phone for the user, on the user's request, until the task ends or the user stops it." />
+        </service>
 
         <service
             android:name=".service.AgentAccessibilityService"

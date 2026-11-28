@@ -270,6 +270,8 @@ class SessionCodecTest {
                 result.name to runCatching { HandoffEnded(p.prompt, result, detail = "x") }.isSuccess
             },
         )
+        assertThrows<IllegalArgumentException> { PolicyRulesRecorded(0, p.rules.tuning) }
+        assertEquals(1, PolicyRulesRecorded(1, p.rules.tuning).rulesVersion)
         assertThrows<IllegalArgumentException> { InboxSpliced(InboxQueue.NEXT_STEP, removed = -1) }
         assertThrows<IllegalArgumentException> { InboxEntry(InboxEntryKind.STEER, listOf(p.reasoning)) }
         assertThrows<IllegalArgumentException> { CompactionSummary(listOf(p.toolCallPart)) }

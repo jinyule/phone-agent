@@ -92,7 +92,7 @@ M1/M2 的主循环、OpenAI 系适配器、Anthropic 适配器、PolicyEngine、
   - 契约包的子包，按前两段算作一个能力：`model.openai`、`model.anthropic`、`policy.rules`；
   - 其他顶层包：`storage`、`screen`、`tools`。
 
-  能力包只引用契约包和自己，能力之间互不引用，由 app 负责组装。
+  能力包只引用契约包和自己，能力之间互不引用，由装配包 `assembly` 组装（2026-11-13 修订，见 ADR `2026-11-13-product-assembly`；原来写的是由 app 组装）。
 - 规则写在 `core/src/test/kotlin/dev/phoneagent/core/architecture/PackageDependencyTest.kt`，用 **Konsist** 检查 import（含通配符），以及代码里的全限定类名和全限定函数调用。注释和字符串、字符字面量的文字不算，但字符串模板 `${…}` 里的代码照样检查（含原始字符串和模板里嵌套的字符串）。没有 package 声明的文件直接算违规。
 - `core/src/test/resources/architecture/counterexample/` 里放了九个会被拒绝的反例：契约用了能力、契约向上引用、能力互相引用（import、全限定类名、全限定函数调用、引用词表的实现）、藏在字符串模板和原始字符串模板里的引用，以及没有 package 声明的文件。两个模板反例作为生产代码能编译通过。其中 `screen/MarksRisk.kt` 演示第 9 节的词表用法：引用契约 `policy.RiskLexicon` 是允许的，引用实现 `policy.rules` 会被拒绝。
 
@@ -229,6 +229,16 @@ v1 仍未发布。`ScreenSnapshot` 加 `detail: SnapshotDetail = BRIEF`：端口
 - `LoopTexts.screenWithheld`、`reasonWithheld`：扣下时的说明和替换端口自由文字的固定文字。
 
 v1 未发布（第一个 M1 PR 才冻结），以上都不升版本；v1 fixture 原地补字段和样本，`format-names.txt` 跟着加。
+
+### 17. 每次运行记下判定用的规则（WP09 B，协调者决定 run 元数据）
+
+- `policy/rules`（`PolicyRulesRecorded`，ignorable = true）：`rulesVersion`（`PolicyTuning.RULES_VERSION`，加载时校验 >= 1）和 `tuning`（`PolicyTuning.byName()` 的全部字段，含默认值，按声明顺序写成 JSON 对象）。
+- 由 runtime 写，来源是 `AgentSetup.rules`：`start` 在 `task/start` 之后写一条，刷盘以后才接收输入；`resume` 在 `session/resumed` 之后再写一条，因为两次运行之间升级了 App，规则就可能变。每个 `policy/verdict` 归它前面最近的一条。`AgentSetup.rules` 为 null 时不写（只有测试这样用，产品装配总会给）。
+- 运行规则：等待用户期间可以写它（`RunRules` 的等待集合）。它不进模型视图，也不是 step 的上下文事件。
+- ignorable 的理由：模型视图、回合结构和任务设置都不依赖它，runtime 也不从它推导 PolicyContext；它只供回放比对。旧版本读到它会跳过，没有它的日志（它出现之前写的）照样能读。
+- 为什么是新事件，不放进 `task/start`：见 ADR `2026-11-13-product-assembly` 的 Alternatives considered。
+
+v1 未发布，不升版本；v1 fixture 用生成任务重新生成（第 2 条记录是新样本，其余只是 seq 顺延），`format-names.txt` 跟着加。
 
 ## Alternatives considered
 

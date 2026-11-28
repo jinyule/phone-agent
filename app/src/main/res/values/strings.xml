@@ -9,7 +9,6 @@
     <!-- Navigation -->
     <string name="nav_chat">Chat</string>
     <string name="nav_models">Models</string>
-    <string name="chat_placeholder">Conversations will appear here once tasks can run.</string>
 
     <!-- Model settings: state -->
     <string name="settings_loading">Loading the model settings…</string>
@@ -110,4 +109,135 @@
     <string name="kind_network">The provider could not be reached.</string>
     <string name="kind_server">The provider failed.</string>
     <string name="kind_bad_response">The provider\'s reply could not be used.</string>
+
+    <!-- Chat -->
+    <string name="chat_empty">Tell PhoneAgent what to do on this phone.</string>
+    <string name="chat_input_hint">What should I do?</string>
+    <string name="chat_answer_hint">Type your answer</string>
+    <string name="chat_send">Send</string>
+    <string name="chat_stop">Stop</string>
+    <string name="chat_new_task">New task</string>
+    <string name="chat_starting">Starting…</string>
+    <string name="chat_working">Working…</string>
+    <string name="chat_open_models">Open the model settings</string>
+    <string name="task_problem_no_model">Set up a model first.</string>
+    <string name="task_problem_key_missing">Enter the model\'s key again in the model settings.</string>
+    <string name="task_problem_storage">The task\'s records could not be saved or read. Check the free storage and try again.</string>
+    <string name="task_problem_unexpected">Something went wrong, and the task did not start.</string>
+    <string name="stopped_user">Stopped. Send a message to continue.</string>
+    <string name="stopped_shutdown">Stopped because the app was closed. Send a message to continue.</string>
+    <string name="stopped_limit">Stopped at a limit. Send a message to continue.</string>
+    <string name="stopped_error">Stopped by an error. Send a message to continue.</string>
+
+    <!-- Chat: steps. UNKNOWN is never a failure: the step may have taken effect. -->
+    <string name="step_running">In progress</string>
+    <string name="step_succeeded">Done</string>
+    <string name="step_failed">Did not succeed</string>
+    <string name="step_refused">Refused</string>
+    <string name="step_unknown">Result uncertain, it may have taken effect</string>
+    <string name="step_withheld">This screen is kept from the agent by the safety rules.</string>
+    <string name="place_with_user">The app is on your screen now.</string>
+    <string name="place_left_with_user">Stopped during the hand-over: the app stays with you.</string>
+    <string name="place_maybe_with_user">The app may be on your screen.</string>
+    <string name="detail_line">%1$s: %2$s</string>
+
+    <!-- Chat: tools -->
+    <string name="tool_phone_observe">Read the screen</string>
+    <string name="tool_phone_tap">Tap</string>
+    <string name="tool_phone_type">Type</string>
+    <string name="tool_phone_scroll">Scroll</string>
+    <string name="tool_phone_swipe">Swipe</string>
+    <string name="tool_phone_key">Press a key</string>
+    <string name="tool_phone_launch">Open</string>
+    <string name="tool_phone_apps">Look up apps</string>
+    <string name="tool_phone_intent">Use a system feature</string>
+    <string name="tool_phone_wait">Wait</string>
+    <string name="tool_ask_user">Ask you</string>
+    <string name="tool_hand_to_user">Hand over to you</string>
+    <string name="tool_request_confirmation">Ask you to confirm</string>
+    <string name="tool_end_not_done">Could not finish</string>
+
+    <!-- Chat: step details -->
+    <string name="detail_detail">Detail</string>
+    <string name="detail_image">Screenshot</string>
+    <string name="detail_ref">Element</string>
+    <string name="detail_x">X</string>
+    <string name="detail_y">Y</string>
+    <string name="detail_long">Long press</string>
+    <string name="detail_text">Text</string>
+    <string name="detail_append">Append</string>
+    <string name="detail_submit">Submit</string>
+    <string name="detail_direction">Direction</string>
+    <string name="detail_x1">From X</string>
+    <string name="detail_y1">From Y</string>
+    <string name="detail_x2">To X</string>
+    <string name="detail_y2">To Y</string>
+    <string name="detail_duration">Duration (ms)</string>
+    <string name="detail_key">Key</string>
+    <string name="detail_app">App</string>
+    <string name="detail_link">Link</string>
+    <string name="detail_cold">Fresh start</string>
+    <string name="detail_query">Search</string>
+    <string name="detail_kind">Kind</string>
+    <string name="detail_time">Time</string>
+    <string name="detail_label">Label</string>
+    <string name="detail_seconds">Seconds</string>
+    <string name="detail_title">Title</string>
+    <string name="detail_start">Start</string>
+    <string name="detail_end">End</string>
+    <string name="detail_location">Location</string>
+    <string name="detail_number">Number</string>
+    <string name="detail_place">Place</string>
+    <string name="detail_page">Page</string>
+    <string name="detail_package">Package</string>
+    <string name="detail_condition">Condition</string>
+    <string name="detail_timeout">Timeout (ms)</string>
+    <string name="detail_question">Question</string>
+    <string name="detail_options">Options</string>
+    <string name="detail_answer">Answer</string>
+    <string name="detail_cause">Cause</string>
+    <string name="detail_summary">Summary</string>
+    <string name="detail_action">Action</string>
+    <string name="detail_target">Target</string>
+    <string name="detail_content">Content</string>
+    <string name="detail_amount">Amount</string>
+    <string name="detail_handoff">Hand-over</string>
+    <string name="handoff_done">You did it</string>
+    <string name="handoff_declined">You gave it back undone</string>
+    <string name="handoff_expired">Time ran out</string>
+    <string name="handoff_unavailable">Could not hand it over</string>
+    <string name="handoff_failed">The hand-over failed</string>
+    <string name="handoff_not_taken_back">Could not take the app back: it is still with you</string>
+
+    <!-- Chat: prompts -->
+    <string name="confirm_title">Allow this?</string>
+    <string name="confirm_spend">It spends money</string>
+    <string name="confirm_outward">It sends or posts something</string>
+    <string name="confirm_delete">It deletes something</string>
+    <string name="confirm_settings">It changes a setting</string>
+    <string name="confirm_first_in_app">The first action in this app</string>
+    <string name="confirm_requested">The agent asks you to confirm</string>
+    <string name="confirm_amount">%1$s %2$s</string>
+    <string name="confirm_approve">Allow</string>
+    <string name="confirm_reject">Don\'t allow</string>
+    <string name="ask_title">A question for you</string>
+    <string name="ask_type_hint">Or type your own answer below.</string>
+    <string name="ask_skip">Skip</string>
+    <string name="handoff_kind_login">Please log in</string>
+    <string name="handoff_kind_password">Please enter the password</string>
+    <string name="handoff_kind_captcha">Please complete the verification</string>
+    <string name="handoff_kind_payment">Please complete the payment</string>
+    <string name="handoff_kind_secure_page">This page cannot be seen by the agent</string>
+    <string name="handoff_kind_choose">Please make the choice</string>
+    <string name="handoff_kind_other">Your turn</string>
+    <string name="handoff_did_it">I\'m done</string>
+    <string name="handoff_give_back">Not doing it</string>
+
+    <!-- Task service notification -->
+    <string name="task_channel">Running tasks</string>
+    <string name="task_running">Working on your task</string>
+    <string name="task_waiting_user">Waiting for your answer</string>
+    <string name="task_waiting_handoff">Your turn: do the step on the phone</string>
+    <string name="task_waiting_lock">Waiting for the screen to be unlocked</string>
+    <string name="task_stop">Stop</string>
 </resources>

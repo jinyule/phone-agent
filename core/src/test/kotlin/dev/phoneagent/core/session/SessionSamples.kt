@@ -80,6 +80,15 @@ object SessionSamples {
     val blob = BlobRef("a".repeat(64))
     val header = SessionHeader(version = 1, sessionId = session, taskId = task, createdAt = 1_000)
     val start = TaskStarted(SecurityLevel.STANDARD, unattended = false)
+    val rules =
+        PolicyRulesRecorded(
+            rulesVersion = 7,
+            tuning =
+                buildJsonObject {
+                    put("labelMax", 12)
+                    put("maxScreenText", 100_000)
+                },
+        )
 
     /** A wire snapshot with every field set away from its default. */
     val wire =
@@ -205,6 +214,7 @@ object SessionSamples {
     private val beforeStart: List<SessionEvent> =
         listOf(
             start,
+            rules,
             TaskLevelChanged(SecurityLevel.CAUTIOUS),
             TurnStarted(1),
             InboxSpliced(

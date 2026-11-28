@@ -51,17 +51,19 @@ phone-agent/
 │   model/       ChatModel 接口与协议适配（openai-compat、anthropic）
 │   tool/        Tool 接口、ToolRegistry（静态 schema、分组展开）、ScreenPresenter（工具取屏幕文字的契约）
 │   policy/      PolicyEngine、IrreversibleDetector、包名/页面/字段分类
-│   screen/      屏幕格式（ScreenFormatter，实现 ScreenPresenter）、差分、指纹、TreeQuality、号码打码（ScreenAnalyzer 实现 SnapshotAnalyzer）；两者只由 ScreenComponents 用同一份配置创建
+│   screen/      屏幕格式（ScreenFormatter，实现 ScreenPresenter）、差分、指纹、TreeQuality、号码打码（ScreenAnalyzer 实现 SnapshotAnalyzer）；两者只由 ScreenComponents 用同一份配置创建，ScreenComponents 只由装配包创建（构造器 internal）
 │   tools/       第一阶段工具（§5）与系统提示 SystemPrompt；屏幕文字只经 ScreenPresenter 拿，不引用 screen
 │   guard/       LoopGuard、OutwardPacing、效果判定
 │   ports/       ScreenPort / SurfaceManager / StoragePort / Clock 等接口
 │   adb/         无线调试配对与 ADB 连接，只跑 App 写死的命令（纯 Kotlin，可 JVM 测；隔离，见下）
+│   assembly/    产品装配：`assemble(model, ProductConfig)` 把各能力装成一个会话的 AgentSetup，App 和会话回放共用（见下）
 │   protocol/    MCP / JSON-RPC 类型
 │   testFixtures FakeChatModel、ScriptedScreen、ReplayChatModel/ReplayScreen、金样工具
 ├─ privileged/   shell 助手：PrivilegedCore + HelperMain（经 app_process 加载，依赖尽量少）
 │                与传输无关：同一份 Core 由 Binder 交接，或作为 Shizuku UserService 运行
 ├─ app/          Android 宿主
 │   ui/          Compose：对话、轨迹、审批卡、接管、设置、onboarding 向导
+│   task/        进程里唯一的 TaskController：建会话、发命令、停止与继续；对话视图由日志记录折叠而成
 │   service/     TaskService（前台）、AgentAccessibilityService、悬浮胶囊、无键盘 IME
 │   adapters/    AndroidScreen（实现 ScreenPort）、AgentDisplayManager、Ocr、Frames
 │   setup/       配对流程、助手生命周期、无障碍自动恢复、能力探针
@@ -70,10 +72,11 @@ phone-agent/
 └─ eval/         任务集（YAML）、设备端 instrumentation runner、PC 端 harness（经 MCP 驱动）
 ```
 
-依赖方向：`app → core`、`app → privileged`、`privileged → (无)`。`core` 内部用一个依赖测试（Konsist 写的 `PackageDependencyTest`）守住两条规则：`agent` 不认识具体能力，能力之间不互相引用。core 的包分为两类：
+依赖方向：`app → core`、`app → privileged`、`privileged → (无)`。`core` 内部用一个依赖测试（Konsist 写的 `PackageDependencyTest`）守住两条规则：`agent` 不认识具体能力，能力之间不互相引用。core 的包分为契约包、能力包和装配包：
 
 - **契约包**：`ids`、`model`、`ports`、`tool`、`policy`、`session`、`agent`，分层排列，只能引用更低的层；
 - **能力包**：其余所有包，例如 `model.openai`、`model.anthropic`、`policy.rules`、`screen`、`tools`、`storage`。能力包只引用契约包和自己。
+- **装配包**：`assembly`。它是唯一把能力装在一起的地方：可以引用所有契约包和所有能力包（隔离能力包除外），core 里别的包都不能引用它。`assemble(model, config)` 是纯函数（没有 I/O），输入是会话的主模型（vision 只从它的能力来）和 `ProductConfig`（本 App 的包名和名称、`PolicyTuning`、`ScreenFormatConfig`、`TreeQualityConfig`、`DiffConfig`、`ToolsConfig`、`LoopConfig`），输出 ScreenPort 要用的 analyzer、policy、intents、PHONE 和 GENERAL 两组的工具、`SystemPrompt.BLOCKS`、默认拦截器和每次运行要记的 `policy/rules`；`setup(taskId, files, screen, surfaces, apps, …)` 再补上任务和设备的部分，得到 `AgentSetup`。理由见 ADR `2026-11-13-product-assembly`。
 - **隔离能力包**：`adb`（内置无线 ADB 客户端）。它是 App 的设置代码，只用来配对、连接，并运行 App 写死的命令（拉起助手、自检），永远不是工具（AGENTS.md §3.4）。所以它和别的包互不引用：core 里其他包都不能用它，它自己也不引用任何契约包（包括 `tool`，免得被实现成工具）。公开 API 里没有交互式 shell，也没有任意 adb 服务，只有 `AdbSession.run(AdbCommand)`：跑完一条命令，返回输出和退出码。`PackageDependencyTest` 守住这两个方向，并带反例。
 
 分层和理由见 ADR `2026-11-01-core-contracts`。
@@ -97,6 +100,12 @@ phone-agent/
                 │ 拉起方式：① 内置 ADB 客户端（Android 12+）经 adbd 的 shell,v2（没有时用 exec:）服务
                 │          ② Shizuku UserService  ③ 开发者在 USB 下运行启动脚本
 ```
+
+**App 侧的任务**（M1，主屏模式）：
+- 进程里只有一个 `TaskController`，对话页和 `TaskService` 共用。第一条命令建会话：主模型为这个会话新建（`BlobSource` 读本会话的 blobs），再 `assemble(model, productConfig)`、`setup(…, surfaces = null)`；ScreenPort 是主屏，用装配给的 analyzer。`ProductConfig` 里本 App 的名称包括应用名和无障碍服务名的中英文，代理不操作本 App，也不操作它的无障碍设置页。
+- 停止以后的下一条命令由同一会话的 `AgentLoop.resume` 接着跑；停止还没生效时发出的命令，等到 `Stopped` 再交给新实例。停止丢掉它之前发出的所有命令：已交给 runtime 的（runtime 清空 inbox），以及还没交出的。正在建会话或续跑时收到的停止先记下来（收到几次都按第一次的原因，和 runtime 一致），实例一建好就先停掉它、等到 `Stopped`，不交给它任何命令；对话页在这期间也显示停止按钮，和通知里的停止走同一条路径；命令还在排队、没交出时也显示，点了就丢掉它。任务不忙时可以点"新任务"：先按 `USER` 停掉旧 runtime，等到 `Stopped`（这时日志已经关闭、协程已经结束），再停止跟随它、清空视图；等待期间发出的命令照常计入"忙"，交给新任务。这几处等旧 run 停下（"新任务"、停止生效前发出的命令、开实例时收到的停止）都在锁里等，没有超时，前提是停止总能在有限时间内到达 `Stopped`：run 的工作响应取消、日志的 close 会返回，`AgentLoop.shutDown` 随后在 finally 里设置 `Stopped`。违反这个前提时锁一直不释放，后面的命令全排在它后面，任务一直显示忙，只能结束进程。进程重启后还不会接回旧会话，日志留在磁盘上。
+- 对话视图是日志记录的折叠，轨迹卡用 `Tool.presentCall` / `presentResult` 从记录重新生成，所以和 runtime 发出的卡一致。`LoopEvent.Recorded` 的 seq 有缺口，或者 `Phase.Waiting` 指向没见过的提示时，从日志重建；读日志期间收到的记录并进重建结果。几次读取可能重叠，结束顺序也不定：读到的日志如果比已经显示的那次读取结束得早，这次结果就丢掉。按日志结尾比较，不按开始读取的先后，因为读文件不在主线程上。
+- `TaskService`（specialUse 前台服务）由可见的对话页在发命令时启动。任务"忙"的期间（命令已交出、还没记成 `user/message`；turn 打开；运行中或等待用户）持有 WakeLock，显示带停止按钮的通知；不忙了就自己停。通知文字和对话页的状态行取自同一个 `TaskView.status`，任务在等用户（回答、接手、解锁）时两边用同样的话，不说"工作中"。服务被销毁时任务还忙，就按 `SHUTDOWN` 停止。
 
 **启动边界**：助手代 App 启动的，只能是 App 自己调用 startActivity 也能启动的那个 Activity，并且不能借 shell 身份多带任何权限。每条启动路径（直接启动、`am start` 回退、冷启动）都只启动同一个检查返回的目标；具体规则见 §3.5 和 `docs/adr/2026-11-01-privileged-display-and-input.md` 决定 1。
 
@@ -426,7 +435,7 @@ interface TaskRuntime {
 }
 ```
 
-实现是 `core.agent.AgentLoop`：`start(setup, sessionId, settings, scope)` 新建会话，`settings` 就是第 1 条记录 `task/start(level, unattended)`；`resume(setup, scope)` 打开已有会话。级别和 unattended 之后只从日志推导（`task/start`、`task/level-changed`），不是 `LoopConfig` 的配置项。`AgentSetup.plan.model` 是**为这个会话建的** `ChatModel`：适配器的 `BlobSource` 读本会话的 blobs，所以一个会话一个 `ChatModel` 实例。
+实现是 `core.agent.AgentLoop`：`start(setup, sessionId, settings, scope)` 新建会话，`settings` 就是第 1 条记录 `task/start(level, unattended)`，紧接着记 `setup.rules`（`policy/rules`，刷盘以后才接收输入）；`resume(setup, scope)` 打开已有会话，`session/resumed` 之后同样记一条 `policy/rules`。级别和 unattended 之后只从日志推导（`task/start`、`task/level-changed`），不是 `LoopConfig` 的配置项。`AgentSetup.plan.model` 是**为这个会话建的** `ChatModel`：适配器的 `BlobSource` 读本会话的 blobs，所以一个会话一个 `ChatModel` 实例。
 
 **输入与 Phase**：
 - 输入方法都不挂起、立即返回；先记成 `inbox/spliced`，再生效。
@@ -505,7 +514,7 @@ fun interface Chain<I, O> { suspend fun proceed(input: I): O }   // 不调用 pr
 | `toolPostExecute` | 每个调用有结果之后（执行、拒绝、转交都算） | `PostExecuteInput(call, tool, result)` → `PostExecuteResult(result, context)` | 替换结果；附加上下文（进 nextStep） | LoopGuard（含重复调用提醒）、OutwardPacing、KnowledgeNotice、Spill |
 | `turnStopping` | 有最终回答且 nextStep 里没有 steer 时 | `TurnStoppingInput(turn, step, continuations, reply)` → `End` / `Continue(context)` | 继续本 turn（受续跑上限约束） | TodoContinuation（M3） |
 
-主循环自带、不能被拦截器替换的部分：`preStep` 之前的步数上限；`request` 之后的刷盘；`toolPreExecute` 之后的 PolicyEngine；`toolExecute` 链最内层的执行事实（`tool/started`、刷盘、`tool/executed`），以及包住整条链的工具超时；提示的单提示锁和锁释放前的收尾（§3.2），派发不再补写 `prompt/withdrawn`；工具读屏时的屏幕判定（下面"屏幕判定"）。
+主循环自带、不能被拦截器替换的部分：每次运行开头的 `policy/rules`（`AgentSetup.rules`，§3.9）；`preStep` 之前的步数上限；`request` 之后的刷盘；`toolPreExecute` 之后的 PolicyEngine；`toolExecute` 链最内层的执行事实（`tool/started`、刷盘、`tool/executed`），以及包住整条链的工具超时；提示的单提示锁和锁释放前的收尾（§3.2），派发不再补写 `prompt/withdrawn`；工具读屏时的屏幕判定（下面"屏幕判定"）。
 
 **`requestError` 默认行为**：
 - `RetryInterceptor`：可重试的错误每个 step 最多重试 5 次；服务端给了 retry-after 就按它等，否则从 500 ms 指数退避到 10 s，一半固定一半随机。retry-after 超过 `maxRetryAfterMs`（默认 60 s，构造时校验）**不重试**，直接按不可重试失败，不会把等待缩短到上限。重试前的等待可以被 steer 打断。
@@ -561,7 +570,8 @@ sealed interface SessionEvent   // task/start|level-changed、turn/start|end、s
                                 // assistant/message|attempt、request/header|retry、context/reasoning-dropped、
                                 // side/request|response、tool/call|result、policy/verdict、approval/asked|decided、
                                 // handoff/start|end、question/asked|answered、prompt/withdrawn、compaction/*、
-                                // inbox/spliced、screen/snapshot|action|launch|judged|frame(blobRef)、tool/started|executed、task/stopped…
+                                // inbox/spliced、screen/snapshot|action|launch|judged|frame(blobRef)、tool/started|executed、task/stopped、
+                                // policy/rules…
 ```
 
 完整的类型表和每种类型是否 ignorable 登记在 `core.session.SessionEventTypes`；命名规则、序列化方式和格式版本见 ADR `2026-11-01-core-contracts`。
@@ -570,7 +580,7 @@ sealed interface SessionEvent   // task/start|level-changed、turn/start|end、s
 1. **模型可见 ⟺ 已记录**：请求 = 请求头 + `deriveMessages(events)` + 工具清单。`deriveMessages` 是纯函数；请求组装好后冻结。回放测试会逐字节核对。
    - 请求头带非秘密的线路快照 `wire: WireProfile`（凭据种类、非秘密 headers、推理字段与回传、图片发法、推理档位映射后的字段和值、输出上限字段名、禁止并行工具调用 / `stream_options` / `include` 开关、正文工具调用还原、映射规则版本），由 `ChatModel.prepare` 生成。适配器只从请求读这些项，不读实时的 ProviderProfile（`model-layer.md` §2）；
    - `request/header` 和 `assistant/message` 只属于主对话。看图、轻量等旁路请求整份记成 `side/request`（含快照），结果记成 `side/response`，二者不进主视图；
-   - PolicyEngine 的输入都能从日志算出：第 1 条记录固定是 `task/start(level, unattended)`，级别中途变化记 `task/level-changed`；`operatedPackages` 和 `outwardConfirmedPackages` 按执行事实（`tool/started`、`tool/executed`）推导，样例在 core 测试源码的 `PolicyContextSamples`。
+   - PolicyEngine 的输入都能从日志算出：第 1 条记录固定是 `task/start(level, unattended)`，级别中途变化记 `task/level-changed`；判定用的规则记在 `policy/rules(rulesVersion, tuning)`：每次运行开头一条（`task/start` 之后、每个 `session/resumed` 之后，两次运行之间升级了 App 规则就可能变），`tuning` 是 `PolicyTuning` 的全部字段，每个 `policy/verdict` 归它前面最近的一条；回放拿自己的规则和它比。这条记录 ignorable，不进模型视图；`operatedPackages` 和 `outwardConfirmedPackages` 按执行事实（`tool/started`、`tool/executed`）推导，样例在 core 测试源码的 `PolicyContextSamples`。
 2. **大对象存 blob**：截图存为 `blobs/<sha256>`（不带扩展名），日志里只记引用、mime 和尺寸。**旧截图怎么瘦身按协议区分**（见 `model-layer.md` §5）：
    - Responses / Chat Completions：越过阈值时在客户端做一次 Replace，只保留最近 N 张图（默认 3），更早的换成文字占位。
    - Anthropic：**不在客户端改写历史**，因为 preserved thinking 会让之后的思考块失效。改用服务端 context editing / compaction，Replace 只用于 UI 投影。
@@ -607,7 +617,7 @@ screen s12 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · 坐标 0–
 - 可点击的元素吸收其下纯文本子节点的文字（用 ` · ` 连接），不跨可滚动容器。吸收有上限（`ScreenFormatConfig`）：元素面积超过屏幕的 35%、可吸收的文字超过 5 段或合计超过 200 字时不吸收，这些文字各占一行，交给页面预算折叠。
 - `brief` 和差分里单段文字截到 60 字、吸收后的整行截到 100 字（末尾 `…`）；`detail=full` 不截断，给出打码后的全文。
 - 按纵向位置分顶 / 中 / 底三区；可滚动容器多缩进一级。
-- 首行之后可有"状态："行（页面标记，如 键盘已弹出、登录页、支付页、禁止截屏）和树质量提示（SPARSE / EMPTY 时提示看截图；禁止截屏的页面改为提示 hand_to_user；主模型不看图时不提截图，改为提示 `detail=full`、按屏上文字的坐标操作或 hand_to_user。这个能力由装配方以 `ScreenComponents(vision = …)` 传入，是唯一的来源：`ScreenPresenter.vision` 把它带给工具，`phone_observe` 是否附图也看它，所以提示和附图不会互相矛盾）。树质量由 `TreeQualityAssessor` 判定：自己没有文字、但按上面的吸收规则吸收了子文字的控件，算作有名字（和屏幕格式同一套规则、同一份 `ScreenFormatConfig`），所以会话列表、设置页、搜索页这类"无名可点击行 + 文字子节点"的页面是 GOOD。
+- 首行之后可有"状态："行（页面标记，如 键盘已弹出、登录页、支付页、禁止截屏）和树质量提示（SPARSE / EMPTY 时提示看截图；禁止截屏的页面改为提示 hand_to_user；主模型不看图时不提截图，改为提示 `detail=full`、按屏上文字的坐标操作或 hand_to_user。这个能力由装配包从主模型的 `info.capabilities.vision` 取，以 `ScreenComponents(vision = …)` 传入，是唯一的来源：`ScreenPresenter.vision` 把它带给工具，`phone_observe` 是否附图也看它，所以提示和附图不会互相矛盾）。树质量由 `TreeQualityAssessor` 判定：自己没有文字、但按上面的吸收规则吸收了子文字的控件，算作有名字（和屏幕格式同一套规则、同一份 `ScreenFormatConfig`），所以会话列表、设置页、搜索页这类"无名可点击行 + 文字子节点"的页面是 GOOD。
 - 整页约 3500 字预算（`detail=full` 约 20000），超出时只折叠中部，**顶部区和底部区始终保留**；列表外被折叠的项在中部末尾计数。这只对不在滚动容器里的元素成立：一个顶层滚动容器连同它里面的所有行是一个整体，按容器自己的中心归到某一区，所以放在占满屏的滚动容器里的底部导航随这个列表留在中部，超出预算时会被折叠。树里没有的 OCR 文字放在 `[屏上文字 · OCR，树里没有]` 段，最后折叠。
 - 银行卡号（Luhn）和身份证号（出生日期 + MOD 11-2 校验位）识别后整段替换成一个标签，其余文字原样保留。标签是按数字的样子猜的，只在站得住时写类型：一段只是一个号码、并且不跨行时，写成 `「疑似银行卡 尾号7894」`、`「疑似身份证 尾号002X」`；一段合并了几个号码，或者跨过了换行（`\n`、`\r`、U+000B、U+000C、U+0085、U+2028、U+2029）时，写成 `「已隐藏的号码」`，不写类型和尾号，因为这时的类型和尾号可能来自根本不是卡号的字段（上下两行的电话），也可能把两张卡说成一张。屏幕文字先把每段空白折成一个字符（含换行的折成换行，否则折成空格），再打码，最后折成一行，所以元素文字里的换行同样算跨行。系统提示告诉模型：标签是猜的，类型和尾号不一定准，一个标签可能盖住几个号码，不能只凭标签断定那里有什么。数字组（半角或全角数字）之间的间隔可以任意长，由下面三类字符组成，其中连字符最多两个：Unicode White_Space 的全部 25 个空白字符（明确列出，含换行、U+0085、U+00A0、U+2009、U+202F、U+3000；`Char.isWhitespace` 不认 U+0085，所以不用它）；不可见的格式字符（Unicode 类别 Cf：U+200B 零宽空格、U+200C/U+200D 零宽（不）连接符、U+2060 词连接符、U+FEFF、U+00AD 软连字符、双向控制符）；连字符和破折号（`-`、U+2010–U+2014、U+2212 减号、U+FE63 小连字符、U+FF0D 全角连字符）。所以换行加缩进、分栏排开的号码仍是一个号码，是不是卡号或身份证再由数字分组（卡号每组至少 3 位，身份证至少 2 位，如 6-8-4、4-4-4-4-2）和校验位决定。其他字符都是字段边界：字母、汉字、`/`、`.`、`_`、`·`、`*` 等标点，以及第三个连字符。每个数字组都作为起点试一遍（每个起点取最长的命中），互相重叠的命中合并成一段整体打码，所以同一段里卡号前面的数字（`第 105 6222 …`、上一行的电话）可能和卡号一起被打码，但卡号不会有任何一部分露出来；合并成的一段用中性标签（见上）。不支持的写法（会被当成字段边界）：其他数字形式（阿拉伯-印度数字、带圈数字等），以及夹在数字之间的组合附加符、emoji 和基本多文种平面以外的字符。
   - 取舍：只隔着空白（含换行、缩进）的不同字段，和折行、分栏的一个号码分不开，会被当成同一段；其中几组恰好拼成合法卡号或身份证时，就连同两边字段被覆盖的部分一起打码，例如 `13800138000⏎⏎    1001` 整体变成 `「已隐藏的号码」`。这是偏隐私的方向，而且不罕见：上下两行按 3-4-4 分组写的手机号，约三分之一会被打码（固定种子抽样 1000 对，实测约 34%）；只隔着空白的两张卡也可能合成一段。所以这些情况用中性标签，不让模型以为屏上有一张并不存在的卡，或者少了一张卡。中间有字段文字的（`电话 …⏎金额 …`）不会拼在一起。
@@ -626,7 +636,7 @@ screen s12 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · 坐标 0–
   - 屏上文字 "加载中" (500,530)
   ```
 
-  差分按**两屏的可见行**比较（`ScreenDiffer` 用和格式化同一套吸收规则、同一份 `ScreenFormatConfig`：analyzer 和 presenter 只能由 `core.screen.ScreenComponents(format, quality, diff, lexicon, vision)` 一起创建，WP07 的 ScreenPort 和 WP09 的工具装配都从它取，装配处不再出现第二份格式配置），目标是"把差分套到模型看过的上一屏上，就得到这一屏"。前提是两屏来自同一个 ScreenPort，**编号相同就是同一个元素**：端口能确定是同一个元素才沿用编号，身份有歧义就给新编号、旧编号作废（§3 的 ref 规则）。所以差分**只按编号配对**，不按名字或阅读顺序猜：
+  差分按**两屏的可见行**比较（`ScreenDiffer` 用和格式化同一套吸收规则、同一份 `ScreenFormatConfig`：analyzer 和 presenter 只能由 `core.screen.ScreenComponents(format, quality, diff, lexicon, vision)` 一起创建，App 的 ScreenPort 和工具都从 `core.assembly` 的同一个 ScreenComponents 取（`ProductAssembly.analyzer`、`presenter`），装配处不再出现第二份格式配置），目标是"把差分套到模型看过的上一屏上，就得到这一屏"。前提是两屏来自同一个 ScreenPort，**编号相同就是同一个元素**：端口能确定是同一个元素才沿用编号，身份有歧义就给新编号、旧编号作废（§3 的 ref 规则）。所以差分**只按编号配对**，不按名字或阅读顺序猜：
   - 两屏都显示的编号，这一行的任何可见内容变了都算 `~`：文字、吸收进来的子文字、值、提示、状态、secret；父节点变了也算；**打印了坐标的元素，中心坐标变了就算**（容差 0）；不打印坐标的元素，中心移动超过 `DiffConfig.moveTolerance`（默认 10）才算。被吸收的子文字消失或换到别的行，受影响的旧行和新行都列为 `~`，子文字自己的编号模型没见过，不列。
   - 只在这一屏显示的编号是 `+`（元素以前在但没显示，比如被吸收，也算 `+`，因为模型没见过这个编号）。
   - `-` 列出上一屏显示过、这一屏不再显示的编号：元素没了、被隐藏或被吸收、换了新编号，或者编号给了一个不显示的元素。所以编号变了就是一删一增。编号如果在这一屏又显示出来（给了别的元素），就在 `~` 里给出新的那一行，不列在 `-`。

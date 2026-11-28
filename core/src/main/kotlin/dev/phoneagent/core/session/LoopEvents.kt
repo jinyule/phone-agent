@@ -4,6 +4,7 @@ import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.policy.SecurityLevel
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonObject
 
 /**
  * `task/start`: the settings the task started with; always record 1, written by
@@ -20,6 +21,29 @@ public data class TaskStarted(
     val level: SecurityLevel,
     val unattended: Boolean,
 ) : SessionEvent
+
+/**
+ * `policy/rules`: the rules this run of the task judges calls with (policy-rules §8): their version
+ * and every threshold, as the assembly built the PolicyEngine. Written at the start of every run,
+ * right after `task/start` and right after each `session/resumed` (an update between two runs may
+ * change the rules), so every `policy/verdict` belongs to the last one before it. Replay compares
+ * the rules it judges with against these (phase1 §3.9 rule 1). Never part of the model view.
+ * Ignorable: the model view and the run do not depend on it; a log without it (written before it
+ * existed, or by a runtime given no rules) says nothing about the rules.
+ *
+ * @property rulesVersion the rules' version (`PolicyTuning.RULES_VERSION`), >= 1.
+ * @property tuning every `PolicyTuning` field by name, defaults included (`PolicyTuning.byName`).
+ */
+@Serializable
+@SerialName("policy/rules")
+public data class PolicyRulesRecorded(
+    val rulesVersion: Int,
+    val tuning: JsonObject,
+) : SessionEvent {
+    init {
+        require(rulesVersion >= 1) { "policy/rules: rulesVersion must be >= 1, got $rulesVersion" }
+    }
+}
 
 /**
  * `task/level-changed`: the user changed the security level of the running task; it applies to

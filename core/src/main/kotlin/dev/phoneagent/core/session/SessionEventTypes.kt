@@ -19,6 +19,7 @@ public object SessionEventTypes {
         listOf(
             type<TaskStarted>(ignorable = false),
             type<TaskLevelChanged>(ignorable = false),
+            type<PolicyRulesRecorded>(ignorable = true),
             type<TaskStopped>(ignorable = false),
             type<TurnStarted>(ignorable = false),
             type<TurnEnded>(ignorable = false),

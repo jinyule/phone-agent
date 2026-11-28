@@ -7,7 +7,6 @@ import android.view.Display
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import dev.phoneagent.app.debug.TemporarySnapshotAnalyzer
 import dev.phoneagent.app.service.AgentAccessibility
 import dev.phoneagent.core.ports.ActionOutcome
 import dev.phoneagent.core.ports.ActionOutcome.StaleReason
@@ -46,7 +45,7 @@ class PressDeviceTest {
             surface = SurfaceRef(Display.DEFAULT_DISPLAY, SurfaceKind.MAIN),
             connection = { AgentAccessibility.host.value },
             system = AndroidScreenSystem(context),
-            analyzer = TemporarySnapshotAnalyzer,
+            analyzer = productAnalyzer(context),
         )
 
     /** The counts of the page: parent clicks, parent long clicks, child clicks, child long clicks. */
