@@ -2,6 +2,7 @@ plugins {
     id("phoneagent.kotlin.jvm")
     id("phoneagent.coverage")
     id("phoneagent.session-format")
+    id("phoneagent.session-replay")
     // Applied per module, not in the convention: :core persists the session log and profiles, :app
     // its model settings file.
     alias(libs.plugins.kotlin.serialization)

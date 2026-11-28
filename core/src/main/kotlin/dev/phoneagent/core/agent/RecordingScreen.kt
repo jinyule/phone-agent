@@ -82,6 +82,11 @@ internal class RecordingScreen(
      * and recorded as `screen/frame` of S checked on S2, after both screens' records. A capture
      * that throws [ScreenUnavailableException], returns nothing or an image the log does not take
      * counts as no frame (its message is never shown); a failed read of S2 drops the frame.
+     *
+     * Session replay depends on two things here (`DeviceScript` in the replay tests): S's
+     * judgment is recorded before the capture, and nothing is captured without a SHOWN one, since
+     * replay finds each capture by that judgment; and a dropped frame leaves the log and the
+     * result as a capture that gave none does, since replay gives none for a frame the log lacks.
      */
     suspend fun framedSnapshot(
         options: SnapshotOptions,

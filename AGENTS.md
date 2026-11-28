@@ -77,5 +77,5 @@ lefthook install                      # 每个 clone 装一次本地钩子
 
 - PR 用模板（Motivation / Changes / Testing + 勾选项）；唯一的必过检查是 `all-checks-passed`。
 - 需要长期保留理由的决策写 ADR（`docs/adr/`，"Alternatives considered" 必填）。
-- 技能在 `.agents/skills/`：`pre-push-checks`（按变更面挑检查集）、`code-review`（必查项）。
+- 技能在 `.agents/skills/`：`pre-push-checks`（按变更面挑检查集）、`code-review`（必查项）、`record-session`（会话 fixture）、`add-tool`（新增工具）。
 - 本项目是 Apache-2.0。借鉴外部代码只取兼容许可的项目（如 Mika、DSH-Android），保留原文件头并在 `NOTICE` 里登记；dsh-Go 是 AGPL，不借代码。
