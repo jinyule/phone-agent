@@ -29,7 +29,7 @@ enum ports.ElementRole: BUTTON, TEXT, INPUT, IMAGE, CHECKBOX, SWITCH, RADIO, LIS
 enum ports.ElementState: CLICKABLE, LONG_CLICKABLE, EDITABLE, SCROLLABLE, FOCUSED, CHECKED, SELECTED, DISABLED
 enum ports.HandoffKind: LOGIN, PASSWORD, CAPTCHA, PAYMENT, SECURE_PAGE, CHOOSE, OTHER
 enum ports.HandoffResult: DONE, DECLINED, EXPIRED, UNAVAILABLE, FAILED, NOT_TAKEN_BACK
-enum ports.ScreenFlag: SECURE, KEYBOARD, SYSTEM_PICKER, LOGIN, CAPTCHA, PAYMENT, RATE_LIMIT, LOCKED
+enum ports.ScreenFlag: SECURE, KEYBOARD, SYSTEM_PICKER, LOGIN, CAPTCHA, PAYMENT, RATE_LIMIT, LOCKED, WITHHELD
 enum ports.SnapshotDetail: BRIEF, FULL
 enum ports.SurfaceKind: AGENT, MAIN
 enum ports.SystemIntentKind: ALARM, TIMER, CALENDAR, SHARE, DIAL, NAVIGATE, SETTINGS
@@ -39,6 +39,8 @@ enum session.CompactionOutcome: COMPLETED, SKIPPED, FAILED
 enum session.CompactionTrigger: PRESSURE, OVERFLOW, MANUAL
 enum session.InboxEntryKind: FOLLOWUP, STEER, INJECT
 enum session.InboxQueue: NEXT_TURN, NEXT_STEP
+enum session.JudgmentOutcome: SHOWN, WITHHELD
+enum session.JudgmentPurpose: TOOL, FRAME_PRECHECK
 enum session.StepOutcome: COMPLETED, FAILED, CANCELLED
 enum session.StopCause: USER, SHUTDOWN, LIMIT, ERROR
 enum session.TurnEndReason: COMPLETED, END_NOT_DONE, MAX_TOKENS, PRE_STEP_REFUSED, LIMIT, STOPPED, FAILED
@@ -54,7 +56,7 @@ sealed ports.AskResult: answered, declined, expired, unavailable
 sealed ports.LaunchTarget: app, link, system
 sealed ports.Target: point, ref
 sealed ports.UiAction: key, scroll, set_wheel, swipe, tap, type
-sealed session.SessionEvent: approval/asked, approval/decided, assistant/attempt, assistant/message, compaction/end, compaction/prune, compaction/start, compaction/summary, handoff/end, handoff/start, inbox/spliced, policy/verdict, prompt/withdrawn, question/answered, question/asked, context/reasoning-dropped, request/header, request/retry, screen/action, screen/frame, screen/launch, screen/snapshot, session/resumed, side/request, side/response, step/end, step/start, task/level-changed, task/start, task/stopped, tool/call, tool/executed, tool/result, tool/started, turn/end, turn/start, user/message
+sealed session.SessionEvent: approval/asked, approval/decided, assistant/attempt, assistant/message, compaction/end, compaction/prune, compaction/start, compaction/summary, handoff/end, handoff/start, inbox/spliced, policy/verdict, prompt/withdrawn, question/answered, question/asked, context/reasoning-dropped, request/header, request/retry, screen/action, screen/frame, screen/judged, screen/launch, screen/snapshot, session/resumed, side/request, side/response, step/end, step/start, task/level-changed, task/start, task/stopped, tool/call, tool/executed, tool/result, tool/started, turn/end, turn/start, user/message
 sealed session.SideOutcome: completed, failed
 sealed session.SurfaceOp: append, replace
 sealed tool.ToolControl: end_turn
@@ -78,6 +80,7 @@ event request/header ignorable=false
 event request/retry ignorable=true
 event screen/action ignorable=true
 event screen/frame ignorable=true
+event screen/judged ignorable=false
 event screen/launch ignorable=true
 event screen/snapshot ignorable=true
 event session/resumed ignorable=false

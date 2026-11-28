@@ -191,10 +191,13 @@ data class ToolResult(
 sealed interface ToolControl { data class EndTurn(val reason: EndReason, val summary: String) : ToolControl }
 
 interface ToolContext {                 // 每次调用一个，由运行时实现
-    val taskId: TaskId; val sessionId: SessionId; val screen: ScreenPort?; val clock: Clock
+    val taskId: TaskId; val sessionId: SessionId; val clock: Clock
+    val screen: ScreenPort?             // 运行时给的屏：读到的每一屏判过才交出，被扣下的给副本；frame() 返回 null（§3.8"屏幕判定"）
     val interaction: ToolInteraction    // 只有提问 / 转交；工具拿不到 confirm，也就造不出确认卡
     val apps: AppCatalog?               // 已安装 App（core.ports）；null = 没有这个能力，phone_apps 返回错误结果，phone_launch 按给定的包名直接启动
     suspend fun storeBlob(bytes: ByteArray): BlobRef
+    suspend fun framedSnapshot(options: SnapshotOptions = SnapshotOptions(), maxEdge: Int = 1280, som: Boolean = false): FramedSnapshot
+                                        // 要截图只走这里：截图之后再读一屏，图核对过才随它返回（§3.8"屏幕判定"）
 }
 interface ToolInteraction {             // core.ports；交给工具的那一半
     suspend fun ask(question: Question): AskResult              // Answered(text) / Declined / Expired / Unavailable
@@ -228,7 +231,7 @@ interface ScreenPort {
     suspend fun snapshot(opts: SnapshotOptions = SnapshotOptions()): ScreenSnapshot
     suspend fun act(action: UiAction, on: SnapshotId?): ActionOutcome
     suspend fun launch(target: LaunchTarget): ActionOutcome   // App / 深链 / 分享 / 白名单系统 intent
-    suspend fun frame(maxEdge: Int = 1280, som: Boolean = false): Frame?   // JPEG；som=true 时画编号框
+    suspend fun frame(maxEdge: Int = 1280, som: Boolean = false): Frame?   // JPEG；som=true 时画编号框；只有 runtime 调（ToolContext.framedSnapshot）
     suspend fun awaitChange(timeoutMs: Long): Boolean          // 事件驱动
 }
 
@@ -255,10 +258,10 @@ data class ScreenSnapshot(
 )
 
 data class ActionOutcome(
-    val status: Status,                 // OK / FAILED(reason) / REFUSED(policy) / STALE_REF(reason)
+    val status: Status,                 // OK / FAILED(reason) / REFUSED(policy) / STALE_REF(reason)；reason 可能引用屏幕，回读屏判过放行才原样给模型
     val effect: Effect,                 // CHANGED / NO_CHANGE / NEW_APP / SPILLED_BACK / RATE_LIMITED / SECURE_PAGE
     val after: ScreenSnapshot?,         // 动作后自动回读
-    val diff: ScreenDiff?,              // 与动作前比，+/-/~
+    val diff: ScreenDiff?,              // 与动作前比，+/-/~；diff.base 是比较的那一屏
 )
 ```
 
@@ -502,7 +505,7 @@ fun interface Chain<I, O> { suspend fun proceed(input: I): O }   // 不调用 pr
 | `toolPostExecute` | 每个调用有结果之后（执行、拒绝、转交都算） | `PostExecuteInput(call, tool, result)` → `PostExecuteResult(result, context)` | 替换结果；附加上下文（进 nextStep） | LoopGuard（含重复调用提醒）、OutwardPacing、KnowledgeNotice、Spill |
 | `turnStopping` | 有最终回答且 nextStep 里没有 steer 时 | `TurnStoppingInput(turn, step, continuations, reply)` → `End` / `Continue(context)` | 继续本 turn（受续跑上限约束） | TodoContinuation（M3） |
 
-主循环自带、不能被拦截器替换的部分：`preStep` 之前的步数上限；`request` 之后的刷盘；`toolPreExecute` 之后的 PolicyEngine；`toolExecute` 链最内层的执行事实（`tool/started`、刷盘、`tool/executed`），以及包住整条链的工具超时；提示的单提示锁和锁释放前的收尾（§3.2），派发不再补写 `prompt/withdrawn`。
+主循环自带、不能被拦截器替换的部分：`preStep` 之前的步数上限；`request` 之后的刷盘；`toolPreExecute` 之后的 PolicyEngine；`toolExecute` 链最内层的执行事实（`tool/started`、刷盘、`tool/executed`），以及包住整条链的工具超时；提示的单提示锁和锁释放前的收尾（§3.2），派发不再补写 `prompt/withdrawn`；工具读屏时的屏幕判定（下面"屏幕判定"）。
 
 **`requestError` 默认行为**（`RetryInterceptor`）：可重试的错误每个 step 最多重试 5 次；服务端给了 retry-after 就按它等，否则从 500 ms 指数退避到 10 s，一半固定一半随机。retry-after 超过 `maxRetryAfterMs`（默认 60 s，构造时校验）**不重试**，直接按不可重试失败，不会把等待缩短到上限。重试前的等待可以被 steer 打断。
 
@@ -523,6 +526,20 @@ fun interface Chain<I, O> { suspend fun proceed(input: I): O }   // 不调用 pr
   - Refuse / HandOff → 按对应结局处理；
   - 又是 Confirm（屏幕在批准后变了）→ 再确认一次。**每个调用最多再问 `LoopConfig.maxReconfirmations` 次（默认 1）**，超过就拒绝，并告诉模型屏幕已变、请重新观察。
 
+**屏幕判定**（policy-rules §6.4）：工具拿到的屏，runtime 先交给 PolicyEngine 判，再决定给不给。由 `RecordingScreen`（每个调用的 `ToolContext.screen`）和 `ScreenGate` 固定做，不是拦截器，不能卸掉或重排；判定只在 PolicyEngine。
+- **范围**：工具读到的每一屏：`snapshot`（observe 和 wait 的每次读屏）、`act` / `launch` 的回读屏、`framedSnapshot` 的两屏。runtime 自己读、不交给工具的屏（批准后复核的 S'、接管结束后的回读）不判，也不给模型看。
+- **怎么判**：这一屏的完整 `screen/*` 先记进日志，然后合成一次 `SCREEN_JUDGMENT_TOOL`（即 `phone_observe`，没有参数，id、taskId、sessionId、reason 照抄读屏的调用），在这一屏上按 READ 解析，`PolicyContext` 按到此为止的日志推导（`screen` 就是这一屏，`approved = null`）。只有 Allow 给看；Refuse、Confirm、HandOff 都只是扣下，不问任何人。结论记 `screen/judged{callId, snapshot, purpose, outcome, rule?, hint?}`（ignorable = false），记完才交给工具；记不进去或在这之前被取消，工具拿不到这一屏。
+- **扣下的屏**：日志里留完整屏，下一个调用照样在它上面判；工具拿到的是副本：只留 id、surface、pkg、detail，标 `WITHHELD`，没有元素、OCR、activity 和别的 flag，树是 EMPTY，指纹固定。工具结果的 `details.screen`（`ToolResult.SCREEN`，"结果显示的那一屏"）在本调用里被扣下过时，runtime 在 `toolPostExecute` 之前给结果追加 `LoopTexts.screenWithheld` 和那条判定的 hint。
+- **端口的自由文字**：`Failed`、`Refused` 的 reason 只在本调用的回读屏判过放行时原样交给工具，否则换成 `LoopTexts.reasonWithheld`；端口抛的 `ScreenUnavailableException`（读屏、动作、启动、等待）一律换成带这句固定文字、没有 cause 的新异常。不回退到旧的放行屏：失败的新读报的文字不一定来自旧屏。
+- **差分**：回读屏放行、并且 `diff.base` 是模型看过的屏时才给，否则 `diff = null`，工具显示整页。模型看过的屏：判过 `purpose = TOOL, outcome = SHOWN`，并且同一调用的 `tool/result` 的 `details.screen` 指的就是它；只从日志推导，resume 以后一样。扣下的屏、S'、接管后的回读、wait 中途的屏、截图前的预检屏都不算。
+- **截图**：工具拿到的 `frame()` 不调端口，返回 null；要图只走 `ToolContext.framedSnapshot`：
+  1. 读 S，判（`purpose = FRAME_PRECHECK`）。S 被扣下就返回它的副本，不截图，也不读 S2；
+  2. 截图 F。端口返回 null、抛 `ScreenUnavailableException`（message 不给看）、图片格式日志不收，都算没有图；取消照常传播；
+  3. 读 S2，判（`purpose = TOOL`）。读 S2 抛 `ScreenUnavailableException` 时换成固定文字往外抛，F 丢掉；
+  4. F 随 S2 返回的条件（截图一致性检查，不是 PolicyEngine 的规则）：S2 放行，和 S 同包；F 带编号框时，S2 的元素编号和位置还要和 S 一致（框是按 S 画的）。满足时写 blob、记 `screen/frame{snapshotId = S, checkedOn = S2}`，都在两屏的记录之后；不满足时不写 blob，S2 照常返回（被扣下的给副本）。
+
+  给模型看的是 S2，它也是日志里最新的完整屏，下一个调用就在它上面判（`ctx.screen` 的推导不用改）。S 只用来决定能不能截图。截图和读屏不是原子的，见 policy-rules §9.2。
+
 只读的观察事件（记录、流式分片、轨迹卡）走 `TaskRuntime.events`，不能改变行为。
 
 **纪律**：改 `agent/` 包内的主循环代码，必须同步更新本节。
@@ -542,7 +559,7 @@ sealed interface SessionEvent   // task/start|level-changed、turn/start|end、s
                                 // assistant/message|attempt、request/header|retry、context/reasoning-dropped、
                                 // side/request|response、tool/call|result、policy/verdict、approval/asked|decided、
                                 // handoff/start|end、question/asked|answered、prompt/withdrawn、compaction/*、
-                                // inbox/spliced、screen/frame(blobRef)、tool/started|executed、task/stopped…
+                                // inbox/spliced、screen/snapshot|action|launch|judged|frame(blobRef)、tool/started|executed、task/stopped…
 ```
 
 完整的类型表和每种类型是否 ignorable 登记在 `core.session.SessionEventTypes`；命名规则、序列化方式和格式版本见 ADR `2026-11-01-core-contracts`。
@@ -642,7 +659,9 @@ screen s12 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · 坐标 0–
 
 所有工具都带 `reason` 参数。模型回复里不带工具调用，就视为最终回答。每轮只执行第一个工具调用。
 
-`phone_wait` 的等法（不依赖 `ScreenPort.awaitChange` 报告调用之前的变化）：appear / disappear 每隔 `ToolsConfig.waitReadIntervalMs`（默认 250ms）读一屏判断一次，变化最迟一个间隔内被发现，画面一直在动也只按间隔读；截止时用最后一屏再判断一次，条件那时已经成立就算等到了。两次读屏之间只等固定间隔，**不和 `awaitChange` 取先到的那个**：最小读屏间隔同时就是最长等待，变化事件没法让读屏提前，取先到只会每轮多一次端口调用，结果一样。stable 用 `awaitChange` 等一段 `stableQuietMs` 的安静期，每次看到变化后至少隔一个读屏间隔再看，端口不挂起也不会空转。全部用协程时间，可取消。工具自己的超时 `ToolsConfig.waitTimeoutMs` 加载时校验：至少是最长等待 30000ms 加 15000ms 余量，留给截止时那次读屏（树和 OCR），条件那时成立才能被看到。
+`phone_observe` 带图（`image=true`，或者没给 `image`、树读不全）时，先照常读一屏，模型能看图、这一屏既不是 FLAG_SECURE 也没被扣下，才走 `ToolContext.framedSnapshot`（§3.8"屏幕判定"）：结果显示截图之后读的那一屏（S2）的整页，图随它返回；没有图时写"（截不到图）"，不论是截不到、截图失败、格式不支持还是没通过一致性检查。所以一次带图的观察读三次屏。
+
+`phone_wait` 的等法（不依赖 `ScreenPort.awaitChange` 报告调用之前的变化）：appear / disappear 每隔 `ToolsConfig.waitReadIntervalMs`（默认 250ms）读一屏判断一次，变化最迟一个间隔内被发现，画面一直在动也只按间隔读；截止时用最后一屏再判断一次，条件那时已经成立就算等到了。两次读屏之间只等固定间隔，**不和 `awaitChange` 取先到的那个**：最小读屏间隔同时就是最长等待，变化事件没法让读屏提前，取先到只会每轮多一次端口调用，结果一样。stable 用 `awaitChange` 等一段 `stableQuietMs` 的安静期，每次看到变化后至少隔一个读屏间隔再看，端口不挂起也不会空转。全部用协程时间，可取消。被扣下的屏（`WITHHELD`，§3.8"屏幕判定"）不满足任何条件，也不算稳定，三种条件都越过它接着等：stable 在安静期之后读到被扣下的屏，隔一个读屏间隔重新等安静期；截止时那一屏还被扣下，结果是"条件无法核实"（ERROR）。工具自己的超时 `ToolsConfig.waitTimeoutMs` 加载时校验：至少是最长等待 30000ms 加 15000ms 余量，留给截止时那次读屏（树和 OCR），条件那时成立才能被看到。
 
 元素编号参数（`ref`）写 `@e5` 或 `e5`，裸数字不算编号。`phone_launch` 的 `app` 只收包名，App 名字返回 `INVALID_ARGS`，提示先用 `phone_apps` 查包名；有 App 列表时包名还必须是列表里能打开的 App。`cold=true` 在 M1 只是清掉这个 App 的任务栈、从首页重新打开，进程不重启；force-stop 要等 M2 的特权助手（`LaunchTarget.App.cold`）。`phone_intent` 的每个 kind 都只打开预填好的系统界面、不直接提交（拨号不拨出，分享只打开分享面板），policy 一律按 NAVIGATE 判；之后在那个界面上真正发出或修改的动作另外判定。`phone_launch` 的 `link` 只接受 `LaunchTarget.Link.SCHEMES`（https、http、geo、mailto、market；`core.ports` 里唯一的一份，工具和适配器都用它），适配器只把它当作可浏览的 `ACTION_VIEW` + Uri 打开，不解析成任意 Intent；App 深链（如 `weixin://`）不在里面，打开 App 用 `app`。`request_confirmation` 的风险等级是 WRITE（保守下限）：只有 PolicyEngine 给出 Confirm、用户批准、复核为 Allow 之后才执行，所以它的结果是"用户已确认"。
 

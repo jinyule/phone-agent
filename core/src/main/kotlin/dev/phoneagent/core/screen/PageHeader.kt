@@ -21,6 +21,13 @@ internal class PageHeader(
         extra: List<String>,
     ): List<String> = listOf(title(snapshot)) + notes(snapshot) + extra
 
+    /**
+     * The whole page of a withheld [snapshot]: its header without the activity, then a state line
+     * that says it is withheld, and nothing of its content, notes or other flags.
+     */
+    fun withheld(snapshot: ScreenSnapshot): List<String> =
+        listOf(title(snapshot.copy(activity = null)), "状态：${flagWord(ScreenFlag.WITHHELD)}")
+
     /** The page-state line (flags) and the tree-quality note, each only when there is something to say. */
     fun notes(snapshot: ScreenSnapshot): List<String> {
         val flags = ScreenFlag.entries.filter { it in snapshot.flags }.map(::flagWord)
@@ -89,5 +96,6 @@ internal class PageHeader(
             ScreenFlag.PAYMENT -> "支付页"
             ScreenFlag.RATE_LIMIT -> "App 提示操作太频繁"
             ScreenFlag.LOCKED -> "手机已锁屏"
+            ScreenFlag.WITHHELD -> "按安全规则不显示这一屏的内容"
         }
 }

@@ -13,6 +13,7 @@ import dev.phoneagent.core.ports.HandoffKind
 import dev.phoneagent.core.ports.HandoffResult
 import dev.phoneagent.core.ports.Question
 import dev.phoneagent.core.ports.ScreenPort
+import dev.phoneagent.core.ports.SnapshotOptions
 import dev.phoneagent.core.ports.ToolInteraction
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
@@ -271,6 +272,12 @@ class ToolRegistryTest {
                     override val apps: AppCatalog? = null
 
                     override suspend fun storeBlob(bytes: ByteArray) = BlobRef("c".repeat(64))
+
+                    override suspend fun framedSnapshot(
+                        options: SnapshotOptions,
+                        maxEdge: Int,
+                        som: Boolean,
+                    ): FramedSnapshot = error("no screen")
                 }
             val result = tap.execute(call, ctx)
             assertEquals(ToolResult.ok("t1:phone_tap:${"c".repeat(64)}"), result)

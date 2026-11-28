@@ -66,7 +66,10 @@ class ScreenFormatterTest {
         fun `lists every page flag in a fixed order`() {
             val all =
                 formatter.page(
-                    snapshot("s3", emptyList()).copy(flags = ScreenFlag.entries.reversed().toSet()),
+                    snapshot(
+                        "s3",
+                        emptyList(),
+                    ).copy(flags = (ScreenFlag.entries - ScreenFlag.WITHHELD).reversed().toSet()),
                     SnapshotDetail.BRIEF,
                 )
             assertEquals(
@@ -74,6 +77,24 @@ class ScreenFormatterTest {
                 all.lines()[1],
             )
             assertFalse(page().contains("状态："))
+        }
+
+        @Test
+        fun `a withheld screen shows only its id, package and surface, and that it is withheld`() {
+            // Content left on the snapshot, other flags and the activity: none of it may show.
+            val withheld =
+                Screens.CHAT.copy(
+                    ocr = listOf(OcrLine("PRIVATE_OCR", box(0, 0, 99, 20))),
+                    flags = setOf(ScreenFlag.WITHHELD, ScreenFlag.PAYMENT, ScreenFlag.KEYBOARD),
+                    quality = TreeQuality.EMPTY,
+                    surface = SurfaceRef(7, SurfaceKind.MAIN),
+                )
+            val expected = "screen s12 · com.tencent.mm · 主屏 · 坐标 0–999\n状态：按安全规则不显示这一屏的内容"
+            val blind = ScreenFormatter(lexicon = Screens.LEXICON, vision = false)
+            for (detail in SnapshotDetail.entries) {
+                assertEquals(expected, formatter.page(withheld, detail), "$detail")
+                assertEquals(expected, blind.page(withheld, detail), "$detail without vision")
+            }
         }
 
         @Test
@@ -507,8 +528,32 @@ class ScreenFormatterTest {
             assertEquals(page, after(ActionOutcome(Status.Ok, Effect.CHANGED, now)))
             assertEquals(
                 page,
-                after(ActionOutcome(Status.Ok, Effect.NEW_APP, now, ScreenDiff(removed = listOf(ElementRef("e6"))))),
+                after(
+                    ActionOutcome(
+                        Status.Ok,
+                        Effect.NEW_APP,
+                        now,
+                        ScreenDiff(base = SnapshotId("s12"), removed = listOf(ElementRef("e6"))),
+                    ),
+                ),
             )
+        }
+
+        @Test
+        fun `after an action onto a withheld screen only the withheld page shows, whatever the diff`() {
+            val now = before.copy(id = SnapshotId("s13"), flags = setOf(ScreenFlag.WITHHELD))
+            val page = formatter.page(now, SnapshotDetail.BRIEF)
+            assertEquals("screen s13 · com.tencent.mm · agent 屏 · 坐标 0–999\n状态：按安全规则不显示这一屏的内容", page)
+            val diff =
+                ScreenDiff(
+                    base = SnapshotId("s12"),
+                    added = listOf(sent),
+                    ocrRemoved = listOf(OcrLine("PRIVATE_OCR", box(0, 0, 99, 20))),
+                )
+            for (effect in listOf(Effect.CHANGED, Effect.NO_CHANGE, Effect.NEW_APP)) {
+                assertEquals(page, after(ActionOutcome(Status.Ok, effect, now, diff)), "$effect")
+            }
+            assertEquals(page, after(ActionOutcome(Status.Ok, Effect.CHANGED, now)))
         }
 
         @Test
@@ -557,6 +602,7 @@ class ScreenFormatterTest {
                 )
             val diff =
                 ScreenDiff(
+                    base = SnapshotId("s12"),
                     added = listOf(now.elements.last()),
                     changed =
                         now.elements.filter {
@@ -605,7 +651,8 @@ class ScreenFormatterTest {
             // Another analyzer's diff: e10 went to an unprinted container, and it reports that as added.
             val container = el("e10", ElementRole.CONTAINER, bounds = box(880, 930, 980, 980))
             val now = before.copy(id = SnapshotId("s13"), elements = before.elements.dropLast(1) + container)
-            val diff = ScreenDiff(added = listOf(container), removed = listOf(ElementRef("e10")))
+            val diff =
+                ScreenDiff(base = SnapshotId("s12"), added = listOf(container), removed = listOf(ElementRef("e10")))
             assertEquals(
                 listOf("screen s13 · 与 s12 相比的变化（其余不变）", "状态：键盘已弹出", "- @e10"),
                 after(ActionOutcome(Status.Ok, Effect.CHANGED, now, diff)).lines(),
@@ -616,7 +663,15 @@ class ScreenFormatterTest {
         fun `a diff naming an element the screen does not have falls back to the full page`() {
             val now = before.copy(id = SnapshotId("s13"))
             val stray = el("e99", ElementRole.TEXT, "别的屏")
-            val text = after(ActionOutcome(Status.Ok, Effect.CHANGED, now, ScreenDiff(changed = listOf(stray))))
+            val text =
+                after(
+                    ActionOutcome(
+                        Status.Ok,
+                        Effect.CHANGED,
+                        now,
+                        ScreenDiff(base = SnapshotId("s12"), changed = listOf(stray)),
+                    ),
+                )
             assertEquals("（与 s12 相比变化较大，下面是完整一屏，+ 是新出现的元素）", text.lines()[2], text)
         }
 
@@ -625,7 +680,7 @@ class ScreenFormatterTest {
             val now = before.copy(id = SnapshotId("s13"))
             assertEquals(
                 "screen s13 · 与 s12 相比没有可见变化\n状态：键盘已弹出",
-                after(ActionOutcome(Status.Ok, Effect.NO_CHANGE, now, ScreenDiff())),
+                after(ActionOutcome(Status.Ok, Effect.NO_CHANGE, now, ScreenDiff(base = SnapshotId("s12")))),
             )
         }
 
@@ -664,7 +719,7 @@ class ScreenFormatterTest {
             val rows = (1..100).map { el("r$it", ElementRole.TEXT, "第 $it 行", box(0, 300, 999, 320)) }
             val old = snapshot("s1", rows)
             val now = snapshot("s2", rows.map { it.copy(name = it.name + "（新）") })
-            val diff = ScreenDiff(changed = now.elements.take(40))
+            val diff = ScreenDiff(base = old.id, changed = now.elements.take(40))
             val text = small.afterAction(ActionOutcome(Status.Ok, Effect.CHANGED, now, diff), old.id)
             assertTrue(text.startsWith("screen s2 · com.tencent.mm"), text)
             assertEquals("（与 s1 相比变化较大，下面是完整一屏，+ 是新出现的元素）", text.lines()[1])

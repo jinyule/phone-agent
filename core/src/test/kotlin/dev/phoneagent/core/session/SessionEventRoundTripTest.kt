@@ -86,6 +86,7 @@ class SessionEventRoundTripTest {
                 "tool/executed",
                 "tool/result",
                 "policy/verdict",
+                "screen/judged",
                 "task/stopped",
                 "compaction/summary",
                 "compaction/prune",

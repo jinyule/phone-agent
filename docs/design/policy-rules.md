@@ -98,6 +98,7 @@
 
 `screen` 就是同一次判定的 `ctx.screen`（复核时是 S'），按 `PolicyContext.screen` 的 KDoc 从日志推导，不一定是调用参数里写的那一屏：
 - 它可能比模型看到的新（例如复核时记下的 S'，那次调用最后没有执行）。带 ref 的调用这时由快照核对拒绝（§6.1 第 1 步，`call.stale_screen`），不会在一屏上查另一屏的 ref；
+- runtime 的屏幕判定（§6.4）也走这里：`call` 是合成的 `phone_observe`（`SCREEN_JUDGMENT_TOOL`，没有参数），`risk` 是 READ，`screen` 是待判的新屏，同一次判定的 `PolicyContext.screen` 也是它；
 - 没有读过屏、读屏失败，或者最后一屏之后有作废边界时为 null。边界是 `handoff/start`、`handoff/end`、`session/resumed`、非 READ 调用的 `tool/started`（按它开始时依据的那次判定的 intent 算）、`screen/action`、`screen/launch`（后两者自己的 after 屏算在边界之后）。屏幕动作这时由 §6.1 第 1 步拒绝（`call.no_screen`），提示先 `phone_observe`。
 
 | 工具 | kind | pkg | 其他 |
@@ -138,7 +139,7 @@ ref 和坐标两条路用的是同一份证据和同一套判定；屏幕格式�
 
 **下限**：工具声明的 `RiskClass` 是下限。SPEND → SPEND，OUTWARD → OUTWARD，SETUP → SETTINGS，READ / WRITE 没有下限。严重程度从低到高：READ < NAVIGATE < INPUT < OUTWARD < SETTINGS < DELETE < SPEND，按各档位下的判定排（§6.1 第 4 步）：OUTWARD 在谨慎档确认、标准档每个 App 只确认第一次，SETTINGS 和 DELETE 在谨慎、标准档每次都确认，SPEND 每档都确认；所以几种风险里取严重程度最高的，判定在每一档都不会更松。同时认出发送和删除的控件按 DELETE 确认，但它仍会发出去：确认卡照发送的写法带上收件人和草稿（§6.3），下限把一次发送抬成 SETTINGS 时也一样。被抬高时去掉字段类别；但密码、验证码、支付密码框的输入不抬高，保证它们仍然转交用户。
 
-**https 链接的边界**：https 链接可能经 App Link 直接打开银行或支付 App，policy 在启动这一步看不出来。兜底是动作之后的新屏：runtime 把返回给模型的每张新快照先当作一次 `phone_observe` 交给 PolicyEngine（§6.4），新屏的 `pkg` 在名单里就拒绝，并且不给模型看内容。
+**https 链接的边界**：https 链接可能经 App Link 直接打开银行或支付 App，policy 在启动这一步看不出来。兜底是动作之后的新屏：runtime 把工具读到的每一屏先当作一次 `phone_observe` 交给 PolicyEngine（§6.4），新屏的 `pkg` 在名单里就拒绝，并且不给模型看内容。
 
 ---
 
@@ -353,7 +354,11 @@ policy 只判定，下面这些由 runtime（WP02）做，WP09 的集成测试�
 
 - **每个调用**（包括 READ 的工具）都先 `resolve` 再 `evaluate`；`resolve` 用的 `screen` 必须就是 `ctx.screen`（复核时是 S'）。
 - **再问上限**：复核返回新的 Confirm 时再问用户，默认最多再问 1 次，可配置；超过上限这次调用不执行，并告诉模型原因（policy 不计次数，不保存状态）。
-- **动作后的新屏**：返回给模型的每张新快照，先合成一次 `phone_observe` 交给 PolicyEngine 判定；被拒绝时不给模型看任何内容（这一条兜住 https App Link 打开的金融 App，§2）。policy 保证对名单 App、本 App、敏感设置页和超过读取上限的屏（§8），读屏一定拒绝。
+- **工具读到的每一屏**（observe、wait 的读屏，动作和启动之后的回读屏，截图前后的两屏）：先合成一次 `phone_observe`（`SCREEN_JUDGMENT_TOOL`，没有参数）在这一屏上判定，只有 Allow 才给模型看（这一条兜住 https App Link 打开的金融 App，§2）。policy 保证对名单 App、本 App、敏感设置页和超过读取上限的屏（§8），读屏一定拒绝。实现在 core.agent 的 `RecordingScreen` 和 `ScreenGate`，runtime 固定做，不用装拦截器（phase1 §3.8"屏幕判定"）。
+  - 非 Allow 一律扣下：Confirm、HandOff 不问人，`screen/judged.rule` 记 `confirm`、`hand_off`；Refuse 记规则名，模型看到 runtime 的固定说明加上 hint（§6.2，不泄露名单）。
+  - 扣下时模型只看到这一屏的定位元数据：屏幕 id、surface、包名、详细度，标 `WITHHELD`；元素、OCR、activity、别的 flag 和真实指纹都不给。日志里留完整屏，下一个调用照样在完整屏上判。
+  - 端口的自由文字（`Failed`、`Refused` 的 reason，`ScreenUnavailableException` 的 message）只跟着本调用里新读、判过放行的屏给模型，否则换成固定文字；差分只对模型看过的屏给。
+  - 带图的观察给模型看截图之后读的屏 S2；截图只在 S 放行、S2 放行、同包（带编号框时元素编号和位置也一致）时随 S2 返回。
 - `operatedPackages` 只从已经执行的非 READ 调用推导（最终放行并有 `tool/started`；被拒绝、转交、确认被拒、没有执行的都不算，null 不算），`outwardConfirmedPackages` 只认执行实际依据的那次批准：调用已经开始、`tool/executed` 为 OK，它开始时依据的那条 Allow 之前、这个调用最后一张 APPROVED 的卡原因是 OUTWARD，并且 pkg 等于那条 Allow 的 `intent.pkg`，才计入这个 pkg（phase1 §3.6"外发免确认资格"）；两者都按 `PolicyContext` 的 KDoc 从日志推导（§6.1 末尾）。WP09 的集成测试要覆盖"拒绝启动确认后再进入同一个 App"这个序列。
 
 ---
@@ -459,6 +464,8 @@ eval 待办（第 1 条，按这个边界出用例）：一行显示"张三""立
 | 8 | 英文复合标签的长尾写法：只用换行分隔（"Send"和"delete"分在两行）、" - "、"→"、"and/or"、"and later delete" 这类连接词后面跟着别的词；符号只有一侧有空格（"Send& delete""Send &delete"）；中文在前、英文在后的混写："发送&delete"（不带空格的符号只在全由拉丁字母组成的词里切） | 只读开头：前面是发送就按 OUTWARD，后面的删除认不出 | 谨慎档照样确认发送；中文的复合标签每个强词都读 |
 | 9 | 验证码否决（§3.2"否决"）认不出开头的引号和括号：被引号、半边括号或 〔 〕 这类不当说明的括号包着的"发送验证码""Send code"（"“发送验证码”""[发送验证码""〔发送验证码〕""“Send code”""[Send code"）。成对的说明括号连同里面的字整个去掉（"「发送验证码」""(Send code)"），不在此列 | 按 OUTWARD 确认：发到用户自己手机上的验证码也要确认一次。和这一节的其他条相反，漏掉的是豁免，这一次的判定只会更严，不会放行；但用户批准这张卡以后，和批准任何 OUTWARD 卡一样，本 App 进了 `outwardConfirmedPackages`，标准档下本任务后面的发送不再确认（§6.1 第 4 步） | 不需要：多确认一次，用户确认即可 |
 | 10 | 网址、路径、话题标签、@ 提及里夹着整词的 and、then（"https://shop.example.com/buy-and-pay""/photos/and/delete""/checkout/then/pay""#Buy-and-pay""@alice-and-send"）：不带空格的符号不切这些词（§3.2），但连接词（`Words.ENGLISH_JOINERS`）在整段文字上按词边界切，"/"、"-" 都是词边界，切出的段去掉两头的标点以后以动作短语开头 | 按切出的段确认，控件标 ⚠：自主档下 buy-and-pay、/checkout/then/pay、#Buy-and-pay 是 SPEND；标准档、本 App 确认过发送时，/photos/and/delete 是 DELETE，写在对话框正文或行文字里也一样；标准档首次发送时，@alice-and-send 是 OUTWARD。d81473d 上这些都放行。和第 9 条一样，这一次的判定只会更严，不会放行；用户批准 @alice-and-send 这张 OUTWARD 卡以后，本 App 同样进了 `outwardConfirmedPackages`（§6.1 第 4 步） | 不需要：多确认一次，用户确认即可。没有在连接词切分时保护这些写法：那要重开词表的评审，还可能让 Send-and-delete、连着的连接词这类正例变松 |
+| 11 | 截图和读屏不是原子的：截图前的 S 和截图后的 S2 都放行、同包，只说明这两次读屏时可以看；两次读屏之间界面切到别的页（包括同包的敏感页）又切回来，截图仍可能带出那一页。这是接受的非原子观察边界，不是已经消除的问题 | 图随 S2 返回 | 两屏都判过、同包；带编号框时元素编号和位置也要一致 |
+| 12 | 同理，动作途中经过被拒的页、最后又回到放行的屏：端口在 reason 里可能写进中途读到的文字 | reason 跟着放行的回读屏原样给模型 | 没有放行的回读屏时一律换成固定文字；以后给端口加带类型的原因码，可以不引用屏幕也恢复诊断信息 |
 
 eval 待办（第 8 条）：聊天屏上点"Send - delete""Send → delete""Send and/or delete""Send and later delete""Send& delete""发送&delete"，以及名字里只用换行隔开的"Send""delete" → 现在 OUTWARD、标准档同一 App 确认过发送后放行。用来量化这些写法有多常见，再决定要不要加连接词。
 

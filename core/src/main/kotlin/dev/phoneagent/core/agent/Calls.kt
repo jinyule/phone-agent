@@ -7,15 +7,19 @@ import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.ports.AppCatalog
 import dev.phoneagent.core.ports.Clock
 import dev.phoneagent.core.ports.ScreenPort
+import dev.phoneagent.core.ports.SnapshotOptions
 import dev.phoneagent.core.ports.ToolInteraction
 import dev.phoneagent.core.ports.forTools
 import dev.phoneagent.core.session.InboxEntry
 import dev.phoneagent.core.session.InboxEntryKind
 import dev.phoneagent.core.session.InboxQueue
+import dev.phoneagent.core.session.SessionEvent
+import dev.phoneagent.core.session.SessionRecord
 import dev.phoneagent.core.session.ToolCallRecorded
 import dev.phoneagent.core.session.ToolExecuted
 import dev.phoneagent.core.session.ToolResultRecorded
 import dev.phoneagent.core.session.ToolStarted
+import dev.phoneagent.core.tool.FramedSnapshot
 import dev.phoneagent.core.tool.Tool
 import dev.phoneagent.core.tool.ToolArguments
 import dev.phoneagent.core.tool.ToolCall
@@ -45,10 +49,12 @@ import kotlinx.serialization.json.jsonPrimitive
  *    runs, READ tools included. A failed flush stops the task before the tool runs; the log
  *    already says it started, so repair gives it OUTCOME_UNKNOWN. A timed-out or faulted call
  *    that started on a non-READ verdict adds [LoopTexts.mayHaveTakenEffect], as the repair does;
- * 4. a call that handed off and whose screen could not be read afterwards gets
- *    [LoopTexts.screenUnknown] after its result's text (its prompts are all closed by then: [Prompts]
- *    closes each in the log before the next may open); then `toolPostExecute`, `tool/result`, and
- *    the attached context queued for the next step.
+ * 4. a result whose shown screen ([ToolResult.SCREEN]) was withheld for the call gets
+ *    [LoopTexts.screenWithheld] and the rule's hint after its text ([RecordingScreen] judged it);
+ *    a call that handed off and whose screen could not be read afterwards gets
+ *    [LoopTexts.screenUnknown] after that (its prompts are all closed by then: [Prompts] closes
+ *    each in the log before the next may open); then `toolPostExecute`, `tool/result`, and the
+ *    attached context queued for the next step.
  */
 internal class Calls(
     private val loop: LoopContext,
@@ -57,6 +63,7 @@ internal class Calls(
     private val interceptors = loop.setup.interceptors
     private val blobs = loop.setup.files.blobs
     private val gate = Gate(loop)
+    private val screenGate = ScreenGate(loop.setup.intents, loop.setup.policy)
     private val postChain = interceptors.toolPostExecute.chain { PostExecuteResult(it.result) }
 
     /** Runs [part] of the reply recorded at [replySeq]; returns its result's control signal. */
@@ -137,16 +144,7 @@ internal class Calls(
                 is Ruling.Run -> execute(tool, call, ruling.verdictSeq)
                 is Ruling.Answered -> ruling.result
             }
-        val result =
-            if (screenLostAfterHandoff(
-                    loop.log.records(),
-                    call.id,
-                )
-            ) {
-                outcome.noted(loop.texts.screenUnknown)
-            } else {
-                outcome
-            }
+        val result = noted(call, outcome)
         val post = postChain.proceed(PostExecuteInput(call, tool, result))
         loop.log.append(ToolResultRecorded(call.id, call.name, post.result), sources = listOf(dispatched.seq))
         loop.emit(LoopEvent.Card(call.id, tool.presentResult(call, post.result)))
@@ -154,6 +152,18 @@ internal class Calls(
             loop.inbox.add(InboxQueue.NEXT_STEP, InboxEntry(InboxEntryKind.INJECT, context.parts, context.source))
         }
         return post.result.control
+    }
+
+    /** [outcome] with the notes the log calls for: a withheld shown screen, then a screen lost after a handoff. */
+    private suspend fun noted(
+        call: ToolCall,
+        outcome: ToolResult,
+    ): ToolResult {
+        val records = loop.log.records()
+        val texts = loop.texts
+        val withheld = withheldShown(records, call.id, outcome)
+        val shown = if (withheld == null) outcome else outcome.noted(texts.screenWithheld + withheld.hint.orEmpty())
+        return if (screenLostAfterHandoff(records, call.id)) shown.noted(texts.screenUnknown) else shown
     }
 
     private suspend fun execute(
@@ -222,9 +232,18 @@ internal class Calls(
         }
     }
 
-    private fun screenFor(call: ToolCall): ScreenPort? =
+    private fun screenFor(call: ToolCall): RecordingScreen? =
         loop.setup.screen?.let { port ->
-            RecordingScreen(port, call.id, blobs) { event -> loop.log.append(event) }
+            RecordingScreen(port, call, blobs, screenGate, loop.texts.reasonWithheld, screenLog)
+        }
+
+    private val screenLog =
+        object : ScreenLog {
+            override suspend fun record(event: SessionEvent) {
+                loop.log.append(event)
+            }
+
+            override suspend fun records(): List<SessionRecord> = loop.log.records()
         }
 
     /** A call's own context: its tool may ask and hand off, never confirm (cards come from the policy only). */
@@ -234,11 +253,21 @@ internal class Calls(
     ) : ToolContext {
         override val taskId: TaskId get() = loop.setup.taskId
         override val sessionId: SessionId get() = loop.sessionId
-        override val screen: ScreenPort? = screenFor(call)
+        private val recording = screenFor(call)
+        override val screen: ScreenPort? get() = recording
         override val clock: Clock get() = loop.setup.clock
         override val apps: AppCatalog? get() = loop.setup.apps
 
         override suspend fun storeBlob(bytes: ByteArray): BlobRef = blobs.put(bytes)
+
+        override suspend fun framedSnapshot(
+            options: SnapshotOptions,
+            maxEdge: Int,
+            som: Boolean,
+        ): FramedSnapshot {
+            val screen = checkNotNull(recording) { "framedSnapshot needs a screen" }
+            return screen.framedSnapshot(options, maxEdge, som)
+        }
     }
 
     private sealed interface Parsed {

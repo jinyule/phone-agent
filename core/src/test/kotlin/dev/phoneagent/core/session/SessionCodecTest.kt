@@ -274,11 +274,69 @@ class SessionCodecTest {
         assertThrows<IllegalArgumentException> { InboxEntry(InboxEntryKind.STEER, listOf(p.reasoning)) }
         assertThrows<IllegalArgumentException> { CompactionSummary(listOf(p.toolCallPart)) }
         assertThrows<IllegalArgumentException> { CompactionPrune(listOf(p.reasoning)) }
-        assertThrows<IllegalArgumentException> { ScreenFrame(p.blob, "image/gif", 1, 1) }
-        assertThrows<IllegalArgumentException> { ScreenFrame(p.blob, "image/png", 0, 1) }
+        val s1 =
+            dev.phoneagent.core.ids
+                .SnapshotId("s1")
+        assertThrows<IllegalArgumentException> { ScreenFrame(p.blob, "image/gif", 1, 1, som = false, s1, s1) }
+        assertThrows<IllegalArgumentException> { ScreenFrame(p.blob, "image/png", 0, 1, som = false, s1, s1) }
         assertThrows<IllegalArgumentException> {
             SessionHeader(version = 0, sessionId = p.session, taskId = p.task, createdAt = 0)
         }
+    }
+
+    @Test
+    fun `a screen judgment has a rule exactly when withheld, and a hint only then`() {
+        val p = SessionSamples
+        val s1 =
+            dev.phoneagent.core.ids
+                .SnapshotId("s1")
+        val shown = JudgmentOutcome.SHOWN
+        val withheld = JudgmentOutcome.WITHHELD
+        val cases =
+            listOf(
+                "shown" to { ScreenJudged(p.call, s1, JudgmentPurpose.TOOL, shown) },
+                "withheld with a rule" to { ScreenJudged(p.call, s1, JudgmentPurpose.TOOL, withheld, "r") },
+                "withheld with a rule and a hint" to
+                    { ScreenJudged(p.call, s1, JudgmentPurpose.TOOL, withheld, "r", "h") },
+                "withheld without a rule" to { ScreenJudged(p.call, s1, JudgmentPurpose.FRAME_PRECHECK, withheld) },
+                "withheld with a blank rule" to { ScreenJudged(p.call, s1, JudgmentPurpose.TOOL, withheld, " ") },
+                "shown with a rule" to { ScreenJudged(p.call, s1, JudgmentPurpose.TOOL, shown, "r") },
+                "shown with a hint" to { ScreenJudged(p.call, s1, JudgmentPurpose.TOOL, shown, hint = "h") },
+            )
+        val accepted = cases.filter { (_, make) -> runCatching(make).isSuccess }.map { it.first }
+        assertEquals(listOf("shown", "withheld with a rule", "withheld with a rule and a hint"), accepted)
+        assertEquals(null, ScreenJudged(p.call, s1, JudgmentPurpose.TOOL, shown).rule)
+        // A log that breaks the rule is refused when read.
+        val broken =
+            """{"seq":2,"time":0,"type":"screen/judged","data":{"callId":"call-1","snapshot":"s1",""" +
+                """"purpose":"TOOL","outcome":"WITHHELD","rule":null,"hint":null}}"""
+        val error = assertThrows<SessionCorruptedException> { codec.read(log(headerLine, line(1), broken)) }
+        assertEquals(3, error.line)
+    }
+
+    @Test
+    fun `a frame names the screen read before it and the one it was checked on, both required`() {
+        val frame = """"blob":"${"a".repeat(64)}","mime":"image/png","width":1,"height":1,"som":false"""
+        val head = """{"seq":2,"time":0,"type":"screen/frame","ignorable":true,"data":"""
+        val full = """$head{$frame,"snapshotId":"s1","checkedOn":"s2"}}"""
+        val read =
+            codec
+                .read(log(headerLine, line(1), full))
+                .records
+                .last()
+                .event as ScreenFrame
+        assertEquals("s1" to "s2", read.snapshotId.value to read.checkedOn.value)
+        val missing =
+            listOf(
+                "snapshotId" to """$head{$frame,"checkedOn":"s2"}}""",
+                "checkedOn" to """$head{$frame,"snapshotId":"s1"}}""",
+                "som" to full.replace(""","som":false""", ""),
+            )
+        val accepted =
+            missing.filter { (_, broken) ->
+                runCatching { codec.read(log(headerLine, line(1), broken)) }.isSuccess
+            }
+        assertEquals(emptyList<String>(), accepted.map { it.first }, "read without a required field")
     }
 
     @Test

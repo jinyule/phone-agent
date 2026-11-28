@@ -144,6 +144,7 @@ private fun visibleOf(event: SessionEvent): Visible? =
         is ScreenActed,
         is ScreenLaunched,
         is ScreenFrame,
+        is ScreenJudged,
         is ToolStarted,
         is ToolExecuted,
         is TaskStopped,

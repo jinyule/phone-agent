@@ -159,7 +159,7 @@ internal object ToolResults {
             )
             (outcome.status as? ActionOutcome.Status.StaleRef)?.let { put("staleReason", it.reason.name) }
             put("effect", outcome.effect.name)
-            outcome.after?.let { put("screen", it.id.value) }
+            outcome.after?.let { put(ToolResult.SCREEN, it.id.value) }
         }
 }
 

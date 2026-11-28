@@ -22,6 +22,7 @@ import dev.phoneagent.core.session.RequestHeader
 import dev.phoneagent.core.session.RequestRetry
 import dev.phoneagent.core.session.ScreenActed
 import dev.phoneagent.core.session.ScreenFrame
+import dev.phoneagent.core.session.ScreenJudged
 import dev.phoneagent.core.session.ScreenLaunched
 import dev.phoneagent.core.session.ScreenObserved
 import dev.phoneagent.core.session.SessionEvent
@@ -127,6 +128,7 @@ internal fun isContextEvent(event: SessionEvent): Boolean =
         is ScreenActed,
         is ScreenLaunched,
         is ScreenFrame,
+        is ScreenJudged,
         is ToolStarted,
         is ToolExecuted,
         is TaskStopped,

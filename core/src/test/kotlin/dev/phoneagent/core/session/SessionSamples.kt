@@ -273,6 +273,7 @@ object SessionSamples {
                     after = snapshot,
                     diff =
                         ScreenDiff(
+                            base = SnapshotId("s1"),
                             added = listOf(element),
                             removed = listOf(ElementRef("e9")),
                             changed = listOf(field),
@@ -290,7 +291,7 @@ object SessionSamples {
                     ActionOutcome.Status.Ok,
                     ActionOutcome.Effect.CHANGED,
                     after = snapshot.copy(id = SnapshotId("s2"), ocr = null, fingerprint = "fp-2"),
-                    diff = ScreenDiff(changed = listOf(field), ocrUnverified = true),
+                    diff = ScreenDiff(base = SnapshotId("s1"), changed = listOf(field), ocrUnverified = true),
                 ),
             ),
             ScreenActed(
@@ -341,7 +342,17 @@ object SessionSamples {
                 LaunchTarget.SystemIntent(SystemIntentKind.TIMER, mapOf("seconds" to "60")),
                 ActionOutcome(ActionOutcome.Status.Ok, ActionOutcome.Effect.CHANGED),
             ),
-            ScreenFrame(blob, "image/jpeg", 720, 1280, som = true, snapshotId = SnapshotId("s1")),
+            ScreenFrame(blob, "image/jpeg", 720, 1280, som = true, SnapshotId("s1"), checkedOn = SnapshotId("s2")),
+            ScreenJudged(call, SnapshotId("s1"), JudgmentPurpose.TOOL, JudgmentOutcome.SHOWN),
+            ScreenJudged(
+                call,
+                SnapshotId("s2"),
+                JudgmentPurpose.FRAME_PRECHECK,
+                JudgmentOutcome.WITHHELD,
+                rule = "hard.finance_app",
+                hint = "this app is off limits",
+            ),
+            ScreenJudged(call, SnapshotId("s2"), JudgmentPurpose.TOOL, JudgmentOutcome.WITHHELD, ScreenJudged.HAND_OFF),
             ToolExecuted(call, ToolStatus.OK),
             ToolResultRecorded(
                 call,

@@ -6,6 +6,7 @@ import dev.phoneagent.core.ports.ActionOutcome
 import dev.phoneagent.core.ports.ElementRef
 import dev.phoneagent.core.ports.OcrLine
 import dev.phoneagent.core.ports.ScreenDiff
+import dev.phoneagent.core.ports.ScreenFlag
 import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.ports.SnapshotDetail
 import dev.phoneagent.core.tool.ScreenPresenter
@@ -31,6 +32,10 @@ import dev.phoneagent.core.tool.ScreenPresenter
  * lines were not checked again. After a switch to another app (`NEW_APP`) the page is shown as it
  * is, without that note: the earlier lines were the other app's.
  *
+ * A withheld snapshot ([ScreenFlag.WITHHELD], policy-rules §6.4) is its header with the id,
+ * package and surface, and a line that says it is withheld, at any detail and after any action:
+ * nothing of its content, and no diff, shows.
+ *
  * [vision] is whether the main model reads images: without it no note suggests a screenshot, and
  * the tools read it here to decide on frames. Built only by [ScreenComponents], with the [config]
  * its analyzer reads lines with.
@@ -47,7 +52,12 @@ public class ScreenFormatter internal constructor(
     override fun page(
         snapshot: ScreenSnapshot,
         detail: SnapshotDetail,
-    ): String = render(snapshot, detail, added = emptySet(), notes = emptyList())
+    ): String =
+        if (ScreenFlag.WITHHELD in snapshot.flags) {
+            headers.withheld(snapshot).joinToString("\n")
+        } else {
+            render(snapshot, detail, added = emptySet(), notes = emptyList())
+        }
 
     override fun afterAction(
         outcome: ActionOutcome,
@@ -57,6 +67,7 @@ public class ScreenFormatter internal constructor(
         val diff = outcome.diff
         val since = plannedOn?.let { "与 $it 相比" } ?: "与上一屏相比"
         return when {
+            ScreenFlag.WITHHELD in after.flags -> page(after, SnapshotDetail.BRIEF)
             diff == null || outcome.effect == ActionOutcome.Effect.NEW_APP -> page(after, SnapshotDetail.BRIEF)
             changedShare(after, diff) > config.fullPageShare -> fullAfterBigChange(after, diff, since)
             else -> diffView(after, diff, since) ?: fullAfterBigChange(after, diff, since)

@@ -42,6 +42,9 @@ class ScriptedScreen(
     /** Returned by [frame]. */
     var frame: Frame? = null
 
+    /** The `maxEdge` and `som` of every [frame] call, in order. */
+    val frameRequests = mutableListOf<Pair<Int, Boolean>>()
+
     /** Returned by [awaitChange]. */
     var changes: Boolean = true
 
@@ -73,7 +76,10 @@ class ScriptedScreen(
     override suspend fun frame(
         maxEdge: Int,
         som: Boolean,
-    ): Frame? = frame
+    ): Frame? {
+        frameRequests += maxEdge to som
+        return frame
+    }
 
     override suspend fun awaitChange(timeoutMs: Long): Boolean = changes
 

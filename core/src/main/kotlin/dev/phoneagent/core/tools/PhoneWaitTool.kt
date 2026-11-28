@@ -1,6 +1,7 @@
 package dev.phoneagent.core.tools
 
 import dev.phoneagent.core.model.Part
+import dev.phoneagent.core.ports.ScreenFlag
 import dev.phoneagent.core.ports.ScreenPort
 import dev.phoneagent.core.ports.ScreenSnapshot
 import dev.phoneagent.core.ports.SnapshotDetail
@@ -34,9 +35,16 @@ import kotlinx.serialization.json.put
  *   The wait between reads is not raced against [ScreenPort.awaitChange] ("whichever comes
  *   first"): the minimum read interval is also the longest wait, so a change event could never
  *   bring a read forward; racing would only add one port call per round, with the same result.
- * - **stable**: [ScreenPort.awaitChange] until a quiet period of [stableQuietMs]; each look after
- *   a change takes at least [readIntervalMs], so a port that reports changes without suspending
- *   cannot spin the loop or hold off cancellation.
+ * - **stable**: [ScreenPort.awaitChange] until a quiet period of [stableQuietMs], then a read;
+ *   each look after a change takes at least [readIntervalMs], so a port that reports changes
+ *   without suspending cannot spin the loop or hold off cancellation. A withheld read after a
+ *   quiet period is waited past like a change: one [readIntervalMs] later, the wait for a quiet
+ *   period starts over.
+ *
+ * A withheld screen ([ScreenFlag.WITHHELD], policy-rules §6.4) meets no condition: its text is not
+ * there to check, which is neither "appeared" nor "gone", and it does not show that the screen
+ * settled. The wait goes on past it, whatever the condition; when the last screen is withheld,
+ * the result says the condition could not be checked, as an error.
  */
 internal class PhoneWaitTool(
     private val presenter: ScreenPresenter,
@@ -108,17 +116,26 @@ internal class PhoneWaitTool(
         screen: ScreenPort,
         wait: Wait,
     ): ScreenSnapshot {
-        if (wait.condition == Condition.STABLE) {
-            do {
-                val changed = changedWithin(screen)
-            } while (changed)
-            return screen.snapshot()
-        }
+        if (wait.condition == Condition.STABLE) return settled(screen)
         var snapshot = screen.snapshot()
         while (!matches(snapshot, wait)) {
             delay(readIntervalMs)
             snapshot = screen.snapshot()
         }
+        return snapshot
+    }
+
+    /** The first screen read after a quiet period that is not withheld (see the class comment). */
+    private suspend fun settled(screen: ScreenPort): ScreenSnapshot {
+        var snapshot: ScreenSnapshot
+        do {
+            do {
+                val changed = changedWithin(screen)
+            } while (changed)
+            snapshot = screen.snapshot()
+            val passed = withheld(snapshot)
+            if (passed) delay(readIntervalMs)
+        } while (passed)
         return snapshot
     }
 
@@ -131,31 +148,40 @@ internal class PhoneWaitTool(
             changed
         }
 
+    /** Whether [snapshot] meets [wait]; a withheld one never does, it cannot be checked. */
     private fun matches(
         snapshot: ScreenSnapshot,
         wait: Wait,
-    ): Boolean = shows(snapshot, wait.needle) == (wait.condition == Condition.APPEAR)
+    ): Boolean = !withheld(snapshot) && shows(snapshot, wait.needle) == (wait.condition == Condition.APPEAR)
 
     private fun report(
         wait: Wait,
         result: Pair<Boolean, ScreenSnapshot>,
     ): ToolResult {
-        val (met, snapshot) = result
-        val shown = wait.text?.let { "「${presenter.mask(it)}」" }.orEmpty()
-        val seconds = seconds(wait.timeoutMs)
-        val line =
-            when (wait.condition) {
-                Condition.APPEAR -> if (met) "等到了：${shown}出现了。" else "等了 $seconds 秒，${shown}还没有出现。"
-                Condition.DISAPPEAR -> if (met) "等到了：${shown}消失了。" else "等了 $seconds 秒，${shown}还在。"
-                Condition.STABLE -> if (met) "画面已经稳定。" else "等了 $seconds 秒，画面一直在变。"
-            }
+        val (waited, snapshot) = result
+        // A withheld last screen says nothing about the condition, not even that it is stable.
+        val met = waited && !withheld(snapshot)
+        val line = if (withheld(snapshot)) UNCHECKED else conditionLine(wait, met)
         val details =
             buildJsonObject {
                 put("met", met)
-                put("screen", snapshot.id.value)
+                put(ToolResult.SCREEN, snapshot.id.value)
             }
         val text = line + "\n" + presenter.page(snapshot, SnapshotDetail.BRIEF)
         return ToolResult(if (met) ToolStatus.OK else ToolStatus.ERROR, listOf(Part.Text(text)), details)
+    }
+
+    private fun conditionLine(
+        wait: Wait,
+        met: Boolean,
+    ): String {
+        val shown = wait.text?.let { "「${presenter.mask(it)}」" }.orEmpty()
+        val seconds = seconds(wait.timeoutMs)
+        return when (wait.condition) {
+            Condition.APPEAR -> if (met) "等到了：${shown}出现了。" else "等了 $seconds 秒，${shown}还没有出现。"
+            Condition.DISAPPEAR -> if (met) "等到了：${shown}消失了。" else "等了 $seconds 秒，${shown}还在。"
+            Condition.STABLE -> if (met) "画面已经稳定。" else "等了 $seconds 秒，画面一直在变。"
+        }
     }
 
     /** [ms] as seconds with at most one decimal, e.g. `2`, `0.5`. */
@@ -173,8 +199,6 @@ internal class PhoneWaitTool(
                 snapshot.ocr.orEmpty().map { it.text }
         return needle != null && texts.any { normalize(it).contains(needle) }
     }
-
-    private fun normalize(text: String): String = text.filterNot(Char::isWhitespace).lowercase()
 
     private enum class Condition(
         val wire: String,
@@ -202,5 +226,12 @@ internal class PhoneWaitTool(
         private const val MAX_TEXT = 200
         private const val USAGE = "phone_wait(condition=appear/disappear/stable, text?, timeoutMs?)"
         private val CONDITIONS = Condition.entries.associateBy { it.wire }
+        private const val UNCHECKED = "这一屏不能显示，条件无法核实。"
     }
 }
+
+/** [text] as it is matched: without whitespace, in lower case. */
+private fun normalize(text: String): String = text.filterNot(Char::isWhitespace).lowercase()
+
+/** Whether the runtime withheld [snapshot] (policy-rules §6.4). */
+private fun withheld(snapshot: ScreenSnapshot): Boolean = ScreenFlag.WITHHELD in snapshot.flags

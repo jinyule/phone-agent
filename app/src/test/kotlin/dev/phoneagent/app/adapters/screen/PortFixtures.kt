@@ -90,6 +90,7 @@ internal class RefDiffAnalyzer : SnapshotAnalyzer {
         val was = before.elements.associateBy { it.ref }
         val now = after.elements.associateBy { it.ref }
         return ScreenDiff(
+            base = before.id,
             added = after.elements.filter { it.ref !in was },
             removed = before.elements.map { it.ref }.filter { it !in now },
             changed = after.elements.filter { element -> was[element.ref]?.let { it != element } == true },

@@ -69,11 +69,13 @@ class MaskingBoundaryTest {
         runTest {
             val screen = FakeScreen().apply { unavailable = ScreenUnavailableException("lost $CARD", null) }
             assertMasked(tap(screen).text())
-            val observeScreen = FakeScreen().apply { frameError = ScreenUnavailableException("frame $CARD", null) }
+            // The screen read with a frame: a port behind another context may word it so.
+            val framing =
+                FakeContext().apply { framed = { _, _, _ -> throw ScreenUnavailableException("frame $CARD", null) } }
             val observed =
                 tools
                     .getValue("phone_observe")
-                    .execute(call("phone_observe", """{"image":true}"""), FakeContext(observeScreen))
+                    .execute(call("phone_observe", """{"image":true}"""), framing)
             assertMasked(observed.text())
         }
 

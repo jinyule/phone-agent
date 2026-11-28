@@ -9,6 +9,7 @@ import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.policy.ActionIntent
 import dev.phoneagent.core.policy.PolicyContext
 import dev.phoneagent.core.policy.PolicyEngine
+import dev.phoneagent.core.policy.SCREEN_JUDGMENT_TOOL
 import dev.phoneagent.core.policy.SecurityLevel
 import dev.phoneagent.core.policy.Verdict
 import dev.phoneagent.core.ports.AskResult
@@ -69,23 +70,43 @@ internal object PolicySamples {
     val refuse = Verdict.Refuse("rule-7", "Sending to strangers is not allowed.")
 }
 
-/** Answers with [verdicts] in order (then Allow) and remembers what it was asked. */
+/**
+ * Answers with [verdicts] in order (then Allow) and remembers what it was asked.
+ *
+ * The runtime's judgments of the screens a call's tool reads (policy-rules §6.4) come as more
+ * [SCREEN_JUDGMENT_TOOL] evaluations of a call already evaluated. Unless [judgesScreens], they
+ * take no verdict from the script: they are allowed and kept in [screens] only, so a script
+ * written for the calls stays one.
+ */
 internal class ScriptedPolicy(
     vararg verdicts: Verdict,
+    private val judgesScreens: Boolean = false,
 ) : PolicyEngine {
     private val queue = ArrayDeque(verdicts.toList())
+    private val evaluated = HashSet<ToolCallId>()
     val contexts = mutableListOf<PolicyContext>()
     val intents = mutableListOf<ActionIntent>()
+
+    /** The screens judged for tools and allowed without a scripted verdict. */
+    val screens = mutableListOf<ScreenSnapshot?>()
 
     override fun evaluate(
         call: dev.phoneagent.core.tool.ToolCall,
         intent: ActionIntent,
         ctx: PolicyContext,
     ): Verdict {
+        val again = !evaluated.add(call.id)
+        if (!judgesScreens && again && isScreenJudgment(call)) {
+            screens += ctx.screen
+            return Verdict.Allow
+        }
         contexts += ctx
         intents += intent
         return queue.removeFirstOrNull() ?: Verdict.Allow
     }
+
+    private fun isScreenJudgment(call: dev.phoneagent.core.tool.ToolCall): Boolean =
+        call.name == SCREEN_JUDGMENT_TOOL && call.args.isEmpty()
 }
 
 /** A started `send` task. */

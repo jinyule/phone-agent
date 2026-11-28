@@ -3,12 +3,11 @@ package dev.phoneagent.core.tools
 import dev.phoneagent.core.model.Part
 import dev.phoneagent.core.ports.Frame
 import dev.phoneagent.core.ports.ScreenFlag
-import dev.phoneagent.core.ports.ScreenPort
 import dev.phoneagent.core.ports.ScreenSnapshot
-import dev.phoneagent.core.ports.ScreenUnavailableException
 import dev.phoneagent.core.ports.SnapshotDetail
 import dev.phoneagent.core.ports.SnapshotOptions
 import dev.phoneagent.core.ports.TreeQuality
+import dev.phoneagent.core.tool.FramedSnapshot
 import dev.phoneagent.core.tool.RiskClass
 import dev.phoneagent.core.tool.ScreenPresenter
 import dev.phoneagent.core.tool.ToolCall
@@ -21,12 +20,16 @@ import kotlinx.serialization.json.put
 
 /**
  * `phone_observe(detail?, image?)` (phase1 §5): reads the screen as one page. A frame, with
- * Set-of-Mark boxes when the port could draw them ([Frame.som]; the text says which), is attached
+ * Set-of-Mark boxes when the port could draw them ([Frame.som]; the text says which), is asked for
  * when `image=true`, or when `image` is absent and the tree is not [TreeQuality.GOOD]; never when
  * the main model reads no images ([ScreenPresenter.vision], the same capability the page notes
- * follow) or the page is FLAG_SECURE (the text says why). The description is one text whatever
- * the capability is (tool definitions are part of the cached prompt prefix): it states the
- * condition instead.
+ * follow), the page is FLAG_SECURE (the text says why) or withheld. The description is one text
+ * whatever the capability is (tool definitions are part of the cached prompt prefix): it states
+ * the condition instead.
+ *
+ * A frame comes only with [ToolContext.framedSnapshot], which reads the screen again around the
+ * capture (policy-rules §6.4): the page shown is then that screen, with the frame when one went
+ * with it, else "（截不到图）"; any failure of the capture reads the same.
  */
 internal class PhoneObserveTool(
     private val presenter: ScreenPresenter,
@@ -66,39 +69,70 @@ internal class PhoneObserveTool(
         image: Boolean?,
     ): ToolResult {
         val screen = ctx.screen ?: return ToolResults.NO_SCREEN
-        return when (val read = screenCall { screen.snapshot(SnapshotOptions(detail)) }) {
+        val options = SnapshotOptions(detail)
+        return when (val read = screenCall { screen.snapshot(options) }) {
             is ScreenCall.Unavailable -> ToolResults.unavailable(read.error, presenter)
-            is ScreenCall.Done -> withImage(ctx, screen, read.value, presenter.page(read.value, detail), image)
+            is ScreenCall.Done -> withImage(ctx, read.value, options, image)
         }
     }
 
     private suspend fun withImage(
         ctx: ToolContext,
-        screen: ScreenPort,
         snapshot: ScreenSnapshot,
-        page: String,
+        options: SnapshotOptions,
         image: Boolean?,
     ): ToolResult {
         val wanted = image ?: (snapshot.quality != TreeQuality.GOOD)
         val skipped =
             when {
+                // Nothing of a withheld screen is shown, not even whether a frame was taken.
+                ScreenFlag.WITHHELD in snapshot.flags -> ""
+
                 !wanted -> ""
+
                 !presenter.vision -> "\n（当前模型不看图，没有附截图）"
+
                 ScreenFlag.SECURE in snapshot.flags -> "\n（这一页禁止截屏，没有附截图）"
+
                 else -> null
             }
-        val frame = if (skipped == null) screenCall { screen.frame(som = true) } else null
+        if (skipped !=
+            null
+        ) {
+            return result(snapshot, listOf(Part.Text(presenter.page(snapshot, options.detail) + skipped)))
+        }
+        return when (val framed = screenCall { ctx.framedSnapshot(options, som = true) }) {
+            is ScreenCall.Unavailable -> ToolResults.unavailable(framed.error, presenter)
+            is ScreenCall.Done -> framed(ctx, framed.value, options.detail)
+        }
+    }
+
+    /** The page of the screen read after the capture, with the frame that went with it. */
+    private suspend fun framed(
+        ctx: ToolContext,
+        framed: FramedSnapshot,
+        detail: SnapshotDetail,
+    ): ToolResult {
+        val shown = framed.snapshot
+        val page = presenter.page(shown, detail)
+        val frame = framed.frame
         val content =
             when {
-                skipped != null -> listOf(Part.Text(page + skipped))
-                frame is ScreenCall.Done && frame.value != null -> attach(ctx, page, frame.value)
-                frame is ScreenCall.Unavailable -> listOf(Part.Text("$page\n（截图失败：${failure(frame.error)}）"))
-                else -> listOf(Part.Text("$page\n（截不到图）"))
+                ScreenFlag.WITHHELD in shown.flags -> listOf(Part.Text(page))
+                frame == null -> listOf(Part.Text("$page\n（截不到图）"))
+                else -> attach(ctx, page, frame)
             }
+        return result(shown, content)
+    }
+
+    private fun result(
+        shown: ScreenSnapshot,
+        content: List<Part>,
+    ): ToolResult {
         val details =
             buildJsonObject {
-                put("screen", snapshot.id.value)
-                put("quality", snapshot.quality.name)
+                put(ToolResult.SCREEN, shown.id.value)
+                put("quality", shown.quality.name)
                 put("imageAttached", content.any { it is Part.Image })
             }
         return ToolResult(ToolStatus.OK, content, details)
@@ -108,19 +142,13 @@ internal class PhoneObserveTool(
         ctx: ToolContext,
         page: String,
         frame: Frame,
-    ): List<Part> =
-        if (frame.mime in Part.IMAGE_MIMES) {
-            val blob = ctx.storeBlob(frame.bytes)
-            listOf(
-                Part.Text("$page\n" + if (frame.som) BOXED else UNBOXED),
-                Part.Image(blob, frame.mime, frame.width, frame.height),
-            )
-        } else {
-            listOf(Part.Text("$page\n（截图格式 ${frame.mime} 不支持，没有附图）"))
-        }
-
-    /** Why the frame failed, masked: the message comes from the device. */
-    private fun failure(error: ScreenUnavailableException): String = presenter.mask(error.message.orEmpty())
+    ): List<Part> {
+        val blob = ctx.storeBlob(frame.bytes)
+        return listOf(
+            Part.Text("$page\n" + if (frame.som) BOXED else UNBOXED),
+            Part.Image(blob, frame.mime, frame.width, frame.height),
+        )
+    }
 
     private companion object {
         const val USAGE = "phone_observe(detail=brief/full?, image?)"

@@ -10,8 +10,9 @@ import kotlin.reflect.KClass
  * Registry of every [SessionEvent] type: its on-disk name (the `@SerialName`) and whether
  * records of that type are ignorable by readers that do not know it. Types that the model view,
  * the turn and run structure (`session/resumed` included), the task settings or the execution
- * rules (`policy/verdict`, which `tool/started` points at) depend on are not ignorable;
- * diagnostics, prompts, device facts and side requests are.
+ * rules (`policy/verdict`, which `tool/started` points at; `screen/judged`, which decides what
+ * later results may show) depend on are not ignorable; diagnostics, prompts, device facts and
+ * side requests are.
  */
 public object SessionEventTypes {
     private val all: List<EventType<*>> =
@@ -53,6 +54,7 @@ public object SessionEventTypes {
             type<ScreenActed>(ignorable = true),
             type<ScreenLaunched>(ignorable = true),
             type<ScreenFrame>(ignorable = true),
+            type<ScreenJudged>(ignorable = false),
         )
     private val byName: Map<String, EventType<*>> = all.associateBy { it.name }
     private val byClass: Map<KClass<*>, EventType<*>> = all.associateBy { it.kclass }

@@ -10,6 +10,7 @@ import dev.phoneagent.core.policy.ActionIntent
 import dev.phoneagent.core.policy.IntentKind
 import dev.phoneagent.core.policy.PolicyContext
 import dev.phoneagent.core.policy.PolicyEngine
+import dev.phoneagent.core.policy.SCREEN_JUDGMENT_TOOL
 import dev.phoneagent.core.policy.SecurityLevel
 import dev.phoneagent.core.policy.Verdict
 import dev.phoneagent.core.ports.ConfirmCard
@@ -61,6 +62,8 @@ class AgentLoopExecutionHistoryTest {
             intent: ActionIntent,
             ctx: PolicyContext,
         ): Verdict {
+            // The judgments of the screens the tools read are READs: allowed, and not the calls' contexts.
+            if (call.name == SCREEN_JUDGMENT_TOOL) return Verdict.Allow
             contexts += ctx
             val target = targets[ctx.screen?.id?.value]
             val card = ConfirmCard(call.id, ConfirmReason.OUTWARD, "发送消息", target, pkg = intent.pkg)

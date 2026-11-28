@@ -182,7 +182,7 @@ class ScreenDiffViewTest {
         // Another app: its page is shown as it is, and the earlier app's lines are not mentioned.
         val after = page("s2").copy(ocr = null)
         val otherApp = ActionOutcome(Status.Ok, Effect.NEW_APP, after, differ.diff(before, after))
-        assertEquals(ScreenDiff(ocrUnverified = true), otherApp.diff)
+        assertEquals(ScreenDiff(before.id, ocrUnverified = true), otherApp.diff)
         assertEquals(formatter.page(after, SnapshotDetail.BRIEF), formatter.afterAction(otherApp, before.id))
     }
 

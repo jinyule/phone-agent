@@ -119,7 +119,13 @@ class AndroidScreenTest {
             after: ScreenSnapshot,
         ): ScreenDiff {
             diffs++
-            return ScreenDiff(added = after.elements.filter { a -> before.elements.none { it.name == a.name } })
+            return ScreenDiff(
+                before.id,
+                added =
+                    after.elements.filter { a ->
+                        before.elements.none { it.name == a.name }
+                    },
+            )
         }
     }
 
@@ -217,6 +223,7 @@ class AndroidScreenTest {
             assertEquals(listOf(AccessibilityNodeInfo.ACTION_CLICK), ok.log.ids)
             assertEquals(listOf("OK", "Done"), outcome.after?.elements?.map { it.name })
             assertEquals(listOf("Done"), outcome.diff?.added?.map { it.name })
+            assertEquals("the diff is based on the planned screen", planned.id, outcome.diff?.base)
             assertEquals("the after-screen is registered", SnapshotId("s2"), outcome.after?.id)
             assertTrue(host.gestures.isEmpty())
             // No event came: the settle wait ran to its cap, in virtual time.
@@ -270,12 +277,13 @@ class AndroidScreenTest {
         runTest {
             show(button("OK", Rect(0, 1000, 500, 1100)))
             val screen = screen()
-            screen.snapshot()
+            val latest = screen.snapshot()
             host.onGesture = { show(button("OK", Rect(0, 1000, 500, 1100)), button("Done", Rect(0, 1200, 500, 1300))) }
 
             val outcome = screen.act(UiAction.Tap(Target.Point(250, 525)), on = null)
 
             assertEquals(listOf("Done"), outcome.diff?.added?.map { it.name })
+            assertEquals(latest.id, outcome.diff?.base)
         }
 
     @Test
@@ -522,7 +530,7 @@ class AndroidScreenTest {
         runTest {
             show(button("Home", Rect(0, 0, 500, 100)), pkg = "com.launcher")
             val screen = screen()
-            screen.snapshot()
+            val latest = screen.snapshot()
             system.onStart = {
                 show(
                     button("Home", Rect(0, 0, 500, 100)),
@@ -535,6 +543,7 @@ class AndroidScreenTest {
             val outcome = screen.launch(LaunchTarget.Link("https://example.com"))
 
             assertEquals(listOf("Widget"), outcome.diff?.added?.map { it.name })
+            assertEquals(latest.id, outcome.diff?.base)
         }
 
     @Test

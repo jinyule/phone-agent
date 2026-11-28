@@ -216,6 +216,20 @@ v1 仍未发布。`ScreenSnapshot` 加 `detail: SnapshotDetail = BRIEF`：端口
 - policy 不读 `HandoffResult`：`handoff/start`、`handoff/end` 不论结局都是作废边界，`operatedPackages` 和 `outwardConfirmedPackages` 都不看交接，所以加这个值不会让任何判定变松。
 - v1 未发布（第一个 M1 PR 才冻结），加枚举值不升版本；v1 fixture 里的 FAILED 样本照旧有效，`format-names.txt` 加上新值。
 
+### 16. 工具读到的屏先判定（policy-rules §6.4，WP02b，协调者决定）
+
+工具读到的每一屏（读屏、动作和启动的回读、截图前后的两屏），runtime 先合成一次 `phone_observe`（`core.policy.SCREEN_JUDGMENT_TOOL`，没有参数）交给 PolicyEngine，只有 Allow 才交给工具（phase1 §3.8"屏幕判定"）。为此改了这些契约：
+
+- `screen/judged`（`ScreenJudged`，ignorable = false）：`callId`、`snapshot`、`purpose`（`TOOL` / `FRAME_PRECHECK`）、`outcome`（`SHOWN` / `WITHHELD`）、`rule?`、`hint?`。扣下时必须有 `rule`（规则名，或者 `confirm`、`hand_off`），只有扣下时才能有 `hint`，加载时校验。两个枚举和其他枚举一样按常量名大写序列化。每次判定都记，不只记被拒的：设备重执行要逐条比判定，"没有记录"也就不能当作放行。
+- `ScreenFlag.WITHHELD`：扣下的屏给工具的副本带它，只留 id、surface、pkg、detail。
+- `ScreenDiff.base` 必填：差分是和哪一屏比的。runtime 只在 base 是模型看过的屏时给差分，否则差分会把模型没看过的屏的内容当成"去掉的行"带出来。
+- `ScreenFrame` 的 `som`、`snapshotId`、`checkedOn` 都必填：截图之前读的 S（编号框按它画）和截图之后核对、给模型看的 S2。只在图随 S2 返回时记。
+- `ToolContext.framedSnapshot` 和 `FramedSnapshot`（`core.tool` 的公共契约，在 WP02b 的授权范围内）：工具要图只走这里，`ToolContext.screen` 的 `frame()` 返回 null。截图前后各读一屏（S、S2），图只在 S2 放行、和 S 同包时随 S2 返回；带编号框的图还要求 S2 的元素编号和位置与 S 一致，因为框是按 S 画的（协调者确认）。接口方法没有默认实现，所有 `ToolContext` 实现都要跟着改。
+- `ToolResult.SCREEN`（`details.screen`）是契约："结果显示的那一屏"。runtime 按它认模型看过的屏、给扣下的屏追加提示。
+- `LoopTexts.screenWithheld`、`reasonWithheld`：扣下时的说明和替换端口自由文字的固定文字。
+
+v1 未发布（第一个 M1 PR 才冻结），以上都不升版本；v1 fixture 原地补字段和样本，`format-names.txt` 跟着加。
+
 ## Alternatives considered
 
 - **id 用裸 `String` 或 typealias**：编译器分不清 `TaskId` 和 `SessionId`，传错参数只能靠测试发现。
@@ -260,6 +274,17 @@ v1 仍未发布。`ScreenSnapshot` 加 `detail: SnapshotDetail = BRIEF`：端口
 - **收回失败时 `handOff` 抛 `ScreenUnavailableException`**（第 15 节的方案 B，不加枚举值）：和交出没有落定时一样走 runtime 的 ERROR。要改 `ToolInteraction.handOff` 的语义；模型拿到的从"App 还留在用户屏幕上"变成一个异常类名；PolicyEngine 判的转交也从 REFUSED 变成 ERROR。
 - **只改 `details.handoff` 的值**（第 15 节）：工具只拿到 `HandoffResult`，FAILED 分不出交出失败和收回失败，写不出两个值；要分就得解析 `handoff/end` 的 detail 文字，或者让工具去读日志。
 - **runtime 在内存里记每个快照的详细度**（第 14 节的另一个选项）：不进日志，要在 runtime 里复刻端口"回读按计划屏的详细度"的规则，进程重建后也没有了。
+- **在 `toolPostExecute` 拦截器里判新屏、剥结果**（第 16 节的另一个选项）：拦截器只看得到成品 `ToolResult`，要反向解析屏幕格式；截图那时已经进了 blob；拦截器还可能漏装或被重排。
+- **扣下时给工具一个不带标记的空快照，或者让 `snapshot()` 抛异常**（第 16 节）：空快照和真的空屏分不出来，工具和 wait 会据此下结论；抛异常时动作的结果连状态都丢了，模型也不知道屏幕被扣下。
+- **日志只记扣下的副本**（第 16 节）：PolicyEngine 要靠完整屏才认得出敏感页，下一个调用也得在完整屏上判。
+- **只在被拒时记 `screen/judged`**（第 16 节）：设备重执行没法区分"放行了"和"没判"。
+- **在 `ToolResults` 的出口过滤自由文字**（第 16 节）：那里已经分不出文字来自哪一屏；而且每个工具、每条出口都得记着过滤。
+- **端口的自由文字一律换掉**（第 16 节 v1）：放行屏上动作失败的有用原因也丢了。
+- **没有放行的新屏时，自由文字回退到 Gate 的屏或旧的放行屏**（第 16 节 v2）：失败的新读报的文字不一定来自旧屏（A 放行以后界面进了被拒的 B，读 B 失败，异常里写的是 B 的内容）。
+- **由 formatter 判断差分基线能不能用**（第 16 节）：formatter 不读日志，不知道模型看过哪些屏；base 也不在差分里。
+- **关掉截图**（第 16 节）：树读不全的页面（游戏、画布、WebView）只能靠图。
+- **只靠 WP07 给 frame 带上包名**（第 16 节）：只能看出截图时的 App，看不出那一屏能不能给模型看。
+- **截图以后给模型看 S，`latestSnapshot` 跳过 S2**（第 16 节 v2）：S2 放行、同包，但同一坐标上的控件可能已经从"返回"变成"发送"；下一个调用在旧屏 S 上判，会绕过确认。
 - **截断的调用也写 `tool/call`**：`tool/call` 装的是校验过的 `ToolCall`，截断的参数可能根本不是 JSON；而且它们从未派发，写了反而让"有 `tool/call` = 派发过"不再成立。
 
 ## 后果

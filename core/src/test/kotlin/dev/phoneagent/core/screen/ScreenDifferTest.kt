@@ -53,7 +53,7 @@ class ScreenDifferTest {
                 snapshot("s1", listOf(box1, box2, ok.under("e1"))),
                 snapshot("s2", listOf(box1, box2, ok.under("e2"))),
             )
-        assertEquals(ScreenDiff(changed = listOf(ok.under("e2"))), moved)
+        assertEquals(ScreenDiff(base = SnapshotId("s1"), changed = listOf(ok.under("e2"))), moved)
     }
 
     @Test
@@ -90,7 +90,7 @@ class ScreenDifferTest {
         val like = el("e1", ElementRole.BUTTON, "赞", box(800, 100, 900, 150), setOf(ElementState.CLICKABLE))
         val replaced = like.copy(ref = ElementRef("e9"))
         assertEquals(
-            ScreenDiff(added = listOf(replaced), removed = listOf(ElementRef("e1"))),
+            ScreenDiff(base = SnapshotId("s1"), added = listOf(replaced), removed = listOf(ElementRef("e1"))),
             differ.diff(snapshot("s1", listOf(like)), snapshot("s2", listOf(replaced))),
         )
     }
@@ -110,7 +110,10 @@ class ScreenDifferTest {
                 snapshot("s1", listOf(list, alice, aliceText, bob, bobText)),
                 snapshot("s2", listOf(list, bobUp, bobText.copy(bounds = box(20, 120, 400, 180)))),
             )
-        assertEquals(ScreenDiff(removed = listOf(ElementRef("e2")), changed = listOf(bobUp)), diff)
+        assertEquals(
+            ScreenDiff(base = SnapshotId("s1"), removed = listOf(ElementRef("e2")), changed = listOf(bobUp)),
+            diff,
+        )
     }
 
     @Test
@@ -188,17 +191,17 @@ class ScreenDifferTest {
         val three = snapshot("s1", listOf(like("e1", 100), like("e2", 200), like("e3", 300)))
         // The last one goes away.
         assertEquals(
-            ScreenDiff(removed = listOf(ElementRef("e3"))),
+            ScreenDiff(base = SnapshotId("s1"), removed = listOf(ElementRef("e3"))),
             differ.diff(three, snapshot("s2", listOf(like("e1", 100), like("e2", 200)))),
         )
         // The middle one goes away and the last moves up into its place.
         assertEquals(
-            ScreenDiff(removed = listOf(ElementRef("e2")), changed = listOf(like("e3", 200))),
+            ScreenDiff(base = SnapshotId("s1"), removed = listOf(ElementRef("e2")), changed = listOf(like("e3", 200))),
             differ.diff(three, snapshot("s2", listOf(like("e1", 100), like("e3", 200)))),
         )
         // The first one goes away; the others stay where they were.
         assertEquals(
-            ScreenDiff(removed = listOf(ElementRef("e1"))),
+            ScreenDiff(base = SnapshotId("s1"), removed = listOf(ElementRef("e1"))),
             differ.diff(three, snapshot("s2", listOf(like("e2", 200), like("e3", 300)))),
         )
         // A new equal button above e1 is the added one; e1 moved and changed.
@@ -219,7 +222,10 @@ class ScreenDifferTest {
         assertEquals(listOf(loading), diff.ocrRemoved, "repeated lines pair one to one")
         val moved = loading.copy(bounds = box(400, 600, 600, 660))
         val movedDiff = differ.diff(old.copy(ocr = listOf(loading)), old.copy(ocr = listOf(moved)))
-        assertEquals(ScreenDiff(ocrAdded = listOf(moved), ocrRemoved = listOf(loading)), movedDiff)
+        assertEquals(
+            ScreenDiff(base = SnapshotId("s1"), ocrAdded = listOf(moved), ocrRemoved = listOf(loading)),
+            movedDiff,
+        )
     }
 
     @Test
@@ -231,17 +237,35 @@ class ScreenDifferTest {
         val unread = differ.diff(read, read.copy(ocr = null))
         assertEquals(emptyList<OcrLine>(), unread.ocrRemoved)
         assertTrue(unread.isEmpty)
-        assertEquals(ScreenDiff(ocrUnverified = true), unread)
+        assertEquals(ScreenDiff(base = SnapshotId("s1"), ocrUnverified = true), unread)
         // Ran and found nothing: the old lines are gone.
-        assertEquals(ScreenDiff(ocrRemoved = listOf(expired, refresh)), differ.diff(read, read.copy(ocr = emptyList())))
+        assertEquals(
+            ScreenDiff(base = SnapshotId("s1"), ocrRemoved = listOf(expired, refresh)),
+            differ.diff(read, read.copy(ocr = emptyList())),
+        )
         // Not run on the earlier screen: what is found now is new.
         assertEquals(
-            ScreenDiff(ocrAdded = listOf(expired)),
+            ScreenDiff(base = SnapshotId("s1"), ocrAdded = listOf(expired)),
             differ.diff(read.copy(ocr = null), read.copy(ocr = listOf(expired))),
         )
         // Nothing was read before: nothing is left unverified.
-        assertEquals(ScreenDiff(), differ.diff(read.copy(ocr = null), read.copy(ocr = null)))
-        assertEquals(ScreenDiff(), differ.diff(read.copy(ocr = emptyList()), read.copy(ocr = null)))
+        assertEquals(ScreenDiff(base = SnapshotId("s1")), differ.diff(read.copy(ocr = null), read.copy(ocr = null)))
+        assertEquals(
+            ScreenDiff(base = SnapshotId("s1")),
+            differ.diff(read.copy(ocr = emptyList()), read.copy(ocr = null)),
+        )
+    }
+
+    @Test
+    fun `a diff is based on the earlier snapshot, whether or not the later one was read with OCR`() {
+        val line = OcrLine("已完成", box(400, 500, 600, 560), 0.9)
+        val earlier = snapshot("s4", emptyList()).copy(ocr = listOf(line))
+        val read = snapshot("s7", emptyList()).copy(ocr = emptyList())
+        val unread = read.copy(ocr = null)
+        assertEquals(SnapshotId("s4"), differ.diff(earlier, read).base, "compared OCR")
+        assertEquals(SnapshotId("s4"), differ.diff(earlier, unread).base, "OCR not run on the later screen")
+        assertEquals(SnapshotId("s7"), differ.diff(read, earlier).base, "the other way round")
+        assertEquals(SnapshotId("s7"), differ.diff(unread, earlier.copy(ocr = null)).base, "neither read with OCR")
     }
 
     @Test

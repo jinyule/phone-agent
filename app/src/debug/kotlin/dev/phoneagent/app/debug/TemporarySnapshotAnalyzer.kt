@@ -100,6 +100,7 @@ internal object TemporarySnapshotAnalyzer : SnapshotAnalyzer {
         val order = after.elements.withIndex().associate { it.value.ref to it.index }
         val beforeOrder = before.elements.withIndex().associate { it.value.ref to it.index }
         return ScreenDiff(
+            base = before.id,
             added = added.sortedBy { order[it.ref] },
             removed = removed.sortedBy { beforeOrder[it] },
             changed = changed.sortedBy { order[it.ref] },
