@@ -1,5 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Not held at install time: the shell-uid helper grants it during onboarding (grantSelf,
+         phase1-architecture D4), and only then can the app write enabled_accessibility_services
+         and adb_wifi_enabled itself. A permission the manifest does not request cannot be
+         granted at all, so it is declared here even though it stays ungranted until setup. -->
+    <uses-permission
+        android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
 
     <!-- Session logs, screenshots and credentials never leave the device (phase1-architecture §3.9). -->
     <application

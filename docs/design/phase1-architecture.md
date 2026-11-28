@@ -96,6 +96,8 @@ phone-agent/
                 │          ② Shizuku UserService  ③ 开发者在 USB 下运行启动脚本
 ```
 
+**启动边界**：助手代 App 启动的，只能是 App 自己调用 startActivity 也能启动的那个 Activity，并且不能借 shell 身份多带任何权限。每条启动路径（直接启动、`am start` 回退、冷启动）都只启动同一个检查返回的目标；具体规则见 §3.5 和 `docs/adr/2026-11-01-privileged-display-and-input.md` 决定 1。
+
 **Binder 交接**（参考 Mika 的 `HelperHandoff` / `HelperProcess`；WP12 已落地，取舍见 `docs/adr/2026-11-01-privileged-handoff.md`）：
 - 助手启动后，通过 App 的 ContentProvider（authority `<applicationId>.helper`，`call("attach")`）把 Binder 交过去；交之前先核对 App 的签名证书指纹。
   - 指纹不从外部传入，而是**自钉**：助手只在 `CLASSPATH` 等于这个包当前安装的 `sourceDir` 时才启动（运行的代码就来自这个 APK），启动时记下包的 uid 和签名证书的 SHA-256。
@@ -308,10 +310,33 @@ interface IPrivilegedCore {
 - **事务号显式写死，1–4 号冻结**。任何版本的 App 都能读出任何版本助手的协议号和身份，也能让它释放并退出，这是版本错配处理（engineering-baseline §6）的前提。`shutdown()` 是为此在原草图上补的。
 - 每个 IPrivilegedCore 方法（事务号 FIRST..LAST_CALL_TRANSACTION）只接受助手为之启动的那个 App uid，其他调用方收到 `SecurityException`。框架的系统事务不经过这个守卫，也不暴露任何能力；其中 `DUMP_TRANSACTION`、`SHELL_COMMAND_TRANSACTION` 也纳入守卫，`INTERFACE_TRANSACTION` 放行。以后重写 `dump` 或 `onShellCommand`，必须做同样的 uid 检查。
 - 还没实现的方法抛 `UnsupportedOperationException`，消息以 `NOT_IMPLEMENTED` 开头（`PrivilegedError.isNotImplemented` 判定），不占用各方法自己的返回值或错误码。Binder 原生就能跨进程传这个异常；`ServiceSpecificException` 不在公开 SDK 里，所以不用它。
+- 意外失败不会被读成 0（协议 3 起）。`Parcel.writeException` 写不了的异常（`ClassCastException`、受检异常……）会让事务以 `UNKNOWN_TRANSACTION` 结束，回复是空的，Proxy 读到的是"没有异常、结果 0"，也就是 displayId 0、`StartResult.OK`、`GrantResult.GRANTED`。所以 `PrivilegedCore` 在 uid 守卫之后兜底：这类异常先记日志，再换成带原异常名的 `IllegalStateException`；Binder 能传的异常原样传。能力层里，隐藏 API 的查找、读字段、类型转换失败统一包成 `CapabilityUnavailable`，由各方法换成自己的失败值；调用已经执行、只是答复类型不对时按失败处理，不再走降级路径重试。主屏监视线程上的扫描失败只记日志，下一次信号或轮询照常读。
+- 返回值是常量，不是裸数字（`dev.phoneagent.privileged.CapabilityContract.kt`）：
+  - `startActivity` → `StartResult`：0 已启动、1 用户正在主屏用它、2 没有页面能接、3 出错、4 冷启动被降级（它在别处还有任务）、5 被 agent 的另一块屏占用、6 助手拒绝（不是它的屏、别的用户、intent 不合规、App 自己启动不了的目标）、7 锁屏中（读不到锁屏状态也算，协议 2 起）；
+  - `createDisplay` → 非负是 displayId，`DisplayResult.REFUSED`(-2) 是参数不合规或 API 34 以下，`DisplayResult.FAILED`(-1) 是系统拒绝，或者 IME 策略设不成 LOCAL、回读不是 LOCAL、回读不了（屏已被释放，释放失败时进待清理集合；后几条协议 3 起，"回读不了"协议 4 起）；
+  - `grantSelf` → `GrantResult`：0 已授予、1 不在白名单、2 失败；
+  - `probe` → `ProbeKeys`：`steps`/`results` 两个平行数组，每项是 `ok` 或失败原因，外加 `ok` 总判定；协议 4 起多一步 `lock`，锁屏状态读得到就是 `ok`（锁没锁都算），读不到写原因、`ok` 为 false；协议 5 起 `release` 一步如实报告释放失败；
+  - `mainArrivals` → `ArrivalKeys`：任务、包名、页面、用户、时间、来自哪块屏、是否同一任务、是否普通页面、此刻在哪块屏（Bundle 里没有对象列表，所以用平行数组）。
 
-**刻意不提供**任意命令执行的接口。setup 需要的命令（授权、写无障碍列表）在助手内部写死成白名单方法。这是针对 Mika `phone_system_command` 的教训。
+**助手自己保证的几条**（无论 App 传什么，WP12 B 段）：
+- 只往自己建的屏启动、注入；主屏和别人的屏一律拒绝。
+- 用户在主屏**可见**地用着的 App 不启动（`StartResult.IN_USE_ON_MAIN`）；看不清任务列表时也不启动。
+- 启动边界（§2.2）：只启动 App 自己调用 startActivity 也能启动的那个 Activity，不借 shell 身份多带权限。解析成唯一的 Activity，再按系统对 App 的 uid 做的检查逐条判断：不属于本 App（按 app id）就必须已导出；它要求的权限 App 已获得，以系统解析后的 `ActivityInfo.permission` 为准（没声明时已经是 application 的权限，显式写空就没有），alias 只看自己的 exported 和权限；权限对应的 app op 必须是 `MODE_ALLOWED`（协议 6 起）；`ACTION_CALL`、拍照、录像这类 action 绑定的运行时权限，App 申请了却没获得时拒绝（协议 6 起）。解析不出是 `NOT_FOUND`，其余都是 `REFUSED`，原因有类型（`LaunchRefusal`），写进 logcat。直接启动、`am start` 回退、冷启动的 force-stop 都只用检查返回的那个目标；URI 授权位在那个 intent 上已经清零，ClipData 也就不会被授权；启动固定在助手自己的用户（`am start --user`，协议 6 起）。带 ClipData 的 intent 不走 `am start` 回退（`ERROR`，协议 6 起）。
+- 可能夹带 intent 的请求一律拒绝（`StartResult.REFUSED`）：`ACTION_CHOOSER`、selector、带 intent 的 ClipData 条目；extras 按允许清单检查（协议 4 起），清单外的类型一律拒绝，读不出来的 extras 也拒绝。允许的只有：null、primitive 及其数组；String、CharSequence、Uri 及其数组和 ArrayList（ArrayList 也可以是装箱整数）；值也在清单内的 Bundle；值只能是前两类叶子的 ContentValues 组成的 ArrayList（联系人插入的 `Insert.DATA`）。其他 Parcelable、Parcelable 数组、SparseArray、Map、Serializable、ClipData、IBinder 都拒绝；要放行新类型，必须连同"检查它里面装了什么"一起加进清单（`NestedIntents`）。所有容器共用一个嵌套深度上限。
+- 进命令行的包名（`setAudioMuted` 的 `appops`、冷启动的 `am force-stop`）先校验：Java 包名格式（至少两段、每段以字母开头），并且已经安装；UID、`u0aNN`、`--` 开头的选项一律拒绝。
+- 解除静音只恢复本助手账本里记过的包；没记过的包什么都不做，也不执行 `appops`。静音前的原模式写不进账本文件就不静音；启动时恢复账本只认格式合法的行。
+- 锁屏时什么都不启动（`StartResult.LOCKED`）。锁屏状态读自 `IWindowManager.isKeyguardLocked()`，读不到就当作锁屏，`probe()` 的 lock 一项报出原因（协议 4 起）；不用 `KeyguardManager`，它在调用失败时会回答"没锁"。
+- 冷启动只在"这个 App 的任务全在这块屏上"时才 force-stop，否则降级为普通启动并返回 `COLD_IGNORED`。
+- `moveTask` 只认 agent 自己启动的任务，以及盯主屏期间冒上来的任务（跳出回收）；用户自己的任务不会被拉进后台屏。
+- `injectKey` 只放行导航和编辑键；音量、电源、Home、最近任务、助手、相机、媒体键作用于整机，一律拒绝。
+- `injectStroke` 校验点数、时间单调、总时长和坐标是否在本屏内。
+- `grantSelf` 只接受 `WRITE_SECURE_SETTINGS`，写完回读确认。
+- `releaseAll` 逐个资源尽力释放（静音、屏、任务归属）：一个失败只记日志，不挡其余的，失败的留到下一次再试；它本身不抛。释放失败的屏（包括 IME 不是 LOCAL、释放又失败的新屏）只在"待清理"集合里等 `releaseAll`，任何能力都不再接受它（协议 4 起）。
+- 隐藏接口全部反射调用，缺失时报出具体原因（logcat + `probe()`），不静默失败；`moveRootTaskToDisplay`、`startActivityAsUser` 有 `am` 命令兜底。
 
-虚拟屏的建屏参数（flags、`setDisplayImePolicy`）、跳出回收、接管流程，按调研报告 §2.4 的配方实现。
+**刻意不提供**任意命令执行的接口。setup 需要的命令（授权、写无障碍列表）在助手内部写死成白名单方法，程序名也有白名单（`am`/`pm`/`appops`/`input`），参数由助手自己拼。这是针对 Mika `phone_system_command` 的教训。
+
+虚拟屏的建屏参数（flags、`setDisplayImePolicy`）、跳出回收、接管流程，按调研报告 §2.4 的配方实现：屏固定竖向（不加 `ROTATES_WITH_CONTENT`，坐标始终按建屏尺寸，横屏 App 由系统 letterbox），flags 按 API 递增（33+ 加 TRUSTED / OWN_DISPLAY_GROUP / ALWAYS_UNLOCKED / TOUCH_FEEDBACK_DISABLED，34+ 加 OWN_FOCUS / STEAL_TOP_FOCUS_DISABLED），建屏后把 IME 策略设成 LOCAL 并回读。
 
 ### 3.6 安全引擎
 
@@ -509,7 +534,7 @@ screen s12 · 微信 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · �
 | | `phone_type` | `screen`, `ref?`, `text`, `append?`, `submit?` |
 | | `phone_scroll` | `screen`, `direction`, `ref?` |
 | | `phone_swipe` | `x1,y1,x2,y2`, `durationMs` |
-| | `phone_key` | `back/home/enter` |
+| | `phone_key` | `back/home/enter`（`home` 在主屏模式下由无障碍的 `performGlobalAction` 实现。助手不注入 HOME：它作用于整机而不是 agent 的屏。后台屏上由 ScreenPort（WP14）返回 Failed，原因"后台屏上没有桌面，请用 phone_launch 切换 App"） |
 | | `phone_launch` | `app` 或 `link`, `cold?` |
 | | `phone_intent` | `kind: alarm/timer/calendar/share/dial/navigate/settings` + 对应字段（白名单，不接受任意 Intent） |
 | 通用 | `ask_user` | `question`, `options?` |

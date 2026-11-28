@@ -31,6 +31,24 @@ Mika
       -> app/src/main/kotlin/dev/phoneagent/app/helper/HelperHandoffProvider.kt
     app/src/main/java/com/wangzan101/mika/cap/phone/shell/ShellContext.kt
       -> privileged/src/main/kotlin/dev/phoneagent/privileged/helper/ShellContext.kt
+    app/src/main/java/com/wangzan101/mika/cap/phone/shell/ShellService.kt
+      -> privileged/src/main/kotlin/dev/phoneagent/privileged/cap/VirtualDisplays.kt
+      -> privileged/src/main/kotlin/dev/phoneagent/privileged/cap/DisplaySpec.kt
+      -> privileged/src/main/kotlin/dev/phoneagent/privileged/cap/TaskTable.kt
+      -> privileged/src/main/kotlin/dev/phoneagent/privileged/cap/TaskSpec.kt
+      -> privileged/src/main/kotlin/dev/phoneagent/privileged/cap/Launcher.kt
+      -> privileged/src/main/kotlin/dev/phoneagent/privileged/cap/InputInjector.kt
+      -> privileged/src/main/kotlin/dev/phoneagent/privileged/cap/SystemOps.kt
+      -> privileged/src/main/kotlin/dev/phoneagent/privileged/cap/ShellCommands.kt
+      -> privileged/src/main/kotlin/dev/phoneagent/privileged/cap/SystemBridge.kt
+    core/src/main/kotlin/com/wangzan101/mika/core/uistate/PressKeys.kt
+      -> privileged/src/main/kotlin/dev/phoneagent/privileged/cap/InputSpec.kt
+    app/src/main/java/com/wangzan101/mika/cap/phone/shell/MainScreenWatch.kt
+      -> privileged/src/main/kotlin/dev/phoneagent/privileged/cap/MainScreenWatch.kt
+    app/src/main/java/com/wangzan101/mika/cap/phone/shell/MainScreenLog.kt
+      -> privileged/src/main/kotlin/dev/phoneagent/privileged/cap/MainScreenLog.kt
+    app/src/main/java/com/wangzan101/mika/cap/phone/shell/AudioMuteLedger.kt
+      -> privileged/src/main/kotlin/dev/phoneagent/privileged/cap/AudioMuteLedger.kt
 
   The Mika files carry no header of their own. Each adapted file starts with
   a header naming the Mika file, the commit, the copyright and license of the
