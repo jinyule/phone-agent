@@ -1,0 +1,80 @@
+{
+  "source": "constructed from the Messages streaming reference and the Java SDK 3.3.0 event types; not verified against real Claude; mid-output server fallback (fallbacks: default): the declined attempt's thinking and tool call stay in the stream but are not echoed",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "text",
+          "text": "我先"
+        },
+        {
+          "type": "text",
+          "text": "查一下天气。"
+        }
+      ],
+      "stopReason": "END_TURN",
+      "usage": {
+        "inputTokens": 25,
+        "outputTokens": 30
+      },
+      "providerMetadata": {
+        "id": "msg_01Test",
+        "requested_model": "claude-opus-5-5",
+        "served_model": "claude-opus-5",
+        "stop_reason": "end_turn",
+        "usage_iterations": [
+          {
+            "type": "message",
+            "model": "claude-opus-5-5",
+            "input_tokens": 25,
+            "output_tokens": 12
+          },
+          {
+            "type": "fallback_message",
+            "model": "claude-opus-5",
+            "input_tokens": 25,
+            "output_tokens": 18
+          }
+        ],
+        "fallbacks": [
+          {
+            "type": "fallback",
+            "from": {
+              "model": "claude-opus-5-5"
+            },
+            "to": {
+              "model": "claude-opus-5"
+            },
+            "trigger": {
+              "type": "refusal"
+            }
+          }
+        ],
+        "fallback_discarded": [
+          {
+            "index": 0,
+            "type": "thinking"
+          },
+          {
+            "index": 2,
+            "type": "tool_use",
+            "id": "toolu_01Declined",
+            "name": "get_weather"
+          }
+        ],
+        "preview_diverged": [
+          "reasoning",
+          "calls",
+          "args"
+        ]
+      }
+    },
+    "deltas": [
+      "reasoning: 先看看。",
+      "text: 我先",
+      "started: toolu_01Declined get_weather",
+      "args: toolu_01Declined {\"city\"",
+      "text: 查一下天气。"
+    ]
+  }
+}

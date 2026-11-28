@@ -1,5 +1,6 @@
 package dev.phoneagent.core.model.openai
 
+import dev.phoneagent.core.agent.LoopTexts
 import dev.phoneagent.core.ids.ModelId
 import dev.phoneagent.core.ids.ProviderId
 import dev.phoneagent.core.ids.ToolCallId
@@ -321,7 +322,7 @@ class WireGoldenTest {
                         listOf(
                             Part.ToolResult(
                                 ToolCallId("m1"),
-                                listOf(Part.Text("Not run: the reply was cut off, so these arguments are incomplete.")),
+                                listOf(Part.Text(LoopTexts().maxTokens)),
                                 isError = true,
                             ),
                         ),

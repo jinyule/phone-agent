@@ -1,0 +1,27 @@
+{
+  "source": "constructed from the Messages streaming reference and the Java SDK 3.3.0 event types; not verified against real Claude; event types added later are ignored",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "text",
+          "text": "好"
+        }
+      ],
+      "stopReason": "END_TURN",
+      "usage": {
+        "inputTokens": 25,
+        "outputTokens": 15
+      },
+      "providerMetadata": {
+        "id": "msg_01Test",
+        "requested_model": "claude-opus-5-5",
+        "served_model": "claude-opus-5-5",
+        "stop_reason": "end_turn"
+      }
+    },
+    "deltas": [
+      "text: 好"
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "source": "constructed from the Messages streaming reference; not verified against real Claude; an unrecognized block after the last fallback block: refused like one in a reply without fallback",
+  "expect": {
+    "error": {
+      "kind": "BAD_RESPONSE",
+      "message": "bad response: block 1 has an unsupported type: server_tool_use"
+    },
+    "deltas": [
+      "text: 好。"
+    ]
+  }
+}

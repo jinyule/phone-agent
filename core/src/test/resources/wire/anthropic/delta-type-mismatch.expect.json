@@ -1,0 +1,10 @@
+{
+  "source": "constructed: input_json_delta for a text block",
+  "expect": {
+    "error": {
+      "kind": "BAD_RESPONSE",
+      "message": "bad response: unexpected input_json_delta for a text block"
+    },
+    "deltas": []
+  }
+}

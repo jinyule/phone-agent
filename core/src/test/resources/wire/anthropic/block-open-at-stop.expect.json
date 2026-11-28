@@ -1,0 +1,12 @@
+{
+  "source": "constructed: message_stop while a block is still open",
+  "expect": {
+    "error": {
+      "kind": "BAD_RESPONSE",
+      "message": "bad response: message_stop with block 0 still open"
+    },
+    "deltas": [
+      "text: x"
+    ]
+  }
+}

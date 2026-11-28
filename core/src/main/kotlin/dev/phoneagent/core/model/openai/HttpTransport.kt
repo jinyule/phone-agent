@@ -97,7 +97,8 @@ internal class HttpReply(
      * straddles the limit is masked whole. When the body goes on past what was read, the code
      * point the read split and the [Redactor.openEnd] are dropped before the cut; when the cut
      * drops text, the [Redactor.openEnd] of what it kept is dropped too (a credential shape cut
-     * too short to be one). The cut never splits a surrogate pair.
+     * too short to be one). A secret written with other escapes and cut inside is not recognized
+     * (model-layer §2, known gaps). The cut never splits a surrogate pair.
      */
     suspend fun maskedText(limit: Int = ERROR_BODY_LIMIT): String =
         blocking(io) {
@@ -114,6 +115,16 @@ internal class HttpReply(
     /** A line ended by CR whose LF (if any) has not been read yet. */
     private var lfPending = false
 
+    /** Bytes at the start of the buffer already looked at for a line end; none of them is one. */
+    private var scanned = 0L
+
+    /**
+     * Bytes looked at for line ends so far: each byte of the body once, however the body is cut
+     * into reads, except an LF right after a CR, which is skipped unread (fix-list r11).
+     */
+    internal var bytesScanned = 0L
+        private set
+
     /**
      * The next lines of the body without terminators: blocks for one, then takes every complete
      * line already buffered. LF, CRLF and a lone CR each end a line (WHATWG SSE), also when a
@@ -128,8 +139,11 @@ internal class HttpReply(
         while (true) {
             takeBuffered(buffer, lines)
             if (lines.isNotEmpty()) return lines
-            // Blocks for at least one more byte; false = the body ended.
-            if (!source.request(buffer.size + 1)) return if (buffer.size > 0) listOf(buffer.readUtf8()) else null
+            // Blocks for at least one more byte; false = the body ended, and what is left is its last line.
+            if (!source.request(buffer.size + 1)) {
+                scanned = 0
+                return if (buffer.size > 0) listOf(buffer.readUtf8()) else null
+            }
         }
     }
 
@@ -143,11 +157,23 @@ internal class HttpReply(
                 if (buffer[0] == LF) buffer.skip(1)
                 lfPending = false
             }
-            val end = buffer.indexOfElement(TERMINATORS)
+            val end = lineEnd(buffer)
             if (end < 0) return
             lines += buffer.readUtf8(end)
             lfPending = buffer.readByte() == CR
         }
+    }
+
+    /**
+     * Where the first line end in [buffer] is, or -1. Looks only at the bytes added since it last
+     * looked; the caller takes the line and its end out of [buffer] before it looks again.
+     */
+    private fun lineEnd(buffer: Buffer): Long {
+        val from = scanned
+        val end = buffer.indexOfElement(TERMINATORS, from)
+        bytesScanned += (if (end < 0) buffer.size else end + 1) - from
+        scanned = if (end < 0) buffer.size else 0
+        return end
     }
 
     /**

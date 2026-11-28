@@ -1,0 +1,10 @@
+{
+  "source": "constructed: a body with only keep-alives",
+  "expect": {
+    "error": {
+      "kind": "BAD_RESPONSE",
+      "message": "bad response: stream carried no message_start"
+    },
+    "deltas": []
+  }
+}

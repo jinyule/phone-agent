@@ -1,0 +1,7 @@
+: source: constructed: a body with only keep-alives
+
+event: ping
+data: {"type":"ping"}
+
+: keep-alive
+

@@ -1,0 +1,45 @@
+{
+  "source": "constructed from the Messages streaming reference and the Java SDK 3.3.0 event types; not verified against real Claude; server compaction block (compact-2026-01-12), each delta carries the whole value",
+  "expect": {
+    "response": {
+      "parts": [
+        {
+          "type": "reasoning",
+          "provider": "claude",
+          "model": "claude-opus-5-5",
+          "kind": "ANTHROPIC_COMPACTION",
+          "opaque": {
+            "type": "compaction",
+            "content": "早先的对话：用户要查巴黎天气。",
+            "encrypted_content": "Q29tcGFjdGVkLW5vdC1yZWFs"
+          }
+        },
+        {
+          "type": "text",
+          "text": "继续。"
+        }
+      ],
+      "stopReason": "END_TURN",
+      "usage": {
+        "inputTokens": 25,
+        "outputTokens": 15
+      },
+      "providerMetadata": {
+        "id": "msg_01Test",
+        "requested_model": "claude-opus-5-5",
+        "served_model": "claude-opus-5-5",
+        "stop_reason": "end_turn",
+        "context_management": {
+          "applied_edits": [
+            {
+              "type": "compact_20260112"
+            }
+          ]
+        }
+      }
+    },
+    "deltas": [
+      "text: 继续。"
+    ]
+  }
+}

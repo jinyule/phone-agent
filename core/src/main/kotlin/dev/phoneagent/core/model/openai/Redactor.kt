@@ -25,8 +25,10 @@ import java.util.IdentityHashMap
  * whole ([guard], [EchoGuard]).
  *
  * Every cut comes after masking, with the whole set of secrets the run has sent: callers redact
- * the full text, then cut it. A reader that must stop early reads [reach] characters past its
- * limit and drops the [openEnd] of what it read, so a cut never leaves part of a secret behind.
+ * the full text, then cut it. A reader that must stop early reads [reach] bytes past its limit
+ * and drops the [openEnd] of what it read: the start of a form of these secrets ([forms]), or of
+ * a credential shape written plainly. A secret written with other escapes and cut inside is not
+ * recognized there, and its first part stays (model-layer §2, known gaps).
  */
 internal class Redactor(
     secrets: Iterable<String>,
@@ -57,8 +59,8 @@ internal class Redactor(
 
     /** [text] with every credential masked: [exact], then `Bearer …` and the credential shapes. */
     fun text(text: String): String {
-        val masked = BEARER.replace(exact(text), "$1$MASK")
-        return SHAPES.fold(masked) { acc, shape -> shape.replace(acc, MASK) }
+        val masked = maskBearer(exact(text))
+        return Shape.entries.fold(masked) { acc, shape -> CredentialShapes.mask(acc, shape) }
     }
 
     /**
@@ -85,7 +87,9 @@ internal class Redactor(
     fun quote(raw: String): String {
         val masked = exact(raw)
         val decoded = JsonEscapes.lenientDecode(masked)
-        val hides = decoded != masked && (exact(decoded) != decoded || SHAPES.any { it.containsMatchIn(decoded) })
+        val hides =
+            decoded != masked &&
+                (exact(decoded) != decoded || Shape.entries.any { CredentialShapes.find(decoded, 0, it) != null })
         return if (hides) WITHHELD else text(masked)
     }
 
@@ -97,7 +101,7 @@ internal class Redactor(
     fun openEnd(masked: String): Int {
         val secret =
             (minOf(reach, masked.length) downTo 1).firstOrNull { n -> forms.any { masked.endsWithStartOf(it, n) } }
-        val shape = OPEN_SHAPE.find(masked)?.let { masked.length - it.range.first }
+        val shape = CredentialShapes.openStart(masked)?.let { masked.length - it }
         return maxOf(secret ?: 0, shape ?: 0)
     }
 
@@ -157,18 +161,6 @@ internal class Redactor(
 
         /** Masks only credential-shaped text (no request secrets known). */
         val SHAPES_ONLY: Redactor = Redactor(emptyList())
-
-        private val BEARER = Regex("""(?i)(\bbearer\s+)[^\s"',;]+""")
-        private val SHAPES =
-            listOf(
-                // OpenAI-style keys: sk-…, sk-proj-…
-                Regex("""\bsk-[A-Za-z0-9_-]{8,}"""),
-                // JWTs (ChatGPT plan access tokens): header.payload.signature
-                Regex("""\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*"""),
-            )
-
-        /** A credential shape still open at the end of the text (cut before [SHAPES] could match it). */
-        private val OPEN_SHAPE = Regex("""(?:\bsk-[A-Za-z0-9_-]*|\beyJ[A-Za-z0-9_.-]*)\z""")
     }
 }
 
@@ -177,3 +169,218 @@ private fun String.endsWithStartOf(
     form: String,
     n: Int,
 ): Boolean = form.length > n && regionMatches(length - n, form, 0, n)
+
+/**
+ * [text] with the token after each `Bearer` masked (model-layer §2 rule 4): the word `bearer` and
+ * the whitespace after it stay, and the token becomes [Redactor.MASK] together with any words
+ * ending in `bearer` in a row before it, so no `Bearer` passes for the token: `Bearer Bearer x`
+ * shows `Bearer ***`, `forbearer Bearer x` shows `forbearer ***`. When nothing follows the run, its
+ * last word is the token. Case does not matter, and there is no word boundary before the word: an
+ * escape a provider wrote as text right before it (`\nBearer`) ends in a letter and would leave
+ * none. A word that ends in `bearer` (`forbearer x`) masks the word after it too, which only shows
+ * less. A word is a run of characters other than whitespace (ASCII: space, tab, line feed, vertical
+ * tab, form feed, carriage return), `"`, `'`, `,` and `;`. One pass, in constant stack depth
+ * however long the run.
+ */
+private fun maskBearer(text: String): String {
+    val masked = StringBuilder(text.length)
+    var kept = 0
+    var at = text.indexOf(SCHEME, ignoreCase = true)
+    while (at >= 0) {
+        val scheme = text.spaceEnd(at + SCHEME.length)
+        val end = if (scheme > at + SCHEME.length) text.tokenEnd(scheme) else NO_TOKEN
+        if (end != NO_TOKEN) {
+            masked.append(text, kept, scheme).append(Redactor.MASK)
+            kept = end
+        }
+        at = text.indexOf(SCHEME, if (end == NO_TOKEN) at + 1 else end, ignoreCase = true)
+    }
+    return masked.append(text, kept, text.length).toString()
+}
+
+/** The end of the token from [from] on, past the words ending in `bearer` before it; [NO_TOKEN] when there is none. */
+private fun String.tokenEnd(from: Int): Int {
+    var start = from
+    var end = wordEnd(start)
+    var lastOfRun = NO_TOKEN
+    while (isRunWord(start, end)) {
+        lastOfRun = end
+        start = spaceEnd(end)
+        end = wordEnd(start)
+    }
+    return if (end > start) end else lastOfRun
+}
+
+/** Whether the word from [start] to [end] ends in `bearer` and whitespace follows it. */
+private fun String.isRunWord(
+    start: Int,
+    end: Int,
+): Boolean =
+    end - start >= SCHEME.length &&
+        spaceEnd(end) > end &&
+        regionMatches(end - SCHEME.length, SCHEME, 0, SCHEME.length, ignoreCase = true)
+
+private fun String.wordEnd(from: Int): Int {
+    var end = from
+    while (end < length && this[end].inWord()) end++
+    return end
+}
+
+private fun String.spaceEnd(from: Int): Int {
+    var end = from
+    while (end < length && this[end].isSpace()) end++
+    return end
+}
+
+private fun Char.isSpace(): Boolean = this == ' ' || this in '\t'..'\r'
+
+private fun Char.inWord(): Boolean = !isSpace() && this !in WORD_ENDS
+
+private const val SCHEME = "bearer"
+
+/** Characters other than whitespace that end a word. */
+private const val WORD_ENDS = "\"',;"
+
+/** No token after `bearer` and its whitespace: nothing to mask there. */
+private const val NO_TOKEN = -1
+
+/** A credential shape [Redactor.text] masks wherever it stands (model-layer §2), by the characters it starts with. */
+internal enum class Shape(
+    val prefix: String,
+) {
+    /** API keys: `sk-ant-api03-…` (Anthropic), `sk-…`, `sk-proj-…` (OpenAI style). */
+    KEY("sk-"),
+
+    /** JWTs (ChatGPT plan access tokens): header.payload.signature. */
+    JWT("eyJ"),
+}
+
+/**
+ * The credential shapes in provider text, each found in one pass from the left that reads every
+ * character a bounded number of times, however the text is written (model-layer §2).
+ *
+ * A key character is an ASCII letter, a digit, `-` or `_`. A key is `sk-` and at least [MIN_PART]
+ * key characters; a JWT is `eyJ` and at least [MIN_PART] key characters, a dot, at least
+ * [MIN_PART] more, a dot, and the key characters after it. Each part takes every key character in
+ * a row, so a dot or another character must end it. Both start a word: right before them stands
+ * nothing, or neither an ASCII letter, digit or `_` nor a non-spacing mark that follows a letter or
+ * digit (over other such marks). The first shape in the text wins, and the next one is looked for
+ * after it. These are the rules of `\bsk-[A-Za-z0-9_-]{8,}` and
+ * `\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*` under java.util.regex, which take
+ * time that grows with the square of a long run of near misses (`eyJ-eyJ-…`).
+ */
+internal object CredentialShapes {
+    /** The first [shape] in [text] that starts at [from] or after it, or `null`. */
+    fun find(
+        text: CharSequence,
+        from: Int,
+        shape: Shape,
+    ): IntRange? {
+        var start = text.indexOf(shape.prefix, from)
+        var end = NONE
+        while (start >= 0 && end == NONE) {
+            val word = startsWord(text, start)
+            val first = if (word) keyEnd(text, start + shape.prefix.length) else NONE
+            val longEnough = first - start - shape.prefix.length >= MIN_PART
+            if (longEnough) end = if (shape == Shape.JWT) jwtEnd(text, first) else first
+            // Any later start before [first] ends its first part there too, with fewer characters: it fails alike.
+            if (end == NONE) start = text.indexOf(shape.prefix, if (word) first else start + 1)
+        }
+        return if (end == NONE) null else start until end
+    }
+
+    /** [text] with each [shape] in it replaced by [Redactor.MASK]. */
+    fun mask(
+        text: CharSequence,
+        shape: Shape,
+    ): String {
+        val masked = StringBuilder(text.length)
+        var kept = 0
+        var found = find(text, 0, shape)
+        while (found != null) {
+            masked.append(text, kept, found.first).append(Redactor.MASK)
+            kept = found.last + 1
+            found = find(text, kept, shape)
+        }
+        return masked.append(text, kept, text.length).toString()
+    }
+
+    /**
+     * Where a key or JWT still open at the end of [text] starts, or `null`: `sk-` with only key
+     * characters after it, or `eyJ` with only key characters and dots after it, starting a word;
+     * the first one wins. The rule of `(?:\bsk-[A-Za-z0-9_-]*|\beyJ[A-Za-z0-9_.-]*)\z`.
+     */
+    fun openStart(text: CharSequence): Int? {
+        var keys = text.length
+        while (keys > 0 && text[keys - 1].isKeyChar()) keys--
+        var tokens = keys
+        while (tokens > 0 && (text[tokens - 1].isKeyChar() || text[tokens - 1] == '.')) tokens--
+        var at = tokens
+        while (at < text.length && !opensAt(text, at, keys)) at++
+        return at.takeIf { it < text.length }
+    }
+
+    /** Whether a shape that is open at the end starts at [at]; only key characters stand from [keys] on. */
+    private fun opensAt(
+        text: CharSequence,
+        at: Int,
+        keys: Int,
+    ): Boolean {
+        val prefix = (at >= keys && text.startsWith(Shape.KEY.prefix, at)) || text.startsWith(Shape.JWT.prefix, at)
+        return prefix && startsWord(text, at)
+    }
+
+    /** Where a JWT whose header ends at [header] ends: a dot, a payload of [MIN_PART] or more, a dot, a signature. */
+    private fun jwtEnd(
+        text: CharSequence,
+        header: Int,
+    ): Int {
+        val payload = if (text.getOrNull(header) == '.') keyEnd(text, header + 1) else NONE
+        val signed = payload - header - 1 >= MIN_PART && text.getOrNull(payload) == '.'
+        return if (signed) keyEnd(text, payload + 1) else NONE
+    }
+
+    /** The end of the key characters in a row from [from] on. */
+    private fun keyEnd(
+        text: CharSequence,
+        from: Int,
+    ): Int {
+        var end = from
+        while (end < text.length && text[end].isKeyChar()) end++
+        return end
+    }
+
+    /** Whether a word starts at [at], as java.util.regex's `\b` before a word character decides it. */
+    private fun startsWord(
+        text: CharSequence,
+        at: Int,
+    ): Boolean {
+        if (at == 0) return true
+        val before = Character.codePointBefore(text, at)
+        val asciiWord = before < ASCII_END && before != '-'.code && before.toChar().isKeyChar()
+        val markedWord = Character.getType(before) == NON_SPACING_MARK && hasBase(text, at - 1)
+        return !(asciiWord || markedWord)
+    }
+
+    /** Whether a letter or digit stands at [from], or before it with only non-spacing marks between. */
+    private fun hasBase(
+        text: CharSequence,
+        from: Int,
+    ): Boolean {
+        var at = from
+        while (at >= 0 && Character.getType(Character.codePointAt(text, at)) == NON_SPACING_MARK) at--
+        return at >= 0 && Character.isLetterOrDigit(Character.codePointAt(text, at))
+    }
+
+    private fun Char.isKeyChar(): Boolean =
+        this in 'A'..'Z' || this in 'a'..'z' || this in '0'..'9' || this == '-' || this == '_'
+
+    /** The fewest key characters in a part of a key or a JWT, past its first characters. */
+    private const val MIN_PART = 8
+
+    /** No match. */
+    private const val NONE = -1
+
+    private const val ASCII_END = 0x80
+    private const val NON_SPACING_MARK = Character.NON_SPACING_MARK.toInt()
+}

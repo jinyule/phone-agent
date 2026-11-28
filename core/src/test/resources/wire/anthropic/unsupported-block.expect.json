@@ -1,0 +1,10 @@
+{
+  "source": "constructed: a server tool block although no server tool was enabled",
+  "expect": {
+    "error": {
+      "kind": "BAD_RESPONSE",
+      "message": "bad response: block 0 has an unsupported type: server_tool_use"
+    },
+    "deltas": []
+  }
+}

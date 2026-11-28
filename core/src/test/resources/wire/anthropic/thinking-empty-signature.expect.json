@@ -1,0 +1,13 @@
+{
+  "source": "constructed from the Messages streaming reference; not verified against real Claude; a completed thinking block whose signature stayed the empty placeholder of its start",
+  "expect": {
+    "error": {
+      "kind": "BAD_RESPONSE",
+      "message": "bad response: thinking block 0 has no signature"
+    },
+    "deltas": [
+      "reasoning: 先想想。",
+      "text: 好的。"
+    ]
+  }
+}

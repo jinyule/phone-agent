@@ -1,0 +1,10 @@
+{
+  "source": "constructed from the Messages streaming reference and the Java SDK 3.3.0 event types; not verified against real Claude; error event of an unknown type counts as a server error",
+  "expect": {
+    "error": {
+      "kind": "SERVER",
+      "message": "server error 500: something new"
+    },
+    "deltas": []
+  }
+}

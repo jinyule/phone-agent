@@ -30,7 +30,7 @@
 │   id、预设、baseUrl、headers   ├─ ResponsesAdapter          （OkHttp + SSE） │
 │   credential                   │    ├─ ApiKey 模式                          │
 │                                │    └─ ChatGptPlan 模式：强制套餐接口的约束 │
-│                                └─ AnthropicMessagesAdapter（官方 Java SDK） │
+│                                └─ AnthropicMessagesAdapter（OkHttp + SSE）  │
 │ Credential（sealed）：ApiKey(secretRef) | ChatGptPlan(sessionRef) | None   │
 │ CredentialStore：Android Keystore 加 AES-GCM；令牌刷新由带锁的 TokenSource │
 │ 负责                                                                        │
@@ -93,18 +93,15 @@ fun interface BlobSource {              // 读当前会话 BlobStore 里 Part.Im
 }
 ```
 
-- 密钥不进日志、异常消息和 `toString`。服务商的响应可能回显密钥：错误体、流内的 error 事件、解析失败的原文和 cause、OpenRouter 的 `metadata.raw`，进入 `ModelError`、探测结果之前一律脱敏（`core.model.openai.Redactor`）。响应头也算服务商的原文：OkHttp 校验服务端发来的值时抛的 `IllegalArgumentException` 会整段引用被拒的值，所以 `Retry-After` 搬运时不做值校验、原样保留，HTTP 不允许的值（比如含非 ASCII 字符）解析不出等待时间，就当没有这个头；传输边界再把 OkHttp 的这类异常换成固定文字的 `BadResponse`，不带 cause，并取消调用、关闭已经拿到的响应。JSON 解析失败时（流的数据行、整段 JSON 回复、模型列表），错误只说哪一种数据不是 JSON、有多长，不引用原文（见下一条的"诊断不引用原文"），kotlinx 的异常也不进 message、不挂成 cause：它的 message 会按固定宽度引用出错位置附近的输入（`JSON input: …`）。本次调用发出过的每个密钥（套餐模式刷新前被拒的旧令牌也算）都换成 `***`，原样的和标准 JSON 转义后的（`"` → `\"`、`\` → `\\`）都算，再按形状兜底（`Bearer …`、`sk-…`、JWT）；错误体先解析、后按形状兜底，顺序见下面"诊断不引用原文"第二类。错误码和类型只用来匹配，脱敏会改动它们时就当没有；`param` 按服务商写的字段处理。成功的回复也一样，都用含本次实际请求密钥的 redactor 处理；"测试并保存"的诊断不引用模型的回答和试调用参数，只说哪里不对、文字有多长、参数是什么形状；**业务标识不改写**，列出的模型 id 和 `providerMetadata` 里服务端回显的 id、model、结束原因、状态，只要脱敏会改动它（`Redactor.verbatim` 为 `null`），就整条（整项）省略，不输出 `***` 形式的假 id。"测试并保存"生成 `Passed` 之前，列表再按这一轮发过的全部密钥（包括取得列表以后才换上的 key）过滤一次。`candidateListed` 在内部用通过合法性校验的原始 id 比较，原始 id 不进任何结果。
+- 密钥不进日志、异常消息和 `toString`。服务商的响应可能回显密钥：错误体、流内的 error 事件、解析失败的原文和 cause、OpenRouter 的 `metadata.raw`，进入 `ModelError`、探测结果之前一律脱敏（`core.model.openai.Redactor`）。响应头也算服务商的原文：OkHttp 校验服务端发来的值时抛的 `IllegalArgumentException` 会整段引用被拒的值，所以 `Retry-After` 搬运时不做值校验、原样保留，HTTP 不允许的值（比如含非 ASCII 字符）解析不出等待时间，就当没有这个头；传输边界再把 OkHttp 的这类异常换成固定文字的 `BadResponse`，不带 cause，并取消调用、关闭已经拿到的响应（两个适配器相同）。JSON 解析失败时（流的数据行、整段 JSON 回复、模型列表），错误只说哪一种数据不是 JSON、有多长，不引用原文（见下一条的"诊断不引用原文"），kotlinx 的异常也不进 message、不挂成 cause：它的 message 会按固定宽度引用出错位置附近的输入（`JSON input: …`）。本次调用发出过的每个密钥（套餐模式刷新前被拒的旧令牌也算）都换成 `***`，原样的和标准 JSON 转义后的（`"` → `\"`、`\` → `\\`）都算，再按形状兜底（`Bearer …`、`sk-…`、JWT）；错误体先解析、后按形状兜底，顺序见下面"诊断不引用原文"第二类。错误码和类型只用来匹配，脱敏会改动它们时就当没有；`param` 按服务商写的字段处理。成功的回复也一样，都用含本次实际请求密钥的 redactor 处理；"测试并保存"的诊断不引用模型的回答和试调用参数，只说哪里不对、文字有多长、参数是什么形状；**业务标识不改写**，列出的模型 id 和 `providerMetadata` 里服务端回显的 id、model、结束原因、状态，只要脱敏会改动它（`Redactor.verbatim` 为 `null`），就整条（整项）省略，不输出 `***` 形式的假 id。"测试并保存"生成 `Passed` 之前，列表再按这一轮发过的全部密钥（包括取得列表以后才换上的 key）过滤一次。`candidateListed` 在内部用通过合法性校验的原始 id 比较，原始 id 不进任何结果。
 - **模型产生的内容里出现本次请求的密钥，整条回复按 `BadResponse` 拒绝，不改写**（和 WP04 同一条规则，WP01 A11 写进契约）。模型产生的内容包括正文、调用参数（包括从正文还原出来的调用）、调用 id 和名字、推理摘要、推理的 opaque（Responses 的 `encrypted_content`、Chat 的推理字段；成员名和值都查）。opaque 按读到的写法查一次，再按日志写回的写法查一次：日志和由日志重建的请求用的是 kotlinx.serialization 写回的文字，它会改写数字（`1.23456e5`、`1.23456E+5`、`12345.6e1` 都写成 `123456.0`），所以很短的纯数字 key 可能只在写回的写法里出现。写不回去的数字（`1e400` 超出 double 的范围，日志根本记不下这条回复）让整条回复报 `BadResponse`，固定文字，不引用值。只有 Responses 的推理条目保留模型的 JSON 并原样写回；Chat 的推理是文字，调用参数按收到的文字保留，不重新写数字。
   - 为什么不改写：改写调用参数会改掉要执行的操作；我们从不把密钥放进上下文，模型输出里出现密钥本身就说明出了问题，宁可失败，也不落盘。
   - 出口原则：凡是会到达出口的模型内容都要检查，出口包括 delta、最终回复的 parts、日志、诊断文字和下一次请求；在到达任何出口之前就被丢弃的内容，不要求检查（WP04 连被放弃的块也查，比这条最低要求更严，两者不冲突）。OpenAI 适配器丢弃的路径，每条都有测试证明它的内容（原样的和转义写出的密钥）不出现在发出的 delta、最终的 parts 和按日志形状序列化后的回复里：Chat 一个 chunk 里第一个以后的 choice、旧式的 `delta.function_call`；Responses 不认识的 output 条目（`web_search_call`、`custom_tool_call` 等）、`response.output_item.added` 条目里的参数、`response.function_call_arguments.done` 里的参数、没有对应调用的参数增量。一个 chunk 只带一个 choice 时不看它的 `index`，按第一个 choice 读，内容到达出口，照常检查。被最终 output 替换掉的流式参数已经作为 delta 发出过，属于到达出口，按下面"已显示的参数整段再查"处理。
-  - 诊断不引用原文：诊断文字也是出口。错误消息、异常的 message 和 cause 链、`ProbeResult`、日志和诊断字段，都不引用模型或服务端回复的原文，只给固定文字加结构信息：缺了哪个字段、第几个条目或调用、哪种事件、认识的取值（比如 `status` 是 `failed`），或者内容的类型和长度（`Unquoted`）。原因：解析器没读过的原文里，转义（`\u0070`、`\/`）能把密钥藏过脱敏。回复照旧整条拒绝，报 `BadResponse`；已经作为 delta 发出的参数照样按下面的异常结束规则查。分三类：
-    - 模型回复里的原文，一律不引用：写坏的数据行、缺 `call_id` 或 `name` 的调用、用不了的调用 id、不认识的 `status` 和 `incomplete_details.reason`、"测试并保存"里模型的回答和试调用参数、不是 JSON 的模型列表。回复里的值违反中性类型的约束时（比如调用 id 含控制字符），错误只说违反了约束和异常类名，`IllegalArgumentException` 的 message 不进错误，cause 只留类名和堆栈。
-    - 服务商的错误说明：先解析、后按形状兜底。读错误体时只把本次密钥的精确形式（原样的、标准转义的）换成 `***`，形状留到解析、解码以后再匹配：形状的匹配停在第一个转义处，读取时就匹配，只能盖住转义之前的半截，解码以后剩下的后半截既不是完整的密钥，也不成形状。服务商写的文字，按字段读出的（message、OpenRouter 的 `metadata.raw`、`param`、`{"error": "…"}` 的字符串；流内 error 事件和 `response.failed` 的也一样）和没有按字段读过的（不是 JSON 的错误体、重定向的目标地址）一样，都按 `Redactor.quote` 处理，规则和 WP04 相同：（1）原样和标准转义的本次密钥换成 `***`，其余说明保留；（2）剩下的文字宽松解码一次，解码没有改动任何文字，就按形状打码后引用（`sk-…`、JWT 和 `Bearer` 后面的 token 换成 `***`），没有可解码的转义时，在原文上打码就是完整的；（3）解码改动了文字，而且解码后出现本次密钥的任一写法，或者 `sk-`、JWT 形状，就整段换成固定说明（`Redactor.WITHHELD`），不留半截，否则照旧打码后引用；（4）`Bearer` 字样只打码它后面的 token，不触发整段替换，所以 `Invalid bearer token` 显示成 `Invalid bearer ***`，用户仍然看得到"key 无效"。字段经过了 JSON 解码，但字段自己的文字里还可能有一层转义（字面的 `\u0073k-…`），所以要再解一次。JSON 里没有 message 字段、或者根本不是错误对象时，只能整段引用：其中每个字符串（成员名和值）解码后按同样的规则查，有一个不能显示就整段换成固定说明，否则整段写回并打码。不直接查写回的整段，是因为写回时字符串会重新转义，字段文字里字面的转义多了一层，只解一次认不出来。
-    - OkHttp 的 `IOException`：它的 message 会引用服务端的原始字节（读不懂的状态行；读不完的头部行按十六进制写出），所以 `Network` 的说明按异常类型给固定文字加类名，cause 只保留类名和堆栈，不带 message。WP04 的口径相同。会引用回复内容的三种情况都有本机原始 socket 的测试（两种协议，加上"测试并保存"的结果）：分块长度写短，下一行被当成块长度引用；`Content-Length` 写少、连接被复用，多出的行被当成下一个状态行引用；body 截在行中间，读到的内容按十六进制写进 `EOFException`。
+  - 诊断不引用原文：两个适配器相同，合在下面"脱敏"一条里（"诊断不引用原文"，分三类）。
   - 只做精确匹配：原样的和 JSON 转义后的形式都算，不按形状兜底，否则屏幕上正常出现的 token 也会被误拒。"测试并保存"一轮里发过的旧密钥也算。
   - 调用参数在每个调用结束时按**完整文本**查三种形式：原样的；能解析成 JSON 时，按标准转义重写后的；宽松解码后的（`JsonEscapes.lenientDecode`）。宽松解码不要求文本是合法 JSON：从左到右解一遍 `\uXXXX`（包括代理对）、`\/`、`\"`、`\\`、`\n`、`\t`、`\r`、`\b`、`\f`，先解 `\\`（所以 `\\u0070` 是一个反斜杠加 `u0070`，不会再解成 `p`），不认识的序列、不完整的 `\u`、落单的代理原样保留；结果只用来匹配，不改写内容。参数被截断（`MAX_TOKENS`）或者写坏（比如多一个 `}`）时，工具层照样会按 JSON 解码它们，所以转义写出的密钥照样要查出来。查的是完整文本，转义被切到几个片段里也不影响结果。从正文还原出来的调用，参数走同一套检查。WP04 有一份同名、同规则、同测试数据的 helper，两边合入后归进公共传输层。
   - 回复在终止事件之前失败时（流断开、解析失败、流内 error 事件，或者别的错误），先对已经作为 delta 发出的每个调用的参数整段做同样的检查，查到密钥就报带标记的 `BadResponse`，不报原来的错误（比如 `Network`）。日志不受这条影响（中断前缀只记文字 delta）；这条是为了让界面撤回已经显示的参数增量。正常结束时也对已显示的参数整段再查一次：Responses 的最终 output 可能替换掉流式参数，被替换掉的增量已经显示过了。
-  - 已知缺口：正文、推理文字、还原失败后留在正文里的标记，以及 DSML 里没闭合的字符串参数值，都是字面文字，下游不会把它们当 JSON 解码，字面的反斜杠写法不是密钥，所以不做宽松解码。具体有两种情况：DSML 参数里没闭合的字符串，会把转义原文按字面写进 argsJson（重新转义成字符串值，解码后仍然是反斜杠文字）；截断的 `<tool_call>` 标记还原不了，原样作为正文留进日志。正文里用转义、空格、编码等方式改写过的密钥不检测：检测只认原样的、标准 JSON 转义的，以及调用参数宽松解码后的形式。另外，检测按通道分开：尾部窗口和结束时的整段再查都是每个通道（正文、推理、每个调用的参数）各查各的，如果一个密钥被拆在两个通道里（比如正文一半、推理一半），或者拆在两个调用的参数里，就检测不到；只有每一半都另外凑成某个密钥时，才会被拦下。usage 的计数读成有类型的整数，不和密钥比较：纯数字的 key 作为计数出现时，会进 usage 和日志；真实的 key 不会是纯数字。key 是很短的纯数字时，可能和推理条目里的计数、编号重合（数字也按子串匹配，key 是 `1` 时任何含数字 1 的值都会命中），含这些数字的 opaque 会让整条回复被拒。服务商写的文字按写出的样子查，再宽松解码一次查（按字段读出的先经过 JSON 解码）；用更多层转义写出的密钥认不出来。按形状打码时，形状只认字母、数字、`-` 和 `_`：不是本次请求发的 `sk-` key 如果带了别的字符（比如 `/`），没有可解码的转义时原地打码，只盖到那个字符为止，后面的部分可见；服务商的 key（`sk-proj-…`）只用这些字符，本次的 key 不论含什么字符都按精确形式打码。`Bearer` 和 token 之间的空白如果是用转义写的（`Bearer\u0020…`，只出现在多套一层转义的文字里），原文上认不出这个 token：token 是凭据形状、或者是转义写出的本次密钥时，整段换成固定说明；原样或标准转义写出的本次密钥按第（1）条就地打码；否则照原样可见。这两条和 WP04 共用。错误体在 64 KiB 读取上限处截断时，如果截断点恰好落在用转义写出的 key 里，截下来的前半截既不是完整的 key（精确匹配认不出），解码以后也不一定成形状，这半截会留在错误里：只有服务商在超过 64 KiB 的错误体里用转义回显 key、截断点又正好落在其中时才会发生，代价是错误信息里露出 key 的前一部分（和 WP04 共用这一条）。
+  - 已知缺口：正文、推理文字、还原失败后留在正文里的标记，以及 DSML 里没闭合的字符串参数值，都是字面文字，下游不会把它们当 JSON 解码，字面的反斜杠写法不是密钥，所以不做宽松解码。具体有两种情况：DSML 参数里没闭合的字符串，会把转义原文按字面写进 argsJson（重新转义成字符串值，解码后仍然是反斜杠文字）；截断的 `<tool_call>` 标记还原不了，原样作为正文留进日志。正文里用转义、空格、编码等方式改写过的密钥不检测：检测只认原样的、标准 JSON 转义的，以及调用参数宽松解码后的形式。另外，检测按通道分开：尾部窗口和结束时的整段再查都是每个通道（正文、推理、每个调用的参数）各查各的，如果一个密钥被拆在两个通道里（比如正文一半、推理一半），或者拆在两个调用的参数里，就检测不到；只有每一半都另外凑成某个密钥时，才会被拦下。usage 的计数读成有类型的整数，不和密钥比较：纯数字的 key 作为计数出现时，会进 usage 和日志；真实的 key 不会是纯数字。key 是很短的纯数字时，可能和推理条目里的计数、编号重合（数字也按子串匹配，key 是 `1` 时任何含数字 1 的值都会命中），含这些数字的 opaque 会让整条回复被拒。服务商错误说明的已知缺口（更多层转义、形状认的字符、转义写出的 `Bearer` 空白、64 KiB 截断）两个适配器共用，见下面"诊断不引用原文"第二类。
   - 增量边发边查，不推迟发布：每个通道（正文、推理、每个调用的参数）保留一个"最长形式减 1"的尾部窗口，凑出密钥的那一片不发出，之前的片段照常即时显示；流结束时再查最终的各个 part。
   - 拒绝用固定文字，带"已流出内容不保留"的标记：runtime 不把这次 attempt 已经流出的前缀记成 interrupted 的消息，只记 attempt 和固定原因；界面上已经显示的片段由 UI 按这个错误清掉。标记是 WP01 的 `ModelError.discardsStreamed`（`CredentialEcho.error()` 设上它）。
 - 密钥不论多长都做精确匹配：设任何长度阈值，短的真实凭据都会直接漏出去，而 `test` 这类值按形状也认不出来。不需要认证的本地服务（Ollama、LM Studio 等）用 `Credential.None`，不要填占位 key：本地服务如果填了占位 key，它就和真密钥一样处理：在错误和诊断里被屏蔽，含它的模型 id（比如 key 填 `qwen`、模型叫 `qwen3:8b`）不出现在列表里，出现在模型的回复里会导致整条回复被拒。
@@ -112,12 +109,48 @@ fun interface BlobSource {              // 读当前会话 BlobStore 里 Part.Im
   - WP09/WP10 的义务：`needsKey = false` 的预设（Ollama、LM Studio）默认用 `Credential.None`，不显示 key 输入框；出现 `CREDENTIAL_IN_TRIAL` 或 `CREDENTIAL_ECHOED` 时，提示换一个 key，或者改成不需要 key。
 - 任何截断都发生在用完整密钥集合脱敏之后。错误体最多读 64 KiB：多读"最长密钥长度（JSON 转义后的形式也算）减 1"个字节，把读到的全文里本次密钥的精确形式换掉（形状在解析以后才匹配，见"诊断不引用原文"第二类）；正文还没读完时，去掉末尾被读取切开的 UTF-8 字符和可能是密钥开头的部分（某个密钥的前缀，或者太短、还没成形的 `sk-…`、JWT），再按字符截到上限，不切开代理对；截掉了文字时，截下来的部分末尾再按同样的规则去掉一次（跨在上限上的形状被截成太短、认不出形状的开头）。"测试并保存"一轮里先后发出的每个密钥（换过的 key 也算）从每个请求一开始就进它的 redactor，所以 500 字的错误 detail、300 字的重定向地址和诊断片段，截断之前都已经用全部密钥脱敏过。
 - **脱敏**（本次请求用到的密钥；契约写在 `CredentialResolver` 的 KDoc，WP03、WP04 各自实现，两边规则相同）：
+  - **统一规则（出口原则）**：会到达出口的模型内容都要检查。出口包括 delta、最终回复、日志、诊断文字和下一次请求。到达任何出口之前就被丢弃的内容，最低要求是不查。
   - **模型产生的内容一律不改写**。密钥出现在其中任何地方（正文、调用参数、推理预览、opaque 和签名块：Anthropic 的 `thinking`、`redacted_thinking`、`tool_use`，OpenAI 的 `reasoning`、`encrypted_content`，以及其他协议里的同类内容），**整条回复按 `BadResponse` 拒绝**，返回固定文字，并设上 `ModelError.discardsStreamed`。不改写的原因：Anthropic 把 thinking 绑定到它之前的整段对话，改写已经返回的正文或 `tool_use.input`，下一次请求就会报 prefix mismatch；改写调用参数还会改掉要执行的操作。我们从不把密钥放进上下文，模型输出里出现密钥本身就说明出了问题。
   - **`discardsStreamed`**：这次 attempt 已经流出的内容不保留。runtime 不把它记成 interrupted 的 `assistant/message`，只记 `assistant/attempt` 和固定原因；界面上已经显示的片段由 UI 按这个错误撤回或标记作废（WP09）。
   - **预览 delta 不推迟发布**：适配器收到片段就交给 `onDelta`，不为了检测密钥先扣住。delta 只用来显示，从不进日志；出现带 `discardsStreamed` 的错误时，已经流出的片段同样不留在日志里，界面按上一条撤回或标记作废。
-  - **匹配方式**：只做精确匹配，同时匹配密钥的 JSON 转义形式，不按形状兜底。不设最短长度，所有密钥都匹配：任何阈值都会让短的真实凭据漏出去。不需要认证的本地服务用 `Credential.None`，不要填占位 key。
-  - **服务端写的诊断字段**（错误正文、拒答 category、metadata）：本次密钥的原样和标准转义形式改写成 `***`，其余说明保留；宽松解码改动了文字、解码以后才现形的本次密钥或者 `sk-`、JWT 形状，整段换成固定说明（`Redactor.WITHHELD`），不留半截；没有可解码的转义时，形状在原文上打码，`Bearer` 字样只打码后面的 token，都不触发整段替换。OpenAI 适配器的具体顺序见上面"诊断不引用原文"第二类。
+  - **匹配方式**：只做精确匹配，同时匹配密钥的 JSON 转义形式，不按形状兜底。不设最短长度，所有密钥都匹配：任何阈值都会让短的真实凭据漏出去。不需要认证的本地服务用 `Credential.None`，不要填占位 key：填了的话，它出现在回复里就会让整条回复被拒；很短的占位 key 会让回复经常被误拒，因为值和成员名都按子串匹配，key 是 `x` 时，任何带成员名 `text` 的回复都会命中，key 是 `a` 时，含字母 a 的回复都会命中。
+  - **诊断不引用原文**（两个适配器相同）：诊断文字也是出口。错误消息、异常的 message 和 cause 链、`ProbeResult`、日志和诊断字段，都不引用模型或服务端回复的原文，只给固定文字加结构信息：缺了哪个字段、哪个块或第几个条目、哪个调用、哪种事件、认识的取值（比如 OpenAI 的 `status` 是 `failed`，Anthropic 的块类型 `text`、delta 类型 `text_delta`），或者内容的 JSON 种类和长度（`Unquoted`）。原因：解析器没读过的原文里，转义（`\u0070`、`\/`）能把密钥藏过脱敏。回复照旧整条拒绝，报 `BadResponse`；已经作为 delta 发出的参数照样按异常结束的规则查。分三类：
+    - **模型回复里的原文，一律不引用**：OpenAI 适配器里是写坏的数据行、缺 `call_id` 或 `name` 的调用、用不了的调用 id、不认识的 `status` 和 `incomplete_details.reason`、"测试并保存"里模型的回答和试调用参数、不是 JSON 的模型列表；Anthropic 适配器里，不认识的块类型和 delta 类型只说长度，重复的 tool id 只说块编号，usage 里不是计数的值只说 JSON 种类、越界的只说越界；解析失败只保留解析器开始引用输入之前的那段描述，结构残缺只写块编号和字段名。回复里的值违反中性类型的约束时（比如调用 id 含控制字符），错误只说违反了约束和异常类名，`IllegalArgumentException` 的 message 不进错误，cause 只留类名和堆栈。
+    - **服务商的错误说明，打码后保留**：先解析、后打码。读错误体时只把本次请求的密钥按精确形式（原样的、标准转义的）换成 `***`：整段的精确形式不会被转义拆开，读取上限的 openEnd 也只依赖它们。形状留到解析、解码以后再匹配：形状的匹配停在第一个转义处，读取时就匹配，只能盖住转义之前的半截，解码以后剩下的后半截既不是完整的密钥，也不成形状。服务商写的文字，按字段读出的和没有按字段读过的（错误体不是 JSON、重定向的目标地址），都按同一条规则引用（`Redactor.quote`，两个适配器逐字相同）。按字段读出的，OpenAI 是 message、OpenRouter 的 `metadata.raw`、`param`、`{"error": "…"}` 的字符串，流内 error 事件和 `response.failed` 的也一样；Anthropic 是解析成 JSON 以后取出的 message 字段（HTTP 错误体、流内 error 事件、整份 JSON 回复里的 error 都一样，也包括 `{"error": "…"}` 的字符串）和拒答的 `stop_details.category`。规则：
+      1. 原样写出、或者用标准转义写出的本次密钥，先精确打码成 `***`，其余说明保留，比如 "invalid x-api-key: ***"。
+      2. 剩下的文字宽松解码（`JsonEscapes.lenientDecode`）一次。解码不改动任何文字，也就是没有可解码的转义：直接在原文上按形状打码后引用（`sk-…`、JWT 和 `Bearer` 后面的 token 换成 `***`）。没有转义时，在原文上打码就是完整的。
+      3. 解码改动了文字：解码后的文字里出现本次密钥的任何一种写法，或者 `sk-…`、JWT 形状，就整段换成固定说明（`Redactor.WITHHELD`），不留半截；否则在原文上打码后引用。原因：在没解码的原文上匹配，形状会停在里面第一个转义处（`\u0064`、`\/`），后半段留在错误里；字段自己的文字里也可能再写一层转义（比如 `\u0073k-proj-…`）。
+      4. `Bearer` 字样只把它后面的 token 打码，任何情况下都不触发整段替换：网关的 "Invalid bearer token"、"用 Bearer 认证" 这类说明照常可见，比如 `Invalid bearer token` 显示成 `Invalid bearer ***`，用户仍然看得到"key 无效"。`Bearer` 前面不要求词边界：服务商的文字里字面写着转义（`\n`、`\t` 这类反斜杠加字母），后面紧跟 `Bearer` 时，token 照样打码。连着的 bearer 词连同后面的 token 一起盖掉：`Bearer Bearer x` 显示成 `Bearer ***`，`forbearer Bearer x` 显示成 `forbearer ***`，后一个 `Bearer` 不会被当成 token、把真正的 token 留在外面；后面没有别的词时，最后一个 bearer 词当成 token 盖掉；不论连着多少个都一样。代价是以 bearer 结尾的词（比如 `forbearer`）后面那个词也会被盖掉，只会少显示。
+      - **没有 message 字段的 JSON**：JSON 不是对象，或者对象里没有 message 字段时（HTTP 错误体和流内 error 事件都一样；OpenAI 适配器先把数组里的第一个对象当错误对象读，Gemini 的兼容层这样包），只能整段引用：其中每个字符串（成员名和值）解码后按上面同样的规则查，有一个不能显示就整段换成固定说明；否则每个字符串先在解码后的文字上打码，再整段写回，写回的整段再打码一次，兜底不在字符串里的内容（比如写成数字的本次密钥）。不直接查写回的整段，是因为写回时字符串会重新转义，字段文字里字面的转义多了一层，只解一次认不出来。形状也不等写回以后才打码：写回时控制字符会变成转义（换行写成 `\n`、制表符写成 `\t`），转义的最后一个字符是字母，紧挨在后面的 `sk-…`、JWT 就失去了形状要求的词边界，所以先按解码后的每个字符串打码，再写回（`Bearer` 不要求词边界，见第 4 条）。宽松解码认得的 JSON 转义（`\n`、`\t`、`\b`、`\f`、`\r`、`\/`、反斜杠 u）紧挨着 `sk-…`、JWT 时，按第 3 条整段替换。两个成员名打码后相同时只留一个，只会少显示。两个适配器的 `whole()` 相同。
+      - **已知缺口**：
+        - 服务商写的文字按写出的样子查，再宽松解码一次查（按字段读出的、没有 message 的 JSON 里的字符串，都先经过 JSON 解码）；用更多层转义写出的密钥认不出来，比如重定向地址里用两层转义写出的 key。
+        - 形状只认 ASCII 字母、数字、`-` 和 `_`。不是本次请求发的 `sk-` key 如果带了别的字符（比如 `/`），没有可解码的转义时原地打码，只盖到那个字符为止，后面的部分可见。服务商的 key（`sk-ant-api03-…`、`sk-proj-…`）只用这些字符；本次的 key 不论含什么字符，都按精确形式打码。
+        - 其他反斜杠写法（`\a`、`\v`、`\0`、`\x1b` 这类 C、Python 的转义），或者 ASCII 字母、数字、`_` 紧挨在 `sk-…`、JWT 前面时，或者任何字母、数字（包括中文、带重音的字母）后面跟着组合附加符号、再紧挨着形状时，形状要求的词边界不成立，原样可见。中文、带重音的字母直接紧挨在前面时，词边界成立，照样打码。
+        - `Bearer` 和 token 之间的空白如果是用转义写的（`Bearer\u0020…`，只出现在多套一层转义的文字里），原文上认不出这个 token：token 是凭据形状、或者是转义写出的本次密钥时，按第 3 条整段替换；原样或标准转义写出的本次密钥按第 1 条就地打码；否则照原样可见。`Bearer` 前面紧挨着字面写出的转义（`\nBearer`）不算缺口：`Bearer` 不要求词边界，token 照样打码，见第 4 条。
+        - 错误体在读取上限（64 KiB）处截断时，如果截断点正好落在用非标准转义（反斜杠 u、`\/` 等）写出的本次密钥里，读取时的精确打码和 openEnd 都认不出这半截（openEnd 只认精确形式和原样写出的形状），解码以后只剩 key 的前一段，`Redactor.quote` 也认不出。
+          - 触发条件：服务商用非标准的转义回显请求里的 key，回显又恰好跨在读取上限上；错误页还要以将近 64 KiB 的空白开头，截断处才会落在错误说明的前 500 个字符里，用户才看得到。
+          - 范围（WP04 r6 在 Anthropic 适配器上实测）：服务商格式的 key（`sk-ant-api03-…`）前面是空白或标点时，只会留下公开前缀（`sk-ant-api` 这一段），其余截断点解码以后认得出形状，整段替换；前面紧挨着字母或数字时，形状要求的词边界不成立，会留下 key 的大部分；不是 `sk-` 形状的 key（比如网关的 key）会留下片段，转义写在最后一个字符上时，除了最后一个字符都可见；含 `/` 的 key 用 `\/` 写出时，和不是 `sk-` 形状的 key 那一档相同（WP04 r8 评审在两个适配器上实测）。
+          - 代价是错误说明里出现 key 的一段。要补，得让 openEnd 认带转义的前缀。两个适配器的读取是同一个做法，这条两边都适用。
+    - **传输异常只写类型**：OkHttp 的 `IOException` 的 message 会引用服务端的原始字节（读不懂的状态行、分块长度行、连接复用时被当成状态行的多余字节；读不完的头部行和读断的行按十六进制写出），所以 `Network` 的说明按异常类型给固定文字加类名，cause 只保留类名和堆栈，不带 message。Anthropic 适配器的固定文字分超时、连不上、主机名解析失败、TLS 失败、违反 HTTP 协议、连接提前结束、连接失败，还写出所处阶段（发请求、读回复、读错误体），cause 换成替身（`Unquoted.io`、`Unquoted.bare`）。会引用回复内容的三种情况都有本机原始 socket 的测试（OpenAI 的两种协议，加上"测试并保存"的结果）：分块长度写短，下一行被当成块长度引用；`Content-Length` 写少、连接被复用，多出的行被当成下一个状态行引用；body 截在行中间，读到的内容按十六进制写进 `EOFException`。
+  - **服务端写的元数据**（`providerMetadata`）：打码会改动的字段整项省略，不写半截打码的值；字段里的成员名也算，数字和布尔值也算（`123456`、`true` 这样的密钥同样命中），打码会改动其中任何一个，整个字段同样省略。值按到达出口的写法比较：按 JSON 里写出的样子比较一次，数字再按序列化以后的样子比较一次，因为写进日志、`ChatResponse` 的 JSON 和由日志重建的请求的是后者（`1.23456e5` 会变成 `123456.0`）。
+  - **Anthropic 适配器的做法**（`core.model.anthropic.EchoGuard`，拒绝用固定文字 `CredentialEcho.DETAIL`）：
+    - 模型产生的内容包括正文、工具调用（id、名字、参数）、thinking 的文字和 `signature`、redacted_thinking、compaction，以及 `server_tool_use` 和其他不认识的块。
+    - Anthropic 适配器比最低要求更严：降级前被放弃的尝试里的块也照样检查，整条拒绝的规则不变。这些块不进最终回复、不回传；其中 thinking 和工具调用已经作为 delta 显示过，`server_tool_use` 和其他不认识的块的参数到达不了任何出口，按出口原则可以不查，这里也查。两者不冲突：出口原则是最低要求，多查的部分只会让回复更早失败，不会放过该拒绝的内容。
+    - 每个块的起始对象和每个 delta，成员名和值都查（`type` 除外）：thinking、redacted_thinking、compaction 原样保留整个起始对象，不认识的成员也会进最终回复、被回传。值里的嵌套部分，每个键和每个非 null 的值都查，数字和布尔值也算；数字和元数据一样，按写出的样子和序列化以后的样子各查一次。序列化写不回去的数字（`1e400` 超出 double 范围，日志的编码器也会拒绝）让整条回复按 `BadResponse` 失败，用固定文字，不引用值；出现在块里或元数据里都一样。调用参数按文字进日志，请求里的数字照写出的样子发出，没有另一种写法要查。整块下发的内容（比如 `tool_use.input`）在起始块就查，早于任何 delta。
+    - 调用参数：每个块的 `input_json_delta` 文本都累积起来，在块结束时整段再查一遍，工具调用、`server_tool_use` 和其他不认识的块都算，后来被降级丢弃的块也算。原样查一次，宽松解码以后再查一次（`JsonEscapes.lenientDecode`：从左到右还原 `\uXXXX`（包括代理对）、`\/`、`\"`、`\\`、`\n`、`\t`、`\r`、`\b`、`\f`，不认识的序列、不完整的 `\u`、落单的代理原样保留；解码结果只用来匹配）。参数被截断（`max_tokens`）或者不是合法 JSON 时，下一步照样会按 JSON 解码，所以 `\/`、`\u0073` 这类转义也藏不住密钥。
+    - 异常结束：流在块结束之前就失败（断开、error 事件、解析失败）时，先对已经累积、还没查过的参数做同样的检查，查到密钥就按上面的固定文字拒绝，不报原来的 `Network` 或 `BadResponse`。日志不受影响（中断前缀只记文字 delta），这一条是为了让 UI 撤回已经显示的参数增量。
+    - 增量边发边查（上面"预览 delta 不推迟发布"）：每个块的每个字符串字段保留一个"最长形式减 1"的尾部窗口，凑出密钥的那一片不发出，之前的片段照常即时显示。
+    - 已知缺口：
+      - 窗口按"块 + 字段"分开。如果一个密钥被拆在两个字段里（比如 thinking 文字一半、signature 一半），或者拆在两个块里，就检测不到。只有每一半都另外凑成某个密钥时，才会被拦下。
+      - usage 的计数读成有类型的整数（`Usage`），不和密钥比较：纯数字的 key 作为计数出现时，会进 `Usage` 和日志。真实的 key 不会是纯数字。
+      - key 是短的纯数字时，含计数、块编号的元数据字段（`usage.iterations`、`context_management` 等）会经常整项省略：数字也按子串匹配，key 是 `1` 时，任何含数字 1 的计数都会命中。
+      - 正文不做宽松解码：text、thinking 这类字面文字，下游不会把它们当 JSON 解码，字面的反斜杠写法不是密钥。所以正文里用转义、空格、编码等方式改写过的密钥不检测。检测只认三种形式：原样的，标准 JSON 转义的，以及调用参数宽松解码以后的。
 - **流式增量**：`Delta.Text` 依次拼起来一定是最终正文的前缀；推理和工具调用的预览不作保证，服务端降级时可能不出现在最终回复里，界面以最终的 `ChatResponse` 为准重新渲染。
+- **已知缺口：成功的流没有长度上限**（WP04 r11，两个适配器相同）：
+  - 成功的流整体没有长度上限，单行也没有。内存随服务端发来的内容增长：一行在读完之前一直留在读取缓冲里；整份 JSON 的回复要累积到 body 结束。
+  - 时间是线性的：找行尾时每个字节只看一次，服务端按单字节分片发送也一样（r11 修复）。
+  - 不能直接用错误体的 64 KiB 读取上限：Responses 的 `response.completed` 事件带着整份 response，是一整行 `data:`；忽略 `stream:true` 的端点会回一整份 JSON，紧凑写法也是一整行。这两种都可能正常地超过 64 KiB。
+  - M2 要给整条流和单行各定一个上限，同时定好超出时报哪种 `ModelError`，两个适配器一起实现。
 - blob 按会话存放：每个会话建一个 ChatModel，或者用会话感知的 `BlobSource`，组装时决定。
 
 **线路快照**（`core.model.WireProfile`，随 `ChatRequest.wire` 传给适配器，冻结在 `request/header` 和 `side/request` 里）：
@@ -165,7 +198,7 @@ data class WireProfile(
 
 - **工具调用**：`tools[].function` + `tool_choice:"auto"`。主循环每轮只执行一个调用，所以服务商支持时适配器在 `prepare` 里设 `wire.disableParallelToolCalls = true`，线路上发 `parallel_tool_calls:false`。如果模型仍然返回多个调用，第一个之外的每个都要配一条结果"已跳过：每步只执行一个动作"，否则下一次请求会被拒。调用的 `arguments` 不是字符串时不静默改写（Chat 和 Responses 相同）：缺省或 `null` 记成 `{}`；对象原样序列化（有的网关发对象）；数字、布尔、数组按原始 JSON 文本保留为 argsJson，交给工具层的边界校验给模型反馈"参数无效"。这些参数和字符串参数一样经过回显检查。
 - **流式**：`stream:true` + `stream_options.include_usage`；要兼容某些网关返回 `usage:null` 的情况。
-- **连接复用**（OpenAI 适配器的 HTTP 客户端，Responses 也用它）：默认不复用空闲连接，每个 attempt 新建连接（`HttpTimeouts.idleConnectionKeepAlive`，默认 `Duration.ZERO`，加载时校验，范围 0 到 5 分钟）。原因：服务端可以不打招呼（不带 `Connection: close`）关掉空闲的 keep-alive 连接，而 OkHttp 只对空闲满 10 秒的连接做健康检查；连接失败重试又是关着的（保住"一个 attempt 只发一个请求"），所以复用一条已经被关掉的连接，这次请求一定失败，白白占掉 `requestError` 的一次重试和一段退避。常见的本地服务（uvicorn、Node http、cpp-httplib）空闲超时在 5 秒左右，正好落在两步之间的间隔里。多一次 TCP/TLS 握手，和模型的延迟比可以忽略。**什么时候可以调大**：已经知道服务端的空闲超时比这个值长时（比如自己部署、配置可查的服务）。**调大以后仍然会碰到**：服务端的超时比这个值短，或者服务端在超时之前因为别的原因（重启、负载均衡切换）关掉连接时，下一次请求照样失败一次；这个剩下的竞争窗口交给 `requestError` 重试，不打开 OkHttp 的连接失败重试。
+- **连接复用**（两个适配器的 HTTP 客户端，规则相同：OpenAI 适配器的 `HttpTimeouts.idleConnectionKeepAlive`，Responses 也用它；Anthropic 适配器的 `AnthropicTimeouts.idleConnectionKeepAlive`）：默认不复用空闲连接，每个 attempt 新建连接（默认 `Duration.ZERO`，加载时校验，范围 0 到 5 分钟）。原因：服务端可以不打招呼（不带 `Connection: close`）关掉空闲的 keep-alive 连接，而 OkHttp 只对空闲满 10 秒的连接做健康检查；连接失败重试又是关着的（保住"一个 attempt 只发一个请求"），所以复用一条已经被关掉的连接，这次请求一定失败（`Network`），白白占掉 `requestError` 的一次重试和一段退避。常见的本地服务（uvicorn、Node http、cpp-httplib）空闲超时在 5 秒左右，正好落在两步之间的间隔里。多一次 TCP/TLS 握手，和模型的延迟比可以忽略。**什么时候可以调大**：已经知道服务端的空闲超时比这个值长时（比如自己部署、配置可查的服务）。**调大以后仍然会碰到**：服务端的超时比这个值短，或者服务端在超时之前因为别的原因（重启、负载均衡切换）关掉连接时，下一次请求照样失败一次；这个剩下的竞争窗口交给 `requestError` 重试，不打开 OkHttp 的连接失败重试。
 - **结束原因**（`finish_reason` → `stopReason`）：`length` / `max_tokens` → `MAX_TOKENS`；`content_filter`、`sensitive` 和 `refusal` 报 `Refusal`，带不带调用都一样。正常结束（`stop`、`end_turn`、`eos`、`tool_calls`、`function_call` 或没有原因）时，带调用就是 `TOOL_USE`（Ollama 带调用时也报 `stop`），不带调用就是 `END_TURN`（`tool_calls` / `function_call` 不带调用是 `OTHER`）。不认识的值一律 `OTHER`，带着的调用不执行。
 - **推理内容**：字段名和"要不要回传"各家不同（`reasoning_content` 等）。在 `ProviderProfile.reasoningField` 和 `ProviderProfile.echoReasoning` 里按服务商配置，由能力探测确认；**探测不了的标"未验证"**。写请求头时这两项冻结进 `wire`（§2"线路快照"）。
 - **工具调用漏成文字**：有的模型会把工具调用写成正文里的标记（DeepSeek DSML、`<tool_call>` 等），参考 Mika 的 `LeakedToolMarkup`。还原**默认关闭，所有预设（包括 DeepSeek、通义、Ollama）都不打开**：还原出来的调用没走服务商的工具通道，而 PolicyEngine 现在还不能对还原出来的调用要求用户确认。以后作为用户显式开启的兼容选项提供（UI 由 WP09 决定）。预设的 `leakedCallFormats` 记下这条线路有证据会漏出的格式（DeepSeek 是 DSML，通义和 Ollama 是 `<tool_call>`）。`ChatQuirks.recoverLeakedCalls` 只能开启这条线路允许的格式（`WireOptions.allowedLeakedCalls`）：预设线路的预设按 `WireOptions.defaultsFor` 的方式解析（指向官方 host 的自定义 profile 也算这个预设），允许的就是预设的 `leakedCallFormats`，线路自己不能再声明；自定义线路默认什么都不允许，必须在 `ChatQuirks.leakedCallFormats` 里显式声明实际会用到的格式，开启的格式必须是声明的子集。创建模型和开始"测试并保存"时校验，不满足就抛 `IllegalArgumentException`，不发请求。设置界面（WP09/WP10）的开关只能列出这条线路允许的格式。开启后，下面几条都满足才还原，否则正文原样保留：
@@ -217,14 +250,36 @@ data class WireProfile(
 
 ### 3.3 Anthropic Messages
 
-- **实现方式**：用官方 SDK `com.anthropic:anthropic-java`（Kotlin 直接用 Java SDK），提供 baseUrl 的服务商（Anthropic 兼容端点）通过 base URL 覆盖接入。
-  - **M1 先做一个 spike**：验证 minSdk 30 下能否运行、APK 增加多少体积、和 R8 是否兼容。不过关的话，再评估用 OkHttp 直接实现线路格式，并记一条 ADR。
+- **实现方式**：用 OkHttp 直接实现 Messages 线路格式（`core.model.anthropic`），**不引入官方 SDK**。提供 baseUrl 的服务商（Anthropic 兼容端点）通过 base URL 覆盖接入。
+  - 依据是 M1 的 Android spike（ADR `2026-11-01-anthropic-adapter`）：SDK 3.3.0 能过 R8 和 API 30 检查，但让 APK 多出约 2.6 MiB、方法数多出约 1.6 万。它的重定向和自动重试都能关，但自带的 OkHttp 客户端挡不住 OkHttp 对 `503` 加 `Retry-After: 0` 的自动重发，满足不了"每次尝试只发一个请求"。
+  - SDK 源码和 claude-api 文档只拿来核对字段名、beta 名和事件类型。
+- **线路设置**：只从请求的 `wire` 快照读取，映射版本 1。
+  - `options` 只认这八个名字：`anthropic.version`、`anthropic.auth`、`anthropic.thinking`、`anthropic.thinking_display`、`anthropic.prefix_mismatch`、`anthropic.fallbacks`、`anthropic.eager_input_streaming`、`anthropic.strict_tools`。
+  - 未知名字、版本不符、凭据类型不符，都在发送前报 `InvalidRequest`。
+  - beta 按需拼进 `anthropic-beta`。
+  - 推荐设置：所有端点都开 adaptive thinking、`display:"summarized"` 和 `eager_input_streaming`；官方端点（`https://api.anthropic.com`）上再加 `drop_block` 和服务端降级（只对有降级的模型）。网关不发 Claude API 专有的 beta。
+  - 官方端点只有一种判定（`AnthropicPresets.isOfficial`），生成快照和发送前的核对都用它：base URL 规范化以后正好是 `https://api.anthropic.com`，也就是 HTTPS、这个主机（大小写不限）、端口 443（写不写都行）、根路径，没有别的。别的端口（如 `:8443`）或带路径（如 `/proxy`）的地址都算另一个端点。
+  - 快照由 `ChatModel.prepare(reasoning)` 生成（§2"线路快照"）：`AnthropicAdapters.model(profile, model, capabilities, blobs, settings)` 创建模型时就拿到用户保存的 `AnthropicSettings`（不给就用推荐设置），profile 的 headers 在这时复制一份冻结；`prepare` 先钳制档位再映射，同一档位总是得到相同的快照；`complete()` 不生成快照。
+  - 端点、模型、设置三者的兼容性在创建模型时统一校验（`prepare` 按契约不抛异常），发送阶段不静默删掉记下的字段。不兼容就报 `InvalidRequest(param = "settings.serverFallback")` 或 `settings.prefixMismatch`。不兼容指两种情况：网关上开了 Claude API 专有的降级或 `prefixMismatch`；没有服务端降级的模型（Haiku 5.5，以及预设不认识的模型）开了降级，Haiku 5.5 上 `fallbacks` 本身就是 400。
+  - 一份档案服务多个模型时，保存的设置先经 `AnthropicSettings.effectiveFor(profile, model)` 按模型算出有效设置，再创建模型，快照记下的就是实际发出的设置。
+  - 发送前再核对一次端点：快照开着 `fallbacks` 或 `prefixMismatch`，而 `profile.baseUrl` 不是官方端点（任务进行中把 base URL 从官方端点改成了网关），就报不可重试的 `InvalidRequest(param = "wire.options")`，写明快照是为另一个端点生成的、需要重新生成。不静默删字段：发出的内容必须能从日志里的快照重建（AGENTS §3 第 1 条）。
+  - **WP09 的义务**：档案的端点变了，就生成并记一份新快照（新的 `request/header`），不拿旧快照接着发。
+  - 快照总是写 `disableParallelToolCalls = true`，写 `false` 的快照在发送前报 `InvalidRequest(param = "wire.disableParallelToolCalls")`；带工具时据此发 `tool_choice.disable_parallel_tool_use:true`（主循环每步只执行一个动作）。
+- **传输**：和 OpenAI 适配器一致。
+  - 每次 attempt 只发一个请求：关掉连接失败重试和重定向跟随。默认也不复用空闲连接（§3.1"连接复用"）。
+  - 3xx 报不可重试的 `InvalidRequest(param = null)`，`detail` 里带截断后的目标地址：按 §2 的 `Redactor.quote` 引用：原样或标准转义写出的本次密钥打码成 `***`，其余地址保留；剩下的文字有转义、解码后含密钥或凭据形状，就整段换成固定说明。
+  - SSE 认 LF、CRLF 和单独的 CR。
+  - `Retry-After` 只接受有限、非负的值。
+  - 取消时释放响应和连接。
+  - 错误里回显的密钥打码：错误体读取时先按精确形式打码、再截断。截断处去掉的末尾只认本次密钥精确形式的开头，以及原样写出、还没成形的 `sk-`、JWT 开头；用别的转义写出的密钥被截在中间时认不出（§2 的已知缺口）。凭据形状在解析、解码以后才打码（§2）。
+  - 模型产生的内容里出现本次请求的密钥，整条回复拒绝；拒答 `category` 打码，`providerMetadata` 里打码会改动的字段整项省略（§2）。
 - **默认模型**：主模型 `claude-opus-5-5`，可选 `claude-sonnet-5-5`；轻量模型 `claude-haiku-5-5`；看图模型默认用主模型。模型清单以服务端 `/v1/models` 返回的为准，本地只做初值。
 - **思考**：
   - Opus 5.5 的思考始终开启：不发 `thinking`，或者发 `{type:"adaptive"}`。**`budget_tokens` 和 `disabled` 都会被拒（400）**。
   - 思考深度用 `output_config.effort` 控制。**Opus 5.5 的默认值是 `medium`**，所以按用途显式设置：主模型做 GUI 任务时建议从 `high` 起调，轻量判断用 `low`。
   - 要给用户看思考进度时，设 `display:"summarized"`。
 - **思考块的回传**：thinking、redacted_thinking 和 compaction 块（包括 signature）原样保存、原样回传。**换了模型也不在客户端删**：API 会自己略过当前模型读不了的块；客户端删掉的话，换回原模型时这些推理就永久丢了，从中间删块还会让后面的块报 `predecessor_missing`，compaction 块装着压缩后的历史，删掉就丢了历史。这也是铁律 7（历史只追加）。
+  - 保留下来的 thinking 块必须带非空的 signature，redacted_thinking 必须带 `data`，否则整条回复报 `BadResponse`，截断的回复也一样。没有签名的块回传时会被拒，所以不能当成完整的 `Reasoning` 记下来。
 - **preserved thinking（关键约束）**：思考块的签名绑定在它之前的整段对话前缀上（system + tools + 之前的所有消息）。
   - **改写、删除或重排更早的轮次，都会让之后所有的思考块失效**；2026-08-31 之后注册的账号会直接收到 400。
   - 对我们的影响和对策见 §5。
@@ -233,6 +288,12 @@ data class WireProfile(
   - **不用强制的 `any`/`tool`**，Opus 5.5 和 Sonnet 5.5 上会返回 400。
   - 工具 schema 可以加 `strict:true`。
   - 流式时给客户端工具加 `eager_input_streaming:true`，**拿到的参数先按 schema 校验再执行**；在执行任何工具之前，先检查 `stop_reason` 是不是 `max_tokens` 或 `refusal`。
+    - 校验在边界做：构造工具调用的地方（`ToolCall` 契约）。适配器只保留原始参数文本，不解析。
+    - 回传时，参数文本不是 JSON 对象（被截断或无效的流式参数）的调用，在映射版本 1 下 `input` 发 `{}`。
+      - 日志里的 `argsJson` 保留原文，`{}` 只出现在线路映射里，所以不破坏"模型可见 ⟺ 已记录"。
+      - 不造 `{"_raw": …}` 这类字段，免得模型模仿着用。
+    - `max_tokens` 和 `model_context_window_exceeded` 报成 `StopReason.MAX_TOKENS`，`refusal` 报成 `ModelError.Refusal`。主循环据此不执行工具。
+    - `end_turn` 而回复里有保留下来的客户端调用时，报 `StopReason.TOOL_USE`（转换网关可能把调用那一轮报成 `end_turn`；和 OpenAI 适配器一致）。`providerMetadata.stop_reason` 保留原值。
 - **缓存**：最多 4 个 `cache_control` 断点。建议放在：工具清单末尾、system 末尾、历史里最后一个稳定点。用 `usage.cache_read_input_tokens` 验证是否命中，结果进 Token 统计。
 - **输出与采样**：
   - 流式请求的 `max_tokens` 给足（约 64K），避免话说到一半被截断。
@@ -241,6 +302,10 @@ data class WireProfile(
 - **拒答**：处理 `stop_reason:"refusal"` 和 `stop_details.category`。
   - 在 Anthropic 官方端点上**默认开启服务端降级**：beta `server-side-fallback-2026-07-01`，`fallbacks:"default"`。Sonnet 5.5 只支持 `"default"` 形式，而且只在 Claude API 上可用。
   - 设置页要告诉用户这个开关已经开着，并允许关闭。
+  - 中途降级时，最后一个 `fallback` 块之前的 thinking、redacted_thinking、tool_use 和未知内部块不回传。`providerMetadata.fallback_discarded` 只记是哪几个块（序号、类型、调用 id 和名字），不记内容。
+  - `requested_model` 和 `served_model` 分开记。`served_model` 依次取：最后一个 fallback 块的 `to.model`；`usage.iterations` 里最后一个 `fallback_message`；`message_start` 的 model。
+  - 正文增量拼起来始终和最终正文一致。推理、调用通告和参数的预览只在降级时可能不一致，这时 `preview_diverged` 记下通道，界面以最终回复为准重新渲染。
+  - 未知块类型在最后一个 `fallback` 块之前的省略；在它之后的，或者没有降级时出现的，报 `BadResponse`。
 - **图片**：用 base64 发送（字节稳定，签名校验认的是字节）。截图长边 ≤1280，JPEG。
 
 ---
@@ -318,7 +383,7 @@ OpenAI 在 DevDay 2026 推出的这个通道，面向"开源、在本地运行"�
 | **SSE 回放** | 每家网关录一份原始流，放在 `core/src/test/resources/wire/<provider>/<case>.sse`，喂给解析器（参考 DSH-Android 的 gateway fixtures）；覆盖 `usage:null`、思考字段、工具参数分片、拒答、中途断流 |
 | **会话回放** | 见 `engineering-baseline.md` §3.2；fixture 里记录协议和模型，同一个场景可以在三种协议下各录一份 |
 | **真实 API** | 每种协议一个 e2e，无 key 时跳过，CI 上缺 secret 判红；ChatGPT 套餐模式只做手动的冒烟清单（需要真实账号，不进 CI） |
-| **preserved thinking 自检** | Anthropic e2e 里加一个"历史只追加"的检查：连续两次请求的 messages，前一次必须是后一次的前缀；请求里显式设 `prefix_mismatch_behavior:"error"`，这样老账号也能测到 |
+| **preserved thinking 自检** | Anthropic e2e 里加一个"历史只追加"的检查：连续两次请求的 messages，前一次必须是后一次的前缀；请求里显式设 `prefix_mismatch_behavior:"error"`，这样老账号也能测到。这个设置只在官方端点上发；网关不是 Claude，不发 |
 
 ---
 
@@ -326,6 +391,6 @@ OpenAI 在 DevDay 2026 推出的这个通道，面向"开源、在本地运行"�
 
 | 里程碑 | 内容 |
 |---|---|
-| M1 | 三种协议的 API Key 模式；`ModelRouter` 的三种用途；"测试并保存"；线路格式单测和 SSE 回放；Anthropic SDK 的 Android spike |
+| M1 | 三种协议的 API Key 模式；`ModelRouter` 的三种用途；"测试并保存"；线路格式单测和 SSE 回放；Anthropic SDK 的 Android spike（已完成，结论是不用 SDK，见 ADR `2026-11-01-anthropic-adapter`） |
 | M2 | ChatGPT 套餐登录（要先确定 §4.2 的适用范围）；Anthropic 服务端 context editing / compaction 接入；Token 和缓存命中统计 |
 | M4 | 更多协议（如 Gemini）、更多服务商预设 |

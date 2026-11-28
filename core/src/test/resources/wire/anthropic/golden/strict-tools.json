@@ -1,0 +1,80 @@
+{
+  "anthropic-version": "2026-10-21",
+  "anthropic-beta": [
+    "thinking-binding-controls-2026-08-01"
+  ],
+  "body": {
+    "model": "claude-opus-5-5",
+    "max_tokens": 64000,
+    "stream": true,
+    "system": [
+      {
+        "type": "text",
+        "text": "你是手机助手。"
+      },
+      {
+        "type": "text",
+        "text": "每步只做一个动作。",
+        "cache_control": {
+          "type": "ephemeral"
+        }
+      }
+    ],
+    "tools": [
+      {
+        "name": "tap",
+        "description": "点击屏幕上的元素。",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "target": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "strict": true,
+        "cache_control": {
+          "type": "ephemeral"
+        }
+      }
+    ],
+    "tool_choice": {
+      "type": "auto",
+      "disable_parallel_tool_use": true
+    },
+    "thinking": {
+      "type": "adaptive",
+      "display": "omitted",
+      "block_binding": {
+        "prefix_mismatch_behavior": "error"
+      }
+    },
+    "output_config": {
+      "effort": "max"
+    },
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "巴黎天气怎么样？",
+            "cache_control": {
+              "type": "ephemeral"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

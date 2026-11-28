@@ -199,7 +199,10 @@ class ReplayTest {
         private const val REPLAYS = 2
         private const val MIN_FIXTURES = 40
 
-        /** Fixture paths relative to `wire/`: every `.sse`, and `.json` bodies that are not expectations or goldens. */
+        /**
+         * Fixture paths relative to `wire/`: every `.sse`, and `.json` bodies that are not expectations
+         * or goldens. `wire/anthropic/` is the Anthropic adapter's, replayed by its StreamFixturesTest.
+         */
         @JvmStatic
         fun fixtures(): List<String> {
             val root = Path.of(checkNotNull(ReplayTest::class.java.getResource("/wire")).toURI())
@@ -209,6 +212,7 @@ class ReplayTest {
                     .map { root.relativize(it) }
                     .filter { it.extension == "sse" || (it.extension == "json" && !it.name.endsWith(".expect.json")) }
                     .filter { !it.invariantSeparatorsPathString.startsWith("golden/") }
+                    .filter { !it.invariantSeparatorsPathString.startsWith("anthropic/") }
                     .map { it.invariantSeparatorsPathString }
                     .sorted()
                     .toList()

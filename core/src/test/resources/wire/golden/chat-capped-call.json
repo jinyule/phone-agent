@@ -26,7 +26,7 @@
     {
       "role": "tool",
       "tool_call_id": "m1",
-      "content": "Not run: the reply was cut off, so these arguments are incomplete."
+      "content": "未执行：这条回复达到了输出长度上限，被截断了。这个调用的参数（你看到的可能是 {}）不完整，不是你原本要发的那一份。如果仍然需要，请重新发起这次调用。"
     },
     {
       "role": "user",

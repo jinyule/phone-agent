@@ -1,0 +1,12 @@
+{
+  "source": "constructed: connection closed mid-answer (no message_stop)",
+  "expect": {
+    "error": {
+      "kind": "NETWORK",
+      "message": "network: stream ended before message_stop"
+    },
+    "deltas": [
+      "text: 巴黎"
+    ]
+  }
+}
