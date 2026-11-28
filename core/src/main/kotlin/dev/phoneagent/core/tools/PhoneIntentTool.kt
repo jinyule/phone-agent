@@ -1,8 +1,8 @@
 package dev.phoneagent.core.tools
 
 import dev.phoneagent.core.ports.LaunchTarget
-import dev.phoneagent.core.ports.PACKAGE_NAME
 import dev.phoneagent.core.ports.SystemIntentKind
+import dev.phoneagent.core.ports.isPackageName
 import dev.phoneagent.core.tool.RiskClass
 import dev.phoneagent.core.tool.ScreenPresenter
 import dev.phoneagent.core.tool.ToolCall
@@ -218,8 +218,7 @@ internal object IntentFields {
     private fun packageName(
         args: ArgReader,
         text: String,
-    ): String? =
-        text.takeIf { PACKAGE_NAME.matches(it) } ?: null.also { args.problem("`package` 应该是包名，如 com.tencent.mm") }
+    ): String? = text.takeIf(::isPackageName) ?: null.also { args.problem("`package` 应该是包名，如 com.tencent.mm") }
 
     private fun phone(
         args: ArgReader,

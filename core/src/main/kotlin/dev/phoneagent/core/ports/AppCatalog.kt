@@ -29,7 +29,7 @@ public data class AppEntry(
     val launchable: Boolean,
 ) {
     init {
-        require(PACKAGE_NAME.matches(packageName)) { "Invalid package name '$packageName'" }
+        require(isPackageName(packageName)) { "Invalid package name '$packageName'" }
         require(label.isNotBlank()) { "App $packageName: label must not be blank" }
     }
 }

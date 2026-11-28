@@ -2,7 +2,7 @@ package dev.phoneagent.core.tools
 
 import dev.phoneagent.core.ports.AppCatalog
 import dev.phoneagent.core.ports.LaunchTarget
-import dev.phoneagent.core.ports.PACKAGE_NAME
+import dev.phoneagent.core.ports.isPackageName
 import dev.phoneagent.core.tool.RiskClass
 import dev.phoneagent.core.tool.ScreenPresenter
 import dev.phoneagent.core.tool.ToolCall
@@ -52,7 +52,7 @@ internal class PhoneLaunchTool(
             args.has("app") == args.has("link") -> args.problem("`app` 和 `link` 要给一个，而且只给一个")
             link != null && cold -> args.problem("`cold` 只能和 `app` 一起用")
             link != null && !Links.allowed(link) -> args.problem(Links.REFUSED)
-            app != null && !PACKAGE_NAME.matches(app) -> args.problem(notAPackage(app))
+            app != null && !isPackageName(app) -> args.problem(notAPackage(app))
         }
         val plan: Launch? = app?.let { Launch.ByApp(it, cold) } ?: link?.let { Launch.ByLink(it) }
         return when (val parsed = args.finish(USAGE, plan)) {

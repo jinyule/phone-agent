@@ -3,11 +3,14 @@ package dev.phoneagent.core.session
 import dev.phoneagent.core.model.ModelErrorKind
 import dev.phoneagent.core.model.StopReason
 import dev.phoneagent.core.model.ToolDef
+import dev.phoneagent.core.ports.LaunchTarget
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.serializer
+import org.junit.jupiter.api.Assertions.assertAll
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.function.Executable
 
 /**
  * Ranges and invariants that the KDoc promises are enforced where a log is read: every bad line is
@@ -111,7 +114,79 @@ class DecodeBoundaryTest {
         assertTrue(ModelErrorKind.NETWORK.retryable)
     }
 
+    @Test
+    fun `a package name of any length in a launch is read, or is corruption of its line`() {
+        // FWD-B1 sweep: package names were checked by a regex repeating a group, which overflowed the stack.
+        val name = "a" + ".a".repeat(REPEATS)
+        val launch =
+            encodedPayload(
+                SessionSamples.events.filterIsInstance<ScreenLaunched>().first { it.target is LaunchTarget.App },
+            )
+        val cells =
+            listOf(
+                Executable {
+                    val read = read(envelope("screen/launch", launch.replace("com.example.chat", name)))
+                    val target = (read.records.last().event as ScreenLaunched).target
+                    assertEquals(name, (target as LaunchTarget.App).packageName)
+                },
+                Executable {
+                    val bad = envelope("screen/launch", launch.replace("com.example.chat", "$name."))
+                    val error = runCatching { read(bad) }.exceptionOrNull()
+                    assertTrue(error is SessionCorruptedException && error.line == prefix.size + 2, "$error")
+                },
+            )
+        assertAll(cells)
+    }
+
+    @Test
+    fun `an event type of any length is read, or is corruption of its line`() {
+        // FWD-B1 sweep: types were checked by a regex repeating a group, which overflowed the stack.
+        val type = "a/a" + "-a".repeat(REPEATS)
+        val skipped = """{"seq":${prefix.size + 1},"time":0,"type":"$type","ignorable":true,"data":{}}"""
+        val cells =
+            listOf(
+                Executable { assertEquals(listOf(type), read(skipped).skipped.map { it.type }) },
+                Executable {
+                    val error = runCatching { read(envelope("$type-", "{}")) }.exceptionOrNull()
+                    assertTrue(error is SessionCorruptedException && error.line == prefix.size + 2, "$error")
+                },
+            )
+        assertAll(cells)
+    }
+
+    @Test
+    fun `a malformed type or package name of 64 KiB is corruption of its line, read by the codec`() {
+        // Each field is exactly 64 KiB and ends where its format does not allow: a type in "-", a package name in ".".
+        val type = "a/" + "a-".repeat((KIB_64 - 2) / 2)
+        val name = "a.".repeat(KIB_64 / 2)
+        val launch =
+            encodedPayload(
+                SessionSamples.events.filterIsInstance<ScreenLaunched>().first { it.target is LaunchTarget.App },
+            )
+        val cells =
+            listOf(
+                Triple("type", type, envelope(type, "{}")),
+                Triple("package name", name, envelope("screen/launch", launch.replace("com.example.chat", name))),
+            ).map { (what, field, line) ->
+                Executable {
+                    assertEquals(KIB_64, field.encodeToByteArray().size, what)
+                    val error = runCatching { read(line) }.exceptionOrNull()
+                    assertTrue(error is SessionCorruptedException && error.line == prefix.size + 2, "$what: $error")
+                }
+            }
+        assertAll(cells)
+    }
+
     private companion object {
+        /**
+         * Segments in the long package name and words in the long type: far more than the stack
+         * holds repetitions of a regex group.
+         */
+        const val REPEATS = 32_000
+
+        /** 64 KiB, in bytes of UTF-8 (the malformed fields are ASCII). */
+        const val KIB_64 = 65_536
+
         val tapDef: String =
             Json.encodeToString(
                 serializer<ToolDef>(),

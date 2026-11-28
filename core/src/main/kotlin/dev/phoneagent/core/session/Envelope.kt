@@ -34,7 +34,7 @@ public data class Envelope(
 ) {
     init {
         require(seq >= 1) { "seq must be >= 1, got $seq" }
-        require(TYPE_PATTERN.matches(type)) { "seq $seq: event type '$type' must match ${TYPE_PATTERN.pattern}" }
+        require(isEventType(type)) { "seq $seq: event type '$type' must match ${TYPE_PATTERN.pattern}" }
         require(sources.all { it in 1 until seq }) { "seq $seq: sources $sources must point to earlier records" }
         val op = surfaceOp
         require(op !is SurfaceOp.Replace || op.endSeq < seq) { "seq $seq: replace range must end before it" }
@@ -42,10 +42,29 @@ public data class Envelope(
 
     /** Constants. */
     public companion object {
-        /** Event types are `<domain>/<name>`, lowercase, words joined by `-`. */
+        /**
+         * Event types are `<domain>/<name>`, lowercase, words joined by `-`. A record checks its
+         * type by [isEventType], not by this regex, so a long type cannot overflow the stack.
+         */
         public val TYPE_PATTERN: Regex = Regex("[a-z]+(-[a-z]+)*/[a-z]+(-[a-z]+)*")
     }
 }
+
+/**
+ * Whether [type] is what [Envelope.TYPE_PATTERN] matches: two halves around one `/`, each lowercase
+ * ASCII words joined by single `-`. Checked without a regex, in time in proportion to [type] and
+ * constant stack, however many words it has.
+ */
+internal fun isEventType(type: String): Boolean {
+    val halves = type.split('/')
+    return halves.size == 2 && halves.all(::isWords)
+}
+
+private fun isWords(half: String): Boolean =
+    half.split('-').all { word ->
+        word.isNotEmpty() &&
+            word.all { it in 'a'..'z' }
+    }
 
 /** How a record changes the model-visible message surface. */
 @Serializable

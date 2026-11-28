@@ -51,4 +51,25 @@ class HelperArgsTest {
         assertTrue(message("dev.phoneagent", "--package-check-ms=600001").contains("1000..600000"))
         assertTrue(message("dev.phoneagent", "--package-check-ms=").contains("''"))
     }
+
+    @Test
+    fun aPackageArgumentOf64KiBIsParsedOrRefusedWithoutOverflowingTheStack() {
+        // FWD-B1 sweep: the argument was checked by a regex repeating a group, which overflowed the stack.
+        val names = mapOf("valid" to "a.".repeat(KIB_64 / 2 - 1) + "aa", "ends in ." to "a.".repeat(KIB_64 / 2))
+        assertEquals(listOf(KIB_64, KIB_64), names.values.map { it.length })
+        val observed = names.mapValues { (_, name) -> outcome(name) }
+        assertEquals(mapOf("valid" to "parsed", "ends in ." to "refused: invalid package name"), observed)
+    }
+
+    private fun outcome(name: String): String =
+        try {
+            if (HelperArgs.parse(arrayOf(name)).packageName == name) "parsed" else "parsed as another name"
+        } catch (refused: IllegalArgumentException) {
+            "refused: " + refused.message.orEmpty().substringBefore(" '")
+        } catch (overflow: StackOverflowError) {
+            overflow.toString()
+        }
 }
+
+/** 64 KiB, in characters (the names are ASCII). */
+private const val KIB_64 = 65_536

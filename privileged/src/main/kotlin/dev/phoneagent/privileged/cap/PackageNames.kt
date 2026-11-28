@@ -3,6 +3,7 @@ package dev.phoneagent.privileged.cap
 import android.content.Context
 import android.content.pm.PackageManager
 import android.util.Log
+import dev.phoneagent.privileged.isPackageName
 
 /**
  * Checks a package name before it reaches a command line (`appops`, `am force-stop`): a Java
@@ -11,10 +12,8 @@ import android.util.Log
  * command would read it as something else.
  */
 internal object PackageNames {
-    private val FORMAT = Regex("""[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+""")
-
     /** Whether [name] has the shape of a package name; says nothing about whether it is installed. */
-    fun wellFormed(name: String): Boolean = FORMAT.matches(name)
+    fun wellFormed(name: String): Boolean = isPackageName(name)
 
     /** Why [name] is not an installed package the helper may name in a command, or null when it is. */
     fun problem(
