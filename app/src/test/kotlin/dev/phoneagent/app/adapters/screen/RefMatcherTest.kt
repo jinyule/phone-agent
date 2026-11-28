@@ -25,7 +25,7 @@ class RefMatcherTest {
         read: TreeBuilder,
         shown: (ReadElement) -> Boolean = { true },
     ): Observed {
-        val carried = RefCarrier.carry(null, read.elements, lastUsed = 0)
+        val carried = RefCarrier.carry(null, nodesOf(read.elements), lastUsed = 0)
         val elements =
             read.elements.indices
                 .filter {

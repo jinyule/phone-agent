@@ -52,7 +52,7 @@ internal class AndroidAppCatalog(
         launchable: Boolean,
     ): AppEntry? {
         val shown = label?.toString()?.trim().takeUnless { it.isNullOrEmpty() } ?: pkg
-        val listed = pkg != ownPackage && JAVA_PACKAGE.matches(pkg)
+        val listed = pkg != ownPackage && PackageNames.isValid(pkg)
         return if (listed) AppEntry(pkg, shown, launchable) else null
     }
 
@@ -108,8 +108,5 @@ internal class AndroidAppCatalog(
 
     private companion object {
         const val TAG = "AppCatalog"
-
-        /** The names `AppEntry` accepts. */
-        val JAVA_PACKAGE = Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")
     }
 }

@@ -14,8 +14,8 @@ package dev.phoneagent.app.adapters.screen
  * @property scrollSwipeMs duration of the swipe that replaces a refused scroll action.
  * @property gestureSlackMs extra time after a gesture's duration before an unanswered dispatch counts as failed.
  * @property clickUncertainMs a node click answered `false` after at least this long is taken as the
- *   platform's timeout (the click may have run) and not repeated with a gesture; below the
- *   platform's 5 s interaction timeout.
+ *   platform's timeout: the press is reported as one that may have run, not as one the app
+ *   refused (neither is repeated with a gesture); below the platform's 5 s interaction timeout.
  * @property screenshotWaitMs longest wait for a screenshot (the system's retry interval included);
  *   then the frame is reported as unavailable.
  * @property snapshotsKept how many recent snapshots act(on = …) can still resolve refs against.

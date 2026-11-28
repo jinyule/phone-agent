@@ -5,7 +5,6 @@ import dev.phoneagent.core.ports.ElementRole
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -14,15 +13,15 @@ class ElementIdentityTest {
     private val nodes = ArrayList<Identities.Facts>()
 
     /**
-     * How a node of [add] is: [shown] `false` for one the read leaves out (out of view); [cut] and
-     * [clipped] as [Identities.Loss] has them.
+     * How a node of [add] is: [cut], [clipped] and [besideGap] as [Identities.Loss] has them. Whether
+     * the read keeps the node does not count: one it leaves out has the identity it would have had kept.
      */
     private class Kind(
         val list: Boolean = false,
-        val shown: Boolean = true,
         val interactive: Boolean = false,
         val cut: Boolean = false,
         val clipped: Boolean = false,
+        val besideGap: Boolean = false,
     )
 
     private val list = Kind(list = true)
@@ -37,16 +36,19 @@ class ElementIdentityTest {
     ): Int {
         nodes +=
             Identities.Facts(
-                if (kind.shown) ElementIdentity(1, role, resourceId = null, name = label, context = null) else null,
+                ElementIdentity(1, role, resourceId = null, name = label, context = null),
                 label = label,
                 shape = Identities.Shape(kind.list, kind.interactive),
                 parent = parent,
-                loss = Identities.Loss(cut = kind.cut, clipped = kind.clipped),
+                loss = Identities.Loss(cut = kind.cut, clipped = kind.clipped, besideGap = kind.besideGap),
             )
         return nodes.lastIndex
     }
 
-    /** A row container under [list] holding [labels] (`-` before a label: out of view); its last label is a button. */
+    /**
+     * A row container under [list] holding [labels] (`-` before a label: out of view, which counts
+     * all the same); its last label is a button.
+     */
     private fun row(
         list: Int,
         vararg labels: String,
@@ -59,17 +61,17 @@ class ElementIdentityTest {
                 label.removePrefix("-"),
                 parent = row,
                 role = if (button) ElementRole.BUTTON else ElementRole.TEXT,
-                kind = Kind(shown = !label.startsWith("-"), interactive = button),
+                kind = Kind(interactive = button),
             )
         }
         return row
     }
 
-    private fun identities(): List<ElementIdentity?> = Identities.of(nodes)
+    private fun identities(): List<ElementIdentity> = Identities.of(nodes)
 
-    private fun contextOf(index: Int): IdentityContext? = identities()[index]!!.context
+    private fun contextOf(index: Int): IdentityContext? = identities()[index].context
 
-    private fun reliable(index: Int): Boolean = identities()[index]!!.reliable
+    private fun reliable(index: Int): Boolean = identities()[index].reliable
 
     private fun inWindow(vararg labels: String) = IdentityContext(Scope.WINDOW, LabelKey.of(labels.toList()))
 
@@ -86,12 +88,22 @@ class ElementIdentityTest {
     }
 
     @Test
-    fun aNodeTheReadLeavesOutHasNoIdentity() {
+    fun aNodeTheReadLeavesOutHasTheIdentityItWouldHaveHadKept() {
+        // Fix list fwd2 B1: out of view, "Draft" and the card are paired as kept nodes would be.
         val root = add(null)
-        val hidden = add("Draft", parent = root, kind = Kind(shown = false))
+        val hidden = add("Draft", parent = root)
+        val feed = add(null, parent = root, kind = list)
+        val card = add("card", parent = feed)
+        add("Like", parent = card, role = ElementRole.BUTTON, kind = control)
+        val identities = identities()
 
-        assertNull(identities()[hidden])
         assertEquals("its label still counts", inWindow("Draft"), contextOf(root))
+        assertEquals(ElementIdentity(1, ElementRole.CONTAINER, null, "Draft", inWindow("Draft")), identities[hidden])
+        assertEquals(
+            "the row it would have had kept",
+            ElementIdentity(1, ElementRole.CONTAINER, null, "card", inRow("card", "Like")),
+            identities[card],
+        )
     }
 
     // Rule 1: outside lists, every label of the window outside lists.
@@ -109,7 +121,7 @@ class ElementIdentityTest {
         add("Share", parent = actions, role = ElementRole.BUTTON, kind = control)
         val feed = add("Feed", parent = root, role = ElementRole.LIST, kind = list)
         val ada = row(feed, "Ada", "Like")
-        add("Draft", parent = root, kind = Kind(shown = false))
+        add("Draft", parent = root)
 
         val window = inWindow("Inbox", "Bob", "Like", "Share", "Feed", "Draft")
         assertEquals(window, contextOf(like))
@@ -261,7 +273,7 @@ class ElementIdentityTest {
         assertFalse(reliable(like))
         assertFalse("however whole it looks", reliable(ok))
         assertFalse(reliable(feed))
-        assertTrue("a row is whole by itself", reliable(ada + 2))
+        assertFalse("below the list, which is not reliable", reliable(ada + 2))
     }
 
     @Test
@@ -283,6 +295,34 @@ class ElementIdentityTest {
         assertTrue(reliable(after + 2))
         assertTrue(reliable(feed))
         assertTrue(reliable(ok))
+    }
+
+    @Test
+    fun whatANodeLacksPassesDownThroughNodesTheReadLeavesOut() {
+        // Fix list fwd B1: the nested lists are out of view; the read gives their rows the outer list as parent.
+        val root = add(null)
+        val outer = add(null, parent = root, kind = list)
+        val items =
+            add(
+                "Items",
+                parent = outer,
+                role = ElementRole.LIST,
+                kind = Kind(list = true, besideGap = true),
+            )
+        val wrapper = add(null, parent = items)
+        val like = add("Like", parent = wrapper, role = ElementRole.BUTTON, kind = control)
+        val photos = add("Photos", parent = outer, role = ElementRole.LIST, kind = Kind(list = true))
+        val share = add("Share", parent = photos, role = ElementRole.BUTTON, kind = control)
+        val cut = add(null, parent = outer, kind = Kind(cut = true))
+        add("Cy", parent = cut, role = ElementRole.TEXT)
+        val inCut = add("Songs", parent = cut, role = ElementRole.LIST, kind = list)
+        val play = add("Play", parent = inCut, role = ElementRole.BUTTON, kind = control)
+
+        assertFalse("the list beside the gap", reliable(items))
+        assertTrue("the outer list", reliable(outer))
+        assertFalse("below the list beside the gap, two nodes down", reliable(like))
+        assertTrue("below a list away from the gap", reliable(share))
+        assertFalse("below a kept list in a row cut", reliable(play))
     }
 
     @Test

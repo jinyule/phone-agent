@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- View ids of PressActivity, so that the test finds its nodes by view id. -->
+<resources>
+    <item name="press_run" type="id" />
+    <item name="press_parent" type="id" />
+    <item name="press_wrapper" type="id" />
+    <item name="press_child" type="id" />
+    <item name="press_label" type="id" />
+    <item name="parent_clicks" type="id" />
+    <item name="parent_long_clicks" type="id" />
+    <item name="child_clicks" type="id" />
+    <item name="child_long_clicks" type="id" />
+</resources>

@@ -174,9 +174,9 @@ internal object SystemIntents {
         )
 
     private val PHONE_NUMBER = Regex("[0-9+*#() -]{1,32}")
-    private val PACKAGE = Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")
     private val TIME = Regex("([01]?[0-9]|2[0-3]):([0-5][0-9])")
     private const val MAX_TIMER_SECONDS = 24 * 60 * 60
+    private const val NEEDS_PACKAGE = "settings page app_details needs a valid 'package'"
     private const val LOCAL_TIME = "local time yyyy-MM-ddTHH:mm"
 
     /** The intent of [kind] from [fields]. */
@@ -307,18 +307,9 @@ internal object SystemIntents {
         val details = page == "app_details"
         return when {
             action == null -> invalid("settings page must be one of ${SETTINGS_PAGES.keys.sorted()}, got '$page'")
-
-            details && (
-                pkg == null ||
-                    !PACKAGE.matches(
-                        pkg,
-                    )
-            ) -> invalid("settings page app_details needs a valid 'package'")
-
+            details && !(pkg != null && PackageNames.isValid(pkg)) -> invalid(NEEDS_PACKAGE)
             details -> ready(Intent(action, Uri.fromParts("package", pkg, null)))
-
             pkg != null -> invalid("'package' is only used with page app_details")
-
             else -> ready(Intent(action))
         }
     }

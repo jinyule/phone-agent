@@ -4,14 +4,15 @@ import dev.phoneagent.core.ports.Bounds
 import dev.phoneagent.core.ports.ElementRef
 
 /**
- * One element of a screen the port showed, as [RefCarrier] remembers it: every visible node of
- * the read, whatever the detail shown.
+ * One node of a screen the port showed, as [RefCarrier] remembers it: every node the read walked
+ * ([TreeRead.nodes]), whatever the detail shown. [ref] is the element's ref, `null` for a node the
+ * read left out; [parent] is the index in the tree of the node above.
  */
 internal class TreeEntry(
-    val ref: ElementRef,
+    val ref: ElementRef?,
     val identity: ElementIdentity,
-    val bounds: Bounds,
-    val parent: ElementRef?,
+    val bounds: Bounds?,
+    val parent: Int?,
 )
 
 /**
@@ -20,13 +21,20 @@ internal class TreeEntry(
  * names the same element. [RefMatcher] pairs a planned screen with a fresh read the same way.
  *
  * An element keeps its ref when the port can tell it is the same element: same [ElementIdentity]
- * (window, role, view id, name, and its context: every label of its window outside lists, or every
+ * (window, role, view id, name, its context: every label of its window outside lists, or every
  * label of its row) under the same parent, and that combination occurs exactly once in each
- * screen; among several, only the one at the same place in both screens keeps its ref. Parents are
- * paired first, so an element whose parent got a new ref gets one too. Anything ambiguous, and any
- * element whose identity is not [ElementIdentity.reliable] (read only in part, or a row the list's
- * edge cut down to its controls), gets a new number above all numbers handed out before, and its
- * old ref is void: a ref never comes back for a different element.
+ * screen; among several, only the one at the same place in both screens keeps its ref. Parents
+ * are paired first, so an element whose parent got a new ref gets one too. Anything ambiguous,
+ * and any element whose identity is not [ElementIdentity.reliable] (read only in part, or a row
+ * the list's edge cut down to its controls, it or a node above it), gets a new number above all
+ * numbers handed out before, and its old ref is void: a ref never comes back for a different
+ * element.
+ *
+ * The nodes a read leaves out (out of view, too small, alike to a kept node) are paired with the
+ * rest by the same rules, as were they kept, by their place in the tree; they take no ref and no
+ * number (fix list fwd2 B1). So an element below them keeps its ref only below the very nodes it
+ * was below: one that comes in below another node alike, at the same place, gets a new ref. An
+ * element keeps a ref only from an element: one that was left out and is kept now gets a new one.
  *
  * It renumbers rather than guess: any changed label outside lists (a clock, a carousel, a banner)
  * gives everything of that window outside lists new refs, the lists and their rows with it; any
@@ -64,7 +72,10 @@ internal object RefCarrier {
 
     private const val PREFIX = "e"
 
-    /** A fresh node whose parent got no ref from [previous]: no old element can have it as parent. */
+    /** No node of the previous screen: what [pair] gives a fresh node it cannot pair. */
+    const val NONE: Int = -1
+
+    /** A fresh node whose parent was paired with no node of the previous screen: no old node has it as parent. */
     private data class Unpaired(
         val index: Int,
     )
@@ -76,66 +87,82 @@ internal object RefCarrier {
 
     private data class Exact(
         val loose: Loose,
-        val bounds: Bounds,
+        val bounds: Bounds?,
     )
 
     /**
-     * Refs for [fresh] (one read, parents before children) carried from [previous], the elements
-     * of the last screen of this port (`null` for the first). [lastUsed] is the highest number
-     * handed out before.
+     * Refs for the elements of [fresh] (the nodes of one read, [TreeRead.nodes]) carried from
+     * [previous], the tree of the last screen of this port (`null` for the first). [lastUsed] is
+     * the highest number handed out before; new refs are numbered in reading order.
      */
     fun carry(
         previous: List<TreeEntry>?,
-        fresh: List<ReadElement>,
+        fresh: List<ReadNode>,
         lastUsed: Int,
     ): Carried {
         val old = previous.orEmpty()
-        val paired = pair(old, fresh)
+        val carried = refsOf(old, fresh, pair(old, fresh))
         var next = maxOf(lastUsed, old.maxOfOrNull(::numberOf) ?: 0)
-        val refs = paired.map { it ?: ElementRef("$PREFIX${++next}") }
-        val tree =
-            fresh.mapIndexed { i, read ->
-                TreeEntry(refs[i], read.identity, read.element.bounds, read.parent?.let(refs::get))
-            }
+        val refs = carried.map { it ?: ElementRef("$PREFIX${++next}") }
+        val tree = fresh.map { TreeEntry(it.element?.let(refs::get), it.identity, it.bounds, it.parent) }
         return Carried(refs, tree, next)
     }
 
-    /** For each element of [fresh], the ref of the element of [previous] it is, or `null` when it cannot tell. */
+    /**
+     * For each element of [fresh], the ref of the element of [previous] it is by [paired] (as
+     * [pair] gives it), or `null`: paired with nothing, or with a node that was left out.
+     */
+    fun refsOf(
+        previous: List<TreeEntry>,
+        fresh: List<ReadNode>,
+        paired: IntArray,
+    ): List<ElementRef?> =
+        fresh.indices.filter { fresh[it].element != null }.map { previous.getOrNull(paired[it])?.ref }
+
+    /**
+     * For each node of [fresh] (parents before children), the index in [previous] of the node it
+     * is, or [NONE] when it cannot tell.
+     */
     fun pair(
         previous: List<TreeEntry>,
-        fresh: List<ReadElement>,
-    ): List<ElementRef?> {
-        val trusted = previous.filter { it.identity.reliable }
-        val exactOld = trusted.groupBy { Exact(Loose(it.identity, it.parent), it.bounds) }
-        val looseOld = trusted.groupBy { Loose(it.identity, it.parent) }
-        val paired = arrayOfNulls<ElementRef>(fresh.size)
-        val looseOf = { i: Int -> Loose(fresh[i].identity, fresh[i].parent?.let { paired[it] ?: Unpaired(it) }) }
+        fresh: List<ReadNode>,
+    ): IntArray {
+        val trusted = previous.indices.filter { previous[it].identity.reliable }
+        val looseOld = trusted.groupBy { Loose(previous[it].identity, previous[it].parent) }
+        val exactOld = trusted.groupBy { Exact(Loose(previous[it].identity, previous[it].parent), previous[it].bounds) }
+        val paired = IntArray(fresh.size) { NONE }
+        val looseOf = { i: Int ->
+            Loose(
+                fresh[i].identity,
+                fresh[i].parent?.let { parent ->
+                    paired[parent].takeIf { it != NONE }
+                        ?: Unpaired(parent)
+                },
+            )
+        }
         for (level in fresh.indices
             .groupBy { fresh[it].depth }
             .toSortedMap()
             .values) {
             val loose = level.associateWith(looseOf)
-            val exact = level.associateWith { Exact(loose.getValue(it), fresh[it].element.bounds) }
+            val exact = level.associateWith { Exact(loose.getValue(it), fresh[it].bounds) }
             val looseCount = loose.values.groupingBy { it }.eachCount()
             val exactCount = exact.values.groupingBy { it }.eachCount()
             for (i in level.filter { fresh[it].identity.reliable }) {
                 val same =
                     sole(exactOld[exact.getValue(i)], exactCount[exact.getValue(i)])
                         ?: sole(looseOld[loose.getValue(i)], looseCount[loose.getValue(i)])
-                paired[i] = same?.ref
+                paired[i] = same ?: NONE
             }
         }
-        return paired.toList()
+        return paired
     }
 
-    /** The only old element, when it is also the only fresh one. */
+    /** The only old node, when it is also the only fresh one. */
     private fun sole(
-        old: List<TreeEntry>?,
+        old: List<Int>?,
         freshCount: Int?,
-    ): TreeEntry? = old?.singleOrNull()?.takeIf { freshCount == 1 }
+    ): Int? = old?.singleOrNull()?.takeIf { freshCount == 1 }
 
-    private fun numberOf(entry: TreeEntry): Int =
-        entry.ref.value
-            .removePrefix(PREFIX)
-            .toIntOrNull() ?: 0
+    private fun numberOf(entry: TreeEntry): Int = entry.ref?.let { it.value.removePrefix(PREFIX).toIntOrNull() } ?: 0
 }
