@@ -1,0 +1,147 @@
+package dev.phoneagent.privileged.helper
+
+import android.content.Intent
+import android.os.Binder
+import android.os.Bundle
+import android.os.Parcel
+import android.os.Process
+import android.util.Log
+import android.view.Surface
+import dev.phoneagent.privileged.IPrivilegedCore
+import dev.phoneagent.privileged.PrivilegedError
+import dev.phoneagent.privileged.PrivilegedProtocol
+
+/**
+ * The helper's [IPrivilegedCore]. Every IPrivilegedCore method (transactions
+ * FIRST_CALL_TRANSACTION..LAST_CALL_TRANSACTION) accepts only [allowedUid], the app: the helper
+ * outlives the app and its Binder could reach other processes. DUMP and SHELL_COMMAND are guarded
+ * the same way; an override of `dump` or `onShellCommand` must keep that check. The framework's
+ * other system transactions (INTERFACE; PING and the like are answered natively before Java) skip
+ * the guard and expose no capability. Capabilities that are not implemented yet throw
+ * [PrivilegedError.notImplemented].
+ *
+ * [onShutdown] runs on the Binder thread and must only schedule the exit.
+ */
+@Suppress("TooManyFunctions") // One override per IPrivilegedCore method.
+internal class PrivilegedCore(
+    private val allowedUid: Int,
+    private val onShutdown: () -> Unit,
+) : IPrivilegedCore.Stub() {
+    private val lock = Any()
+    private val held = mutableListOf<HeldResource>()
+
+    /**
+     * Something the helper must undo in [releaseAll] (a display, a mute). [release] may throw a
+     * RuntimeException: [releaseAll] logs it, goes on with the other resources and keeps the failed
+     * one for the next [releaseAll].
+     */
+    fun interface HeldResource {
+        fun release()
+    }
+
+    override fun onTransact(
+        code: Int,
+        data: Parcel,
+        reply: Parcel?,
+        flags: Int,
+    ): Boolean {
+        if (code in FIRST_CALL_TRANSACTION..LAST_CALL_TRANSACTION || code in GUARDED_SYSTEM_TRANSACTIONS) {
+            val caller = Binder.getCallingUid()
+            if (caller != allowedUid) throw SecurityException("uid $caller may not call the PhoneAgent helper")
+        }
+        return super.onTransact(code, data, reply, flags)
+    }
+
+    override fun protocolVersion(): Int = PrivilegedProtocol.VERSION
+
+    override fun identity(): IntArray = intArrayOf(Process.myUid(), Process.myPid())
+
+    /** Releases every held resource, each on its own: one failure never stops the others. Never throws. */
+    override fun releaseAll() {
+        val taken = synchronized(lock) { held.toList().also { held.clear() } }
+        val failed = taken.filterNot(::release)
+        synchronized(lock) { held.addAll(0, failed) }
+        Log.i(TAG, "releaseAll: released ${taken.size - failed.size} of ${taken.size} resource(s)")
+    }
+
+    // TooGenericExceptionCaught: a resource may fail in any way; the others must still be released.
+    @Suppress("TooGenericExceptionCaught")
+    private fun release(resource: HeldResource): Boolean =
+        try {
+            resource.release()
+            true
+        } catch (e: RuntimeException) {
+            Log.e(TAG, "releasing $resource failed; kept for the next releaseAll", e)
+            false
+        }
+
+    override fun shutdown() {
+        Log.i(TAG, "shutdown requested")
+        onShutdown()
+    }
+
+    /** Registers [resource] to be undone by the next [releaseAll]. */
+    fun hold(resource: HeldResource) {
+        synchronized(lock) { held += resource }
+    }
+
+    override fun probe(): Bundle = notImplemented("probe")
+
+    override fun createDisplay(
+        s: Surface?,
+        w: Int,
+        h: Int,
+        dpi: Int,
+    ): Int = notImplemented("createDisplay")
+
+    override fun releaseDisplay(displayId: Int): Unit = notImplemented("releaseDisplay")
+
+    override fun startActivity(
+        displayId: Int,
+        intent: Intent?,
+        userId: Int,
+        cold: Boolean,
+    ): Int = notImplemented("startActivity")
+
+    override fun topTask(displayId: Int): Int = notImplemented("topTask")
+
+    override fun moveTask(
+        taskId: Int,
+        displayId: Int,
+    ): Boolean = notImplemented("moveTask")
+
+    override fun watchMainScreen(windowMs: Int): Int = notImplemented("watchMainScreen")
+
+    override fun mainArrivals(sinceUptimeMs: Long): Bundle = notImplemented("mainArrivals")
+
+    override fun injectStroke(
+        displayId: Int,
+        xs: IntArray?,
+        ys: IntArray?,
+        t: LongArray?,
+    ): Boolean = notImplemented("injectStroke")
+
+    override fun injectKey(
+        displayId: Int,
+        keyCode: Int,
+    ): Boolean = notImplemented("injectKey")
+
+    override fun setAudioMuted(
+        pkg: String?,
+        muted: Boolean,
+    ): Boolean = notImplemented("setAudioMuted")
+
+    override fun grantSelf(permission: String?): Int = notImplemented("grantSelf")
+
+    private fun notImplemented(method: String): Nothing = throw PrivilegedError.notImplemented(method)
+
+    private companion object {
+        const val TAG = "PhoneAgentHelper"
+
+        /** `IBinder.SHELL_COMMAND_TRANSACTION`, hidden from the SDK: `_CMD`. */
+        const val SHELL_COMMAND_TRANSACTION = ('_'.code shl 24) or ('C'.code shl 16) or ('M'.code shl 8) or 'D'.code
+
+        /** System transactions that could reach helper code if `dump` or `onShellCommand` were overridden. */
+        val GUARDED_SYSTEM_TRANSACTIONS = setOf(DUMP_TRANSACTION, SHELL_COMMAND_TRANSACTION)
+    }
+}

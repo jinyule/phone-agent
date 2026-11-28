@@ -20,7 +20,7 @@ git diff --name-only origin/main...HEAD   # 已提交的部分
 |---|---|
 | `core/src/main/**` | `./gradlew :core:test :core:koverVerify :core:koverVerifyCritical :core:detektMain` |
 | `core/src/test/**` | `./gradlew :core:test :core:detektTest` |
-| `privileged/**` | `./gradlew :privileged:assembleDebug :privileged:detektMain :privileged:lintDebug` |
+| `privileged/**` | `./gradlew :privileged:assembleDebug :privileged:testDebugUnitTest :privileged:verifyPrivilegedProtocol :privileged:detektMain :privileged:lintDebug` |
 | `app/src/main/**` | `./gradlew :app:assembleDebug :app:detektMain :app:lintDebug` |
 | `app/src/test/**` 或 `app/src/main/res/**` | 再加 `:app:testDebugUnitTest` |
 | `build-logic/**` | `./gradlew :build-logic:convention:check`，然后跑一次 `./gradlew check`（约定插件影响所有模块） |

@@ -9,6 +9,7 @@ dependencies {
     compileOnly(libs.kover.gradlePlugin)
     compileOnly(libs.spotless.gradlePlugin)
 
+    testImplementation(gradleTestKit())
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platform.launcher)
@@ -47,6 +48,10 @@ gradlePlugin {
         register("sessionFormat") {
             id = "phoneagent.session-format"
             implementationClass = "dev.phoneagent.buildlogic.SessionFormatConventionPlugin"
+        }
+        register("privilegedProtocol") {
+            id = "phoneagent.privileged.protocol"
+            implementationClass = "dev.phoneagent.buildlogic.PrivilegedProtocolConventionPlugin"
         }
     }
 }

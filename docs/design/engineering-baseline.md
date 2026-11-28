@@ -23,7 +23,7 @@ phone-agent/
 ├─ build-logic/              Gradle 约定插件（included build）：kotlin-jvm、android-app、quality、coverage
 ├─ gradle/libs.versions.toml 版本目录；verification-metadata.xml（SHA-256）+ 禁止动态版本，不用 lockfile
 ├─ gradle/gradle-daemon-jvm.properties  构建 JDK（Temurin 25）
-├─ config/detekt/            detekt.yml + canary/（已知坏代码与必须报出的规则清单）
+├─ config/detekt/            detekt.yml + canary/（已知坏代码与必须报出的规则清单）+ canary-aidl/（同上，证明 privileged 的 detekt 能解析 AIDL 生成的类型）
 ├─ core/  privileged/  app/  模块划分见 phase1-architecture §2（eval/ 在 M1 加）
 ├─ core/src/test/resources/
 │   ├─ sessions/<scenario>/  会话回放 fixture（§3.2）
@@ -146,7 +146,7 @@ core/src/test/resources/sessions/<scenario>/
 
 | Workflow | 触发 | Job | 优先级 |
 |---|---|---|---|
-| `ci.yml` | pull_request、push main、手动 | `static`（spotlessCheck、detektMain/detektTest、detekt canary、Android lint、gitleaks 扫全历史）· `core`（test + 会话回放 + `koverVerify` + `koverVerifyCritical` + build-logic 测试）· `app`（assembleDebug + Robolectric 单测）· `privileged-build`（构建 dex，检查 AIDL 版本常量）· **`all-checks-passed`**（汇总以上 job：failure、cancelled、skipped 都判红；**唯一的必过检查**） | P0 |
+| `ci.yml` | pull_request、push main、手动 | `static`（spotlessCheck、detektMain/detektTest、detekt canary、Android lint、gitleaks 扫全历史）· `core`（test + 会话回放 + `koverVerify` + `koverVerifyCritical` + build-logic 测试）· `app`（assembleDebug + Robolectric 单测）· `privileged-build`（构建 dex + 单测，`verifyPrivilegedProtocol` 检查 AIDL 版本常量）· **`all-checks-passed`**（汇总以上 job：failure、cancelled、skipped 都判红；**唯一的必过检查**） | P0 |
 | `main.yml` | push main | ci.yml 的全部内容 + 模拟器端口契约测试（API 34/35/36，`reactivecircus/android-emulator-runner`）+ 构建未签名的 release 包 | P1 |
 | `e2e.yml` | 每日定时 + 手动 | 真实模型 API 测试；secret 为空时直接判红 | P1 |
 | `eval.yml` | 每日定时 + 手动 | 自建 runner 接 USB 真机跑保留池，产出 `summary.md` 和 `metrics.json`；成功率下降超过阈值就标红 | P1 |
@@ -181,7 +181,11 @@ core/src/test/resources/sessions/<scenario>/
 **特权助手与版本错配（必须遵守）**
 - helper 是从 `base.apk` 加载的，**App 更新后，旧的 helper 进程可能还在运行旧代码**。
 - 交接时比对 `protocolVersion` 和 APK 的 versionCode；不一致就让旧 helper `releaseAll()` 并退出，再重新拉起。
-- CI 检查 AIDL 版本常量：改了 AIDL 文件就必须升版本号。
+- CI 检查 AIDL 版本常量：改了 AIDL 文件就必须升版本号。实现（WP12）：
+  - `privileged/protocol-history.txt` 是只追加的 `<版本号> <指纹>` 列表；指纹是所有 `.aidl` 文件按相对路径、按 AIDL 词元算的 SHA-256（去掉注释和词元之间的空白，字符串常量原样保留），所以只改注释或排版不算协议变更；
+  - `:privileged:verifyPrivilegedProtocol`（挂在 `check` 上，CI 的 `privileged-build` 也单独跑）要求最后一行等于当前的 `PrivilegedProtocol.VERSION` 和当前指纹，失败时直接给出要追加的那一行；
+  - AIDL 的 1–4 号事务（`protocolVersion`、`identity`、`releaseAll`、`shutdown`）永久冻结，任何版本的 App 都能让任何版本的旧 helper 释放并退出（phase1-architecture §3.5）。这四条的完整声明（返回类型、方法名、参数、`oneway`、事务号）写死在检查器里（`PrivilegedProtocolCheck.FROZEN`），AIDL 里少了或改了任何一条都失败，升版本也不行；
+  - history 只追加：CI 的 `privileged-build` 传 `-PprivilegedProtocolBaseRef=<基线 sha>`（`pull_request` 用 `pull_request.base.sha`，`push` 用 `before`；基线不在 clone 里时 `scripts/ci/protocol-base-ref.sh` 按 sha 补拉，补拉不到就失败），检查器用 `git show` 读出基线的 history，要求它是当前 history 的前缀；基线里没有这个文件就当作空前缀。属性只接受完整 sha，分支名和短 sha 会被拒绝（它们会移动，任务却会按 up-to-date 跳过）。**这一项只在 CI 上做**：本地不传这个属性，只跑上面几项。
 
 **签名密钥**
 - release keystore 离线保存两份。CI 只通过 environment secret 使用它。
@@ -242,7 +246,7 @@ core/src/test/resources/sessions/<scenario>/
 | Gradle 约定插件 | ✅ `phoneagent.root / kotlin.jvm / android.application / android.library / quality / coverage` | `build-logic/convention` |
 | 版本号公式与单测 | ✅ | `AppVersion.kt`、`AppVersionTest` |
 | 静态检查 | ✅ Spotless + ktlint 1.8；detekt 2.0.0-alpha.6（带类型解析）；Android lint（警告即错误）；explicitApi + allWarningsAsErrors | `config/detekt/` |
-| "至少一个会被拒绝的反例" | ✅ `verifyDetektCanary`；手动验证过 explicitApi、Kover 两条规则、detekt 在真实模块里都会拦截 | `config/detekt/canary/` |
+| "至少一个会被拒绝的反例" | ✅ `verifyDetektCanary`；手动验证过 explicitApi、Kover 两条规则、detekt 在真实模块里都会拦截。Android 模块的 detekt 类型解析要带上本模块 javac 的输出（AIDL 生成的 Java 只作为 Kotlin 的源码出现，不在编译任务的 libraries 里）；`:privileged:verifyDetektCanary` 在这一点失效时报错 | `config/detekt/canary/`、`config/detekt/canary-aidl/`、`AndroidConventions.kt` |
 | Kover | ✅ 每类行覆盖 ≥ 90%；`critical` 变体校验 policy/agent 分支覆盖 100%；`@ExcludeFromCoverage` 的 reason 由测试检查 | `CoverageConventionPlugin.kt` |
 | 依赖可复现 | ✅ 校验文件 + 禁止动态版本 | `gradle/verification-metadata.xml` |
 | lefthook、gitleaks、.editorconfig、.gitattributes | ✅ | 仓库根目录 |

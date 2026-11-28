@@ -96,10 +96,32 @@ phone-agent/
                 │          ② Shizuku UserService  ③ 开发者在 USB 下运行启动脚本
 ```
 
-**Binder 交接**（参考 Mika 的 `HelperHandoff` / `HelperProcess`）：
-- 助手启动后，通过 App 的 ContentProvider `call()` 把 Binder 交过去；交之前先核对 App 的签名证书指纹。
-- App 收下前，调用 `identity()` 核对对方确实是 uid 2000，并且就是来交接的那个 pid。
-- 一次性口令通过 stdin 传给助手，不放进命令行，因为同为 shell 身份的其他进程能读到 cmdline。
+**Binder 交接**（参考 Mika 的 `HelperHandoff` / `HelperProcess`；WP12 已落地，取舍见 `docs/adr/2026-11-01-privileged-handoff.md`）：
+- 助手启动后，通过 App 的 ContentProvider（authority `<applicationId>.helper`，`call("attach")`）把 Binder 交过去；交之前先核对 App 的签名证书指纹。
+  - 指纹不从外部传入，而是**自钉**：助手只在 `CLASSPATH` 等于这个包当前安装的 `sourceDir` 时才启动（运行的代码就来自这个 APK），启动时记下包的 uid 和签名证书的 SHA-256。
+  - 之后每次交接前都重新确认：包还装着、uid 和证书没变，Provider 也属于这个 uid。
+- App 收下前按顺序检查，任何一步不过都拒绝：
+  1. 调用方是 uid 2000，并且助手自报的 uid/pid 就是这次 Binder 调用的 uid/pid；
+  2. 口令有效（在碰对方 Binder 之前检查）；
+  3. `identity()` 返回的 `[uid, pid]` 就是来交接的那个进程；
+  4. `protocolVersion()`、助手代码所在 APK 的 versionCode 和路径与 App 自己一致。只有这一项不符的是"旧助手"：App 让它 `releaseAll()`，然后回复拒绝，助手收到拒绝就退出；App 进入"需要重新拉起"状态（WP13 之前只在 logcat 提示运行启动脚本）。
+- 全部通过后，App 先对助手的 Binder `linkToDeath`，成功了才用一次保存消耗口令、换发续接口令，然后替换连接，所以晚到的失败不会让在用助手的续接口令失效。口令在检查期间失效（过期，或被新的 `arm` 替换）就按 `BAD_NONCE` 拒绝，旧助手也一样。
+- 被替换的旧助手最后才收到 `shutdown()`，就在回复发出之前。App 在这之前死掉，旧助手还在、也没被通知退出；App 重启后它能不能接回，要看它手里的口令还在不在（见下面的已知缺口）。
+- 一次性口令通过 stdin 传给助手，不放进命令行，因为同为 shell 身份的其他进程能读到 cmdline。每个口令只能用一次，有三种来源：
+  - **启动口令**：App 自己拉起助手时（WP13 的内置 ADB）由 App 生成，30 秒内有效；
+  - **预约口令**：电脑侧的 `scripts/start-helper.sh` 自己生成口令，先用 `content call --method arm` 把口令的 SHA-256 交给 App（App 只接受 uid 2000 的 arm），再经 stdin 把明文交给助手，60 秒内有效；
+  - **续接口令**：每次交接成功，App 都回给助手下一个口令（App 侧持久化），App 进程重启后助手用它重新交接。续接口令绑定领取它的助手进程（pid），别的进程拿去也用不了。
+  - 续接口令**一代重叠**：换发新口令时，助手手里可能还握着的那个旧口令（自我续接时是它刚出示的，替换时是被替换助手的）再保留一代，下一次交接成功才失效。被替换的旧助手在同一个 App 进程里再来交接会被拒；App 重启后，一个收到 `shutdown()` 却没退出的旧助手可以抢先回来一次，新助手随后续接被拒、退出。最后都只剩一个助手。
+  - **已知缺口（一整类）**：App 无法知道回复是否送达，回复是在 `offer` 返回之后才由 Binder 写出去的。App 在保存一次接纳之后、回复送出之前死掉，被接纳的助手就拿不到新口令。自我续接的助手仍能用出示过的口令接回；首次交接的助手接不回来，因为一次性口令已经用掉了，这时能接回的是这次接纳保存之前握着当时的续接口令、没被通知退出的那个助手，不管它此刻是否连着这个 App 进程。两种情形都只到下一次别的接纳保存为止；不满足条件的助手被拒（`BAD_NONCE`），各自释放资源并退出，之后没有别的助手连上就需要重新拉起；失败是关闭的。App 串行化接纳的锁只保证同一个进程里不会有两次接纳同时处在"已保存、还没通知旧助手"的阶段，管不到 `offer` 返回后还在路上的回复。要彻底消除，需要按 pid 保留口令；取舍和重新评估的时机见 ADR 2026-11-01-privileged-handoff 的决定 3 和 Alternatives。
+  - 启动口令和预约口令按 `elapsedRealtime` 计时，并记下签发时的开机标识（`Settings.Global.BOOT_COUNT`）；重启后旧口令一律失效。读不到开机标识时不签发也不预约，直接带着原因失败（来源和取舍见 ADR 2026-11-01-privileged-handoff 决定 4）。
+- 生命周期：
+  - App 进程死后助手不退出，进入"孤儿"状态；宽限期（默认 10 秒，`--orphan-grace-ms`）过后 `releaseAll()`。
+  - 助手监听 App uid 的进程状态，App 进程再起来时用续接口令重新交接。新会话开始前一定先释放上一会话的资源，所以迟到的计时器不会释放新会话建的东西。
+  - App 被卸载或换了签名证书：释放并退出。
+    - 助手在每次交接前、App 死亡时、宽限期到期时复核包（固定的 uid 和证书）。App 死后（孤儿和空闲状态）没有别的事件能发现卸载，所以每隔 `--package-check-ms`（默认 30 秒，范围 1000..600000）再复核一次；复核计时器带链号，迟到的被忽略。
+    - 最坏情况下，卸载后约 max(宽限期, 复核间隔) 助手退出，默认 30 秒。
+    - 不用 `registerReceiver` 监听包变化：shell 自建的 ActivityThread 在 AMS 里没有进程记录，API 34 起注册会被拒绝。
+  - App 收下新助手时，用 `shutdown()` 让被替换的旧助手释放并退出。
 
 ---
 
@@ -261,23 +283,31 @@ interface SurfaceManager {
 
 ```aidl
 interface IPrivilegedCore {
-    int protocolVersion();
-    int[] identity();                                     // [uid, pid]
-    Bundle probe();                                       // 能力探针：建小屏 + 注入一次无害点击
-    int createDisplay(in Surface s, int w, int h, int dpi);   // flags 按系统版本递增；返回 displayId，负数为错误
-    void releaseDisplay(int displayId);
-    int startActivity(int displayId, in Intent intent, int userId, boolean cold); // 用户正在主屏用的 App 不启动
-    int topTask(int displayId);
-    boolean moveTask(int taskId, int displayId);
-    int watchMainScreen(int windowMs);                    // 动作前开始盯主屏
-    Bundle mainArrivals(long sinceUptimeMs);              // 动作后取：期间冒到主屏的任务
-    boolean injectStroke(int displayId, in int[] xs, in int[] ys, in long[] t);
-    boolean injectKey(int displayId, int keyCode);        // 白名单
-    boolean setAudioMuted(String pkg, boolean muted);
-    int grantSelf(String permission);                     // 只允许 WRITE_SECURE_SETTINGS
-    void releaseAll();
+    // 冻结区：事务号和签名在所有协议版本里都不变
+    int protocolVersion() = 1;
+    int[] identity() = 2;                                 // [uid, pid]
+    void releaseAll() = 3;
+    oneway void shutdown() = 4;                           // releaseAll，然后助手进程退出
+    // 能力区
+    Bundle probe() = 10;                                  // 能力探针：建小屏 + 注入一次无害点击
+    int createDisplay(in Surface s, int w, int h, int dpi) = 11;   // flags 按系统版本递增；返回 displayId，负数为错误
+    void releaseDisplay(int displayId) = 12;
+    int startActivity(int displayId, in Intent intent, int userId, boolean cold) = 13; // 用户正在主屏用的 App 不启动
+    int topTask(int displayId) = 14;
+    boolean moveTask(int taskId, int displayId) = 15;
+    int watchMainScreen(int windowMs) = 16;               // 动作前开始盯主屏
+    Bundle mainArrivals(long sinceUptimeMs) = 17;         // 动作后取：期间冒到主屏的任务
+    boolean injectStroke(int displayId, in int[] xs, in int[] ys, in long[] t) = 18;
+    boolean injectKey(int displayId, int keyCode) = 19;   // 白名单
+    boolean setAudioMuted(String pkg, boolean muted) = 20;
+    int grantSelf(String permission) = 21;                // 只允许 WRITE_SECURE_SETTINGS
 }
 ```
+
+接口文件是 `privileged/src/main/aidl/dev/phoneagent/privileged/IPrivilegedCore.aidl`。线上约定（WP12）：
+- **事务号显式写死，1–4 号冻结**。任何版本的 App 都能读出任何版本助手的协议号和身份，也能让它释放并退出，这是版本错配处理（engineering-baseline §6）的前提。`shutdown()` 是为此在原草图上补的。
+- 每个 IPrivilegedCore 方法（事务号 FIRST..LAST_CALL_TRANSACTION）只接受助手为之启动的那个 App uid，其他调用方收到 `SecurityException`。框架的系统事务不经过这个守卫，也不暴露任何能力；其中 `DUMP_TRANSACTION`、`SHELL_COMMAND_TRANSACTION` 也纳入守卫，`INTERFACE_TRANSACTION` 放行。以后重写 `dump` 或 `onShellCommand`，必须做同样的 uid 检查。
+- 还没实现的方法抛 `UnsupportedOperationException`，消息以 `NOT_IMPLEMENTED` 开头（`PrivilegedError.isNotImplemented` 判定），不占用各方法自己的返回值或错误码。Binder 原生就能跨进程传这个异常；`ServiceSpecificException` 不在公开 SDK 里，所以不用它。
 
 **刻意不提供**任意命令执行的接口。setup 需要的命令（授权、写无障碍列表）在助手内部写死成白名单方法。这是针对 Mika `phone_system_command` 的教训。
 

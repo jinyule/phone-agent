@@ -1,0 +1,5 @@
+# Rules that must keep firing on canary/AidlCanary.kt (one per line). Each needs a type from the
+# AIDL-generated IPrivilegedCore, so together they prove :privileged's detekt resolves it.
+UnsafeCast
+UnnecessarySafeCall
+UnnecessaryNotNullOperator

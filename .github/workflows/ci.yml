@@ -26,6 +26,10 @@ jobs:
       - uses: ./.github/actions/setup-build
       - name: Format, detekt (with type resolution), detekt canary, Android lint
         run: ./gradlew spotlessCheck detektMain detektTest verifyDetektCanary :app:lintDebug :privileged:lintDebug --continue
+      - name: start-helper.sh against a fake adb
+        run: bash scripts/test/start-helper-test.sh
+      - name: protocol-base-ref.sh against throwaway git repositories
+        run: bash scripts/test/protocol-base-ref-test.sh
       - name: Secret scan
         env:
           GITLEAKS_VERSION: 8.30.1
@@ -91,15 +95,41 @@ jobs:
 
   privileged-build:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0 # verifyPrivilegedProtocol reads protocol-history.txt at the base commit
+          # Also makes protocol-base-ref.sh fetch a missing base anonymously: a private repo needs a token there.
           persist-credentials: false
       - uses: ./.github/actions/setup-build
-      # M2 adds the AIDL ⇄ PrivilegedProtocol.VERSION check here.
-      - name: Assemble privileged helper
-        run: ./gradlew :privileged:assembleDebug
+      - name: Cache Robolectric android-all jars
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: robolectric-
+      # verifyPrivilegedProtocol (engineering-baseline §6): changing the AIDL without bumping
+      # PrivilegedProtocol.VERSION fails, changing transactions 1-4 fails, and against the base commit
+      # privileged/protocol-history.txt may only grow (that part runs only here, with the base sha).
+      - name: AIDL ⇄ PrivilegedProtocol.VERSION, assemble and unit-test the privileged helper
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          args=(:privileged:verifyPrivilegedProtocol :privileged:assembleDebug :privileged:testDebugUnitTest --continue)
+          # Pushes run on main only. BASE_SHA is empty for workflow_dispatch and all zeros for the first
+          # push of main: no baseline then. A base missing from the clone (force-pushed away) is fetched
+          # by sha; if that fails the job fails rather than checking against an empty baseline.
+          base_ref="$(bash scripts/ci/protocol-base-ref.sh)" || exit 1
+          if [[ -n "$base_ref" ]]; then args+=("$base_ref"); fi
+          ./gradlew "${args[@]}"
+      - name: Upload reports
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: privileged-reports
+          path: privileged/build/reports/
+          retention-days: 7
 
   all-checks-passed:
     if: always()

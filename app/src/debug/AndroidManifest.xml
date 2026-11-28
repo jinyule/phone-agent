@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <!-- Debug-only helper self-check, run with `am broadcast -n dev.phoneagent/dev.phoneagent.app.debug.HelperSelfCheckReceiver`.
+             The shell cannot reach unexported receivers, so it is exported to DUMP holders only. -->
+        <receiver
+            android:name=".debug.HelperSelfCheckReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
+    </application>
+</manifest>

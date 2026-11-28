@@ -3,11 +3,14 @@ package dev.phoneagent.buildlogic
 import com.android.build.api.dsl.ApplicationExtension
 import com.android.build.api.dsl.CommonExtension
 import com.android.build.api.dsl.LibraryExtension
+import dev.detekt.gradle.Detekt
 import org.gradle.api.JavaVersion
 import org.gradle.api.Plugin
 import org.gradle.api.Project
+import org.gradle.api.tasks.compile.JavaCompile
 import org.gradle.api.tasks.testing.Test
 import org.gradle.kotlin.dsl.configure
+import org.gradle.kotlin.dsl.named
 import org.gradle.kotlin.dsl.withType
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
@@ -36,13 +39,8 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
                 }
             }
             configureKotlinAndroid(explicitApi = false)
-            tasks.withType<Test>().configureEach {
-                // Robolectric (SDK 36 sandbox) reaches into FileDescriptor internals on JDK 21+.
-                jvmArgs(
-                    "--add-exports=java.base/jdk.internal.access=ALL-UNNAMED",
-                    "--enable-native-access=ALL-UNNAMED",
-                )
-            }
+            configureRobolectricJvm()
+            resolveModuleJavaInDetekt()
         }
 }
 
@@ -58,6 +56,8 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
                 lint.targetSdk = Sdk.TARGET
             }
             configureKotlinAndroid(explicitApi = true)
+            configureRobolectricJvm()
+            resolveModuleJavaInDetekt()
         }
 }
 
@@ -76,6 +76,16 @@ private fun configureAndroidCommon(android: CommonExtension) {
     }
 }
 
+private fun Project.configureRobolectricJvm() {
+    tasks.withType<Test>().configureEach {
+        // Robolectric (SDK 36 sandbox) reaches into FileDescriptor internals on JDK 21+.
+        jvmArgs(
+            "--add-exports=java.base/jdk.internal.access=ALL-UNNAMED",
+            "--enable-native-access=ALL-UNNAMED",
+        )
+    }
+}
+
 private fun Project.configureKotlinAndroid(explicitApi: Boolean) {
     tasks.withType<KotlinCompile>().configureEach {
         compilerOptions {
@@ -83,6 +93,27 @@ private fun Project.configureKotlinAndroid(explicitApi: Boolean) {
             allWarningsAsErrors.set(true)
             // Production sources only; test sources keep implicit visibility.
             if (explicitApi && !name.contains("Test")) freeCompilerArgs.add("-Xexplicit-api=strict")
+        }
+    }
+}
+
+/**
+ * detekt's Android tasks take their classpath from the variant's Kotlin compile task, whose
+ * `libraries` leave out the Java the module compiles itself (AIDL stubs): Kotlin reads that Java as
+ * sources. Without javac's output, code touching those types is analysed unresolved and the
+ * type-resolution rules skip it silently. So each `detekt<Variant>` gets the same libraries plus
+ * that output; `:privileged:verifyDetektCanary` fails if the AIDL types stop resolving.
+ */
+private fun Project.resolveModuleJavaInDetekt() {
+    tasks.withType<Detekt>().configureEach {
+        val variant = name.removePrefix("detekt")
+        val kotlinc = "compile${variant}Kotlin"
+        val javac = "compile${variant}JavaWithJavac"
+        if (kotlinc in tasks.names && javac in tasks.names) {
+            classpath.setFrom(
+                tasks.named<KotlinCompile>(kotlinc).map { it.libraries },
+                tasks.named<JavaCompile>(javac).flatMap { it.destinationDirectory },
+            )
         }
     }
 }
