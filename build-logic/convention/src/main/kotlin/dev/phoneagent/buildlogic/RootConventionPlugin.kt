@@ -4,6 +4,7 @@ import com.diffplug.gradle.spotless.SpotlessExtension
 import dev.detekt.gradle.Detekt
 import org.gradle.api.Plugin
 import org.gradle.api.Project
+import org.gradle.api.file.ConfigurableFileTree
 import org.gradle.kotlin.dsl.configure
 import org.gradle.kotlin.dsl.register
 
@@ -25,32 +26,43 @@ class RootConventionPlugin : Plugin<Project> {
         val ktlintVersion = libs.versionOf("ktlint")
         extensions.configure<SpotlessExtension> {
             kotlin {
-                target("**/src/**/*.kt")
-                targetExclude("**/build/**")
+                target(sourceTree("**/src/**/*.kt"))
                 ktlint(ktlintVersion)
             }
             kotlinGradle {
-                target("*.gradle.kts", "**/*.gradle.kts")
-                targetExclude("**/build/**")
+                target(sourceTree("*.gradle.kts", "**/*.gradle.kts"))
                 ktlint(ktlintVersion)
             }
             format("misc") {
                 target(
-                    "*.md",
-                    "**/*.md",
-                    "**/*.yml",
-                    "**/*.yaml",
-                    "**/*.toml",
-                    ".gitignore",
-                    ".gitattributes",
-                    ".editorconfig",
+                    sourceTree(
+                        "*.md",
+                        "**/*.md",
+                        "**/*.yml",
+                        "**/*.yaml",
+                        "**/*.toml",
+                        ".gitignore",
+                        ".gitattributes",
+                        ".editorconfig",
+                    ),
                 )
-                targetExclude("**/build/**", ".gradle/**", "**/.gradle/**")
                 trimTrailingWhitespace()
                 endWithNewline()
             }
         }
     }
+
+    /**
+     * Files under the root directory matching [includes]. The excludes prune whole directories
+     * while the tree is walked. Spotless's `targetExclude` only filters afterwards, so the walk
+     * still entered build directories that compile tasks were rewriting in parallel and failed
+     * with "Could not read path".
+     */
+    private fun Project.sourceTree(vararg includes: String): ConfigurableFileTree =
+        fileTree(rootDir) {
+            include(*includes)
+            exclude(PRUNED_DIRECTORIES)
+        }
 
     private fun Project.configureDetektCanary() {
         pluginManager.apply("dev.detekt")
@@ -90,3 +102,6 @@ class RootConventionPlugin : Plugin<Project> {
         tasks.named("check") { dependsOn(verify) }
     }
 }
+
+/** Generated or tool-owned directories that formatting never looks into. */
+private val PRUNED_DIRECTORIES = listOf("**/build/**", "**/.gradle/**", "**/.kotlin/**", ".git/**")

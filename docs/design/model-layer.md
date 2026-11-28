@@ -43,13 +43,17 @@
 ```kotlin
 sealed interface Part {
     data class Text(val text: String) : Part
-    data class Image(val blob: BlobRef, val mime: String) : Part        // 每次都以 base64 发送同样的字节
+    data class Image(val blob: BlobRef, val mime: String, val width: Int, val height: Int) : Part  // 每次都以 base64 发送同样的字节
     data class ToolCall(val id: ToolCallId, val name: String, val argsJson: String) : Part
-    data class ToolResult(val id: ToolCallId, val parts: List<Part>, val isError: Boolean) : Part
-    /** 服务商私有的推理内容，原样保存，只回传给同一 provider 和同一 model。 */
-    data class Reasoning(val provider: ProviderId, val model: ModelId, val kind: ReasoningKind, val opaque: JsonElement) : Part
+    data class ToolResult(val id: ToolCallId, val parts: List<Part>, val isError: Boolean) : Part  // parts 只含 Text / Image
+    /** 服务商私有的推理内容，原样保存，只回传给同一 provider；同一 provider 换了 model 以后回不回传，由该 provider 的适配器决定（§3.2、§3.3）。model 记录是哪个模型产生的，供适配器判断，也供 UI 和诊断使用。 */
+    data class Reasoning(val provider: ProviderId, val model: ModelId, val kind: ReasoningKind, val opaque: JsonElement,
+                         val summary: String? = null /* 只给 UI 看，不回传 */) : Part
 }
-enum class ReasoningKind { AnthropicThinking /* 带 signature */, ResponsesEncrypted /* encrypted_content */, ChatReasoningField /* reasoning_content 等 */ }
+enum class ReasoningKind(val isReasoning: Boolean) {   // isReasoning = false：装的是历史，context/reasoning-dropped 不去掉它
+    AnthropicThinking(true) /* 带 signature */, AnthropicRedactedThinking(true), AnthropicCompaction(false) /* 服务端 compaction 块，§5 */,
+    ResponsesEncrypted(true) /* encrypted_content */, ChatReasoningField(true) /* reasoning_content 等 */,
+}
 ```
 
 **能力描述**：
@@ -57,10 +61,10 @@ enum class ReasoningKind { AnthropicThinking /* 带 signature */, ResponsesEncry
 ```kotlin
 data class ModelCapabilities(
     val tools: Boolean, val vision: Boolean, val contextTokens: Int, val maxOutputTokens: Int?,
-    val reasoningEfforts: List<String>?,        // null = 未知；空 = 没有可选档位
+    val reasoningLevels: List<ReasoningLevel>?, // null = 未知；空 = 没有可选档位；适配器负责映射成各家的档位名
     val promptCaching: PromptCaching,           // Implicit / Explicit(cache_control) / None
     val thinkingBinding: ThinkingBinding,       // None / PrefixBound（Anthropic preserved thinking）
-    val verified: Set<VerifiedCap>,             // 探测确认过的：TOOL_CALL、VISION、GROUNDING …
+    val verified: Set<VerifiedCapability>,      // 探测确认过的：TOOL_CALL、VISION、GROUNDING、REASONING_ECHO
 )
 ```
 
@@ -68,13 +72,71 @@ data class ModelCapabilities(
 
 ```kotlin
 sealed interface ModelError {
-    Auth, SignInExpired, PlanNotEligible, RateLimited(retryAfter), Overloaded, ContextOverflow,
-    InvalidRequest(param, detail), Refusal(category), PrefixBindingMismatch, Network, Server(status)
+    Auth, SignInExpired, PlanNotEligible, QuotaExceeded /* 余额或额度用完，不重试 */, RateLimited(retryAfter), Overloaded,
+    ContextOverflow, InvalidRequest(param, detail), Refusal(category), PrefixBindingMismatch, Network, Server(status),
+    BadResponse(discardsStreamed) /* 响应解析失败或违反协议；回复里带着本次的密钥时 discardsStreamed = true，见下文"脱敏" */
+}   // 每个都带 kind: ModelErrorKind（写进日志）；retryable 由 kind 决定：RateLimited、Overloaded、Network、Server、BadResponse
+```
+
+- 重试策略由各 provider 自己定义，参考 dsh 的默认值：最多 5 次，500ms–10s，带抖动，遵守 `retry-after`。每次重试都写一条 `request/retry` 日志。
+- `InvalidRequest` 和 `Auth` 不重试。
+
+**适配器的注入端口**（`core.model`，构造适配器时注入，`ChatModel.complete` 的签名不变）：
+
+```kotlin
+fun interface CredentialResolver {      // Key 存储和 ChatGPT TokenSource 实现，app 组装
+    suspend fun secret(credential: Credential, rejected: Boolean): String?   // None → null；rejected = 上一个值刚被 401 拒绝，要换新的；换不了抛 Auth / SignInExpired
+}
+fun interface BlobSource {              // 读当前会话 BlobStore 里 Part.Image 的字节
+    suspend fun bytes(ref: BlobRef): ByteArray   // 缺失或损坏抛 IOException，适配器转成 InvalidRequest
 }
 ```
 
-- 重试策略由各 provider 自己定义，参考 dsh 的默认值：最多 5 次，500ms–10s，带抖动，遵守 `retry-after`。每次重试都写一条 `llm/retry` 日志。
-- `InvalidRequest` 和 `Auth` 不重试。
+- 密钥不进日志、异常消息和 `toString`。
+- **脱敏**（本次请求用到的密钥；契约写在 `CredentialResolver` 的 KDoc，WP03、WP04 各自实现，两边规则相同）：
+  - **模型产生的内容一律不改写**。密钥出现在其中任何地方（正文、调用参数、推理预览、opaque 和签名块：Anthropic 的 `thinking`、`redacted_thinking`、`tool_use`，OpenAI 的 `reasoning`、`encrypted_content`，以及其他协议里的同类内容），**整条回复按 `BadResponse` 拒绝**，返回固定文字，并设上 `ModelError.discardsStreamed`。不改写的原因：Anthropic 把 thinking 绑定到它之前的整段对话，改写已经返回的正文或 `tool_use.input`，下一次请求就会报 prefix mismatch；改写调用参数还会改掉要执行的操作。我们从不把密钥放进上下文，模型输出里出现密钥本身就说明出了问题。
+  - **`discardsStreamed`**：这次 attempt 已经流出的内容不保留。runtime 不把它记成 interrupted 的 `assistant/message`，只记 `assistant/attempt` 和固定原因；界面上已经显示的片段由 UI 按这个错误撤回或标记作废（WP09）。
+  - **预览 delta 不推迟发布**：适配器收到片段就交给 `onDelta`，不为了检测密钥先扣住。delta 只用来显示，从不进日志；出现带 `discardsStreamed` 的错误时，已经流出的片段同样不留在日志里，界面按上一条撤回或标记作废。
+  - **匹配方式**：只做精确匹配，同时匹配密钥的 JSON 转义形式，不按形状兜底。不设最短长度，所有密钥都匹配：任何阈值都会让短的真实凭据漏出去。不需要认证的本地服务用 `Credential.None`，不要填占位 key。
+  - **服务端写的诊断字段**（错误正文、拒答 category、metadata）照旧改写成 `***`，并按形状兜底。
+- **流式增量**：`Delta.Text` 依次拼起来一定是最终正文的前缀；推理和工具调用的预览不作保证，服务端降级时可能不出现在最终回复里，界面以最终的 `ChatResponse` 为准重新渲染。
+- blob 按会话存放：每个会话建一个 ChatModel，或者用会话感知的 `BlobSource`，组装时决定。
+
+**线路快照**（`core.model.WireProfile`，随 `ChatRequest.wire` 传给适配器，冻结在 `request/header` 和 `side/request` 里）：
+
+```kotlin
+data class WireProfile(
+    val mappingVersion: Int,                    // 适配器映射规则的版本：同样的输入会发出不同字节时就升
+    val credential: CredentialKind,             // API_KEY / CHATGPT_PLAN / NONE，只记种类，不记密钥引用的解析值
+    val headers: Map<String, String> = emptyMap(),        // 非秘密的额外 header，名字不能像凭据
+    val images: ImageMode = ImageMode.INLINE,             // INLINE 原图 / PLACEHOLDER 换成固定的占位文字（没有 vision）
+    val reasoningField: String? = null, val echoReasoning: Boolean = false,   // Chat Completions 的推理字段与回传
+    val reasoningEffort: WireSetting? = null,   // 推理档位映射后的字段和值（如 reasoning.effort = high）；null = 不发
+    val maxTokensField: String? = null,         // max_tokens / max_completion_tokens / max_output_tokens；null = 不发上限
+    val disableParallelToolCalls: Boolean = false,      // true：Chat/Responses 发 parallel_tool_calls:false，Anthropic 发 disable_parallel_tool_use:true；false 两者都不发
+    val streamOptions: Boolean = false,
+    val includeEncryptedReasoning: Boolean = false,       // Responses：include: ["reasoning.encrypted_content"]
+    val recoverLeakedToolCalls: Boolean = false,          // 把漏成正文的工具调用还原（§3.1）
+    val options: Map<String, String> = emptyMap(),        // 还没有专门字段的其他设置，小写名字，不放秘密
+)
+```
+
+- **适配器只从 `request.wire` 读这些项**，不读实时的 `ProviderProfile` 或 `ModelCapabilities`：它们在任务中途可能被改。profile 只提供 endpoint 和凭据引用。
+- 适配器在发送前拒绝两种请求（`InvalidRequest`）：`credential` 的种类和 profile 不一致；`mappingVersion` 不是它实现的版本。
+- **线路快照的唯一生成入口是 `ChatModel.prepare(reasoning): RequestSettings(reasoning, wire)`**（`core.model`）：
+  ```kotlin
+  interface ChatModel {
+      val info: ModelInfo
+      fun prepare(reasoning: ReasoningLevel?): RequestSettings   // 纯函数，不抛；同一实例对同一档位结果相等，集合是副本
+      suspend fun complete(request: ChatRequest, onDelta: (Delta) -> Unit = {}): ChatResponse
+  }
+  data class RequestSettings(val reasoning: ReasoningLevel?, val wire: WireProfile)
+  ```
+  - 适配器（WP03/WP04）实现它：按 `clampTo` 把档位钳制到 `info.capabilities.reasoningLevels`，再按自己 `mappingVersion` 的规则映射成 `reasoningEffort` 等线路项。钳制和映射在同一步完成，调用方不自己算。`ProviderProfile.wire(mappingVersion)` 是给适配器用的辅助函数，填来自 profile 的部分（凭据种类、headers 副本、推理字段与回传）。
+  - 调用方：主循环（WP02）写 `request/header` 前调用，能力包写 `side/request` 前调用；两者把 `reasoning` 放进 `ChatRequest.reasoning`，把 `wire` 放进 `ChatRequest.wire`，并原样记进日志。**回放不调用 `prepare`**，两项都从日志取。
+  - `ModelRouter` 把任务绑定到模型时，把 profile、能力和映射版本冻结进 ChatModel 实例，所以任务中途改设置不会改变 `prepare` 的结果。
+  - 适配器测试继承 core 测试源里的 `ChatModelContract`（稳定性、钳制、`prepare` 的结果能被 `complete` 接受、外来 `mappingVersion` 或凭据种类在发送前被拒；`complete` 不改动已经给出的 settings（包括发出去的那份，原地修改也算）和之后 `prepare` 给出的 settings）。被测模型必须声明档位的真子集（不能是全部档位，也不能是 null），让某个档位真的被钳制，否则"先钳制再映射"查不出来，契约直接失败；真实模型档位未知时，测试里用声明了真子集的能力构造适配器。`ChatModelContractStrengthTest` 用带缺陷的 fake 证明这些检查会失败。
+- 回放时，同一个 `mappingVersion` 的规则加上日志里的请求，必须逐字节重建当时发出的请求。
 
 ---
 
@@ -82,9 +144,9 @@ sealed interface ModelError {
 
 ### 3.1 Chat Completions 兼容（DeepSeek、通义、Kimi、GLM、豆包、硅基流动、OpenRouter、Ollama、LM Studio …）
 
-- **工具调用**：`tools[].function` + `tool_choice:"auto"`。主循环每轮只执行一个调用，所以服务商支持时发 `parallel_tool_calls:false`。如果模型仍然返回多个调用，第一个之外的每个都要配一条结果"已跳过：每步只执行一个动作"，否则下一次请求会被拒。
+- **工具调用**：`tools[].function` + `tool_choice:"auto"`。主循环每轮只执行一个调用，所以服务商支持时适配器在 `prepare` 里设 `wire.disableParallelToolCalls = true`，线路上发 `parallel_tool_calls:false`。如果模型仍然返回多个调用，第一个之外的每个都要配一条结果"已跳过：每步只执行一个动作"，否则下一次请求会被拒。
 - **流式**：`stream:true` + `stream_options.include_usage`；要兼容某些网关返回 `usage:null` 的情况。
-- **推理内容**：字段名和"要不要回传"各家不同（`reasoning_content` 等）。在 `ProviderProfile.reasoningEcho` 里按服务商配置，由能力探测确认；**探测不了的标"未验证"**。
+- **推理内容**：字段名和"要不要回传"各家不同（`reasoning_content` 等）。在 `ProviderProfile.reasoningField` 和 `ProviderProfile.echoReasoning` 里按服务商配置，由能力探测确认；**探测不了的标"未验证"**。写请求头时这两项冻结进 `wire`（§2"线路快照"）。
 - **工具调用漏成文字**：有的模型会把工具调用写成正文里的标记（DeepSeek DSML、`<tool_call>` 等），参考 Mika 的 `LeakedToolMarkup`，识别出来按工具调用处理。
 - **缓存**：靠服务端隐式前缀缓存，所以历史要尽量只追加；命中情况从 usage 里读。
 
@@ -93,6 +155,7 @@ sealed interface ModelError {
 - **请求结构**：`instructions`（系统提示词）+ `input[]`。input 的条目类型有 message、`function_call`、`function_call_output`、`reasoning`。对话里的 system 角色一律改成 developer 消息。
 - **无状态**：`store:false`，**不用 `previous_response_id`**，每次都发完整的 input。
 - **推理**：`include:["reasoning.encrypted_content"]`，把返回的加密推理条目原样保存，下一次请求原样回传（Mika 的做法）。用户选了档位才发 `reasoning.effort`。
+  - 同一 provider 换了 model 以后，加密推理还回不回传，由 WP03 确定并写在这里（`Part.Reasoning` 的契约把这条规则交给适配器）。
 - **ChatGPT 套餐模式的硬性约束**（官方文档 *Preview limitations*，以官方为准）：
 
 | 类别 | 要求 |
@@ -115,7 +178,7 @@ sealed interface ModelError {
   - Opus 5.5 的思考始终开启：不发 `thinking`，或者发 `{type:"adaptive"}`。**`budget_tokens` 和 `disabled` 都会被拒（400）**。
   - 思考深度用 `output_config.effort` 控制。**Opus 5.5 的默认值是 `medium`**，所以按用途显式设置：主模型做 GUI 任务时建议从 `high` 起调，轻量判断用 `low`。
   - 要给用户看思考进度时，设 `display:"summarized"`。
-- **思考块的回传**：thinking 块（包括 signature）原样保存、原样回传，绑定 model。换了模型时服务端会静默丢弃这些块，不计费。
+- **思考块的回传**：thinking、redacted_thinking 和 compaction 块（包括 signature）原样保存、原样回传。**换了模型也不在客户端删**：API 会自己略过当前模型读不了的块；客户端删掉的话，换回原模型时这些推理就永久丢了，从中间删块还会让后面的块报 `predecessor_missing`，compaction 块装着压缩后的历史，删掉就丢了历史。这也是铁律 7（历史只追加）。
 - **preserved thinking（关键约束）**：思考块的签名绑定在它之前的整段对话前缀上（system + tools + 之前的所有消息）。
   - **改写、删除或重排更早的轮次，都会让之后所有的思考块失效**；2026-08-31 之后注册的账号会直接收到 400。
   - 对我们的影响和对策见 §5。
@@ -195,7 +258,9 @@ OpenAI 在 DevDay 2026 推出的这个通道，面向"开源、在本地运行"�
 
 **模型分工与缓存**：缓存和思考块都按模型隔离。轻量模型（意图判断、结局判定）和看图模型（描述界面、看图定位）**一律作为旁路请求**，用自己的短上下文，**不在主对话里切换模型**。
 
-**恢复兜底**：如果收到 `PrefixBindingMismatch` 这类 400，去掉历史里所有的 thinking 块后重试一次，并记日志。这是一次性的恢复手段，不是常规路径。
+**恢复兜底**：如果收到 `PrefixBindingMismatch` 这类 400，去掉历史里所有的推理块（thinking、redacted_thinking，以及其他协议里 `ReasoningKind.isReasoning` 的块）后重试一次，并记日志（`context/reasoning-dropped`）。**compaction 块不去掉**：它装的是压缩后的历史，去掉它服务端就要重新处理压缩前的整段历史，可能撞上上下文上限，成本也会突增；文字和工具调用同样保留。这是一次性的恢复手段，不是常规路径。
+
+**中断前缀里的 compaction 块**：被中断的回复（`assistant/message(interrupted=true)`）进入模型视图时，去掉其中所有的 `Part.Reasoning`，compaction 块也在内。回复不完整，其中的 compaction 块不回传，之后的请求由服务端重新压缩。视图是对日志的纯函数，前缀进入视图以后，每次请求里它的样子都相同，所以不违反"Anthropic 历史只追加"。契约写在 `SessionEvent` 的 KDoc（模型视图一节），WP17 复查。
 
 ---
 

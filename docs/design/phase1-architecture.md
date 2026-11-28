@@ -69,7 +69,12 @@ phone-agent/
 └─ eval/         任务集（YAML）、设备端 instrumentation runner、PC 端 harness（经 MCP 驱动）
 ```
 
-依赖方向：`app → core`、`app → privileged`、`privileged → (无)`。`core` 内部用一个依赖测试（参考 Mika 的 `PackageDependencyTest`）守住两条规则：`agent` 不认识具体能力，能力之间不互相引用。
+依赖方向：`app → core`、`app → privileged`、`privileged → (无)`。`core` 内部用一个依赖测试（Konsist 写的 `PackageDependencyTest`）守住两条规则：`agent` 不认识具体能力，能力之间不互相引用。core 的包分为两类：
+
+- **契约包**：`ids`、`model`、`ports`、`tool`、`policy`、`session`、`agent`，分层排列，只能引用更低的层；
+- **能力包**：其余所有包，例如 `model.openai`、`model.anthropic`、`policy.rules`、`screen`、`tools`、`storage`。能力包只引用契约包和自己。
+
+分层和理由见 ADR `2026-11-01-core-contracts`。
 
 ### 2.2 进程模型
 
@@ -105,8 +110,10 @@ phone-agent/
 ```kotlin
 interface ChatModel {
     val info: ModelInfo          // provider、id、protocol、supportsTools、supportsImages、contextWindow
+    fun prepare(reasoning: ReasoningLevel?): RequestSettings   // 钳制后的档位 + 线路快照；唯一生成入口（model-layer §2）
     suspend fun complete(req: ChatRequest, onDelta: (Delta) -> Unit = {}): ChatResponse
 }
+data class RequestSettings(val reasoning: ReasoningLevel?, val wire: WireProfile)
 
 data class ChatRequest(
     val system: List<PromptBlock>,      // 静态：身份、准则、能力段（缓存分区 1）
@@ -115,7 +122,8 @@ data class ChatRequest(
     val cache: CacheLayout,             // 断点位置（Anthropic 用 cache_control；其余靠前缀稳定）
     val contextEdits: ContextEditPolicy, // 按协议区分：Anthropic 走服务端 context editing / compaction，其余在客户端裁剪
     val maxOutputTokens: Int? = null,
-    val reasoning: ReasoningLevel? = null,
+    val reasoning: ReasoningLevel? = null,   // 取自 prepare(...).reasoning
+    val wire: WireProfile,                   // 取自 prepare(...).wire，冻结在 request/header 或 side/request；字段和生成规则见 model-layer §2
 )
 ```
 
@@ -130,10 +138,10 @@ data class ChatRequest(
 
 ```kotlin
 interface Tool {
-    val def: ToolDef                    // name、description（静态，长度有上限）、JSON schema
+    val def: ToolDef                    // name、description（静态，长度有上限）、JSON schema；定义在 core.model（ChatRequest 也用它）
     val group: ToolGroup                // PHONE、GENERAL、KNOWLEDGE …（按组折叠或展开）
     val risk: RiskClass                 // READ / WRITE / OUTWARD / SPEND / SETUP
-    val concurrencySafe: Boolean get() = false   // 写屏幕的动作一律 false（屏幕是共享资源）
+    val concurrencySafe: Boolean        // 每个工具显式声明，没有默认值；写屏幕的动作一律 false（屏幕是共享资源）
     val timeoutMs: Long                 // 单一超时真相源；等待用户的时间不计入
     suspend fun execute(call: ToolCall, ctx: ToolContext): ToolResult
     fun presentCall(call: ToolCall): StepCard          // 纯函数：回放时可以重新生成轨迹卡片
@@ -148,9 +156,38 @@ data class ToolCall(
     val args: JsonObject,
     val reason: String,                 // 每个工具都有，用户的语言；界面上显示成"这一步在做什么"
 )
+
+data class ToolResult(
+    val status: ToolStatus, val content: List<Part>,   // content 只含文字和图片，模型可见
+    val details: JsonObject? = null,                  // 给轨迹卡片用，模型不可见
+    val control: ToolControl? = null,                 // 给主循环的信号，只能出现在 OK 结果上
+)
+sealed interface ToolControl { data class EndTurn(val reason: EndReason, val summary: String) : ToolControl }
+
+interface ToolContext {                 // 每次调用一个，由运行时实现
+    val taskId: TaskId; val sessionId: SessionId; val screen: ScreenPort?; val clock: Clock
+    val interaction: ToolInteraction    // 只有提问 / 转交；工具拿不到 confirm，也就造不出确认卡
+    val apps: AppCatalog?               // 已安装 App（core.ports）；null = 没有这个能力，phone_apps 和按名字启动返回错误结果
+    suspend fun storeBlob(bytes: ByteArray): BlobRef
+}
+interface ToolInteraction {             // core.ports；交给工具的那一半
+    suspend fun ask(question: Question): AskResult              // Answered(text) / Declined / Expired / Unavailable
+    suspend fun handOff(kind: HandoffKind, reason: String): HandoffResult  // DONE / DECLINED / EXPIRED / UNAVAILABLE / FAILED
+}
+interface UserInteraction : ToolInteraction {   // 运行时实现；confirm 只由运行时处理 Confirm 判定时调用
+    suspend fun confirm(card: ConfirmCard): ConfirmResult       // APPROVED / REJECTED / EXPIRED / UNAVAILABLE
+}
+fun UserInteraction.forTools(): ToolInteraction   // 运行时给 ToolContext 的视图：强转也拿不到 confirm
 ```
 
 工具结果里**带状态、不带描述**："现在做不了"用结果文字说明原因，工具本身不增删，这样能保住 prompt 缓存。
+
+- **主循环只认 `ToolResult.control`，不认工具名**：`end_not_done` 返回 `EndTurn`，主循环记下结果后不再开新 step，本 turn 以 `END_NOT_DONE` 结束。
+- **等待用户**：`UserInteraction` 的方法挂起直到有结果。
+  - 超时返回 `EXPIRED`；
+  - 没人能回答（无人值守）时立即返回 `UNAVAILABLE`，不显示任何东西；
+  - 任务在等待时被停止，调用被取消（抛 `CancellationException`，不返回结果），日志记 `prompt/withdrawn`。
+  - 提问和结果在方法返回前已写进日志；等待时间不计入 `timeoutMs`；每个任务同时最多一个待答提示。
 
 ### 3.3 屏幕端口（主屏和虚拟屏共用一套实现，按 displayId 参数化）
 
@@ -193,6 +230,15 @@ data class ActionOutcome(
 )
 ```
 
+```kotlin
+interface SnapshotAnalyzer {            // core.ports；core.screen 实现，ScreenPort 实现经构造参数注入，自己不写算法
+    fun fingerprint(pkg: String?, activity: String?, elements: List<UiElement>, ocr: List<OcrLine>?): String   // 同一屏内容 → 同一值；含 OCR，树为空或稀疏时也能看出变化
+    fun quality(elements: List<UiElement>, surface: SurfaceRef, flags: Set<ScreenFlag>): TreeQuality
+    fun diff(before: ScreenSnapshot, after: ScreenSnapshot): ScreenDiff
+}
+interface AppCatalog { suspend fun apps(): List<AppEntry> }   // AppEntry(packageName, label, launchable)；app 实现，除取消外不抛异常
+```
+
 实现上的几条要点：
 - **防过期引用**：动作执行前重新抓一次树，按指纹（窗口 | 角色 | 名字 | 边界）找回目标元素，找不到就返回 `STALE_REF`（参考 dsh-Go）。
 - **等界面稳定靠事件**：等到第一个无障碍事件后，再等 300ms 静默，总共最多 3s；不用固定 sleep（参考 dsh-Go 的 `EventClock`）。
@@ -203,7 +249,7 @@ data class ActionOutcome(
 
 ```kotlin
 interface SurfaceManager {
-    suspend fun agentDisplay(task: TaskId): Result<SurfaceRef>   // 懒创建；每个任务一块（14+ 才支持多任务并行）
+    suspend fun agentDisplay(task: TaskId): SurfaceAllocation   // Ready(surface) | Unavailable(reason, detail)；懒创建；每个任务一块（14+ 才支持多任务并行）
     suspend fun release(task: TaskId)
     suspend fun handToUser(task: TaskId, kind: HandoffKind): HandoffTicket  // 把任务挪到主屏
     suspend fun takeBack(ticket: HandoffTicket): SurfaceRef                 // 挪回后台屏，并重新读屏
@@ -249,11 +295,31 @@ data class ActionIntent(            // 执行前从"动作 + 目标元素 + 当�
 )
 sealed interface Verdict {
     data object Allow : Verdict
-    data class Confirm(val card: ConfirmCard) : Verdict            // 一次性同意，与目标和金额绑定
+    data class Confirm(val card: ConfirmCard) : Verdict            // 一次性同意，与整张卡绑定；ConfirmCard、Money 在 core.ports
     data class HandOff(val kind: HandoffKind, val hint: String) : Verdict
     data class Refuse(val reason: String, val hintForModel: String) : Verdict
 }
+fun interface RiskLexicon {             // 共用的风险词表：屏幕格式的 ⚠ 和 PolicyEngine 都只依赖这个契约，实现在 policy 能力包
+    fun activationRisk(element: UiElement, screen: ScreenSnapshot): ElementRisk?   // kind ∈ OUTWARD / SPEND / DELETE / SETTINGS
+}
+fun interface IntentResolver {          // 这次调用会干什么；纯函数、不抛异常，实现在 policy 能力包
+    fun resolve(call: ToolCall, risk: RiskClass, screen: ScreenSnapshot?): ActionIntent   // risk 是下限
+}
+data class PolicyContext(
+    val taskId: TaskId, val level: SecurityLevel, val unattended: Boolean,
+    val screen: ScreenSnapshot?,                             // 所属调用已有结果的、最新记录的那一屏（含复核的 S′），之后没有作废边界；交接开始起之前的屏全部作废，边界清单见 KDoc；复核时是 S′；没有时为 null
+    val operatedPackages: Set<String> = emptySet(),          // 本任务写过 tool/started 的非 READ 调用的 intent.pkg（intent 取 verdictSeq 那条 verdict；含 phone_launch 的目标）
+    val outwardConfirmedPackages: Set<String> = emptySet(),  // 只认执行实际依据的那次批准，见下文
+    val approved: ConfirmCard? = null,                       // 批准后复核时传入刚批准的卡
+)   // 不序列化，但必须能从 session 日志推导，回放才能得到同样的 verdict
 ```
+
+- **安全判定只在 policy**：runtime 的 policy guard 先 `resolve` 再 `evaluate`；工具少报效果也绕不过去。
+  - 声明为 SPEND 的工具一定解析成 SPEND；
+  - 写类工具的参数解析不了，或者不认识的工具名且不是 READ，都按保守处理；
+  - 每个要执行的调用都先有 `policy/verdict(Allow)`，`tool/started` 才合法，READ 调用也一样，没有免判的快路径。
+- **外发免确认资格**（`outwardConfirmedPackages`）：只认执行实际依据的那次批准。对每个已 `tool/started`、`tool/executed` 为 OK 的调用，取 `tool/started.verdictSeq` 那条 Allow 之前、这个调用**最后一张** APPROVED 的卡；这张卡必须是 OUTWARD，pkg 非空，并且等于那条 Allow 里 intent 的 pkg。被后来的 Confirm 取代的卡、其他 reason 的卡（例如付款）、pkg 和执行不一致的卡、`request_confirmation` 的卡都不算。
+- **批准后复核**：用户批准之后、执行之前，runtime 读新的一屏 S′，记成这个调用 callId 下的 `screen/snapshot`，再用它 `resolve` 和 `evaluate` 一次，传入 `approved`。只有新算出的卡与批准的卡完全相同（`ConfirmCard` 的全部字段：callId、reason、action、target、content、amount、pkg）才 Allow；否则返回新的 Confirm，新屏要求转交或拒绝时返回 HandOff 或 Refuse。
 
 ### 3.7 任务运行时（turn/step 状态机 + 双队列 inbox，参考 dsh）
 
@@ -264,8 +330,8 @@ interface TaskRuntime {
     fun followup(input: UserInput)           // 进 nextTurn：一条消息独占一个 turn
     fun steer(input: UserInput)              // 进 nextStep：在下一个 step 边界被取走；阻止本 turn 结束
     fun inject(context: ContextInput)        // 进 nextStep，不唤醒驱动器（例如定时结果、通知）
-    fun stop(cause: StopCause)               // 只停这一个任务；默认清空 inbox
-    fun answer(promptId: PromptId, reply: UserReply)   // 确认 / 提问 / 接管完成
+    fun stop(cause: StopCause)               // 只停这个任务的当前运行；清空 inbox；最后写 task/stopped(cause)；没有终态。StopCause 在 core.session
+    fun answer(promptId: PromptId, reply: UserReply): Boolean   // Approve / Reject / Answer / Decline / HandoffDone；提示已失效或回复不匹配时返回 false
 }
 sealed interface Phase { data object Idle : Phase; data class Running(val turn: Int, val step: Int) : Phase; /* … */ }
 ```
@@ -275,21 +341,49 @@ sealed interface Phase { data object Idle : Phase; data class Running(val turn: 
 - **step**：一次模型请求，加上这次响应里请求的全部工具调用。
 - **attempt**：同一 step 内的重试。重试时不重复组装请求，也不重复写用户消息。
 
-**停止条件**：
-- 自然结束：模型回复里没有工具调用、调用 `end_not_done`，或撞到 max-tokens（丢弃这次的工具调用，不执行）；
+**停止条件**（turn 怎么结束）：
+- 自然结束：模型回复里没有工具调用，或者调用了 `end_not_done`；
+- 带调用的正常结束：`TOOL_USE` 或 `END_TURN` 且带完整调用，调用照常执行，turn 继续。适配器应该把它归一化成 `TOOL_USE`，但网关可能在调用旁边给 stop / end_turn，主循环不能因为 `END_TURN` 就拒绝执行；
+- 回复没有正常结束（契约见 `ChatResponse.stopReason`）：
+  - `MAX_TOKENS` 且带调用：`assistant/message` 原样记录，调用也留着（历史只追加）。下一个请求之前，给每个调用写 `tool/result(SKIPPED)`（isError）和一段固定文字，告诉模型这次调用没有执行、它看到的参数（可能是 `{}`）不完整、不是它原本要发的那一份，请重新发起。这些调用不经过 PolicyEngine，没有 `tool/call`，也没有 `tool/started`；turn 以 `MAX_TOKENS` 结束；
+  - `OTHER` 且带调用：按 BadResponse 重试，只记录已经流出的前缀（interrupted，不含调用）和这次 attempt，不执行任何调用；
+  - `OTHER` 而且只有文字：照常算最终答案；
 - `preStep` 拒绝；
-- **步数上限**：默认 80，可配置；
-- **turn-stopping 续跑上限**：默认每个 turn 最多 3 次。
+- **步数上限**：默认每个 turn 80 步，可配置；
+- **turn-stopping 续跑上限**：默认每个 turn 最多 3 次；
+- 这两个逐 turn 的上限只结束这个 turn（`TurnEndReason.LIMIT`），不写 `task/stopped`。`StopCause.LIMIT` 只用于 app 跨 turn 的上限，例如任务总步数。
 
 **取消与超时契约**：
 - 单一超时真相源：工具层先作答，外层后超时。等待用户的时间不计入工具超时。
 - 挂起等待（确认、接管）之后、真正执行之前，再确认一次这个调用仍然有效。
 - **被放弃的调用绝不晚些执行**；收尾时写日志的代码放在 `withContext(NonCancellable)` 里。
-- **流被中断**：用户已经看到的部分回复写成 `assistant/message(interrupted=true)`。
-- **step 失败或进程被杀**，恢复时修复日志：
-  - 没有 `tool/call` 的，补 `NOT_STARTED`；
-  - 有 `tool/call` 但没有结果的，补 `OUTCOME_UNKNOWN`，并附提示："这一步可能已经生效，先 `phone_observe` 核实再决定"。
-- **不自动续跑**，等用户说"继续"。
+- **流被中断**：用户已经看到的部分回复写成 `assistant/message(interrupted=true)`，parts 不能为空（什么都没显示就不写）。例外：错误带 `ModelError.discardsStreamed`（回复里出现了本次的密钥，model-layer §2）时不写前缀，只写 `assistant/attempt` 和固定原因，界面撤回或标记作废已经显示的片段。前缀进不进模型视图只看后面先来的是什么：
+  - 先来的是另一条 `assistant/message`（同一 step 的重试，期间没有新的用户输入）：前缀只给 UI 看。重试重发的是产生它的那个请求，回复是在没有前缀的情况下生成的；
+  - 先来的是 `user/message`（steer 截断后重开 step，或者 stop / 最终失败之后下一个 turn 的输入）：前缀跟着这条输入进入模型视图，但去掉其中的 `Part.Reasoning`（没写完的推理块不能回传），compaction 块也一样：回复不完整，其中的 compaction 块不回传，之后的请求由服务端重新压缩。视图是对日志的纯函数，前缀进入视图以后每次请求里的样子都相同，不违反"历史只追加"（model-layer §5）。去掉后为空就整条不进；
+  - 规则样例在 `core` 测试源码的 `DeriveRuleSamples`，WP02 的 `deriveMessages` 测试逐条运行。
+- **去掉 thinking 重试**：签名失效等情况下，`requestError` 先写 `context/reasoning-dropped(upToSeq)`，之后的请求不再带 seq ≤ upToSeq 的推理块（`ReasoningKind.isReasoning`：thinking、redacted thinking、Responses 加密推理、Chat 推理字段），文字、工具调用、工具结果和 **compaction 块**不变（compaction 块装的是压缩后的历史，去掉它服务端就要重新处理整段历史）。多条去掉记录累加；只剩推理的回复整条不进；upToSeq 之后的推理照常带上。
+- **执行事实写进日志**：真正调用 `Tool.execute` 之前写 `tool/started(callId, verdictSeq)` 并刷盘（verdictSeq 是这个调用最新的 verdict，必须是 Allow）；execute 返回后、`toolPostExecute` 之前写 `tool/executed(callId, status)`，记原始状态。拒绝、转交、等待或被拒的审批、拦截器短路都不写 `tool/started`。
+- **需要答复的调用**：每条 `assistant/message` 里的工具调用（interrupted 的消息没有调用），不管派发了没有；再加上每个已派发的调用（`tool/call`）。停止、崩溃修复、截断跳过和模型视图配对都用这一个集合。每个调用在关闭它的记录之前都有 `tool/result`：`step/end`、`turn/end`、`task/stopped`、`session/resumed` 都由不变量检查。
+- **step 失败或进程被杀**，修复时给每个需要答复、还没有结果的调用补结果，按落盘的 `tool/started` 区分：
+  - 没有 `tool/started` 的，补 `NOT_STARTED`（派发过也一样）；
+  - 有 `tool/started` 的，补 `OUTCOME_UNKNOWN`，并附提示："这一步可能已经生效，先 `phone_observe` 核实再决定"；
+  - 不变量保证两者不会写反。
+- **停止时的调用**（四种 cause 都一样，判断依据是落盘的 `tool/started`，不是有没有 `tool/call`）：
+
+  | 停止时的情况 | 状态 | 模型看到的正文 |
+  |---|---|---|
+  | 没有 `tool/started` | CANCELLED | 明确写"没有执行" |
+  | 有 `tool/started`，还没有结果 | CANCELLED | 明确写"可能已经生效，继续之前先 `phone_observe` 核实，再决定要不要重试" |
+  | 已经有 `tool/result` | 保留原结果 | 不追加第二条 |
+
+- **停止只结束当前这次运行**（D14），没有终态，`USER`、`LIMIT`、`SHUTDOWN`、`ERROR` 都一样。停止流程先取消并 join 所有还可能写日志的协程（工具执行、取消结果、`prompt/withdrawn`、录入 inbox 的协程），再按上表补结果，写 `prompt/withdrawn`、`step/end(CANCELLED)`、`turn/end(STOPPED)`，最后写 `task/stopped(cause)`：这次运行的所有 append 都在它之前完成，之后这个 runtime 实例不再写任何记录。`turn/end(STOPPED)` 后面紧跟 `task/stopped`；写 `task/stopped` 时没有打开的 turn。
+- **不自动续跑**，等用户说"继续"，用不变量机械保证：任何 `task/stopped` 或 `session/resumed` 之后，任务进入"等待用户输入"状态，直到某个 turn 里记下一条 kind = USER 的 `user/message`。等待期间可以开 turn、记 inbox、改安全级别、再次停止或恢复，也可以先记下排着队的后台消息（INJECTED、RUNTIME_CONTEXT，它们不结束等待）；但不能有 step、模型请求、回复、工具调用、提示、旁路请求或上下文改动。所以第一个 step 之前一定有用户自己的输入。
+- **turn 和 step 配对**：同一时间最多一个打开的 turn，编号比之前所有 turn 都大；step 只在打开的 turn 里开始，同一时间最多一个，编号在这个 turn 里递增；`step/end` 只结束打开的那个 step，`turn/end` 只结束打开的那个 turn，而且要等它的 step 结束。所以 step 不跨 turn，"没有打开的 turn"不会因为 turn 嵌套或重复开始而失真。读写两端用同一份不变量检查。
+- **先恢复再继续**：每个 `task/stopped` 之后，下一条记录都必须是 `session/resumed`，四种 cause 一样。停下的 runtime 实例不再接受输入，继续任务的总是一个新实例（进程重建以后，或同一进程里由新实例接管），它先写 `session/resumed`，再记新收到的用户命令（`inbox/spliced`）、开新 turn。所以 `task/stopped` 和 `session/resumed` 之间没有 inbox 或别的已知记录。
+- **半截停止**：进程在 `turn/end(STOPPED)` 和 `task/stopped` 之间退出，日志停在 `turn/end(STOPPED)`。这是合法的日志，下一条已知记录必须是 `task/stopped`。恢复时补写 `task/stopped(ERROR)`，含义是"停止收尾没有完成"（原来的原因没有落盘，不猜），再写 `session/resumed`，然后等待用户输入。
+- 未知的可忽略记录对这些规则透明：不打断配对，不结束等待，也不被拒绝。读和写用同一份不变量，store 自己写出的日志重新打开后状态一致。
+- 日志写不了的时候，`task/stopped(ERROR)` 可能缺失，按崩溃恢复处理。
+- **恢复前怎么判断**：打开日志以后看整份日志，不能只看最后一次停止的原因（SHUTDOWN 之后可能已经 resumed 过；USER 停止之后可能又跑了新 turn 再崩溃）。要同时看：最后一条 `task/stopped`；它后面有没有 `session/resumed`；之后有没有已经开始、又被截断的新运行；有没有半截停止；有没有打开的 step、turn；有没有需要答复但还没有结果的调用。修复按下面的顺序写，这也是 store 唯一接受的顺序：① 给需要答复、还没有结果的调用补结果（`NOT_STARTED` 或 `OUTCOME_UNKNOWN`，见上）；② 打开的 step 写 `step/end`；③ 打开的 turn 写 `turn/end`；④ 半截停止补 `task/stopped(ERROR)`；⑤ 写 `session/resumed`，然后等待用户输入。先关 step 再补结果会被 store 拒绝。实现归 runtime（WP02），`SessionStore.open` 的 KDoc 列了同一份清单，core 测试源码的 `RecoveryOrderTest` 按这个顺序在一次运行的每个截断点做恢复。
 - 插件或拦截器出故障，只结束当前 turn，不会让 TaskRuntime 停掉。
 
 ### 3.8 固定拦截点（主循环只能通过这些点扩展）
@@ -302,10 +396,10 @@ interface Chain<I, O> { suspend fun proceed(input: I): O }   // 不调用 procee
 | 拦截点 | 时机 | 能做什么 | 第一阶段的使用者 |
 |---|---|---|---|
 | `preStep` | 每个 step 之前 | **拒绝本 step**；追加 runtime-context（前台 App、时间、知识提示）；压缩；刷盘 | StepLimit、RuntimeContext、Compaction、Checkpoint |
-| `request` | 每次 attempt 之前 | 选模型（主 / 看图 / 轻量）、推理强度；**不能改消息** | ModelRouter |
+| `request` | 每次 attempt 之前 | 为主请求选模型和推理档位（之后对最终的模型 `prepare`，见 §7.2 第 3 步）；看图和轻量请求走旁路（`side/*`）；**不能改消息** | ModelRouter |
 | `requestError` | attempt 失败后（step 仍打开） | 返回 Retry 接管恢复 | LlmRetry、OverflowCompaction、ImageOffload |
 | `toolPreExecute` | 每个调用，按模型输出顺序 | allow / deny / ask / handoff | **PolicyEngine**（作为不可被重排的 guard，固定排在最后一个、外部无法绕过） |
-| `toolExecute` | 包住执行体 | 超时、刷盘、spill-back 检测 | Timeout、Checkpoint、MainScreenWatch |
+| `toolExecute` | 包住执行体 | 超时、刷盘、spill-back 检测；链的最内层由运行时写 `tool/started`（刷盘后再调 `Tool.execute`）和 `tool/executed`，拦截器短路不产生这两条 | Timeout、Checkpoint、MainScreenWatch |
 | `toolPostExecute` | 工具执行后 | 替换结果、附加上下文 | LoopGuard（含重复调用提醒）、OutwardPacing、KnowledgeNotice、Spill |
 | `turnStopping` | 本该结束且 nextStep 为空时 | 想继续就调用 `steer()`（受续跑上限约束） | TodoContinuation（M3） |
 
@@ -320,18 +414,25 @@ interface Chain<I, O> { suspend fun proceed(input: I): O }   // 不调用 procee
 data class Envelope(
     val seq: Long, val time: Long, val type: String,
     val ignorable: Boolean = false,          // 不认识的类型：ignorable=true 才能跳过，否则拒绝加载
-    val surfaceOp: SurfaceOp? = null,        // Append | Replace(startSeq, endSeq)：压缩和裁剪用 Replace
+    val surfaceOp: SurfaceOp = SurfaceOp.Append, // Append（默认，不写出）| Replace(startSeq, endSeq)：压缩和裁剪用 Replace
     val sources: List<Long> = emptyList(),   // 例如 tool/result 指回对应的 tool/call
     val data: JsonElement,
 )
-sealed interface SessionEvent   // turn/start|end、step/start|end、user/message、assistant/message|attempt、
-                                // request/header、tool/call|result、policy/verdict、approval/asked|decided、
-                                // handoff/start|end、compaction/*、inbox/spliced、screen/frame(blobRef)…
+sealed interface SessionEvent   // task/start|level-changed、turn/start|end、step/start|end、user/message、
+                                // assistant/message|attempt、request/header|retry、context/reasoning-dropped、
+                                // side/request|response、tool/call|result、policy/verdict、approval/asked|decided、
+                                // handoff/start|end、question/asked|answered、prompt/withdrawn、compaction/*、
+                                // inbox/spliced、screen/frame(blobRef)、tool/started|executed、task/stopped…
 ```
+
+完整的类型表和每种类型是否 ignorable 登记在 `core.session.SessionEventTypes`；命名规则、序列化方式和格式版本见 ADR `2026-11-01-core-contracts`。
 
 **规则**：
 1. **模型可见 ⟺ 已记录**：请求 = 请求头 + `deriveMessages(events)` + 工具清单。`deriveMessages` 是纯函数；请求组装好后冻结。回放测试会逐字节核对。
-2. **大对象存 blob**：截图存为 `blobs/<sha256>.jpg`，日志里只记引用和尺寸。**旧截图怎么瘦身按协议区分**（见 `model-layer.md` §5）：
+   - 请求头带非秘密的线路快照 `wire: WireProfile`（凭据种类、非秘密 headers、推理字段与回传、图片发法、推理档位映射后的字段和值、输出上限字段名、禁止并行工具调用 / `stream_options` / `include` 开关、正文工具调用还原、映射规则版本），由 `ChatModel.prepare` 生成。适配器只从请求读这些项，不读实时的 ProviderProfile（`model-layer.md` §2）；
+   - `request/header` 和 `assistant/message` 只属于主对话。看图、轻量等旁路请求整份记成 `side/request`（含快照），结果记成 `side/response`，二者不进主视图；
+   - PolicyEngine 的输入都能从日志算出：第 1 条记录固定是 `task/start(level, unattended)`，级别中途变化记 `task/level-changed`；`operatedPackages` 和 `outwardConfirmedPackages` 按执行事实（`tool/started`、`tool/executed`）推导，样例在 core 测试源码的 `PolicyContextSamples`。
+2. **大对象存 blob**：截图存为 `blobs/<sha256>`（不带扩展名），日志里只记引用、mime 和尺寸。**旧截图怎么瘦身按协议区分**（见 `model-layer.md` §5）：
    - Responses / Chat Completions：越过阈值时在客户端做一次 Replace，只保留最近 N 张图（默认 3），更早的换成文字占位。
    - Anthropic：**不在客户端改写历史**，因为 preserved thinking 会让之后的思考块失效。改用服务端 context editing / compaction，Replace 只用于 UI 投影。
 3. **刷盘时机**：模型请求发出前、写动作执行前（追加写 + fsync）。**刷盘失败就不执行**。
@@ -353,7 +454,7 @@ screen s12 · 微信 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · �
   @e7 + "我：十点"                    ← + = 相对上一屏新出现
 [底部]
 @e9 输入框 (提示:"发送消息") {可编辑,焦点} (480,955)
-@e10 ⚠ 按钮 "发送" (930,955)          ← ⚠ = 点它会触发确认（与 PolicyEngine 共用同一份词表）
+@e10 ⚠ 按钮 "发送" (930,955)          ← ⚠ = 高风险（对外 / 花钱 / 删除 / 设置），点它可能触发确认；与 PolicyEngine 共用 RiskLexicon
 … 另有 14 项（在 @e5 里滚动查看）
 ```
 
@@ -387,6 +488,8 @@ screen s12 · 微信 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · �
 | | `end_not_done` | `reason: impossible/blocked/user_stopped/…`, `summary` |
 
 所有工具都带 `reason` 参数。模型回复里不带工具调用，就视为最终回答。每轮只执行第一个工具调用。
+
+`phone_intent` 各 kind 的字段键名以本节的 `phone_intent` 字段表为准（`LaunchTarget.SystemIntent.fields` 用这些键）。
 
 ---
 
@@ -442,14 +545,17 @@ TaskRuntime 循环（每个 step，对应 §3.8 的拦截点）：
   1. 从 inbox 取出输入（turn 开始时：全部 nextStep + 1 条 nextTurn；step 之间：只取 nextStep）
   2. preStep 链：步数上限 → runtime-context（只在变化时追加用户消息，发过的消息一律不改）
                 → 达到上下文 60% 时压缩，按协议区分（Responses / Chat Completions：在客户端裁剪旧界面结果、折叠旧往返；Anthropic：交给服务端 context editing / compaction）→ 刷盘
-  3. request 链选模型 → 写 request/header（有变化才写）→ deriveMessages → 冻结 → ChatModel.complete
+  3. request 链定下模型和想要的推理档位 → 对最终选定的模型调用 ChatModel.prepare
+       → 用同一个 RequestSettings 填 reasoning 和 wire → 写 request/header（有变化才写）
+       → deriveMessages → 冻结 → 刷盘 → ChatModel.complete
+       request 链换了模型或档位，就重新 prepare，不沿用旧的 wire
        steer 到来、模型请求还在进行：取消这次 attempt（已输出的部分记成 interrupted），带上新输入重开本 step
        工具执行中不被插话打断
        失败 → requestError 链（重试 / 溢出压缩 / 卸载图片 / 思考块前缀不匹配时去掉 thinking 块重试一次）
   4. 没有工具调用 → 校验（空回复 / 工具调用漏成文字 / 语言是否对）→ 作为最终回答 → turnStopping
   5. 有工具调用（每轮只执行第一个）→ 写 tool/call → toolPreExecute 链，PolicyEngine 是最后一道 guard：
        Refuse  → 原因作为结果返回给模型
-       HandOff → SurfaceManager.handToUser → 等待 → takeBack → 重新读屏
+       HandOff → SurfaceManager.handToUser → 等待 → takeBack → 重新读屏（记在交接调用的 callId 下）
        Confirm → 显示确认卡（悬浮层 / 通知 / App 内）→ 等待（15 分钟没人回按拒绝）
        Allow   ↓
   6. toolExecute 链：刷盘 → watchMainScreen(3000) → ScreenPort.act → awaitChange → 回读快照
