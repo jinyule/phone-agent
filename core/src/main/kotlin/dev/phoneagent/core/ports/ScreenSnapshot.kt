@@ -1,6 +1,8 @@
 package dev.phoneagent.core.ports
 
 import dev.phoneagent.core.ids.SnapshotId
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 
 /**
@@ -284,18 +286,44 @@ public enum class ScreenFlag {
 }
 
 /**
- * Change between two snapshots of the same surface, keyed by element identity rather than ref.
+ * Change between two snapshots of the same surface as the model reads them (phase1 §4): by the
+ * lines of the screen format (one per printed element, with the texts a row absorbs) and by the
+ * OCR lines. Applying it to what the model saw of the earlier snapshot gives what it would see of
+ * the later one: an element in none of the lists still shows the same line under the same ref.
  *
- * @property added elements present only after the action (`+`).
- * @property removed refs (in the earlier snapshot) of elements that disappeared (`-`).
- * @property changed elements whose name, value or state changed, as they are now (`~`).
+ * Both snapshots come from the same [ScreenPort], so an equal ref is the same element; elements
+ * are paired only by ref, and a ref that changes is one element removed and one added.
+ *
+ * @property added printed elements whose ref the earlier snapshot did not show (`+`), as they are now.
+ * @property removed refs the earlier snapshot showed that the later one no longer shows: the
+ *   element went away, was hidden or absorbed, got a new ref, or its ref went to an element that
+ *   is not shown (`-`). A ref of [added] or [changed] is never in it.
+ * @property changed printed elements shown under the same ref in both snapshots that read
+ *   differently (text, absorbed texts, value, hint, states, printed coordinates) or moved to
+ *   another parent, as they are now (`~`).
+ * OCR lines are compared only when the later snapshot was read with OCR (`ocr` not `null`): a
+ * later read without OCR says nothing about the earlier lines, so none of them is removed.
+ *
+ * @property ocrAdded OCR lines of the later snapshot whose text or place is new; with no OCR on
+ *   the earlier snapshot, all of its lines.
+ * @property ocrRemoved OCR lines of the earlier snapshot that are gone from the later one's OCR; a
+ *   line that moved is in both lists (removed at its old place, added at its new one).
+ * @property ocrUnverified the earlier snapshot had OCR lines and the later one was read without
+ *   OCR, so whether they are still there, and where, is not known. Not a change: [isEmpty] does
+ *   not look at it.
  */
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 public data class ScreenDiff(
     val added: List<UiElement> = emptyList(),
     val removed: List<ElementRef> = emptyList(),
     val changed: List<UiElement> = emptyList(),
+    // Left out when empty or false, so logs written before these fields existed read and write the same.
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val ocrAdded: List<OcrLine> = emptyList(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val ocrRemoved: List<OcrLine> = emptyList(),
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val ocrUnverified: Boolean = false,
 ) {
-    /** Whether nothing changed. */
-    public val isEmpty: Boolean get() = added.isEmpty() && removed.isEmpty() && changed.isEmpty()
+    /** Whether nothing is known to have changed ([ocrUnverified] aside). */
+    public val isEmpty: Boolean
+        get() = added.isEmpty() && removed.isEmpty() && changed.isEmpty() && ocrAdded.isEmpty() && ocrRemoved.isEmpty()
 }

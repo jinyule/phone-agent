@@ -1,0 +1,31 @@
+能打开的 App（3 个，名字或包名包含「微」）：
+微信 · com.tencent.mm
+微信读书 · com.tencent.weread
+微博 · com.sina.weibo
+
+=====
+
+参数有误，这一步没有执行：
+- `app` 要填包名，如 com.tencent.mm（收到 "微信"）：先用 phone_apps 查到包名再启动
+用法：phone_launch(app 或 link, cold?)
+
+=====
+
+手机上没有包名为 com.example.missing 的可打开的 App。先用 phone_apps 查到包名再启动。
+
+=====
+
+已打开 微信（com.tencent.mm），前台换成了另一个 App。
+screen s12 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · 坐标 0–999
+状态：键盘已弹出
+[顶部]
+@e1 按钮 "返回" (40,60)
+@e2 "张三"
+@e3 按钮 "更多" (940,60)
+[中部]
+↕ 列表 @e5 "聊天记录"
+  @e6 "张三：明天几点到？"
+  @e7 "我：十点"
+[底部]
+@e9 输入框 (提示:"发送消息") {可编辑,焦点} (480,955)
+@e10 ⚠ 按钮 "发送" (930,955)

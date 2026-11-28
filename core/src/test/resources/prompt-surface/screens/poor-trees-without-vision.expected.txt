@@ -1,0 +1,17 @@
+screen s40 · com.example.game/.GameActivity · agent 屏 · 坐标 0–999
+树不完整：有些内容读不到。可以 phone_observe detail=full 读全部元素，屏上文字可以按坐标点；还缺的部分请用户处理（hand_to_user kind=other）
+[顶部]
+@e1 按钮 "关闭" (940,60)
+[底部]
+@e3 按钮 (500,950)
+[屏上文字 · OCR，树里没有]
+"开始游戏" (500,530)
+"排行榜" (500,650)
+
+=====
+
+screen s40 · com.example.game/.GameActivity · agent 屏 · 坐标 0–999
+读不到界面元素：屏上文字可以按坐标点；没有屏上文字或不够用时，请用户处理（hand_to_user kind=other）
+[屏上文字 · OCR，树里没有]
+"开始游戏" (500,530)
+"排行榜" (500,650)

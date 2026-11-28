@@ -49,9 +49,10 @@ phone-agent/
 │   agent/       主循环（turn/step 状态机）、Inbox、拦截链、上下文、压缩
 │   session/     SessionEvent、JSONL 存储、投影（推导模型消息 / UI 状态）、修复、版本
 │   model/       ChatModel 接口与协议适配（openai-compat、anthropic）
-│   tool/        Tool 接口、ToolRegistry（静态 schema、分组展开）
+│   tool/        Tool 接口、ToolRegistry（静态 schema、分组展开）、ScreenPresenter（工具取屏幕文字的契约）
 │   policy/      PolicyEngine、IrreversibleDetector、包名/页面/字段分类
-│   screen/      ScreenSnapshot 模型、格式化、差分、指纹、TreeQuality
+│   screen/      屏幕格式（ScreenFormatter，实现 ScreenPresenter）、差分、指纹、TreeQuality、号码打码（ScreenAnalyzer 实现 SnapshotAnalyzer）；两者只由 ScreenComponents 用同一份配置创建
+│   tools/       第一阶段工具（§5）与系统提示 SystemPrompt；屏幕文字只经 ScreenPresenter 拿，不引用 screen
 │   guard/       LoopGuard、OutwardPacing、效果判定
 │   ports/       ScreenPort / SurfaceManager / StoragePort / Clock 等接口
 │   adb/         无线调试配对与 ADB 连接（纯 Kotlin，可 JVM 测）
@@ -191,7 +192,7 @@ sealed interface ToolControl { data class EndTurn(val reason: EndReason, val sum
 interface ToolContext {                 // 每次调用一个，由运行时实现
     val taskId: TaskId; val sessionId: SessionId; val screen: ScreenPort?; val clock: Clock
     val interaction: ToolInteraction    // 只有提问 / 转交；工具拿不到 confirm，也就造不出确认卡
-    val apps: AppCatalog?               // 已安装 App（core.ports）；null = 没有这个能力，phone_apps 和按名字启动返回错误结果
+    val apps: AppCatalog?               // 已安装 App（core.ports）；null = 没有这个能力，phone_apps 返回错误结果，phone_launch 按给定的包名直接启动
     suspend fun storeBlob(bytes: ByteArray): BlobRef
 }
 interface ToolInteraction {             // core.ports；交给工具的那一半
@@ -499,26 +500,59 @@ sealed interface SessionEvent   // task/start|level-changed、turn/start|end、s
 
 ## 4. 给模型的屏幕格式（v0）
 
+实现在 `core.screen.ScreenFormatter`，逐字节金样在 `core/src/test/resources/prompt-surface/`（改格式要同时改金样）。
+
 ```
-screen s12 · 微信 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · 坐标 0–999
+screen s12 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · 坐标 0–999
+状态：键盘已弹出
 [顶部]
 @e1 按钮 "返回" (40,60)
-@e2 标题 "张三"
-[中部] ↕ 列表 @e5
+@e2 "张三"
+@e3 按钮 "更多" (940,60)              ← 无名按钮吸收了子节点的文字
+[中部]
+↕ 列表 @e5 "聊天记录"                 ← 可滚动容器单独一行（横向的是 ↔），里面的行多缩进一级
   @e6 "张三：明天几点到？"
-  @e7 + "我：十点"                    ← + = 相对上一屏新出现
+  @e7 "我：十点"
+  … 另有 14 项（在 @e5 里滚动查看）     ← 超出预算时的折叠行，紧跟在该列表最后一行之后
 [底部]
 @e9 输入框 (提示:"发送消息") {可编辑,焦点} (480,955)
 @e10 ⚠ 按钮 "发送" (930,955)          ← ⚠ = 高风险（对外 / 花钱 / 删除 / 设置），点它可能触发确认；与 PolicyEngine 共用 RiskLexicon
-… 另有 14 项（在 @e5 里滚动查看）
 ```
 
 规则：
-- 一行一个元素；可点击的元素吸收其下纯文本子节点的文字。
+- 一行一个元素：`@eN`、类型词（纯文字不写）、引号里的文字、`值:"…"`、`(提示:"…")`、`{状态}`，能操作的元素末尾给中心坐标 `(x,y)`（0–999）。
+- 可点击的元素吸收其下纯文本子节点的文字（用 ` · ` 连接），不跨可滚动容器。吸收有上限（`ScreenFormatConfig`）：元素面积超过屏幕的 35%、可吸收的文字超过 5 段或合计超过 200 字时不吸收，这些文字各占一行，交给页面预算折叠。
+- `brief` 和差分里单段文字截到 60 字、吸收后的整行截到 100 字（末尾 `…`）；`detail=full` 不截断，给出打码后的全文。
 - 按纵向位置分顶 / 中 / 底三区；可滚动容器多缩进一级。
-- 整页约 3500 字预算，超出折叠，**但底部导航区始终保留**。
-- 银行卡号和身份证号做校验位识别后打码；密码框只给 `secret` 标记，不给内容。
-- 动作后的结果默认只给差分；换了 App 或超过一半元素变了，给全量。
+- 首行之后可有"状态："行（页面标记，如 键盘已弹出、登录页、支付页、禁止截屏）和树质量提示（SPARSE / EMPTY 时提示看截图；禁止截屏的页面改为提示 hand_to_user；主模型不看图时不提截图，改为提示 `detail=full`、按屏上文字的坐标操作或 hand_to_user。这个能力由装配方以 `ScreenComponents(vision = …)` 传入，是唯一的来源：`ScreenPresenter.vision` 把它带给工具，`phone_observe` 是否附图也看它，所以提示和附图不会互相矛盾）。树质量由 `TreeQualityAssessor` 判定：自己没有文字、但按上面的吸收规则吸收了子文字的控件，算作有名字（和屏幕格式同一套规则、同一份 `ScreenFormatConfig`），所以会话列表、设置页、搜索页这类"无名可点击行 + 文字子节点"的页面是 GOOD。
+- 整页约 3500 字预算（`detail=full` 约 20000），超出时只折叠中部，**顶部区和底部区始终保留**；列表外被折叠的项在中部末尾计数。这只对不在滚动容器里的元素成立：一个顶层滚动容器连同它里面的所有行是一个整体，按容器自己的中心归到某一区，所以放在占满屏的滚动容器里的底部导航随这个列表留在中部，超出预算时会被折叠。树里没有的 OCR 文字放在 `[屏上文字 · OCR，树里没有]` 段，最后折叠。
+- 银行卡号（Luhn）和身份证号（出生日期 + MOD 11-2 校验位）识别后整段替换成一个标签，其余文字原样保留。标签是按数字的样子猜的，只在站得住时写类型：一段只是一个号码、并且不跨行时，写成 `「疑似银行卡 尾号7894」`、`「疑似身份证 尾号002X」`；一段合并了几个号码，或者跨过了换行（`\n`、`\r`、U+000B、U+000C、U+0085、U+2028、U+2029）时，写成 `「已隐藏的号码」`，不写类型和尾号，因为这时的类型和尾号可能来自根本不是卡号的字段（上下两行的电话），也可能把两张卡说成一张。屏幕文字先把每段空白折成一个字符（含换行的折成换行，否则折成空格），再打码，最后折成一行，所以元素文字里的换行同样算跨行。系统提示告诉模型：标签是猜的，类型和尾号不一定准，一个标签可能盖住几个号码，不能只凭标签断定那里有什么。数字组（半角或全角数字）之间的间隔可以任意长，由下面三类字符组成，其中连字符最多两个：Unicode White_Space 的全部 25 个空白字符（明确列出，含换行、U+0085、U+00A0、U+2009、U+202F、U+3000；`Char.isWhitespace` 不认 U+0085，所以不用它）；不可见的格式字符（Unicode 类别 Cf：U+200B 零宽空格、U+200C/U+200D 零宽（不）连接符、U+2060 词连接符、U+FEFF、U+00AD 软连字符、双向控制符）；连字符和破折号（`-`、U+2010–U+2014、U+2212 减号、U+FE63 小连字符、U+FF0D 全角连字符）。所以换行加缩进、分栏排开的号码仍是一个号码，是不是卡号或身份证再由数字分组（卡号每组至少 3 位，身份证至少 2 位，如 6-8-4、4-4-4-4-2）和校验位决定。其他字符都是字段边界：字母、汉字、`/`、`.`、`_`、`·`、`*` 等标点，以及第三个连字符。每个数字组都作为起点试一遍（每个起点取最长的命中），互相重叠的命中合并成一段整体打码，所以同一段里卡号前面的数字（`第 105 6222 …`、上一行的电话）可能和卡号一起被打码，但卡号不会有任何一部分露出来；合并成的一段用中性标签（见上）。不支持的写法（会被当成字段边界）：其他数字形式（阿拉伯-印度数字、带圈数字等），以及夹在数字之间的组合附加符、emoji 和基本多文种平面以外的字符。
+  - 取舍：只隔着空白（含换行、缩进）的不同字段，和折行、分栏的一个号码分不开，会被当成同一段；其中几组恰好拼成合法卡号或身份证时，就连同两边字段被覆盖的部分一起打码，例如 `13800138000⏎⏎    1001` 整体变成 `「已隐藏的号码」`。这是偏隐私的方向，而且不罕见：上下两行按 3-4-4 分组写的手机号，约三分之一会被打码（固定种子抽样 1000 对，实测约 34%）；只隔着空白的两张卡也可能合成一段。所以这些情况用中性标签，不让模型以为屏上有一张并不存在的卡，或者少了一张卡。中间有字段文字的（`电话 …⏎金额 …`）不会拼在一起。
+  - 订单号例外：数字**紧跟**在订单号、运单号、交易号、流水号、Order No.、Tracking 这类标签之后（中间只有空白、冒号或 `#`）才不打码，例如 `订单号：…`、`运单号 …`。数字附近出现银行卡语义的词（银行卡、卡号、储蓄卡、信用卡、借记卡、账号、card 等）时一律打码，银行卡语义优先；`订单支付 银行卡 6222…`、`银行卡编号 6222…` 都会打码。"附近"指号码前 32 个、后 12 个字符以内，按传进来的文字数；屏幕文字是先把空白折过再打码的，所以长空白和空行挤不走卡词。已知缺口：其余出口（设备给的失败和拒绝原因、异常信息、卡片摘要）按原文数，卡词隔着足够长的空白时，订单例外会生效。
+  - 打码的出口：屏幕文字（名称、值、提示、吸收的文字、OCR）、设备给出的失败和拒绝原因、进入工具结果的异常信息、轨迹卡片的摘要和参数。结果正文里原样保留的：用户在 ask_user 里的回答（用户主动提供，填表要用），以及模型自己写的参数（request_confirmation 的 action、调用的 reason）的回显；轨迹卡片上这些照样打码。
+  - 密码框只给 `secret` 标记，不给内容。
+- 动作后的结果默认只给差分（相对动作所依据的那一屏）：
+
+  ```
+  screen s13 · 与 s12 相比的变化（其余不变）
+  状态：键盘已弹出
+  + @e11 "我：十点半"                   ← 新出现
+  ~ @e9 输入框 值:"十点半" {可编辑,焦点} (480,955)   ← 有变化，给现在的样子
+  - @e6                                  ← 作废的编号
+  + 屏上文字 "已完成" (500,530)          ← OCR 行的变化：+ 新出现、- 没了，都带中心坐标
+  - 屏上文字 "加载中" (500,530)
+  ```
+
+  差分按**两屏的可见行**比较（`ScreenDiffer` 用和格式化同一套吸收规则、同一份 `ScreenFormatConfig`：analyzer 和 presenter 只能由 `core.screen.ScreenComponents(format, quality, diff, lexicon, vision)` 一起创建，WP07 的 ScreenPort 和 WP09 的工具装配都从它取，装配处不再出现第二份格式配置），目标是"把差分套到模型看过的上一屏上，就得到这一屏"。前提是两屏来自同一个 ScreenPort，**编号相同就是同一个元素**：端口能确定是同一个元素才沿用编号，身份有歧义就给新编号、旧编号作废（§3 的 ref 规则）。所以差分**只按编号配对**，不按名字或阅读顺序猜：
+  - 两屏都显示的编号，这一行的任何可见内容变了都算 `~`：文字、吸收进来的子文字、值、提示、状态、secret；父节点变了也算；**打印了坐标的元素，中心坐标变了就算**（容差 0）；不打印坐标的元素，中心移动超过 `DiffConfig.moveTolerance`（默认 10）才算。被吸收的子文字消失或换到别的行，受影响的旧行和新行都列为 `~`，子文字自己的编号模型没见过，不列。
+  - 只在这一屏显示的编号是 `+`（元素以前在但没显示，比如被吸收，也算 `+`，因为模型没见过这个编号）。
+  - `-` 列出上一屏显示过、这一屏不再显示的编号：元素没了、被隐藏或被吸收、换了新编号，或者编号给了一个不显示的元素。所以编号变了就是一删一增。编号如果在这一屏又显示出来（给了别的元素），就在 `~` 里给出新的那一行，不列在 `-`。
+  - OCR 行按打码后的文字和中心坐标比较：新出现的 `+`，没了的 `-`，两种都带中心坐标。OCR 行没有编号，坐标就是它的身份：同样的文字出现两处时，`-` 的坐标说明作废的是哪一处；移了位置就是旧坐标一行 `-`、新坐标一行 `+`。
+  - 只有这一屏做了文字识别（`ocr` 不为 `null`）才比较 OCR 行。这一屏没做、上一屏有 OCR 行时，不报这些行没了，也不计入变化占比，差分（或同一 App 里变化较大时退回的完整一屏）里写明"这一屏没做文字识别，之前识别到的屏上文字和坐标没有重新核实"（`ScreenDiff.ocrUnverified`）；换了 App 时原样给新 App 的一屏，不写这句，旧的 OCR 行属于上一个 App；这一屏做了但什么都没识别到（空列表），上一屏的行才报 `-`；上一屏没做、这一屏有识别结果时，全部报 `+`。
+  - ScreenPort 实现给同一元素换编号，差分里就是一删一增；换得多了会退化成完整一屏。
+  同一 App 里增删改的行（元素和 OCR 合计）超过一半、差分里有这一屏没有的元素，或者差分本身超过预算时，给完整一屏，并用 `+` 标出新元素。换了 App 或者没有差分时，原样给完整一屏（和 `phone_observe` 的 brief 一样），不标 `+`：换了 App 时整屏都是新的，没有差分时不知道哪些是新的。系统提示照此说明。
+- 只要动作后读到了一屏（`ActionOutcome.after` 不为空），结果就给出这一屏（差分或完整一屏，跟在第一行的结果说明之后，以新的 screen 编号开头），成功、失败、被拒绝都一样，`details.screen` 也只在这时写；没读到时提示先 phone_observe，`details` 里不写 screen。系统提示照此说明：屏幕段以新的 `screen sN` 开头；屏幕动作之后没读到新屏、又要依据当前画面继续操作时，先 phone_observe（不承诺每个结果都带一屏，`ask_user`、`phone_apps` 这类结果本来就没有）。所以 `details.screen` 总是模型看过的一屏。
+- 端口的 effect 比的是动作**前后**两次读屏，差分比的是模型**上次看到**的那一屏。effect 是 `NO_CHANGE` 而差分不为空时（只改了父节点或编号，指纹不看这些；或者模型看屏之后、动作之前画面自己变了，比如来了新消息），状态行两层意思都说：动作前后画面没有变化，这个动作可能没起作用；下面是和上次看到的画面相比的变化，不一定是这个动作造成的，例如 `已点击 @e7，但动作前后画面没有变化：可能还在加载（可以 phone_wait），也可能这个动作在这里不起作用。和你上次看到的画面相比的变化见下面，不一定是这个动作造成的。`。差分为空时只说"画面没有变化"。`details.effect` 仍是端口给的值。
 
 ---
 
@@ -535,16 +569,34 @@ screen s12 · 微信 · com.tencent.mm/.ui.chatting.ChattingUI · agent 屏 · �
 | | `phone_scroll` | `screen`, `direction`, `ref?` |
 | | `phone_swipe` | `x1,y1,x2,y2`, `durationMs` |
 | | `phone_key` | `back/home/enter`（`home` 在主屏模式下由无障碍的 `performGlobalAction` 实现。助手不注入 HOME：它作用于整机而不是 agent 的屏。后台屏上由 ScreenPort（WP14）返回 Failed，原因"后台屏上没有桌面，请用 phone_launch 切换 App"） |
-| | `phone_launch` | `app` 或 `link`, `cold?` |
+| | `phone_launch` | `app`（只收包名）或 `link`, `cold?` |
 | | `phone_intent` | `kind: alarm/timer/calendar/share/dial/navigate/settings` + 对应字段（白名单，不接受任意 Intent） |
 | 通用 | `ask_user` | `question`, `options?` |
 | | `hand_to_user` | `kind: login/captcha/payment/secure_page/choose/other`, `reason` |
 | | `request_confirmation` | `action`, `target`, `content`, `amount?`（模型主动申报；只能**增加**确认，不能免除规则要求的确认） |
-| | `end_not_done` | `reason: impossible/blocked/user_stopped/…`, `summary` |
+| | `end_not_done` | `cause: impossible/blocked/user_stopped/other`, `summary`（经 `ToolResult.control = EndTurn` 结束本轮） |
 
 所有工具都带 `reason` 参数。模型回复里不带工具调用，就视为最终回答。每轮只执行第一个工具调用。
 
-`phone_intent` 各 kind 的字段键名以本节的 `phone_intent` 字段表为准（`LaunchTarget.SystemIntent.fields` 用这些键）。
+`phone_wait` 的等法（不依赖 `ScreenPort.awaitChange` 报告调用之前的变化）：appear / disappear 每隔 `ToolsConfig.waitReadIntervalMs`（默认 250ms）读一屏判断一次，变化最迟一个间隔内被发现，画面一直在动也只按间隔读；截止时用最后一屏再判断一次，条件那时已经成立就算等到了。两次读屏之间只等固定间隔，**不和 `awaitChange` 取先到的那个**：最小读屏间隔同时就是最长等待，变化事件没法让读屏提前，取先到只会每轮多一次端口调用，结果一样。stable 用 `awaitChange` 等一段 `stableQuietMs` 的安静期，每次看到变化后至少隔一个读屏间隔再看，端口不挂起也不会空转。全部用协程时间，可取消。工具自己的超时 `ToolsConfig.waitTimeoutMs` 加载时校验：至少是最长等待 30000ms 加 15000ms 余量，留给截止时那次读屏（树和 OCR），条件那时成立才能被看到。
+
+元素编号参数（`ref`）写 `@e5` 或 `e5`，裸数字不算编号。`phone_launch` 的 `app` 只收包名，App 名字返回 `INVALID_ARGS`，提示先用 `phone_apps` 查包名；有 App 列表时包名还必须是列表里能打开的 App。`cold=true` 在 M1 只是清掉这个 App 的任务栈、从首页重新打开，进程不重启；force-stop 要等 M2 的特权助手（`LaunchTarget.App.cold`）。`phone_intent` 的每个 kind 都只打开预填好的系统界面、不直接提交（拨号不拨出，分享只打开分享面板），policy 一律按 NAVIGATE 判；之后在那个界面上真正发出或修改的动作另外判定。`phone_launch` 的 `link` 只接受 `LaunchTarget.Link.SCHEMES`（https、http、geo、mailto、market；`core.ports` 里唯一的一份，工具和适配器都用它），适配器只把它当作可浏览的 `ACTION_VIEW` + Uri 打开，不解析成任意 Intent；App 深链（如 `weixin://`）不在里面，打开 App 用 `app`。`request_confirmation` 的风险等级是 WRITE（保守下限）：只有 PolicyEngine 给出 Confirm、用户批准、复核为 Allow 之后才执行，所以它的结果是"用户已确认"。
+
+`phone_intent` 各 kind 的字段键名以下表为准（`LaunchTarget.SystemIntent.fields` 用这些键；工具在边界校验，WP05 解析、WP07 实现都用同一套键）：
+
+| kind | 字段 |
+|---|---|
+| `alarm` | `time`（"HH:mm"，24 小时制，必填）、`label`? |
+| `timer` | `seconds`（1–86400，必填）、`label`? |
+| `calendar` | `title`（必填）、`start`（"yyyy-MM-ddTHH:mm"，必填）、`end`?（晚于 start）、`location`? |
+| `share` | `text`（必填） |
+| `dial` | `number`（必填；只打开拨号盘，不拨出） |
+| `navigate` | `place`（必填） |
+| `settings` | `page`（必填，白名单：wifi、bluetooth、display、sound、battery、date、locale、location、storage、app_details）；`page=app_details` 时还要 `package` |
+
+无障碍、开发者选项、权限、安全类设置页不在白名单里。字段不属于该 kind、缺必填字段或格式不对，工具返回 `INVALID_ARGS` 并列出要改的地方。
+
+`phone_key home`：主屏模式（M1）由无障碍 `performGlobalAction` 回到桌面；后台屏（M2）上没有桌面，返回 Failed，原因写"后台屏上没有桌面，请用 phone_launch 切换 App"。
 
 ---
 
